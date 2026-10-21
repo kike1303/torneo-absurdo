@@ -9,7 +9,7 @@ approvals:
   - by: owner
     date: 2026-10-20
 created: 2026-10-20
-updated: 2026-10-20
+updated: 2026-10-21
 ---
 
 # ADR-0005: Economía de monedas sin dinero real
@@ -26,3 +26,4 @@ Comprar monedas con dinero real para apostar entra en regulación de juegos de a
 ## Consecuencias
 - El security-reviewer revisa todo cambio que toque el ledger, las apuestas o la liquidación.
 - Leaderboard de apostadores por **ganancia neta**: excluye bonos y rescates.
+- Nota de trazabilidad (2026-10-21, con OK del owner): el leaderboard de temporada ordena por `RankedProfit`, la parte de la ganancia neta que viene de apuestas de cuentas fuera de carencia. Es un refinamiento de la regla anterior, no un cambio; ver ADR-0008 D8.

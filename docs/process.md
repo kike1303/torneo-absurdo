@@ -64,7 +64,7 @@ Por defecto los agentes avanzan solos. El owner tiene que dar su OK explícito e
 ---
 id: "003"                 # número de la feature (o del ADR)
 title: Motor de pelea v0
-type: intent | spec | plan | adr | vision | architecture | process | glossary | character
+type: intent | spec | plan | adr | vision | architecture | process | glossary | character | legal
 status: draft | proposed | in-review | changes-requested | approved | rejected | superseded | done
                           # ADRs: proposed → approved | rejected | superseded
 risk: low | medium | high
