@@ -1,0 +1,35 @@
+---
+title: Glosario
+type: glossary
+status: approved
+author: owner
+created: 2026-10-20
+updated: 2026-10-20
+---
+
+# Glosario
+
+| Término | Código (en) | Definición |
+|---|---|---|
+| Pelea | `Fight` | Combate entre dos personajes, calculado por el motor a partir de una semilla. |
+| Pelea rápida | `QuickFight` | Pelea programada cada X minutos. |
+| Main event | `MainEvent` | Torneo diario a hora fija, con bracket. |
+| Torneo | `Tournament` | Conjunto de peleas en bracket con un campeón. |
+| Personaje homenaje | `Character` | Personaje original inspirado en un arquetipo reconocible, sin copiarlo. |
+| Arquetipo | `Archetype` | La idea reconocible detrás de un personaje ("rata eléctrica"). |
+| Semilla | `Seed` | 256 bits aleatorios que, junto con los personajes, determinan la pelea por completo. |
+| Commit | `SeedCommit` | `SHA-256(seed)` publicado al abrir las apuestas. |
+| Reveal | `SeedReveal` | Publicación de la semilla al terminar la pelea, para verificarla. |
+| Log de eventos | `FightLog` | Secuencia ordenada de `FightEvent` con offset de tiempo; el renderizador la reproduce. |
+| Ventana de apuestas | `BettingWindow` | Periodo en que se aceptan apuestas, antes de que empiece la pelea. |
+| Pozo (parimutuel) | `Pool` | Suma de lo apostado por lado; las ganancias se reparten proporcionalmente entre los ganadores. |
+| Comisión | `Rake` | % del pozo que se destruye como sumidero de monedas (puede ser 0). |
+| Monedas | `Coins` | Moneda ficticia para apostar. No se compra ni se retira. |
+| Bono diario | `DailyGrant` | Monedas gratis por entrar cada día. |
+| Rescate | `Bailout` | Monedas gratis cuando el saldo está en (casi) cero. |
+| Ledger | `Ledger` | Registro inmutable de movimientos de monedas; los saldos se derivan de él. |
+| Temporada | `Season` | Periodo del ranking de apostadores; al terminar se reinicia el ranking (no las monedas). |
+| Ganancia neta | `NetProfit` | Lo ganado en apuestas menos lo apostado; no incluye bonos ni rescates. |
+| Rating | `Rating` | Fuerza estimada de un personaje (Glicko-2). |
+| Narrador | `Narrator` | Sistema de frases con plantillas que comenta la pelea según el contexto. |
+| Repetición | `Replay` | Reproducir una pelea pasada a partir de su log o su semilla. |

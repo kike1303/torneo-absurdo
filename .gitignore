@@ -1,0 +1,34 @@
+# OS / editors
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Node / SvelteKit
+node_modules/
+.svelte-kit/
+build/
+dist/
+.turbo/
+*.log
+
+# Rust
+target/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Local-only assets (MUGEN sprites, franchise material) — NEVER commit
+content/_local/
+tools/sff-converter/input/
+tools/sff-converter/output/
+
+# Test artifacts
+coverage/
+playwright-report/
+test-results/
+
+# Private docs (business model, monetization, strategy) — NEVER commit
+private/
