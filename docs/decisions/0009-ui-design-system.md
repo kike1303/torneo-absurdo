@@ -5,13 +5,13 @@ type: adr
 status: approved
 risk: low
 author: architect
-reviewers: [frontend-engineer, owner]
-approvals: [{by: frontend-engineer, date: 2026-10-21}, {by: owner, date: 2026-10-21}]
+reviewers: [frontend-engineer, owner, security-reviewer]
+approvals: [{by: frontend-engineer, date: 2026-10-21}, {by: owner, date: 2026-10-21}, {by: owner, date: 2026-10-22}, {by: security-reviewer, date: 2026-10-22}, {by: frontend-engineer, date: 2026-10-22}]
 supersedes: null
 linear: TA-5
 depends_on: ["0003", "0007"]
 created: 2026-10-20
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # ADR-0009: Sistema de diseño, theme y componentes
@@ -142,6 +142,22 @@ updated: 2026-10-21
 - **Identidad visual**: no es la feature 004 (esa es el pipeline de assets). Será una **feature nueva**, cuyo intent escribe product-owner, junto con el estilo de los personajes; el owner decide su prioridad. Mientras tanto, 001 entrega una **paleta neutra provisional** con todos los tokens semánticos y `--arena-*` de D1, para que cambiar de identidad sea solo cambiar valores.
 - Las familias tipográficas que se elijan deben tener licencia libre (OFL o similar) para autoalojarlas sin costo.
 
+## Enmienda 2026-10-22: SvelteKit 3
+El owner aprobó el 2026-10-22 que la feature 001 use **SvelteKit 3** (`@sveltejs/kit` 3.1.x, `adapter-node` 6) desde el inicio. Esta enmienda cambia solo lo que Kit 3 obliga a cambiar; lo de arriba se conserva como historia. D1, D6, D7 y D8 no cambian. Lo verifiqué en el código de `@sveltejs/kit@3.1.0` y `shadcn-svelte@1.7.0` y en la guía oficial de migración.
+
+- **Alias `#lib` (afecta a D2 y D4).** Kit 3 ya no genera `$lib`. El alias se declara con *subpath imports* en el `package.json` de `apps/web`: `"imports": { "#lib": "./src/lib/index.ts", "#lib/*": "./src/lib/*" }` (la primera entrada solo si existe `src/lib/index.ts`), y los imports llevan extensión (`#lib/utils.js`).
+- **D2, en su lugar:** `components.json` con los alias `lib: #lib`, `components: #lib/components`, `ui: #lib/components/ui`, `utils: #lib/utils` y `hooks: #lib/hooks`. `shadcn-svelte@1.7.0` detecta `#lib/*` en `imports` y lo propone por defecto. Las primitivas copiadas importan con extensión (`#lib/utils.js`), como ya lo hace el registro. Si el CLI deja algún `$lib`, se corrige a `#lib` y el archivo lleva la cabecera `MODIFICADO`. El resto de D2 (versiones exactas, `bits-ui` según el CLI, `tw-animate-css`, procedimiento de actualización, `mode-watcher`) no cambia.
+- **D3:** la CSP ya no es `kit.csp` de `svelte.config.js`, que en Kit 3 no existe. Es la opción `csp` del plugin `sveltekit({ … })` en `vite.config.ts`, con el mismo `mode: 'auto'`. `%sveltekit.nonce%` en `app.html` y `transformPageChunk` funcionan igual: Kit llena la plantilla, nonce incluido, antes de llamar a `transformPageChunk`. Además, Kit 3 rompe el build si se prerenderiza una página cuya plantilla contiene `%sveltekit.nonce%`, así que la regla "las páginas con tema no se prerenderizan" ahora también la hace cumplir el framework.
+- **D4, en su lugar** (mismas reglas, con `#lib`):
+  - `ui/` no importa de `#lib/features/**`, `#lib/components/<dominio>/**` ni de los mensajes de Paraglide (`#lib/paraglide/**`), salvo `ui/_a11y-messages.ts`. Sin `allowTypeImports`.
+  - `components/<dominio>/` no importa valores de `#lib/features/**` (`allowTypeImports: true`) y no usa `fetch`.
+  - Fuera de `FightStage.svelte`, nadie importa valores del renderer (`allowTypeImports: true`).
+  - Cada patrón con `#lib/…` tiene su forma relativa (`**/features/**`, `**/components/<dominio>/**`, `**/paraglide/**`), como ya pedía la nota de frontend-engineer.
+  - Nuevo, en todo `src/`: se prohíben los imports de `$lib` y `$lib/**` (no existen en Kit 3; el mensaje apunta a `#lib`) y los de `$env/**` y `$app/environment`, que Kit 3 mantiene como alias obsoletos; se usan `$app/env`, `$app/env/private` y `$app/env/public`.
+- **D5:** `ENABLE_DEV_CATALOG` se declara en `src/env.ts` con `defineEnvVars` (privada, dinámica y opcional) y se lee de `$app/env/private`, no de `$env/dynamic/private`. El motivo para no usar `dev` sigue en pie (en Kit 3 vive en `$app/env`): Playwright corre contra el build, donde vale `false`.
+- **Test 2, en su lugar:** los fixtures usan rutas `#lib/…` con extensión (por ejemplo, `#lib/features/system/health.js`). Fallan además un `import { cn } from '$lib/utils'` y un import de `$env/dynamic/private`.
+- **Consecuencias, además:** hay que vigilar que cada `shadcn-svelte add` o `--overwrite` siga escribiendo `#lib` (el test 2 lo detecta) y que Paraglide siga generando sus módulos en `src/lib/paraglide/`.
+
 ## Revisión
 ### frontend-engineer — 2026-10-20 — REQUEST_CHANGES
 - Verifiqué: frontmatter contra el esquema de `docs/process.md`; consistencia con ADR-0003 (SvelteKit SSR con adapter-node, PixiJS agnóstico en `packages/renderer`) y ADR-0007 (Paraglide, rutas `/es` y `/en`, cero strings literales, `Intl`); que la organización de carpetas coincida con mi definición de agente y con el intent 001 (tema que persiste, `/dev/components`) y el intent 002 (`prefers-reduced-motion` en el renderer); y la viabilidad técnica de Tailwind v4, shadcn-svelte, Bits UI y Svelte 5. No contradice ningún ADR aprobado. La dirección es correcta, pero como ADR todavía no se puede verificar: deja abiertas decisiones que la feature 001 necesita cerradas.
@@ -206,3 +222,70 @@ updated: 2026-10-21
   - **El nonce va en `app.html`, no en el hook.** SvelteKit reemplaza `%sveltekit.nonce%` al renderizar la plantilla, antes de `transformPageChunk`. Si el hook inyecta el `<script>`, el placeholder queda literal y, con `kit.csp` activo, el script se bloquea. El script vive estático en `app.html` y no hace nada si `data-theme` no es `system`. Solo las `<meta>` dependen del hook.
   - **Las primitivas de shadcn-svelte tropiezan con `check-tokens.mjs`.** Según el registro actual, `button` usa `text-white` en `destructive` (no trae `--destructive-foreground`) y `dialog` usa `bg-black/50` en el overlay. Se cambian por `text-destructive-foreground` y por un token de overlay, con la cabecera `MODIFICADO` (D2). Del mismo modo, sus anillos son `ring-[3px] ring-ring/50` más `border-ring`, y no el `ring-2 ring-offset-2` de D6: el plan de 001 tiene que elegir uno y asegurar ≥ 3:1 en el indicador que de verdad se pinta.
   - **El override del catálogo y las reglas de ESLint, con el path correcto.** El override de `?theme=` compara la ruta sin el prefijo de idioma (`event.route.id` o la URL ya sin localizar), porque `url.pathname` es `/es/dev/…`. Los patrones de ESLint también cubren imports relativos (`**/features/**`), no solo `$lib/…`.
+
+### architect — 2026-10-22 — ENMIENDA (SvelteKit 3)
+- Agregué "Enmienda 2026-10-22: SvelteKit 3", con OK del owner para enmendar este ADR aprobado. Cambia D2 y D4 (`#lib`), D3 (`csp` en `vite.config.ts`), D5 (`$app/env/private`) y el test 2. No reescribí las secciones originales ni las revisiones.
+- `status` sigue en `approved`, con la aprobación del owner del 2026-10-22 para la enmienda. Pido revisión de la enmienda a frontend-engineer (viabilidad con shadcn-svelte y Paraglide) y a security-reviewer (D3 y el CSP).
+
+### security-reviewer — 2026-10-22 — APPROVE (enmienda Kit 3)
+**🤖 security-reviewer**
+
+- Verifiqué: el `git diff` de los tres documentos contra ADR-0008 D4 y D5. También leí el código de `@sveltejs/kit@3.1.0` y `@sveltejs/adapter-node@6.0.0`:
+  - `csrf.js` y `respond.js`: el chequeo de Kit corre antes de `handle`. Solo cubre `POST`/`PUT`/`PATCH`/`DELETE` con `Content-Type` de formulario o sin él. Compara contra `paths.origin || url.origin` y se apaga solo con `trustedOrigins` que incluya `'*'`.
+  - `config/options.js`: `checkOrigin` es una opción `removed`, así que su presencia rompe la configuración.
+  - `errors.js`: los cuatro valores de `kind`, el `merge` con el *fallback* y que, si el hook lanza o rechaza, Kit escribe el error original con `console.error`.
+  - `instance.js`: el `handleError` por defecto.
+  - `core/env.js` y `exports/internal/env.js`: la validación de `defineEnvVars` al arrancar, `set_building()` en el build y que `public` vale `false` por defecto, sin semántica de prefijo `PUBLIC_`.
+  - `vite/utils.js`: `/[/.]server\.[^/]+$/` hace que `src/lib/paraglide/server.js` sea solo de servidor, y `$app/env/private` está protegido por `guard.js`.
+  - `handler.js` de adapter-node: el origen es `https://` + `Host` cuando no hay `*_HEADER`. Sin `PROTOCOL_HEADER` el texto del error es fijo. `getRequest` responde 400 sin log. `ADDRESS_HEADER` y `XFF_DEPTH` no cambian.
+  - `static.js`: solo atiende `GET` y `HEAD`, el resto pasa por `handle`.
+  - `prerender_template_nonce`: existe.
+  - **Conclusión:** RF-A23 aplica la regla de D4 a peticiones del navegador. Pide `Origin` exacto a `PUBLIC_ORIGIN`, o `Sec-Fetch-Site: same-origin` si falta. Rechaza `Origin: null`, cualquier `Content-Type` y todo método fuera de una lista permitida, sin `resolve` y sin logs. Nada que Kit atienda antes de `handle` deja pasar una mutación.
+  - `paths.origin` queda prohibido y verificado por un chequeo.
+  - El riesgo de formularios sobre `http` está bien acotado: en 001 no hay actions, y `PROTOCOL_HEADER` solo en e2e es aceptable porque RF-C6 lo prohíbe en el compose.
+
+- Hallazgos (Minor, no bloquean):
+  1. **`Host` y `event.url.origin` (RF-C4).** La frase "ningún header que el cliente pueda falsificar cambia el origen" solo es cierta detrás de Traefik. Quien llega directo al contenedor elige el `Host`, y `event.url.origin` lo sigue. Eso pasa en `prod-local` (`127.0.0.1:3000`) o desde cualquier contenedor de `torneo-edge`.
+     - *Escenario:* una feature futura arma una URL absoluta con `event.url.origin`, por ejemplo un enlace `hreflang` o canónico, el `next` del login o un correo. Una petición con `Host: evil.example` genera enlaces al dominio del atacante.
+     - Hoy no hay impacto: el guard usa `PUBLIC_ORIGIN` y no hay caché compartida.
+     - *Cambio:* agregar en "Seguridad" de la spec la regla "`web` nunca construye URLs absolutas con `event.url.origin`, `url.host` ni `url.href`; usa `PUBLIC_ORIGIN`". También precisar la frase de RF-C4 con "detrás de Traefik".
+  2. **`handleError` síncrono (RF-A19).** En Kit 3.1.0, un `handleError` que devuelve una `Promise` durante el render, sin `experimental.async`, escribe un `console.warn` y descarta el resultado. Si la promesa rechaza, Kit escribe el error crudo con `console.error`.
+     - *Escenario:* alguien lo declara `async` y el e2e "sin líneas en stdout" falla, o un rechazo vuelca a stderr la URL con query y la IP de canario sin pasar por el saneador.
+     - *Cambio:* RF-A19 exige que `handleError` sea síncrono, sin `async` y sin devolver promesas, y el test unitario lo verifica.
+  3. **Mensajes de los validadores de entorno.** Kit imprime al arrancar los mensajes de los validadores de `defineEnvVars` tal cual (`env_invalid`).
+     - *Escenario:* cuando `web` reciba `X-Internal-Secret` o `IP_HASH_KEY` (ADR-0008 D5), un validador que lance algo como `` `invalid value: ${v}` `` deja el secreto en el `json-file` de Docker.
+     - *Cambio:* aplicar en `src/env.ts` la regla de RF-B8: el mensaje lleva la regla, nunca el valor. El test unitario del validador de `PUBLIC_ORIGIN` comprueba que el mensaje no contiene el valor de entrada.
+  4. **Un e2e de RF-A23 no prueba el guard.** `POST /es/` sin `Origin` ni `Sec-Fetch-Site`, si va sin `Content-Type`, lo rechaza antes el chequeo de Kit con el texto "Cross-site POST form submissions are forbidden". El test pasaría aunque el guard no existiera.
+     - *Cambio:* enviar `Content-Type: application/json` y verificar que el cuerpo es `{"error":"auth.csrf_origin"}`. Lo mismo para el caso con `Origin` ajeno.
+  5. **Precisión en la enmienda de ADR-0008.** Dice que el chequeo de Kit "está siempre activo", pero Kit lo omite en `vite dev` (`!__SVELTEKIT_DEV__`).
+     - *Cambio:* decir "en el build (no en `vite dev`)" y aclarar que el guard de RF-A23 sí corre en dev. La spec ya lo dice en "Áreas de preocupación" 12.
+  6. **Frontmatter de los ADRs (proceso).** ADR-0009 agrega `security-reviewer` a `reviewers` pero sigue en `approved` sin su aprobación, y ADR-0008 tampoco la lleva para la enmienda. Hay que registrar esta aprobación en `approvals` de los dos ADRs y en la spec al cerrar la ronda. Le toca a quien edite, no a mí.
+
+### frontend-engineer — 2026-10-22 — APPROVE (enmienda Kit 3)
+
+**Verifiqué:**
+- Leí el `git diff` de `spec.md`, ADR-0008 y ADR-0009 y lo comparé con `plan-a.md`.
+- Revisé el registro de npm hoy. `@sveltejs/kit@3.1.0` (2026-10-14) pide Vite `^8.0.12`, Svelte `^5.57.1`, TS `^6.0.0` y `vite-plugin-svelte` `^7.0.0`, con `engines.node >=22.17`. `adapter-node@6.0.0` (2026-10-01) pide `kit ^3.0.0-next.0`. `typescript-eslint@8.72.0` pide TS `<6.1.0`. `svelte-check@4.7.7` acepta TS `^6`. `paraglide-js@2.29.1` no fija versión de Kit. `bits-ui@2.20.0` no depende de Kit (sus peers son Svelte `^5.33.0` e `@internationalized/date`).
+- Leí el código de Kit 3.1.0 y adapter-node 6.0.0 que security-reviewer ya había bajado al scratchpad. No descargué nada.
+  - `errors.js`: confirma los cuatro `kind`, el `merge` con el *fallback* y el aviso cuando `handleError` devuelve una `Promise`.
+  - `ambient.d.ts`: confirma que `App.Error` ya declara `status: number` y `message: string`.
+  - `cli.js`: confirma que `svelte-kit sync` lee `vite.config.ts`.
+  - `write_tsconfig`: confirma `$app/tsconfig` y `#lib/*`.
+  - adapter-node 6 sigue escribiendo `Listening on http://…`, así que la lista blanca de logs del plan sigue valiendo.
+- Paraglide 2.29.1: `runtime.js` no importa `server.js`. Con eso, la regla de Kit 3 de que todo archivo con segmento `server` es solo de servidor solo afecta a `paraglideMiddleware`, que se importa desde los hooks.
+- Leí la documentación de entorno de Kit 3: `defineEnvVars`, `building` y que no hay semántica de prefijo `PUBLIC_`. Por eso `PUBLIC_ORIGIN` puede ser privada sin conflicto.
+- Corrí ESLint 9 con typescript-eslint 8.72.0 sobre la prueba de patrones `#lib`/`$lib` que ya estaba en el scratchpad.
+
+**Hallazgos (todos Minor; no bloquean la spec y los resolví en el plan):**
+1. **Un patrón `#lib/…` en `group` nunca coincide.** `no-restricted-imports` lee los `group` con sintaxis de `.gitignore`, donde una línea que empieza con `#` es un comentario. Con el patrón `#lib/features/**`, el import `#lib/features/system/health.js` no lo atrapó ese patrón sino su gemelo relativo `**/features/**`. Sí funcionan `\#lib/…` y `regex: '^#lib/…'`. La enmienda D4 de ADR-0009 dice "cada patrón con `#lib/…`"; sigue siendo correcta, pero la implementación tiene que escribirlos como `regex` y el test 2 necesita un caso que solo atrape el patrón `#lib`.
+2. **`App.Error` en Kit 3 ya declara `status` y `message: string`.** El `app.d.ts` del plan anterior (`message: 'not_found' | 'internal'`) no compilaría. La lista cerrada de RF-A19 se cumple con el tipo de retorno de `handleError`, no ampliando `App.Error`.
+3. **Efecto lateral en la prueba de RF-A16.** Sin `paths.origin`, sobre `http` Kit rechaza antes de `handle` un `POST` de formulario del mismo origen. El e2e de A16 del plan ("`POST` del mismo origen para pasar el CSRF de Kit") ya no llegaría al guard de `/dev/**`. Pasa a `Content-Type: application/json` con `Origin` igual a `PUBLIC_ORIGIN`. Es el mismo fenómeno que ya registra "Áreas de preocupación" 12.
+4. **`init` de shadcn y la decisión 13 se contradicen.** "Áreas de preocupación" 12 pide `init` de shadcn-svelte en la prueba corta, y la decisión 13 del plan evita `init` porque escribe `components.json` y un `utils.ts` que trae el paquete `cn`. Lo resolví corriendo `init` en una copia desechable solo para ver qué alias propone, sin commitear su salida.
+5. El resto de lo pedido es viable tal como está escrito:
+   - `csp` en `vite.config.ts` sin `svelte.config.js`.
+   - `components.json` con `#lib`.
+   - `src/env.ts` con `$app/env/private`.
+   - `handleError` por `kind`.
+   - `server.js` de Paraglide solo en los hooks.
+   - Node ≥ 22.17 y TS 6.0.x.
+   - bits-ui fijado en 2.20.0: la 2.20.1 salió el 2026-10-22 a las 19:01 UTC y no pasa `minimumReleaseAge`.

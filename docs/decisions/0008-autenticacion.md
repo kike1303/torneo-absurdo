@@ -13,11 +13,15 @@ approvals:
     date: 2026-10-21
   - by: owner
     date: 2026-10-21
+  - by: owner
+    date: 2026-10-22
+  - by: security-reviewer
+    date: 2026-10-22
 supersedes: null
 linear: TA-5
 depends_on: ["0002", "0003", "0005", "0006", "0007"]
 created: 2026-10-20
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # ADR-0008: Autenticación y sesiones
@@ -282,6 +286,14 @@ Los valores absolutos de `B`, `m` y `r` los fija la spec de apuestas. Todos son 
 ## Pendiente
 - **Aviso de privacidad** (LFPDPPP): borrador en [`docs/legal/aviso-de-privacidad.md`](../legal/aviso-de-privacidad.md). Requiere revisión de security-reviewer y, antes de publicarse, una revisión legal y los datos del responsable.
 - **Logs de acceso de Traefik**: resuelto en ADR-0006 D11; se aplica en el VPS durante la feature 001.
+
+## Enmienda 2026-10-22: SvelteKit 3
+El owner aprobó el 2026-10-22 usar **SvelteKit 3** desde la feature 001. Kit 3 eliminó la opción `csrf.checkOrigin` que cita D4 ("SvelteKit mantiene `csrf.checkOrigin` activado"). Esa línea queda reemplazada por lo siguiente. El resto de D4 y todo D5 no cambian.
+
+- **Chequeo de Kit.** En Kit 3, el chequeo de `Origin` de los formularios (`POST`/`PUT`/`PATCH`/`DELETE` con `Content-Type` de formulario o sin él) está siempre activo, y solo se apaga con `csrf.trustedOrigins: ['*']`. `csrf.trustedOrigins` queda vacío y nunca contiene `'*'`.
+- **Origen de confianza.** Kit 3 compara contra `paths.origin`, que es de build, o contra el origen de la petición. adapter-node 6 ya no lee la variable `ORIGIN`. `web` no define `paths.origin` (la imagen es la misma para cualquier host), así que el origen de la petición es `https://` + `Host`, sin `PROTOCOL_HEADER`, `HOST_HEADER` ni `PORT_HEADER`.
+- **Guard de `Origin` propio en `web`.** Como el chequeo de Kit no cubre JSON ni otros tipos y compara contra el `Host`, `web` aplica en `handle` la misma regla que el middleware de axum para peticiones del navegador: en todo método distinto de `GET`, `HEAD` y `OPTIONS`, `Origin` debe ser exactamente `PUBLIC_ORIGIN` (variable de runtime de `web`, con el mismo valor que la del server). Si `Origin` falta, se acepta solo con `Sec-Fetch-Site: same-origin`. Si no, 403 `auth.csrf_origin` sin ejecutar la ruta. El requisito verificable es RF-A23 de la spec 001.
+- **D5 no cambia.** `X-Client-Origin` y `X-Client-Fetch-Site` siguen siendo copia literal de los headers del navegador, y el middleware de axum sigue siendo la defensa de las mutaciones del API. `ADDRESS_HEADER=X-Forwarded-For` y `XFF_DEPTH=1` siguen existiendo en adapter-node 6 con el mismo comportamiento (lo verifiqué en su código).
 
 ## Revisión
 ### security-reviewer — 2026-10-20 — REQUEST_CHANGES
@@ -635,3 +647,40 @@ Los valores absolutos de `B`, `m` y `r` los fija la spec de apuestas. Todos son 
   1. **Llave UTS #39 que cambia con la versión.** El skeleton depende de la versión de Unicode del crate. *Escenario:* al actualizar el crate, dos filas que ya existen pasan a tener el mismo skeleton, o un nombre nuevo deja de chocar con uno viejo. *Cambio:* fijar la versión del crate y, al subirla, recalcular `display_name_key` en una migración que reporte las colisiones.
   2. **Espectadores anónimos sin capacidad.** Con 50 sockets por `/64` y miles de `/64` en un `/48`, un atacante puede llenar el 80 % no reservado. *Escenario:* en el main event, los espectadores anónimos legítimos reciben 503 `ws.capacity`; los usuarios con antigüedad sí entran gracias a la reserva. Es aceptable en el MVP. *Cambio:* incluir ese caso en la prueba de carga de "Vigilar" y medirlo.
   3. **Dependencia de ADR-0006.** D7 depende de que nadie más que el proxy pueda tener `10.250.0.2`. Para eso, la creación de `torneo-edge` en ADR-0006 D1 necesita `--ip-range` (el Minor de devops en ADR-0006). Se sigue en ese ADR, no en este.
+
+### architect — 2026-10-22 — ENMIENDA (SvelteKit 3)
+- Agregué "Enmienda 2026-10-22: SvelteKit 3", que solo reemplaza la línea de `csrf.checkOrigin` de D4 (la opción ya no existe en Kit 3) por el chequeo siempre activo de Kit, sin `trustedOrigins`, y por un guard de `Origin` propio en `web` (RF-A23 de la spec 001). No reescribí D4 ni las revisiones. Lleva la aprobación del owner del 2026-10-22. Pido revisión de la enmienda a security-reviewer.
+
+### security-reviewer — 2026-10-22 — APPROVE (enmienda Kit 3)
+**🤖 security-reviewer**
+
+- Verifiqué: el `git diff` de los tres documentos contra ADR-0008 D4 y D5. También leí el código de `@sveltejs/kit@3.1.0` y `@sveltejs/adapter-node@6.0.0`:
+  - `csrf.js` y `respond.js`: el chequeo de Kit corre antes de `handle`. Solo cubre `POST`/`PUT`/`PATCH`/`DELETE` con `Content-Type` de formulario o sin él. Compara contra `paths.origin || url.origin` y se apaga solo con `trustedOrigins` que incluya `'*'`.
+  - `config/options.js`: `checkOrigin` es una opción `removed`, así que su presencia rompe la configuración.
+  - `errors.js`: los cuatro valores de `kind`, el `merge` con el *fallback* y que, si el hook lanza o rechaza, Kit escribe el error original con `console.error`.
+  - `instance.js`: el `handleError` por defecto.
+  - `core/env.js` y `exports/internal/env.js`: la validación de `defineEnvVars` al arrancar, `set_building()` en el build y que `public` vale `false` por defecto, sin semántica de prefijo `PUBLIC_`.
+  - `vite/utils.js`: `/[/.]server\.[^/]+$/` hace que `src/lib/paraglide/server.js` sea solo de servidor, y `$app/env/private` está protegido por `guard.js`.
+  - `handler.js` de adapter-node: el origen es `https://` + `Host` cuando no hay `*_HEADER`. Sin `PROTOCOL_HEADER` el texto del error es fijo. `getRequest` responde 400 sin log. `ADDRESS_HEADER` y `XFF_DEPTH` no cambian.
+  - `static.js`: solo atiende `GET` y `HEAD`, el resto pasa por `handle`.
+  - `prerender_template_nonce`: existe.
+  - **Conclusión:** RF-A23 aplica la regla de D4 a peticiones del navegador. Pide `Origin` exacto a `PUBLIC_ORIGIN`, o `Sec-Fetch-Site: same-origin` si falta. Rechaza `Origin: null`, cualquier `Content-Type` y todo método fuera de una lista permitida, sin `resolve` y sin logs. Nada que Kit atienda antes de `handle` deja pasar una mutación.
+  - `paths.origin` queda prohibido y verificado por un chequeo.
+  - El riesgo de formularios sobre `http` está bien acotado: en 001 no hay actions, y `PROTOCOL_HEADER` solo en e2e es aceptable porque RF-C6 lo prohíbe en el compose.
+
+- Hallazgos (Minor, no bloquean):
+  1. **`Host` y `event.url.origin` (RF-C4).** La frase "ningún header que el cliente pueda falsificar cambia el origen" solo es cierta detrás de Traefik. Quien llega directo al contenedor elige el `Host`, y `event.url.origin` lo sigue. Eso pasa en `prod-local` (`127.0.0.1:3000`) o desde cualquier contenedor de `torneo-edge`.
+     - *Escenario:* una feature futura arma una URL absoluta con `event.url.origin`, por ejemplo un enlace `hreflang` o canónico, el `next` del login o un correo. Una petición con `Host: evil.example` genera enlaces al dominio del atacante.
+     - Hoy no hay impacto: el guard usa `PUBLIC_ORIGIN` y no hay caché compartida.
+     - *Cambio:* agregar en "Seguridad" de la spec la regla "`web` nunca construye URLs absolutas con `event.url.origin`, `url.host` ni `url.href`; usa `PUBLIC_ORIGIN`". También precisar la frase de RF-C4 con "detrás de Traefik".
+  2. **`handleError` síncrono (RF-A19).** En Kit 3.1.0, un `handleError` que devuelve una `Promise` durante el render, sin `experimental.async`, escribe un `console.warn` y descarta el resultado. Si la promesa rechaza, Kit escribe el error crudo con `console.error`.
+     - *Escenario:* alguien lo declara `async` y el e2e "sin líneas en stdout" falla, o un rechazo vuelca a stderr la URL con query y la IP de canario sin pasar por el saneador.
+     - *Cambio:* RF-A19 exige que `handleError` sea síncrono, sin `async` y sin devolver promesas, y el test unitario lo verifica.
+  3. **Mensajes de los validadores de entorno.** Kit imprime al arrancar los mensajes de los validadores de `defineEnvVars` tal cual (`env_invalid`).
+     - *Escenario:* cuando `web` reciba `X-Internal-Secret` o `IP_HASH_KEY` (ADR-0008 D5), un validador que lance algo como `` `invalid value: ${v}` `` deja el secreto en el `json-file` de Docker.
+     - *Cambio:* aplicar en `src/env.ts` la regla de RF-B8: el mensaje lleva la regla, nunca el valor. El test unitario del validador de `PUBLIC_ORIGIN` comprueba que el mensaje no contiene el valor de entrada.
+  4. **Un e2e de RF-A23 no prueba el guard.** `POST /es/` sin `Origin` ni `Sec-Fetch-Site`, si va sin `Content-Type`, lo rechaza antes el chequeo de Kit con el texto "Cross-site POST form submissions are forbidden". El test pasaría aunque el guard no existiera.
+     - *Cambio:* enviar `Content-Type: application/json` y verificar que el cuerpo es `{"error":"auth.csrf_origin"}`. Lo mismo para el caso con `Origin` ajeno.
+  5. **Precisión en la enmienda de ADR-0008.** Dice que el chequeo de Kit "está siempre activo", pero Kit lo omite en `vite dev` (`!__SVELTEKIT_DEV__`).
+     - *Cambio:* decir "en el build (no en `vite dev`)" y aclarar que el guard de RF-A23 sí corre en dev. La spec ya lo dice en "Áreas de preocupación" 12.
+  6. **Frontmatter de los ADRs (proceso).** ADR-0009 agrega `security-reviewer` a `reviewers` pero sigue en `approved` sin su aprobación, y ADR-0008 tampoco la lleva para la enmienda. Hay que registrar esta aprobación en `approvals` de los dos ADRs y en la spec al cerrar la ronda. Le toca a quien edite, no a mí.
