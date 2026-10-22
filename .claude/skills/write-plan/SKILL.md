@@ -1,11 +1,11 @@
 ---
 name: write-plan
-description: Write a plan.md (files that change, order of work, risks, proof) for a Torneo Absurdo feature from its approved spec, working read-only before any code edit. Use when a spec is approved and implementation needs a concrete plan in docs/features/NNN-slug/plan.md.
+description: Write a plan.md (files that change, order of work, risks, proof) for a Torneo Absurdo feature from its approved spec, working read-only before any code edit. Use when a spec is approved and implementation needs a concrete plan in docs/features/NNN-slug/plan.md (or plan-<phase>.md when the spec defines phases).
 ---
 
 # Escribir un plan.md
 
-El plan se escribe **antes de editar código**, en modo solo lectura. La prueba de calidad: alguien que nunca vio la conversación tiene que poder implementarlo solo con el plan.
+El plan se escribe **antes de editar código**, en modo solo lectura. Si la spec define fases, escribe un plan por fase en `plan-<fase>.md` (ver `docs/process.md`). La prueba de calidad: alguien que nunca vio la conversación tiene que poder implementarlo solo con el plan.
 
 ## Antes de escribir
 - La spec debe estar `approved`. Lee intent, spec y el código actual de los archivos que se tocarán.
