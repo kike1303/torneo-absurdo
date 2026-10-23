@@ -12,7 +12,7 @@ approvals:
 linear: TA-5
 depends_on: ["0005", "0006", "0007", "0008"]
 created: 2026-10-21
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # Aviso de privacidad integral — Torneo Absurdo (borrador)
@@ -67,7 +67,7 @@ Usamos solo cookies **necesarias** para que el Servicio funcione. No usamos cook
 |---|---|---|
 | `__Host-session` | Mantener tu sesión iniciada | 30 días en tu navegador; tu sesión deja de valer antes si no la usas en 7 días o si cierras sesión |
 | `__Host-oauth` | Proteger el inicio de sesión con Google o Discord | 10 minutos |
-| Preferencia de idioma | Recordar tu idioma | `{{DURACION_COOKIE_IDIOMA}}` |
+| `locale` | Recordar tu idioma | 1 año |
 | `theme` | Recordar tema claro, oscuro o del sistema | 1 año |
 
 Puedes borrar las cookies desde tu navegador. Si borras `__Host-session`, se cerrará tu sesión.
@@ -128,7 +128,7 @@ Decisiones que este aviso necesita antes de publicarse:
 2. **Edad mínima:** recomiendo **18 años**. Aunque las monedas sean ficticias, las tiendas de apps y la regulación tratan las apuestas simuladas con criterios de juego de azar, y 18 evita discusiones (owner).
 3. **Eliminación de cuenta:** ningún ADR define todavía cómo se borra una cuenta con un ledger inmutable. Este aviso asume una **seudonimización**: se borran en el acto `oauth_accounts`, `sessions`, el alias y las filas de `auth_events` del usuario, y los asientos del ledger, `bets` y `season_stats` quedan atados al `user_id` sin datos. Lo tiene que confirmar el architect en la spec de la feature de cuentas, junto con el flujo "eliminar mi cuenta" (security-reviewer). Esa spec también debe evitar que un usuario baneado se borre y vuelva con el mismo Google o Discord: por ejemplo, conservando para cuentas baneadas un HMAC de `(provider, provider_user_id)` como lista de bloqueo. Si se adopta, se declara en este aviso con su plazo.
 4. **Plazos:** de respuesta a solicitudes ARCO y de conservación de los registros de moderación. Un abogado los debe confirmar contra la LFPDPPP vigente.
-5. **Cookie de idioma:** su nombre y duración se fijan en la spec de 001. Con legal, confirmar si las cookies de preferencia (idioma y `theme`) cuentan como necesarias o se declaran aparte como "de preferencia".
+5. **Cookies de preferencia:** la cookie de idioma ya quedó fijada en la spec de 001 (`locale`, 1 año, solo por elección explícita en el selector). Falta confirmar con legal si las cookies de preferencia (`locale` y `theme`) cuentan como necesarias o se declaran aparte como "de preferencia".
 6. **Revisión legal** del texto completo antes de publicarlo. Puntos concretos: la autoridad competente con la LFPDPPP de 2025, si hace falta consentimiento expreso o basta el aviso, los medios para limitar el uso y revocar el consentimiento, los plazos ARCO, los tratamientos automatizados (`farm-report`) y en qué países guardan datos Hostinger y R2.
 7. **Retención de `auth_events`:** la spec de auth debe fijar si el job de retención borra la fila completa o solo el `ip_hash`. Recomendación: la fila completa. Este aviso asume eso.
 8. **Logs de `web`:** la spec de 001 debe fijar que `web` (adapter-node, `handleError`, `hooks`) nunca registra `getClientAddress()`, `X-Forwarded-For`, cookies ni headers sensibles. ADR-0008 solo lo garantiza para el server. También debe fijar qué registra `tower-http::trace` sobre el usuario y el plazo típico de los logs (`{{PLAZO_LOGS}}`).

@@ -26,7 +26,14 @@ Todo cambio no trivial pasa por **intent → spec → plan → implementación �
 Detalle: [docs/architecture.md](docs/architecture.md).
 
 ## Comandos
-_Pendiente de la feature 001-fundaciones._ Objetivo: `just dev`, `just check`, `just test`, `just gen` (tipos TS).
+Requisitos: **Node ≥ 22.17** (versión exacta en `.node-version`; `nvm` no la lee, actívala a mano) con **corepack** (`corepack enable`, para usar el pnpm fijado en `packageManager`). `just` y Docker según la fase.
+- `just install`: dependencias exactas del lockfile (`pnpm install --frozen-lockfile`).
+- `just dev`: la web en modo dev (fase A: solo `web`, en `:5173`). Necesita `apps/web/.env` con `PUBLIC_ORIGIN` (copia `apps/web/.env.example`; sin `PUBLIC_ORIGIN` la app no arranca).
+- `just check`: Prettier, ESLint, `svelte-check`, Vitest (web y `scripts/`), `check-tokens`, `check-i18n`, `check-prerender` y `check-kit-config`. Se detiene en el primer fallo. No incluye e2e.
+- `just test`: solo las dos corridas de Vitest.
+- `just e2e`: build y Playwright contra `node build` (Chromium y WebKit); antes, una vez, `just e2e-install` para los navegadores. Logs en `apps/web/test-results/logs/` y capturas en `apps/web/test-results/screenshots/`.
+- `just fmt`: Prettier en escritura.
+- Llegan después: `just gen` (tipos TS desde `crates/protocol`, fase B) y las recetas de Rust, Docker y hooks (fases B y C).
 
 ## Verifying your work
 Antes de reportar una tarea como terminada: corre `just check` (formato, lint, tipos, tests), pega la salida y confirma que pasa. **Arregla el código, no el test.** En bugs, primero un test que reproduzca el fallo.
