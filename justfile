@@ -27,6 +27,7 @@ check: _check-web
 
 _check-web: _web-prepare
     pnpm exec prettier --check .
+    pnpm --filter web exec eslint .
     pnpm --filter web exec svelte-check --fail-on-warnings
     pnpm --filter web exec vitest run
     pnpm exec vitest run --config scripts/vitest.config.mjs

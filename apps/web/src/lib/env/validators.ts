@@ -23,12 +23,12 @@ export function validatePublicOrigin(
 
 function isBrowserOrigin(value: string): boolean {
   if (!URL.canParse(value)) return false;
-  const url = new URL(value);
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-  if (url.username !== '' || url.password !== '') return false;
+  const parsed = new URL(value);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  if (parsed.username !== '' || parsed.password !== '') return false;
   // `origin` drops path, query, fragment and default port and lowercases the host; any of those
   // in the raw value (or a trailing slash) makes the two strings differ.
-  return url.origin === value;
+  return parsed.origin === value;
 }
 
 /** `/dev/**` is enabled only with exactly `'1'` (RF-A16). Any other value means off. */
