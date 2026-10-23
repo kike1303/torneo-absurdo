@@ -3,7 +3,7 @@ import { sanitize } from './sanitize.js';
 
 // Every fragment of an address that must not survive sanitizing.
 function expectNoFragments(out: string, address: string): void {
-  const parts = address.split(/[.:%\[\]]+/).filter((p) => p.length >= 2 && p !== 'ffff');
+  const parts = address.split(/[.:%[\]]+/).filter((p) => p.length >= 2 && p !== 'ffff');
   for (let i = 0; i < parts.length - 1; i++) {
     expect(out, `${address} → ${out}`).not.toContain(`${parts[i]}.${parts[i + 1]}`);
     expect(out, `${address} → ${out}`).not.toContain(`${parts[i]}:${parts[i + 1]}`);
