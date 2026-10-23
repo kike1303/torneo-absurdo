@@ -2,7 +2,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ESLint } from 'eslint';
 import { describe, expect, it } from 'vitest';
-import { createConfig } from '../../eslint.config.js';
+import { readdirSync } from 'node:fs';
+import { UI_MAX_DEPTH, createConfig } from '../../eslint.config.js';
 
 // ADR-0009 test 2 (with the Kit 3 `#lib` amendment), RF-A14 and plan-a decisions 2, 18 and 20.
 const WEB = fileURLToPath(new URL('../..', import.meta.url));
@@ -74,6 +75,22 @@ describe('import boundaries that fail', () => {
       'src/lib/components/ui/card/card.svelte',
       svelte("  import Hud from '../../fight/Hud.svelte';\n  Hud;"),
     ],
+    // TA-10: a domain folder that is not in any list is still off limits for ui/.
+    [
+      'unlisted domain component in ui (#lib)',
+      'src/lib/components/ui/card/card.svelte',
+      svelte("  import Chat from '#lib/components/chat/Chat.svelte';\n  Chat;"),
+    ],
+    [
+      'unlisted domain component in ui (relative)',
+      'src/lib/components/ui/card/card.svelte',
+      svelte("  import Chat from '../../chat/Chat.svelte';\n  Chat;"),
+    ],
+    [
+      'unlisted domain component in ui (relative, from ui root)',
+      'src/lib/components/ui/x.ts',
+      "import Chat from '../chat/Chat.svelte';\nexport const x = Chat;\n",
+    ],
     [
       'Paraglide messages in ui (#lib)',
       'src/lib/components/ui/dialog/dialog-content.svelte',
@@ -132,6 +149,10 @@ describe('each #lib pattern works alone (relative twins disabled)', () => {
       svelte("  import Hud from '#lib/components/fight/Hud.svelte';\n  Hud;"),
     ],
     [
+      'src/lib/components/ui/card/card.svelte',
+      svelte("  import Chat from '#lib/components/chat/Chat.svelte';\n  Chat;"),
+    ],
+    [
       'src/lib/components/ui/dialog/x.svelte',
       svelte("  import { m } from '#lib/paraglide/messages.js';\n  m;"),
     ],
@@ -174,6 +195,58 @@ describe('other rules that fail', () => {
     ['event.url.toString()', 'export const f = (event: { url: URL }) => event.url.toString();\n'],
     ['String(event.url)', 'export const f = (event: { url: URL }) => String(event.url);\n'],
     ['template with event.url', 'export const f = (event: { url: URL }) => `${event.url}`;\n'],
+    // TA-10: destructuring.
+    [
+      'const { origin } = event.url',
+      'export const f = (event: { url: URL }) => {\n  const { origin } = event.url;\n  return origin;\n};\n',
+    ],
+    [
+      'const { href: h } = url',
+      'export const f = (url: URL) => {\n  const { href: h } = url;\n  return h;\n};\n',
+    ],
+    [
+      '({ url: { host } }) parameter',
+      'export const f = ({ url: { host } }: { url: URL }) => host;\n',
+    ],
+    [
+      'const { url: { origin } } = event',
+      'export const f = (event: { url: URL }) => {\n  const {\n    url: { origin },\n  } = event;\n  return origin;\n};\n',
+    ],
+    [
+      '({ origin } = event.url) assignment',
+      "export const f = (event: { url: URL }) => {\n  let origin = '';\n  ({ origin } = event.url);\n  return origin;\n};\n",
+    ],
+    // TA-10: `new URL(<x>.url)` copies the client-controlled `Host`.
+    [
+      'new URL(event.url).origin',
+      'export const f = (event: { url: URL }) => new URL(event.url).origin;\n',
+    ],
+    ['new URL(url).href', 'export const f = (url: URL) => new URL(url).href;\n'],
+    // TA-10: URLs built from the `Host` or `X-Forwarded-*` headers.
+    [
+      "request.headers.get('host')",
+      "export const f = (request: Request) => `https://${request.headers.get('host')}/x`;\n",
+    ],
+    [
+      "event.request.headers.get('X-Forwarded-Host')",
+      "export const f = (event: { request: Request }) => event.request.headers.get('X-Forwarded-Host');\n",
+    ],
+    [
+      "headers.get('x-forwarded-proto')",
+      "export const f = (headers: Headers) => headers.get('x-forwarded-proto');\n",
+    ],
+    [
+      "headers.get('forwarded')",
+      "export const f = (headers: Headers) => headers.get('Forwarded');\n",
+    ],
+    [
+      'headers.host (node headers)',
+      'export const f = (req: { headers: Record<string, string> }) => req.headers.host;\n',
+    ],
+    [
+      "headers['x-forwarded-host']",
+      "export const f = (req: { headers: Record<string, string> }) => req.headers['x-forwarded-host'];\n",
+    ],
   ])('absolute URL: %s', async (_name, code) => {
     expect(await rules('src/lib/server/hooks/x.ts', code)).toContain(SYNTAX);
   });
@@ -223,11 +296,61 @@ describe('cases that pass', () => {
       'export const f = (value: string) => new URL(value).protocol;\n',
     ],
     [
+      'another primitive in ui (#lib and relative)',
+      'src/lib/components/ui/dialog/dialog-content.svelte',
+      svelte(
+        "  import { Button } from '#lib/components/ui/button/index.js';\n  import X from '../button/button.svelte';\n  import Y from './dialog-title.svelte';",
+        '<Button /><X /><Y />',
+      ),
+    ],
+    [
+      'utils from ui',
+      'src/lib/components/ui/button/button.svelte',
+      svelte(
+        "  import { cn } from '#lib/utils.js';\n  import { cn as c } from '../../../utils.js';",
+        "<p class={cn('a', c('b'))}></p>",
+      ),
+    ],
+    [
+      'other headers',
+      'src/lib/server/hooks/x.ts',
+      "export const f = (request: Request) => request.headers.get('origin') ?? request.headers.get('sec-fetch-site');\n",
+    ],
+    [
       'other runtime imports',
       'src/routes/+page.ts',
       "import { getLocale } from '#lib/paraglide/runtime.js';\nexport const x = getLocale;\n",
     ],
   ])('%s', async (_name, file, code) => {
     expect(await rules(file, code)).toEqual([]);
+  });
+});
+
+describe('ui/ depth (TA-10)', () => {
+  it(`no primitive is nested deeper than UI_MAX_DEPTH (${UI_MAX_DEPTH}), where the relative rules stop`, () => {
+    const ui = path.join(WEB, 'src/lib/components/ui');
+    const deepest = readdirSync(ui, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => path.relative(ui, entry.parentPath).split(path.sep).filter(Boolean).length)
+      .reduce((a, b) => Math.max(a, b), 0);
+    expect(deepest).toBeLessThanOrEqual(UI_MAX_DEPTH);
+  });
+
+  it.each([
+    [
+      'src/lib/components/ui/a/b/c/x.ts',
+      "import X from '../../../../chat/X.svelte';\nexport const x = X;\n",
+    ],
+    [
+      'src/lib/components/ui/a/x.ts',
+      "import X from '../button/../../chat/X.svelte';\nexport const x = X;\n",
+    ],
+    ['src/lib/components/ui/x.ts', "import X from './../chat/X.svelte';\nexport const x = X;\n"],
+    [
+      'src/lib/components/ui/x.ts',
+      "import X from '#lib/components/ui/../chat/X.svelte';\nexport const x = X;\n",
+    ],
+  ])('%s: %s', async (file, code) => {
+    expect(await rules(file, code)).toContain(IMPORTS);
   });
 });
