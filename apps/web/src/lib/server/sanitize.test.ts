@@ -64,6 +64,14 @@ describe('sanitize', () => {
     expect(sanitize('Is it ok? yes')).toBe('Is it ok? yes');
   });
 
+  it('removes credentials from URLs', () => {
+    expect(sanitize('connect postgres://torneo:s3cr3t-pw@db.internal:5432/app failed')).toBe(
+      'connect postgres://[redacted]@db.internal:5432/app failed',
+    );
+    expect(sanitize('GET https://user@api.example/x')).toBe('GET https://[redacted]@api.example/x');
+    expect(sanitize('mail someone@example.com')).toBe('mail someone@example.com');
+  });
+
   it('removes the value after sensitive header names, any case', () => {
     const cases = [
       'cookie: session=abc; theme=dark',

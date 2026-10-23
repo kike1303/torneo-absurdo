@@ -1,10 +1,14 @@
 // Blacklist sanitizer for `error_message` and `stack` (RF-A19). Removes:
 // - the value that follows a sensitive header name;
+// - credentials in URLs (`user:pass@`);
 // - the query string of any URL, absolute or relative;
 // - IPv6 addresses (full, compressed, with zone, with an embedded IPv4) and IPv4 addresses.
 
 const SENSITIVE_HEADER =
   /(\b(?:cookie|authorization|x-forwarded-for|x-internal-secret|x-client-ip)["']?\s*[:=]\s*["']?)[^\r\n"']*/gi;
+
+/** Userinfo of a URL (`scheme://user:pass@host`): everything between `//` and the `@`. */
+const URL_CREDENTIALS = /(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/?#@"'<>]+@/gi;
 
 /**
  * A query string: a `?` that follows a URL or path character, or any `?name=` (even after a
@@ -47,6 +51,7 @@ export const REDACTED_IP = '[ip]';
 export function sanitize(text: string): string {
   return text
     .replace(SENSITIVE_HEADER, `$1${REDACTED}`)
+    .replace(URL_CREDENTIALS, `$1${REDACTED}@`)
     .replace(QUERY, '')
     .replace(IPV6_EMBEDDED_IPV4, REDACTED_IP)
     .replace(IPV6, (match) => (match === '::' ? match : REDACTED_IP))
