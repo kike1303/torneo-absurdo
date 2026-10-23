@@ -21,5 +21,8 @@
   "error_id_label": "ID del error para soporte: {id}",
   "error_home_link": "Volver al inicio",
   "a11y_close": "Cerrar",
-  "a11y_more": "Más"
+  "a11y_more": "Más",
+  "skip_to_content": "Saltar al contenido",
+  "header_label": "Cabecera del sitio",
+  "error_page_title": "Error {status}"
 }

@@ -21,5 +21,8 @@
   "error_id_label": "Error ID for support: {id}",
   "error_home_link": "Back to home",
   "a11y_close": "Close",
-  "a11y_more": "More"
+  "a11y_more": "More",
+  "skip_to_content": "Skip to content",
+  "header_label": "Site header",
+  "error_page_title": "Error {status}"
 }
