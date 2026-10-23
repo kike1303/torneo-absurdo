@@ -82,6 +82,10 @@ Son decisiones que la spec deja a la implementación, o desvíos menores que el 
    | `dropdown-menu/dropdown-menu-checkbox-item.svelte` | `min-h-11` (lo usa `ThemeSwitcher`, con `aria-checked`) |
    | `dropdown-menu/dropdown-menu-radio-item.svelte` | `min-h-11` |
    | `dropdown-menu/dropdown-menu-sub-trigger.svelte` | `min-h-11` |
+   | `dialog/dialog-footer.svelte` | botón de cerrar opcional: texto `Close` → `_a11y-messages.ts` (añadido en la implementación) |
+   | `dropdown-menu/dropdown-menu-content.svelte`, `dropdown-menu/dropdown-menu-sub-content.svelte` | `duration-100` → `duration-(--duration-base)` (añadido en la implementación) |
+
+   **Ajustes al registro actual (estilo `vega`, desviación 3):** el `button` traía `h-8`, `size-8`, `ring-3` y `focus-visible:ring-ring/50`, y su `destructive` era `bg-destructive/10 text-destructive`; queda con `h-11`/`size-11` (y `lg` en `h-12`/`size-12`, para que no sea menor que el tamaño por defecto), el anillo de D6 y `bg-destructive text-destructive-foreground`, que es el par que mide el test 3. Su variante `outline` y la del `badge` dibujan el límite con `border-input` en vez de `border-border` (ADR-0009 test 3). El overlay traía `bg-black/10`, no `bg-black/50`. Los tamaños `xs`, `sm`, `icon-xs` e `icon-sm` del botón quedan como en el registro: no son los de por defecto.
 
    Si al correr `add` aparece en otro archivo un `sr-only` en inglés, un color suelto o un `ring-ring/<n>`, se corrige igual y se suma a la tabla en el mismo commit.
 9. **`theme-color` en hex.** `<meta name="theme-color">` con OKLCH no lo leen todos los navegadores que soportamos. `theme-color.ts` guarda el equivalente sRGB en hex de cada `--background`, y el test 3 convierte el token con `culori` y compara con tolerancia de ±1 por canal.
@@ -371,6 +375,7 @@ Sin cambios: la fase A no agrega workflows. Los jobs `web` y `e2e` llegan con la
    - Se desactiva `svelte/no-navigation-without-resolve` (del preset recomendado de eslint-plugin-svelte 3.23): nuestras rutas llevan prefijo de idioma y se arman con `localizedHref()`, no son `route.id`, y las primitivas solo reenvían `href`.
    - Los selectores de la decisión 20 no se aplican a `src/**/*.test.ts`, que leen fixtures con `new URL(ruta, import.meta.url)`. En código de la app, el selector sobre un `Identifier` llamado `url` obligó a renombrar una variable del validador de `PUBLIC_ORIGIN` (falso positivo esperado, sin cambiar la regla).
    - Paquete del renderer en las reglas: `@torneo/renderer` (y `**/packages/renderer/**`), que todavía no existe; el nombre se confirma cuando llegue el paquete.
+9. **Paso 10, `add` de shadcn-svelte.** Como `dialog` depende de `button`, el CLI pide confirmar la sobrescritura; se usó `add --no-deps-install -y -o` (el botón aún no tenía cambios propios). El CLI escribió `"@lucide/svelte": "^1.61.0"` en `apps/web/package.json`; se revirtió con `git checkout` y los iconos que usan las primitivas (`check`, `chevron-right`, `minus`, `x`) existen en 0.561.0. Tras el revert, `git diff --exit-code package.json apps/web/package.json pnpm-lock.yaml` sale vacío y `pnpm why cn` (raíz y `--filter web`) no devuelve nada.
 
 ## Revisión
 

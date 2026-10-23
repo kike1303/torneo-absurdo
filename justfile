@@ -31,6 +31,7 @@ _check-web: _web-prepare
     pnpm --filter web exec svelte-check --fail-on-warnings
     pnpm --filter web exec vitest run
     pnpm exec vitest run --config scripts/vitest.config.mjs
+    node scripts/check-tokens.mjs
     node scripts/check-i18n.mjs
     node scripts/check-prerender.mjs
     node scripts/check-kit-config.mjs
