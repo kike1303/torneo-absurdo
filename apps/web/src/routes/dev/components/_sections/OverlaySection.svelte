@@ -12,7 +12,9 @@
   <Dialog.Root>
     <Dialog.Trigger>
       {#snippet child({ props })}
-        <Button {...props} variant="outline" data-testid="dialog-trigger">Open dialog</Button>
+        <Button {...props} variant="outline" class="self-start" data-testid="dialog-trigger"
+          >Open dialog</Button
+        >
       {/snippet}
     </Dialog.Trigger>
     <Dialog.Content data-testid="dialog-content">
@@ -31,7 +33,9 @@
   <DropdownMenu.Root>
     <DropdownMenu.Trigger>
       {#snippet child({ props })}
-        <Button {...props} variant="outline" data-testid="dropdown-trigger">Open menu</Button>
+        <Button {...props} variant="outline" class="self-start" data-testid="dropdown-trigger"
+          >Open menu</Button
+        >
       {/snippet}
     </DropdownMenu.Trigger>
     <DropdownMenu.Content class="min-w-56" data-testid="dropdown-content">
