@@ -1,0 +1,11 @@
+version = 4
+
+[[package]]
+name = "serde"
+version = "1.0.229"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "sneaky"
+version = "0.1.0"
+source = "git+https://github.com/example/sneaky?rev=abc123#abc123"

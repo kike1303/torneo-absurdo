@@ -53,3 +53,8 @@ e2e-install:
 # Generated code the tools need (Kit types, compiled Paraglide messages). Does not touch versioned files.
 _web-prepare:
     pnpm --filter web run sync
+
+# Every Cargo.lock version must be >= 3 days old on crates.io (plan-b decision 16). Uses the
+# network (one request per second), so it is not part of `check`. Run it on every lock change.
+crate-age:
+    node scripts/check-crate-age.mjs

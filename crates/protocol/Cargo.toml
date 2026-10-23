@@ -1,0 +1,21 @@
+[package]
+name = "protocol"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# Only `just gen` enables it; the server never compiles ts-rs (RF-B3).
+ts = ["dep:ts-rs"]
+
+[dependencies]
+serde.workspace = true
+ts-rs = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -324,7 +324,24 @@ Sin cambios en esta fase: no hay workflows hasta la fase C. Para C, `check-rust`
 
 ## Desviaciones durante la implementación
 
-_(Se llena si la implementación se aparta del plan.)_
+1. **Paso 1, versiones (2026-10-23).** Volví a comprobar la tabla contra crates.io: todas las directas existen, no están retiradas y tienen 3 días o más. tokio 1.54.1 (2026-10-21) y uuid 1.29.0 (2026-10-23) siguen sin cumplir los 3 días, así que se quedan 1.53.3 y 1.28.0.
+2. **Paso 1b, transitivas bajadas con `cargo update -p <crate>@<versión> --precise <anterior>`.** `cargo generate-lockfile` resolvió 222 paquetes de crates.io; la primera corrida de `just crate-age` marcó 15 con menos de 3 días. Bajadas (todas a la versión anterior más reciente con ≥ 3 días):
+
+   | Crate | Del lock | Bajada a | Publicada |
+   |---|---|---|---|
+   | `cc` | 1.10.0 | 1.9.0 | 2026-10-19 |
+   | `ctutils` | 0.4.5 | 0.4.3 (0.4.4 también es reciente) | 2026-10-05 |
+   | `icu_collections`, `icu_locale_core`, `icu_normalizer`, `icu_normalizer_data`, `icu_properties`, `icu_properties_data` | 2.4.0 | 2.3.0 | 2026-08-13 |
+   | `icu_provider` | 2.4.0 | 2.3.1 | 2026-08-20 |
+   | `smallvec` | 1.16.4 | 1.16.3 | 2026-10-10 |
+   | `tinystr` | 0.8.5 | 0.8.4 | 2026-08-13 |
+   | `webpki-roots` | 1.0.11 | 1.0.10 | 2026-10-19 |
+   | `yoke` | 0.8.4 | 0.8.3 | 2026-06-03 |
+   | `zerovec` | 0.11.9 | 0.11.8 | 2026-08-19 |
+   | `zerovec-derive` | 0.11.7 | 0.11.6 | 2026-08-20 |
+
+   La familia ICU 2.4 se pide entre sí con `~2.4.0`, así que se bajó de arriba hacia abajo: `icu_normalizer` primero (cargo bajó con él `icu_collections`, `icu_normalizer_data`, `icu_properties` e `icu_properties_data`), y después `icu_provider`, `icu_locale_core`, `tinystr`, `zerovec`, `zerovec-derive` y `yoke`. Al bajar `webpki-roots`, cargo también bajó `rustls-pki-types` 1.15.1 → 1.14.0 y `zeroize` 1.9.1 → 1.8.2 (más viejas; las dos pasan la regla). La segunda corrida: `222 crates.io package(s) checked, 0 younger than 3 days, 0 problem(s)`, salida 0.
+3. **Paso 1c.** `cargo deny check bans` da `bans ok`, sin `openssl`, `openssl-sys` ni `aws-lc-sys`. Quedan avisos `duplicate` (permitidos por `multiple-versions = "warn"`): `block-buffer`, `cpufeatures`, `crypto-common`, `digest`, `getrandom` (3), `hashbrown`, `rand`, `rand_core`, `sha2` y `syn`.
 
 ## Revisión
 

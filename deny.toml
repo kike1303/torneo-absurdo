@@ -1,0 +1,12 @@
+# cargo-deny configuration (RF-B2). Run with `just deny` (`cargo deny check bans`).
+
+[graph]
+targets = ["x86_64-unknown-linux-musl"]
+
+[bans]
+multiple-versions = "warn"
+deny = [
+    { crate = "openssl-sys" },
+    { crate = "openssl" },
+    { crate = "aws-lc-sys" },
+]
