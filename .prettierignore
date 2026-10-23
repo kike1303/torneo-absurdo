@@ -12,3 +12,4 @@ packages/protocol-ts/src/generated/
 test-results/
 playwright-report/
 coverage/
+scripts/__fixtures__/

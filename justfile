@@ -29,11 +29,15 @@ _check-web: _web-prepare
     pnpm exec prettier --check .
     pnpm --filter web exec svelte-check --fail-on-warnings
     pnpm --filter web exec vitest run
+    pnpm exec vitest run --config scripts/vitest.config.mjs
+    node scripts/check-i18n.mjs
+    node scripts/check-prerender.mjs
     node scripts/check-kit-config.mjs
 
 # Unit tests (web and repo scripts)
 test: _web-prepare
     pnpm --filter web exec vitest run
+    pnpm exec vitest run --config scripts/vitest.config.mjs
 
 # End-to-end tests against `node build` (Chromium and WebKit)
 e2e: _web-prepare

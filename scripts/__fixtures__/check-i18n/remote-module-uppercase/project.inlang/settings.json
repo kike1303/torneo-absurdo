@@ -1,0 +1,10 @@
+{
+  "baseLocale": "en",
+  "locales": [
+    "en",
+    "es"
+  ],
+  "modules": [
+    "HTTP://example.com/plugin.js"
+  ]
+}
