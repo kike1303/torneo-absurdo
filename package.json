@@ -1,0 +1,21 @@
+{
+  "name": "torneo-absurdo",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "packageManager": "pnpm@10.34.7+sha512.ba98abc585539933375b5971f4bc6d6c73a1b4b7edc4a879e7d102fe5423d1e02309d67c60a11f04955093a96e521ad9c3b138cdd654ca5be563f378b3ae48bd",
+  "engines": {
+    "node": ">=22.17"
+  },
+  "scripts": {
+    "fmt": "prettier --write .",
+    "fmt:check": "prettier --check .",
+    "test:scripts": "vitest run --config scripts/vitest.config.mjs"
+  },
+  "devDependencies": {
+    "prettier": "3.9.10",
+    "prettier-plugin-svelte": "4.1.1",
+    "prettier-plugin-tailwindcss": "0.8.1",
+    "svelte": "5.57.2",
+    "vitest": "5.0.5"
+  }
+}

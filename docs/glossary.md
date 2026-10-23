@@ -4,7 +4,7 @@ type: glossary
 status: approved
 author: owner
 created: 2026-10-20
-updated: 2026-10-20
+updated: 2026-10-21
 ---
 
 # Glosario
@@ -30,6 +30,8 @@ updated: 2026-10-20
 | Ledger | `Ledger` | Registro inmutable de movimientos de monedas; los saldos se derivan de él. |
 | Temporada | `Season` | Periodo del ranking de apostadores; al terminar se reinicia el ranking (no las monedas). |
 | Ganancia neta | `NetProfit` | Lo ganado en apuestas menos lo apostado; no incluye bonos ni rescates. |
+| Ganancia clasificable | `RankedProfit` | La parte de `NetProfit` que cuenta para el leaderboard: las pérdidas cuentan completas y las ganancias solo acreditan la parte que sale de stakes perdedores de **apuestas hechas** fuera de carencia (cuenta la foto al apostar, no el estado actual de la cuenta). Nunca es mayor que `NetProfit` (ADR-0008 D8). No cambia el ledger ni los pagos. |
+| Carencia | `Probation` | Periodo inicial de una cuenta (menos de 7 días o de 10 apuestas liquidadas, es decir, ganadas o perdidas; los reembolsos no cuentan): tope por pelea reducido, no sale en el leaderboard y sus stakes perdidos no dan `RankedProfit` a nadie (ADR-0008 D8). |
 | Rating | `Rating` | Fuerza estimada de un personaje (Glicko-2). |
 | Narrador | `Narrator` | Sistema de frases con plantillas que comenta la pelea según el contexto. |
 | Repetición | `Replay` | Reproducir una pelea pasada a partir de su log o su semilla. |

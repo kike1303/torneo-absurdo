@@ -64,7 +64,7 @@ Por defecto los agentes avanzan solos. El owner tiene que dar su OK explícito e
 ---
 id: "003"                 # número de la feature (o del ADR)
 title: Motor de pelea v0
-type: intent | spec | plan | adr | vision | architecture | process | glossary | character
+type: intent | spec | plan | adr | vision | architecture | process | glossary | character | legal
 status: draft | proposed | in-review | changes-requested | approved | rejected | superseded | done
                           # ADRs: proposed → approved | rejected | superseded
 risk: low | medium | high
@@ -87,6 +87,7 @@ docs/features/NNN-slug/
   spec.md     # requisitos y diseño
   plan.md     # archivos, orden, riesgos y pruebas
 ```
+Si la spec divide la feature en **fases** (un PR por fase), cada fase lleva su propio plan: `plan-<fase>.md` (p. ej. `plan-a.md`, `plan-b.md`). Cada uno se escribe, revisa y aprueba por separado, y el issue de Linear pasa a *In Progress* cuando se aprueba el primero.
 Los números son consecutivos y nunca se reutilizan. Las decisiones transversales salen como ADR en `docs/decisions/NNNN-slug.md`.
 
 ## Público vs privado

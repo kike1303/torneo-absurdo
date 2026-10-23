@@ -27,7 +27,7 @@ Orquestas el pipeline de [docs/process.md](../../../docs/process.md). Tú (la se
 - **Linear**: el issue pasa a *In Progress*. Si el plan tiene pasos independientes que tocan archivos distintos, se pueden crear sub-issues.
 
 ## 4. Implementación
-- Rama `ta-<n>-<slug>`. El ingeniero implementa según el plan; si se desvía, actualiza `plan.md`.
+- Rama `ta-<n>-<slug>`. El ingeniero implementa según el plan; si se desvía, actualiza `plan.md` (o `plan-<fase>.md` si la spec define fases; en ese caso las etapas 3 a 5 se repiten por fase).
 - `qa-engineer` verifica (`just check` más las pruebas del plan). Si falla, regresa al ingeniero con el reporte.
 
 ## 5. PR
