@@ -1,10 +1,22 @@
 <!doctype html>
-<html lang="%paraglide.lang%">
+<html lang="%paraglide.lang%" data-theme="%theme%">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    %theme.meta%
     <script nonce="%sveltekit.nonce%">
-      document.documentElement.dataset.probe = '1';
+      (() => {
+        const d = document.documentElement;
+        if (d.dataset.theme !== 'system') return;
+        const q = matchMedia('(prefers-color-scheme: dark)');
+        const apply = () => {
+          d.dataset.theme = q.matches ? 'dark' : 'light';
+        };
+        apply();
+        q.addEventListener('change', () => {
+          if (/(?:^|;\s*)theme=system(?:;|$)/.test(document.cookie)) apply();
+        });
+      })();
     </script>
     %sveltekit.head%
   </head>

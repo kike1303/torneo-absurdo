@@ -20,6 +20,7 @@ export function fakeEvent(init: FakeEventInit): RequestEvent {
     url,
     request,
     route: { id: init.routeId ?? null },
+    locals: {},
     cookies: {
       get: (name: string) => cookies[name],
       getAll: () => Object.entries(cookies).map(([name, value]) => ({ name, value })),

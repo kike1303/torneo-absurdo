@@ -1,0 +1,175 @@
+/*
+ * Design tokens (ADR-0009 D1). Provisional neutral palette until the visual identity exists.
+ * Primitives (`--palette-*`) are used only in this file. Contrast pairs are verified by
+ * `tokens.test.ts` (test 3); `theme-color.ts` mirrors `--background` of each theme.
+ */
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+:root {
+  --palette-neutral-50: oklch(1 0 0);
+  --palette-neutral-100: oklch(0.985 0 0);
+  --palette-neutral-150: oklch(0.96 0 0);
+  --palette-neutral-200: oklch(0.922 0 0);
+  --palette-neutral-300: oklch(0.75 0 0);
+  --palette-neutral-350: oklch(0.7 0 0);
+  --palette-neutral-450: oklch(0.6 0 0);
+  --palette-neutral-500: oklch(0.52 0 0);
+  --palette-neutral-550: oklch(0.5 0 0);
+  --palette-neutral-600: oklch(0.48 0 0);
+  --palette-neutral-750: oklch(0.3 0 0);
+  --palette-neutral-800: oklch(0.269 0 0);
+  --palette-neutral-850: oklch(0.205 0 0);
+  --palette-neutral-950: oklch(0.145 0 0);
+
+  --palette-red-200: oklch(0.88 0.05 25);
+  --palette-red-400: oklch(0.7 0.18 22);
+  --palette-red-600: oklch(0.5 0.19 27);
+  --palette-red-800: oklch(0.36 0.08 25);
+
+  --palette-green-400: oklch(0.72 0.17 145);
+  --palette-green-600: oklch(0.52 0.15 145);
+
+  --palette-amber-400: oklch(0.8 0.16 75);
+  --palette-amber-600: oklch(0.6 0.15 65);
+
+  --palette-slate-50: oklch(0.97 0.005 250);
+  --palette-slate-100: oklch(0.96 0.005 250);
+  --palette-slate-900: oklch(0.2 0.01 250);
+  --palette-slate-950: oklch(0.18 0.01 250);
+
+  /* Durations live outside @theme so reduced motion can zero them at runtime (D1, D6). */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+
+  --radius: 0.625rem;
+}
+
+:root,
+[data-theme='light'] {
+  --background: var(--palette-neutral-50);
+  --foreground: var(--palette-neutral-950);
+  --card: var(--palette-neutral-50);
+  --card-foreground: var(--palette-neutral-950);
+  --popover: var(--palette-neutral-50);
+  --popover-foreground: var(--palette-neutral-950);
+  --primary: var(--palette-neutral-850);
+  --primary-foreground: var(--palette-neutral-100);
+  --secondary: var(--palette-neutral-150);
+  --secondary-foreground: var(--palette-neutral-850);
+  --muted: var(--palette-neutral-150);
+  --muted-foreground: var(--palette-neutral-600);
+  --accent: var(--palette-neutral-150);
+  --accent-foreground: var(--palette-neutral-850);
+  --destructive: var(--palette-red-600);
+  --destructive-foreground: var(--palette-neutral-100);
+  --border: var(--palette-neutral-200);
+  --input: var(--palette-neutral-450);
+  --ring: var(--palette-neutral-550);
+
+  --arena-bg: var(--palette-slate-100);
+  --arena-hp: var(--palette-green-600);
+  --arena-hp-lost: var(--palette-red-200);
+  --arena-crit: var(--palette-amber-600);
+  --arena-text: var(--palette-slate-900);
+}
+
+[data-theme='dark'] {
+  --background: var(--palette-neutral-950);
+  --foreground: var(--palette-neutral-100);
+  --card: var(--palette-neutral-850);
+  --card-foreground: var(--palette-neutral-100);
+  --popover: var(--palette-neutral-850);
+  --popover-foreground: var(--palette-neutral-100);
+  --primary: var(--palette-neutral-200);
+  --primary-foreground: var(--palette-neutral-850);
+  --secondary: var(--palette-neutral-800);
+  --secondary-foreground: var(--palette-neutral-100);
+  --muted: var(--palette-neutral-800);
+  --muted-foreground: var(--palette-neutral-300);
+  --accent: var(--palette-neutral-800);
+  --accent-foreground: var(--palette-neutral-100);
+  --destructive: var(--palette-red-400);
+  --destructive-foreground: var(--palette-neutral-950);
+  --border: var(--palette-neutral-750);
+  --input: var(--palette-neutral-500);
+  --ring: var(--palette-neutral-350);
+
+  --arena-bg: var(--palette-slate-950);
+  --arena-hp: var(--palette-green-400);
+  --arena-hp-lost: var(--palette-red-800);
+  --arena-crit: var(--palette-amber-400);
+  --arena-text: var(--palette-slate-50);
+}
+
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: var(--font-sans);
+  --ease-out-arena: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-arena-bg: var(--arena-bg);
+  --color-arena-hp: var(--arena-hp);
+  --color-arena-hp-lost: var(--arena-hp-lost);
+  --color-arena-crit: var(--arena-crit);
+  --color-arena-text: var(--arena-text);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --shadow-card: 0 1px 3px 0 color-mix(in oklch, var(--foreground) 10%, transparent);
+  --shadow-glow: 0 0 0 4px color-mix(in oklch, var(--ring) 35%, transparent);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+  }
+}
+
+/* Reduced motion (D6), outside any @layer to beat Tailwind's theme layer. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+    --default-transition-duration: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
