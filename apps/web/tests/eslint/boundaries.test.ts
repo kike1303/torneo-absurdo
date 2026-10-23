@@ -247,6 +247,36 @@ describe('other rules that fail', () => {
       "headers['x-forwarded-host']",
       "export const f = (req: { headers: Record<string, string> }) => req.headers['x-forwarded-host'];\n",
     ],
+    // PR #2 review (security-reviewer).
+    [
+      'hostname, port and protocol',
+      "export const f = (event: { url: URL }) =>\n  event.url.protocol + '//' + event.url.hostname + ':' + event.url.port;\n",
+    ],
+    [
+      'const { hostname } = event.url',
+      'export const f = (event: { url: URL }) => {\n  const { hostname } = event.url;\n  return hostname;\n};\n',
+    ],
+    [
+      "URL.parse('/x', event.url)",
+      "export const f = (event: { url: URL }) => URL.parse('/x', event.url);\n",
+    ],
+    ['URL.parse(event.url)', 'export const f = (event: { url: URL }) => URL.parse(event.url);\n'],
+    ["event.url['origin']", "export const f = (event: { url: URL }) => event.url['origin'];\n"],
+    ['event.url.toJSON()', 'export const f = (event: { url: URL }) => event.url.toJSON();\n'],
+    ["'' + event.url", "export const f = (event: { url: URL }) => '' + event.url;\n"],
+    [
+      'new Request(event.url)',
+      'export const f = (event: { url: URL }) => new Request(event.url);\n',
+    ],
+    ['headers.get(`host`)', 'export const f = (headers: Headers) => headers.get(`host`);\n'],
+    [
+      'request.headers.get(`x-forwarded-${p}`)',
+      'export const f = (request: Request, p: string) => request.headers.get(`x-forwarded-${p}`);\n',
+    ],
+    [
+      'Object.fromEntries(request.headers).host',
+      'export const f = (request: Request) => Object.fromEntries(request.headers).host;\n',
+    ],
   ])('absolute URL: %s', async (_name, code) => {
     expect(await rules('src/lib/server/hooks/x.ts', code)).toContain(SYNTAX);
   });
@@ -315,6 +345,16 @@ describe('cases that pass', () => {
       'other headers',
       'src/lib/server/hooks/x.ts',
       "export const f = (request: Request) => request.headers.get('origin') ?? request.headers.get('sec-fetch-site');\n",
+    ],
+    [
+      'searchParams.get with a template literal',
+      'src/lib/server/hooks/x.ts',
+      'export const f = (event: { url: URL }) => event.url.searchParams.get(`theme`);\n',
+    ],
+    [
+      'URL.parse with one value',
+      'src/lib/env/x.ts',
+      'export const f = (value: string) => URL.parse(value)?.protocol;\n',
     ],
     [
       'other runtime imports',

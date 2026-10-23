@@ -123,7 +123,7 @@ function restrictedImports(relative, extra) {
   ];
 }
 
-const URL_PROPS = '/^(origin|host|href)$/';
+const URL_PROPS = '/^(origin|host|hostname|href|port|protocol)$/';
 const FORWARDING_HEADERS = '/^(?:host|forwarded|x-forwarded-.*)$/i';
 const ABSOLUTE_URL_MESSAGE =
   'Never build absolute URLs from the request (`Host` is client-controlled); use PUBLIC_ORIGIN (plan-a decision 20).';
@@ -133,8 +133,8 @@ const absoluteUrlSelectors = [
   "MemberExpression[object.type='Identifier'][object.name='request'][property.name='url']",
   "MemberExpression[object.type='MemberExpression'][object.property.name='request'][property.name='url']",
   "NewExpression[callee.name='URL'][arguments.length>=2]",
-  "CallExpression[callee.property.name='toString'][callee.object.property.name='url']",
-  "CallExpression[callee.property.name='toString'][callee.object.name='url']",
+  "CallExpression[callee.property.name=/^(toString|toJSON)$/][callee.object.property.name='url']",
+  "CallExpression[callee.property.name=/^(toString|toJSON)$/][callee.object.name='url']",
   "CallExpression[callee.name='String'][arguments.0.property.name='url']",
   "CallExpression[callee.name='String'][arguments.0.name='url']",
   "TemplateLiteral > MemberExpression.expressions[property.name='url']",
@@ -148,7 +148,22 @@ const absoluteUrlSelectors = [
   // `new URL(event.url)` copies the client-controlled `Host` (TA-10).
   "NewExpression[callee.name='URL'] > MemberExpression.arguments[property.name='url']",
   "NewExpression[callee.name='URL'] > Identifier.arguments[name='url']",
-  // The `Host`, `Forwarded` and `X-Forwarded-*` headers are client-controlled too (TA-10).
+  // PR #2 review: computed access, `URL.parse`, `'' + url` and `new Request(url)`.
+  `MemberExpression[object.type='MemberExpression'][object.property.name='url'][property.value=${URL_PROPS}]`,
+  `MemberExpression[object.type='Identifier'][object.name='url'][property.value=${URL_PROPS}]`,
+  "CallExpression[callee.object.name='URL'][callee.property.name='parse'][arguments.length>=2]",
+  "CallExpression[callee.object.name='URL'][callee.property.name='parse'] > MemberExpression.arguments[property.name='url']",
+  "CallExpression[callee.object.name='URL'][callee.property.name='parse'] > Identifier.arguments[name='url']",
+  "BinaryExpression[operator='+'] > MemberExpression[property.name='url']",
+  "BinaryExpression[operator='+'] > Identifier[name='url']",
+  "NewExpression[callee.name='Request'] > MemberExpression.arguments[property.name='url']",
+  "NewExpression[callee.name='Request'] > Identifier.arguments[name='url']",
+  // The `Host`, `Forwarded` and `X-Forwarded-*` headers are client-controlled too (TA-10). A
+  // template literal as the name of a header to read is never needed, so it is not allowed.
+  "CallExpression[callee.property.name='get'][callee.object.property.name='headers'][arguments.0.type='TemplateLiteral']",
+  "CallExpression[callee.property.name='get'][callee.object.name='headers'][arguments.0.type='TemplateLiteral']",
+  `MemberExpression[object.callee.property.name='fromEntries'][property.name=${FORWARDING_HEADERS}]`,
+  `MemberExpression[object.callee.property.name='fromEntries'][property.value=${FORWARDING_HEADERS}]`,
   `CallExpression[callee.property.name='get'][arguments.0.value=${FORWARDING_HEADERS}]`,
   `MemberExpression[object.property.name='headers'][property.name=${FORWARDING_HEADERS}]`,
   `MemberExpression[object.property.name='headers'][property.value=${FORWARDING_HEADERS}]`,
