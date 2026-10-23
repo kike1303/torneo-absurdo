@@ -195,3 +195,101 @@ describe('sanitize: bounded input (TA-10)', () => {
     }
   });
 });
+
+describe('sanitize: header values end where their structure ends (PR #2 review)', () => {
+  it.each([
+    [`{ headers: { cookie: 'pref="dark"; sid=SECRET' } }`, `{ headers: { cookie: '[redacted]' } }`],
+    [
+      `{ headers: { cookie: "name=o'brien; sid=SECRET" } }`,
+      `{ headers: { cookie: "[redacted]" } }`,
+    ],
+    ['{"cookie":"pref=\\"dark\\"; sid=SECRET"}', '{"cookie":"[redacted]"}'],
+    [
+      "Map(1) { 'set-cookie' => [ 'a=]x', 'sid=SECRET; Path=/' ] }",
+      "Map(1) { 'set-cookie' => [redacted] }",
+    ],
+    [`{ headers: { cookie: [ 'x=]', 'sid=SECRET' ] } }`, '{ headers: { cookie: [redacted] } }'],
+    [
+      '{ headers: { cookie: `a=\'b\'; c="d"; sid=SECRET` } }',
+      '{ headers: { cookie: `[redacted]` } }',
+    ],
+    [`{ cookie: [ "o'x", \`a'"]b\`, 'sid=SECRET' ] }`, '{ cookie: [redacted] }'],
+    ['{\\"cookie\\":\\"sid=SECRET\\"} tail', '{\\"cookie\\":[redacted]'],
+  ])('%s', (input, expected) => {
+    const out = sanitize(input);
+    expect(out).toBe(expected);
+    expect(out).not.toContain('SECRET');
+  });
+
+  it('redacts to the end of the line when the value does not open with a quote', () => {
+    expect(sanitize(`cookie: pref="dark"; sid=SECRET\nnext line`)).toBe(
+      'cookie: [redacted]\nnext line',
+    );
+    expect(sanitize(`cookie=a'b; sid=SECRET`)).toBe('cookie=[redacted]');
+  });
+
+  it('redacts to the end when a string or an array never closes', () => {
+    expect(sanitize("cookie: 'sid=SECRET\nmore SECRET")).not.toContain('SECRET');
+    expect(sanitize("cookie: [ 'a',\n 'sid=SECRET'")).not.toContain('SECRET');
+  });
+});
+
+describe('sanitize: IPv6 right after `key:` (PR #2 review)', () => {
+  it.each([
+    ['peer:2001:db8::1 refused', 'peer:[ip] refused'],
+    ['addr:fe80::1%eth0', 'addr:[ip]'],
+    ['ip:2001:db8:85a3:0:0:8a2e:370:7334', 'ip:[ip]'],
+    ['ip:::ffff:203.0.113.5', 'ip:[ip]'],
+  ])('%s', (input, expected) => {
+    expect(sanitize(input)).toBe(expected);
+  });
+});
+
+describe('sanitize: truncation without whitespace (PR #2 review)', () => {
+  it('keeps the prefix up to the last separator', () => {
+    const input = `${'x'.repeat(4000)},${'y'.repeat(6000)}`;
+    expect(sanitize(input)).toBe(`${'x'.repeat(4000)},[truncated]`);
+  });
+
+  it('still drops a split secret', () => {
+    const input = `${'x'.repeat(8 * 1024 - 20)};postgres://user:s3cr3t@db.example/${'z'.repeat(100)}`;
+    const out = sanitize(input);
+    expect(out).not.toMatch(/s3cr|user/);
+    expect(out.endsWith(';[truncated]')).toBe(true);
+  });
+});
+
+describe('sanitize: every pattern is linear on 8 KB, the worst real case (PR #2 review)', () => {
+  const n = 8 * 1024;
+  const unit = (s: string) => s.repeat(Math.ceil(n / s.length)).slice(0, n);
+  it.each(
+    [
+      'a:',
+      'aaaa:',
+      ':',
+      '1:1.',
+      'r:a:',
+      '1.',
+      '111.',
+      'a.',
+      'a://b:',
+      'a://:',
+      'ab://x:',
+      '?a',
+      ' ?a',
+      '?',
+      ' #a',
+      'cookie:',
+      'cookie: [',
+      "cookie: ['",
+      'cookie:"\\',
+      '\\"cookie\\":',
+    ].map((s) => [s]),
+  )('%j', (s) => {
+    const input = unit(s);
+    sanitize(input);
+    const start = performance.now();
+    sanitize(input);
+    expect(performance.now() - start).toBeLessThan(50);
+  });
+});
