@@ -1,7 +1,9 @@
 import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
+import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import tailwindcss from '@tailwindcss/vite';
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
+import paraglideOptions from './paraglide.options.js';
 
 // Kit 3 has no svelte.config.js: all Kit options live here (plan-a, decision 17).
 // Never add `csrf.trustedOrigins`, `csrf.checkOrigin` or `paths.origin`
@@ -9,6 +11,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [
     tailwindcss(),
+    paraglideVitePlugin(paraglideOptions),
     sveltekit({
       adapter: adapter(),
       csp: {
@@ -28,4 +31,8 @@ export default defineConfig({
       },
     }),
   ],
+  test: {
+    environment: 'node',
+    include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
+  },
 });

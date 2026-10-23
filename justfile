@@ -28,6 +28,7 @@ check: _check-web
 _check-web: _web-prepare
     pnpm exec prettier --check .
     pnpm --filter web exec svelte-check --fail-on-warnings
+    pnpm --filter web exec vitest run
     node scripts/check-kit-config.mjs
 
 # Unit tests (web and repo scripts)
@@ -43,6 +44,7 @@ e2e: _web-prepare
 e2e-install:
     pnpm --filter web exec playwright install chromium webkit
 
-# Generated code the tools need (Kit types). Does not touch versioned files.
+# Generated code the tools need (Kit types, compiled Paraglide messages). Does not touch versioned files.
 _web-prepare:
+    pnpm --filter web exec node --input-type=module -e "import { compile } from '@inlang/paraglide-js'; import options from './paraglide.options.js'; await compile(options);"
     pnpm --filter web exec svelte-kit sync

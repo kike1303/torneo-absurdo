@@ -1,11 +1,10 @@
 <script lang="ts">
   import '../app.css';
   import { Button } from '#lib/components/ui/button/index.js';
-  import { probeClass } from '#lib/probe/classes.js';
-
-  let { data } = $props();
+  import { m } from '#lib/paraglide/messages.js';
 </script>
 
-<main class={probeClass}>
-  <Button data-catalog={data.catalog}>{'probe'}</Button>
+<main>
+  <h1>{m.home_title()}</h1>
+  <Button>{m.home_coming_soon()}</Button>
 </main>
