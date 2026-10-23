@@ -394,6 +394,15 @@ Sin cambios: la fase A no agrega workflows. Los jobs `web` y `e2e` llegan con la
     - **Orden de los handle.** Dos e2e: `POST /` y `POST /es/dev/components` con `Origin` ajeno dan 403 (no 307 ni 404). Fallan si el guard se mueve detrás de `localeRedirect` o `devGuard`.
     - **`check-i18n`.** Detecta los literales que una expresión muestra tal cual: `{"…"}`, plantillas, las dos ramas de `?:`, `&&`/`||`/`??` y `+`, en el texto y en `aria-label`/`title`/`alt`/`placeholder`. Los literales que se pasan a funciones o a comparaciones siguen permitidos.
     - **Scripts de `apps/web`.** `pnpm run sync` (`scripts/compile-paraglide.js` y `svelte-kit sync`) corre antes de `check`, `lint`, `test`, `dev` y `build`, y `e2e` hace el build primero. `just _web-prepare` llama a ese mismo script, así que hay un único punto de entrada y `pnpm --filter web check` funciona en un clon limpio.
+    - **Segunda ronda (revisiones del PR #2).**
+      - El valor de un header sensible se lee por su estructura, en una sola pasada lineal. Un string entre comillas se toma completo, con sus escapes; un arreglo, hasta el `]` que lo cierra, aunque haya `]` dentro de un elemento; cualquier otro valor, hasta el fin de línea. Si un string o un arreglo no cierra, se redacta hasta el final.
+      - El ancla de IPv6 pasa a `(?<![0-9a-f]|[0-9a-f]:)`, así que `peer:2001:db8::1` vuelve a redactarse.
+      - El truncado retrocede hasta el último separador (`[\s"'<>,;]`), no solo hasta el último espacio.
+      - Cada patrón se mide con 8 KB de entrada adversaria.
+      - La regla de `ui/` atrapa también las rutas relativas que suben hasta `lib/` y vuelven por `components/<x>/`, con una regex que no depende de la profundidad.
+      - La regla de URLs absolutas agrega `hostname`, `port` y `protocol`, el acceso con corchetes, `toJSON()`, `URL.parse`, `'' + url`, `new Request(url)`, `headers.get` con plantilla y `Object.fromEntries(headers).host`.
+      - `check-i18n` detecta los literales dentro de arreglos.
+      - Quedan sin cambiar dos casos en que se redacta de más: una URL con puerto y una `@` en la ruta (`http://localhost:5173/…/@x`) se toma como credencial, y `C#9` pierde el `#9`. Corregirlos sin conocer la URL haría que dejaran de redactarse contraseñas o fragmentos poco comunes, y aquí se prefiere redactar de más.
 
 ## Revisión
 
