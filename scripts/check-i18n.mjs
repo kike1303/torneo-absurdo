@@ -92,7 +92,7 @@ function checkSettings(webDir, problems) {
 
 /**
  * String literals with letters that an expression renders as is: the expression itself, the
- * text of a template, both branches of `?:`, both sides of `&&`/`||`/`??` and of a `+`. Literals
+ * text of a template, the elements of an array, both branches of `?:`, both sides of `&&`/`||`/`??` and of a `+`. Literals
  * passed to calls or compared (`m.x()`, `fmt(n, "en")`, `a === "b"`) are code, not text.
  * @returns {{ text: string, start: number }[]}
  */
@@ -110,6 +110,8 @@ function renderedLiterals(expr) {
         : [];
       return [...own, ...expr.expressions.flatMap(renderedLiterals)];
     }
+    case 'ArrayExpression': // `{["a", "b"]}` renders as `a,b`
+      return expr.elements.flatMap(renderedLiterals);
     case 'ConditionalExpression':
       return [...renderedLiterals(expr.consequent), ...renderedLiterals(expr.alternate)];
     case 'LogicalExpression':

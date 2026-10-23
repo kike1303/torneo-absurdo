@@ -26,6 +26,7 @@ describe('check-i18n (RF-A15)', () => {
     ['literal-aria-label-expression', /\+page\.svelte:5: literal `aria-label` `Close dialog`/],
     ['literal-title-template', /\+page\.svelte:5: literal `title` `Hi /],
     ['literal-alt-quoted-expression', /\+page\.svelte:1: literal `alt` `Logo`/],
+    ['literal-array-expression', /\+page\.svelte:1: literal text `Texto`/],
     ['remote-module', /settings\.json:\d+: remote module/],
     ['remote-module-uppercase', /settings\.json:\d+: remote module/],
   ])('fails on %s', (name, pattern) => {
