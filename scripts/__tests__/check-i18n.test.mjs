@@ -42,7 +42,10 @@ describe('check-i18n (RF-A15)', () => {
 
   it('reports both branches of a ternary (TA-10)', () => {
     const problems = run('literal-ternary-expression');
-    expect(problems.some((p) => p.includes('`No`')), problems.join('\n')).toBe(true);
+    expect(
+      problems.some((p) => p.includes('`No`')),
+      problems.join('\n'),
+    ).toBe(true);
   });
 
   it('exempts literal text under src/routes/dev/**', () => {
