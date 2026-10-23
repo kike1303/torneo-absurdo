@@ -16,7 +16,8 @@ test.describe('test 4: axe without serious or critical violations', () => {
   for (const theme of ['light', 'dark'] as const) {
     test(`home and 404 with theme=${theme}`, async ({ page }) => {
       await page.context().addCookies([{ name: 'theme', value: theme, url: ORIGIN }]);
-      for (const path of ['/es/', '/en/', '/es/no-existe']) {
+      // `/api/x` renders the 404 on an excluded path (QA H2).
+      for (const path of ['/es/', '/en/', '/es/no-existe', '/api/x']) {
         await page.goto(path);
         expect(await seriousViolations(page), path).toEqual([]);
       }

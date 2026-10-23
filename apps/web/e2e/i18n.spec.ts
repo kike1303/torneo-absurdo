@@ -120,3 +120,36 @@ test.describe('locale cookie and switcher (RF-A4, RF-A5)', () => {
     expect(cookie?.value).toBe('es');
   });
 });
+
+test.describe('pages on excluded paths (QA H2)', () => {
+  const PATHS = ['/api', '/api/x', '/ws', '/healthz/x', '/healthz//'];
+
+  for (const method of ['GET', 'POST'] as const) {
+    test(`${method}: 404s have a valid lang and no Paraglide marker`, async () => {
+      for (const [cookie, lang] of [
+        [undefined, 'en'],
+        ['locale=es', 'es'],
+        ['locale=xx', 'en'],
+      ] as const) {
+        for (const path of PATHS) {
+          const res = await raw(PORT, path, {
+            method,
+            headers: {
+              ...(cookie ? { cookie } : {}),
+              ...(method === 'POST'
+                ? { 'content-type': 'application/json', origin: `http://localhost:${PORT}` }
+                : {}),
+            },
+            ...(method === 'POST' ? { body: '{}' } : {}),
+          });
+          const label = `${method} ${path} ${cookie ?? 'no cookie'}`;
+          expect(res.status, label).toBeGreaterThanOrEqual(400);
+          expect(header(res, 'location'), label).toBeUndefined();
+          expect(header(res, 'content-type'), label).toContain('text/html');
+          expect(res.body, label).not.toContain('%paraglide.');
+          expect(res.body, label).toContain(`<html lang="${lang}"`);
+        }
+      }
+    });
+  }
+});

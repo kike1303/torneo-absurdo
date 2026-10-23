@@ -26,11 +26,14 @@ describe('paraglide handle', () => {
     expect(res.headers.get('location')).toBe('/es/x?y=1');
   });
 
-  it('skips the middleware on excluded paths', async () => {
+  it('passes excluded paths to the middleware with a locale-prefixed effective URL', async () => {
     vi.mocked(paraglideMiddleware).mockClear();
     const resolve = vi.fn(async () => new Response('ok'));
-    const res = await paraglide({ event: fakeEvent({ url: 'http://h/healthz' }), resolve });
-    expect(await res.text()).toBe('ok');
-    expect(paraglideMiddleware).not.toHaveBeenCalled();
+    await paraglide({
+      event: fakeEvent({ url: 'http://h/healthz', cookies: { locale: 'es' } }),
+      resolve,
+    });
+    const options = vi.mocked(paraglideMiddleware).mock.calls[0]?.[2];
+    expect(String(options?.effectiveRequestUrl)).toBe('http://h/es/healthz');
   });
 });
