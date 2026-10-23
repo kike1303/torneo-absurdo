@@ -14,8 +14,12 @@ import globals from 'globals';
 import ts from 'typescript-eslint';
 
 /**
- * Deepest folder level under `components/ui/` that the relative rules cover (`ui/x.ts` is 0,
- * `ui/button/button.svelte` is 1). `tests/eslint/boundaries.test.ts` fails if a primitive goes deeper.
+ * Deepest folder level under `components/ui/` that the per-depth relative rule covers (`ui/x.ts`
+ * is 0, `ui/button/button.svelte` is 1). That rule is only needed for paths that step straight
+ * out of `ui/` into a sibling (`../chat/X` from `ui/x.ts`), which never name `components/`; paths
+ * that climb higher and come back through `components/<x>/` are caught at any depth. A primitive
+ * deeper than this falls outside every `ui/` file group, so `tests/eslint/boundaries.test.ts`
+ * fails if one appears.
  */
 export const UI_MAX_DEPTH = 3;
 
@@ -74,9 +78,13 @@ const UI_MESSAGE =
   'Primitives in `ui/` import nothing from features, domain components or Paraglide messages, not even types (ADR-0009 D4).';
 /**
  * Everything outside `components/ui/` is off limits, not a closed list of domains, so a new
- * domain folder is covered on day one (TA-10). A relative path leaves `ui/` when it climbs one
- * level more than the file's depth under `ui/`, so each depth gets its own regex; dot segments
- * after a normal segment (`../button/../../chat`) and `./../` are rejected outright.
+ * domain folder is covered on day one (TA-10). Relative paths leave `ui/` in two ways:
+ * - climbing higher and coming back through `components/<x>/` (`../../components/chat/X`): the
+ *   path names `components/`, so one regex covers every depth;
+ * - climbing exactly one level more than the file's depth under `ui/` (`../chat/X` from `ui/x.ts`,
+ *   `../../chat/X` from `ui/card/x.ts`): the path never names `components/`, so each depth gets
+ *   its own regex.
+ * Dot segments after a normal segment (`../button/../../chat`) and `./../` are rejected outright.
  * @param {boolean} relative @param {boolean} allowMessages @param {number} depth
  */
 const uiRestriction = (relative, allowMessages, depth) => [
@@ -87,6 +95,9 @@ const uiRestriction = (relative, allowMessages, depth) => [
   ...(relative
     ? [
         { group: ['**/features/**'], message: UI_MESSAGE },
+        // Climbing to `lib/` (or higher) and coming back down through `components/<x>/`.
+        { regex: '^\\.{1,2}/(?:.*/)?components/(?!ui(?:/|$))', message: UI_MESSAGE },
+        // Stepping straight out of `ui/` into a sibling folder, which never names `components/`.
         { regex: `^(?:\\.\\./){${depth + 1}}(?!ui(?:/|$)|\\.\\./)`, message: UI_MESSAGE },
         {
           regex: '^\\./\\.\\.?/|^(?:\\.\\.?/)*(?:[^./][^/]*/)+\\.\\.?(?:/|$)',

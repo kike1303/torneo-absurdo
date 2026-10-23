@@ -326,6 +326,34 @@ describe('cases that pass', () => {
   });
 });
 
+describe('ui/ climbing to lib/ and back into components/ (TA-10, PR #2 review)', () => {
+  it.each([
+    [
+      'src/lib/components/ui/x.ts',
+      "import X from '../../components/fight/X.svelte';\nexport const x = X;\n",
+    ],
+    [
+      'src/lib/components/ui/x.ts',
+      "import X from '../../components/chat/X.svelte';\nexport const x = X;\n",
+    ],
+    [
+      'src/lib/components/ui/card/x.ts',
+      "import X from '../../../components/chat/X.svelte';\nexport const x = X;\n",
+    ],
+  ])('%s: %s', async (file, code) => {
+    expect(await rules(file, code)).toContain(IMPORTS);
+  });
+
+  it('still allows climbing to lib/ and back into components/ui/', async () => {
+    expect(
+      await rules(
+        'src/lib/components/ui/card/x.ts',
+        "import { Button } from '../../../components/ui/button/index.js';\nexport const x = Button;\n",
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe('ui/ depth (TA-10)', () => {
   it(`no primitive is nested deeper than UI_MAX_DEPTH (${UI_MAX_DEPTH}), where the relative rules stop`, () => {
     const ui = path.join(WEB, 'src/lib/components/ui');
