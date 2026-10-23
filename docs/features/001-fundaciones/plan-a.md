@@ -2,7 +2,7 @@
 id: "001"
 title: Fundaciones del monorepo — fase A
 type: plan
-status: approved
+status: done
 risk: high
 author: frontend-engineer
 reviewers: [architect, security-reviewer]
@@ -52,7 +52,7 @@ Son decisiones que la spec deja a la implementación, o desvíos menores que el 
       - **Exclusiones por segmento completo:** `/healthz`, `/api` y `/ws`, cada una exacta o seguida de `/` (`/api` y `/api/x` sí; `/apix`, `/healthzz` y `/wsx` no), igual que `/developers` en el guard.
       - **`Location`** = `/<locale>/` + `event.url.pathname` sin `/` ni `\` iniciales + `event.url.search`. Solo usa esos dos campos, ya serializados por el parser WHATWG; nunca `request.url` crudo, ninguna cabecera ni `new URL(path, base)`.
       - **Cabeceras de la 307:** `Vary: Cookie, Accept-Language` y `Cache-Control: private, no-store`, porque el destino depende de esas cabeceras.
-   4. `paraglide`: `paraglideMiddleware`, que se salta en las rutas excluidas (para que nunca redirija `/healthz`), reemplaza `%paraglide.lang%` y reescribe a relativo el `Location` de sus propias redirecciones (decisión 2).
+   4. `paraglide`: `paraglideMiddleware`, que se salta en las rutas excluidas (para que nunca redirija `/healthz`) **(cambiado: ahora corre también en las rutas excluidas, con una URL efectiva que lleva el idioma; ver desviación 14)**, reemplaza `%paraglide.lang%` y reescribe a relativo el `Location` de sus propias redirecciones (decisión 2).
    5. `devGuard` (RF-A16): si `route.id` es `/dev` o empieza con `/dev/` y `ENABLE_DEV_CATALOG !== '1'` (de `$app/env/private`), devuelve un **`Response` 404 directo** (`new Response(null, { status: 404 })`), sin `resolve` y sin `throw error(404)`, para no renderizar el árbol de errores ni pasar por `handleError`. La segunda capa, `dev/+layout.server.ts`, sí lanza `error(404)`; en Kit 3 eso llega a `handleError` con `kind: 'app'` y no se registra (decisión 4).
    6. `theme` (RF-A6 y RF-A9): resuelve el tema y reemplaza `%theme%` y `%theme.meta%` en `transformPageChunk` **solo en la parte del documento anterior a `</head>` (que incluye la etiqueta `<html>`), y solo la primera aparición de cada marcador**. Un handle con estado por petición marca cuándo ya pasó `</head>`; desde ahí, los fragmentos siguientes salen sin tocar. Un texto futuro con el marcador en el `<body>` no recibe `<meta>` inyectadas. Unit con un HTML que trae `%theme.meta%` también en el `<body>`.
 
@@ -388,6 +388,12 @@ Sin cambios: la fase A no agrega workflows. Los jobs `web` y `e2e` llegan con la
 
     No contienen datos de la app ni ejecutan código de rutas; se acepta en la fase A. **En la fase C, el proxy (Traefik) también pone estas cabeceras** en el router de `web`, para cubrir estos casos; el plan de C debe incluirlo y verificarlo con un `curl` a `/_app/version.json` y a `/healthz/`.
 17. **Revisión de QA, nota de credenciales.** El saneador también quita la parte `usuario:contraseña@` de cualquier URL (`postgres://user:pass@host` → `postgres://[redacted]@host`), con su unit.
+18. **Nits de las revisiones del PR #1 (TA-10).**
+    - **Saneador.** El valor de un header sensible se redacta también cuando viene en un arreglo (de una o varias líneas) o en una entrada de `Map` (`=>`). Las credenciales se cortan en el último `@`, aunque la contraseña tenga `/` o `@` sin codificar; la autoridad vacía (`file:///…`) no se toca. Se quitan los fragmentos `#…` sin query, salvo después de un `.` (`Foo.#bar` en las trazas). La IPv4 pegada a una letra o a `_` se redacta. La entrada se corta a 8 KB, y se descarta también el último token, para que el corte no deje un trozo de IP o de credencial. Las regex de IPv6 se anclan con `(?<![0-9a-f:])` y el esquema de las credenciales se acota, porque eran cuadráticas. Un unit comprueba que 160 KB de entrada adversaria tardan menos de 50 ms.
+    - **ESLint.** `ui/` no puede importar nada fuera de `components/ui/` (`^#lib/components/(?!ui/)`), en lugar de una lista cerrada de dominios. La forma relativa depende de la profundidad del archivo, así que hay un objeto por nivel hasta `UI_MAX_DEPTH`, y un test falla si una primitiva queda más abajo. La regla de URLs absolutas (decisión 20) atrapa también la desestructuración de `origin`, `host` y `href`, `new URL(<x>.url)` y las lecturas de `Host`, `Forwarded` y `X-Forwarded-*`. El `new URL(event.url)` de `paraglide.ts` lleva un `eslint-disable` con su motivo: solo alimenta la detección de idioma, y `relativizeLocation` reescribe cualquier `Location`.
+    - **Orden de los handle.** Dos e2e: `POST /` y `POST /es/dev/components` con `Origin` ajeno dan 403 (no 307 ni 404). Fallan si el guard se mueve detrás de `localeRedirect` o `devGuard`.
+    - **`check-i18n`.** Detecta los literales que una expresión muestra tal cual: `{"…"}`, plantillas, las dos ramas de `?:`, `&&`/`||`/`??` y `+`, en el texto y en `aria-label`/`title`/`alt`/`placeholder`. Los literales que se pasan a funciones o a comparaciones siguen permitidos.
+    - **Scripts de `apps/web`.** `pnpm run sync` (`scripts/compile-paraglide.js` y `svelte-kit sync`) corre antes de `check`, `lint`, `test`, `dev` y `build`, y `e2e` hace el build primero. `just _web-prepare` llama a ese mismo script, así que hay un único punto de entrada y `pnpm --filter web check` funciona en un clon limpio.
 
 ## Revisión
 
