@@ -47,25 +47,38 @@ test.describe('locale redirect (RF-A3)', () => {
     expect((await raw(PORT, '/apix')).status).toBe(307);
   });
 
-  test("Paraglide's own redirects are relative, even with a forged Host", async () => {
-    for (const path of [
-      '/',
-      '/dev/components',
-      '//evil.example/',
-      '/\\evil.example',
-      '/es',
-      '/en',
-      '/es//evil.example/',
-      '/EN/',
-    ]) {
+  // With the strategy ['url', 'baseLocale'] Paraglide's middleware never redirects: a URL without a
+  // prefix is answered by our localeRedirect before it, and a URL with a prefix decides the locale.
+  // This test pins, case by case, which handle answers and that no Location is absolute (QA H4).
+  test('document requests with a forged Host: only localeRedirect redirects, always relative', async () => {
+    const OWN_REDIRECT = 'localeRedirect';
+    const cases: [string, number, string | undefined][] = [
+      ['/', 307, '/en/'],
+      ['/dev/components', 307, '/en/dev/components'],
+      ['//evil.example/', 307, '/en/evil.example/'],
+      ['/\\evil.example', 307, '/en/evil.example'],
+      ['/EN/', 307, '/en/EN/'],
+      ['/es', 200, undefined],
+      ['/en', 200, undefined],
+      ['/es/', 200, undefined],
+      ['/es//evil.example/', 404, undefined],
+    ];
+    for (const [path, status, location] of cases) {
       const res = await raw(PORT, path, {
         headers: { host: 'evil.example', 'sec-fetch-dest': 'document' },
       });
-      const location = header(res, 'location');
-      if (location === undefined) continue;
-      // Relative, same origin: starts with one `/` (never `//` or `/\`) and has no scheme.
-      expect(location, path).toMatch(/^\/(?![/\\])/);
-      expect(location, path).not.toMatch(/^[a-z]+:/i);
+      expect(res.status, path).toBe(status);
+      expect(header(res, 'location'), path).toBe(location);
+      if (status === 307) {
+        const handler =
+          header(res, 'cache-control') === 'private, no-store' &&
+          header(res, 'vary') === 'Cookie, Accept-Language'
+            ? OWN_REDIRECT
+            : 'other';
+        expect(handler, path).toBe(OWN_REDIRECT);
+        expect(location, path).toMatch(/^\/(?![/\\])/);
+        expect(location, path).not.toMatch(/^[a-z][a-z0-9+.-]*:/i);
+      }
     }
   });
 
