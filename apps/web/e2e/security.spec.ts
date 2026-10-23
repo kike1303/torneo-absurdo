@@ -78,6 +78,29 @@ test('RF-A23: Origin guard rejects foreign and missing origins, without logging'
   expect(await linesSince('catalog', before)).toEqual([]);
 });
 
+// TA-10: pins the handle order (plan-a decision 3). The Origin guard answers before the locale
+// redirect (307) and before the /dev/** guard (404); RF-A23 forbids either answering first.
+test('RF-A23: POST / with a foreign Origin is 403, not the locale 307', async () => {
+  const res = await raw(CATALOG, '/', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+    body: '{}',
+  });
+  expect(res.status).toBe(403);
+  expect(res.body).toBe('{"error":"auth.csrf_origin"}');
+  expect(header(res, 'location')).toBeUndefined();
+});
+
+test('RF-A23: POST /es/dev/components with a foreign Origin is 403, not the dev guard 404', async () => {
+  const res = await raw(NO_CATALOG, '/es/dev/components', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+    body: '{}',
+  });
+  expect(res.status).toBe(403);
+  expect(res.body).toBe('{"error":"auth.csrf_origin"}');
+});
+
 test('RF-A16 / test 6: without ENABLE_DEV_CATALOG every /dev/** route is 404 and nothing is logged', async () => {
   const before = readLines('no-catalog').length;
   for (const path of [

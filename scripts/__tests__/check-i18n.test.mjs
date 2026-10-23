@@ -19,12 +19,32 @@ describe('check-i18n (RF-A15)', () => {
     ['literal-title', /\+page\.svelte:1: literal `title`/],
     ['literal-alt', /\+page\.svelte:1: literal `alt`/],
     ['literal-placeholder', /\+page\.svelte:1: literal `placeholder`/],
+    // TA-10: literals inside `{…}`.
+    ['literal-expression', /\+page\.svelte:1: literal text `Save changes`/],
+    ['literal-template-expression', /\+page\.svelte:1: literal text `Hello /],
+    ['literal-ternary-expression', /\+page\.svelte:5: literal text `Yes`/],
+    ['literal-aria-label-expression', /\+page\.svelte:5: literal `aria-label` `Close dialog`/],
+    ['literal-title-template', /\+page\.svelte:5: literal `title` `Hi /],
+    ['literal-alt-quoted-expression', /\+page\.svelte:1: literal `alt` `Logo`/],
+    ['literal-array-expression', /\+page\.svelte:1: literal text `Texto`/],
     ['remote-module', /settings\.json:\d+: remote module/],
     ['remote-module-uppercase', /settings\.json:\d+: remote module/],
   ])('fails on %s', (name, pattern) => {
     const problems = run(name);
     expect(
       problems.some((p) => pattern.test(p)),
+      problems.join('\n'),
+    ).toBe(true);
+  });
+
+  it('passes on expressions that only pass literals to code (TA-10)', () => {
+    expect(run('valid-expressions')).toEqual([]);
+  });
+
+  it('reports both branches of a ternary (TA-10)', () => {
+    const problems = run('literal-ternary-expression');
+    expect(
+      problems.some((p) => p.includes('`No`')),
       problems.join('\n'),
     ).toBe(true);
   });

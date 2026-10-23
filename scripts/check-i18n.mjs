@@ -2,7 +2,9 @@
 // RF-A15 and plan-a decision 7. Fails if:
 // - a message key exists in one locale and not in another, or a message is empty;
 // - a `.svelte` file outside src/routes/dev/** has literal visible text (text nodes with letters,
-//   or literal `aria-label`, `title`, `alt` or `placeholder`), found with svelte/compiler;
+//   or literal `aria-label`, `title`, `alt` or `placeholder`), found with svelte/compiler. That
+//   includes string literals that an expression outputs as is: `{"Save"}`, `{`Hi ${n}`}`,
+//   `{ok ? "Yes" : "No"}`, `aria-label={"Close"}` (TA-10);
 // - an entry of `modules` in project.inlang/settings.json starts with `http` (no remote plugins).
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -88,6 +90,41 @@ function checkSettings(webDir, problems) {
   }
 }
 
+/**
+ * String literals with letters that an expression renders as is: the expression itself, the
+ * text of a template, the elements of an array, both branches of `?:`, both sides of `&&`/`||`/`??` and of a `+`. Literals
+ * passed to calls or compared (`m.x()`, `fmt(n, "en")`, `a === "b"`) are code, not text.
+ * @returns {{ text: string, start: number }[]}
+ */
+function renderedLiterals(expr) {
+  if (!expr || typeof expr !== 'object') return [];
+  switch (expr.type) {
+    case 'Literal':
+      return typeof expr.value === 'string' && LETTER.test(expr.value)
+        ? [{ text: expr.value, start: expr.start }]
+        : [];
+    case 'TemplateLiteral': {
+      const quasis = expr.quasis.map((q) => q.value.cooked ?? q.value.raw);
+      const own = LETTER.test(quasis.join(''))
+        ? [{ text: quasis.join('…'), start: expr.start }]
+        : [];
+      return [...own, ...expr.expressions.flatMap(renderedLiterals)];
+    }
+    case 'ArrayExpression': // `{["a", "b"]}` renders as `a,b`
+      return expr.elements.flatMap(renderedLiterals);
+    case 'ConditionalExpression':
+      return [...renderedLiterals(expr.consequent), ...renderedLiterals(expr.alternate)];
+    case 'LogicalExpression':
+      return [...renderedLiterals(expr.left), ...renderedLiterals(expr.right)];
+    case 'BinaryExpression':
+      return expr.operator === '+'
+        ? [...renderedLiterals(expr.left), ...renderedLiterals(expr.right)]
+        : [];
+    default:
+      return [];
+  }
+}
+
 /** Walks the modern Svelte AST looking for literal visible text. */
 function checkSvelte(file, source, problems) {
   let ast;
@@ -111,12 +148,30 @@ function checkSvelte(file, source, problems) {
       return;
     }
     if (node.type === 'Comment') return;
+    if (node.type === 'ExpressionTag' || node.type === 'HtmlTag') {
+      for (const { text, start } of renderedLiterals(node.expression))
+        problems.push(
+          `${file}:${lineAt(source, start)}: literal text \`${text.trim().slice(0, 40)}\`; use a Paraglide message`,
+        );
+      return;
+    }
     if (node.type === 'Attribute') {
-      if (TEXT_ATTRIBUTES.has(node.name.toLowerCase()) && Array.isArray(node.value)) {
-        for (const part of node.value) {
-          if (part.type === 'Text' && LETTER.test(part.data))
+      if (TEXT_ATTRIBUTES.has(node.name.toLowerCase())) {
+        // `attr="…"` is an array of Text and ExpressionTag parts; `attr={…}` is one ExpressionTag.
+        const parts = Array.isArray(node.value) ? node.value : [node.value];
+        for (const part of parts) {
+          if (!part || typeof part !== 'object') continue;
+          const literals =
+            part.type === 'Text'
+              ? LETTER.test(part.data)
+                ? [{ text: part.data, start: part.start }]
+                : []
+              : part.type === 'ExpressionTag'
+                ? renderedLiterals(part.expression)
+                : [];
+          for (const { text, start } of literals)
             problems.push(
-              `${file}:${lineAt(source, part.start)}: literal \`${node.name}\` \`${part.data.slice(0, 40)}\`; use a Paraglide message`,
+              `${file}:${lineAt(source, start)}: literal \`${node.name}\` \`${text.slice(0, 40)}\`; use a Paraglide message`,
             );
         }
       }

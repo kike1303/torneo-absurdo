@@ -8,13 +8,14 @@
     "#lib/*": "./src/lib/*"
   },
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
+    "sync": "node scripts/compile-paraglide.js && svelte-kit sync",
+    "dev": "pnpm run sync && vite dev",
+    "build": "pnpm run sync && vite build",
     "preview": "vite preview",
-    "check": "svelte-kit sync && svelte-check --fail-on-warnings",
-    "lint": "eslint .",
-    "test": "vitest run",
-    "e2e": "playwright test"
+    "check": "pnpm run sync && svelte-check --fail-on-warnings",
+    "lint": "pnpm run sync && eslint .",
+    "test": "pnpm run sync && vitest run",
+    "e2e": "pnpm run build && playwright test"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",

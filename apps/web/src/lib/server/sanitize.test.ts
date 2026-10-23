@@ -93,3 +93,203 @@ describe('sanitize', () => {
     }
   });
 });
+
+describe('sanitize: sensitive header values in arrays and maps (TA-10)', () => {
+  it.each([
+    ['{"set-cookie":["sid=abc123"]}', '{"set-cookie":[redacted]}'],
+    ['{"set-cookie":["sid=abc123","theme=dark"],"x":1}', '{"set-cookie":[redacted],"x":1}'],
+    ["{ cookie: [ 'sid=abc123' ] }", '{ cookie: [redacted] }'],
+    ["Map(1) { 'cookie' => 'session=abc123' }", "Map(1) { 'cookie' => '[redacted]' }"],
+    ["Map(1) { 'set-cookie' => [ 'sid=abc123' ] }", "Map(1) { 'set-cookie' => [redacted] }"],
+    ["Headers { authorization: 'Bearer abc123' }", "Headers { authorization: '[redacted]' }"],
+  ])('%s', (input, expected) => {
+    const out = sanitize(input);
+    expect(out).toBe(expected);
+    expect(out).not.toMatch(/abc123|dark/);
+  });
+
+  it('redacts a multi-line array (util.inspect breaks long arrays)', () => {
+    const out = sanitize("{\n  'set-cookie': [\n    'sid=abc123',\n    'theme=dark'\n  ]\n}");
+    expect(out).not.toMatch(/abc123|dark/);
+  });
+});
+
+describe('sanitize: credentials, fragments and glued IPv4 (TA-10)', () => {
+  it.each([
+    [
+      'connect postgres://user:p/ss@db.internal/app',
+      'connect postgres://[redacted]@db.internal/app',
+    ],
+    [
+      'connect postgres://user:pa@ss@db.internal/app',
+      'connect postgres://[redacted]@db.internal/app',
+    ],
+    ['GET https://user:p@ss/w0rd@api.example/x', 'GET https://[redacted]@api.example/x'],
+  ])('removes credentials with `/` or `@`: %s', (input, expected) => {
+    expect(sanitize(input)).toBe(expected);
+  });
+
+  it('keeps URLs without credentials, stack paths and emails intact', () => {
+    expect(sanitize('GET https://api.example/users/a@b.example failed')).toBe(
+      'GET https://api.example/users/a@b.example failed',
+    );
+    const frame =
+      'at x (file:///app/node_modules/.pnpm/@sveltejs+kit@3.1.0/node_modules/@sveltejs/kit/src/x.js:1:2)';
+    expect(sanitize(frame)).toBe(frame);
+  });
+
+  it('removes fragments without a query', () => {
+    expect(sanitize('redirect to /cb#access_token=abc&state=1 done')).toBe('redirect to /cb done');
+    expect(sanitize('open https://a.example/p#secret-section')).toBe('open https://a.example/p');
+    expect(sanitize("go '/x#token=abc'")).toBe("go '/x'");
+  });
+
+  it('keeps `#` that is not a URL fragment', () => {
+    expect(sanitize('at Foo.#bar (src/x.ts:1:2)')).toBe('at Foo.#bar (src/x.ts:1:2)');
+    expect(sanitize('see issue #12 and C# code')).toBe('see issue #12 and C# code');
+  });
+
+  it.each([
+    ['client_203.0.113.5 failed', 'client_[ip] failed'],
+    ['peer=ip203.0.113.6', 'peer=ip[ip]'],
+    ['x203.0.113.7y', 'x[ip]y'],
+  ])('removes IPv4 glued to a letter or `_`: %s', (input, expected) => {
+    expect(sanitize(input)).toBe(expected);
+  });
+});
+
+describe('sanitize: bounded input (TA-10)', () => {
+  const adversarial = [
+    ['IPv6 run without ::', 'a:'.repeat(80_000)],
+    ['hex groups', '1:'.repeat(80_000)],
+    ['dotted words', 'a.'.repeat(80_000)],
+    ['scheme prefixes', 'a://a:'.repeat(27_000)],
+    ['header names', 'cookie:'.repeat(23_000)],
+    ['IPv4-ish digits', '1.'.repeat(80_000)],
+  ] as const;
+
+  it.each(adversarial)('sanitizes 160 KB of %s in under 50 ms', (_name, input) => {
+    expect(input.length).toBeGreaterThanOrEqual(160_000);
+    sanitize('warm up 2001:db8::1 203.0.113.5');
+    const start = performance.now();
+    sanitize(input);
+    expect(performance.now() - start).toBeLessThan(50);
+  });
+
+  it('truncates to 8 KB and marks it', () => {
+    const out = sanitize('x '.repeat(10_000));
+    expect(out.length).toBeLessThanOrEqual(8 * 1024 + 20);
+    expect(out.endsWith('[truncated]')).toBe(true);
+  });
+
+  it('never leaves a partial secret at the cut', () => {
+    const pad = 'x'.repeat(8 * 1024 - 12) + ' ';
+    for (const tail of [
+      '203.0.113.77 end',
+      'postgres://user:s3cr3t@db end',
+      '/cb?token=abcdef end',
+      '2001:db8:85a3::8a2e:370:7334 end',
+    ]) {
+      const out = sanitize(pad + tail);
+      expect(out, tail).not.toMatch(/203|113|s3cr|user|abcd|2001|db8|85a/);
+    }
+  });
+});
+
+describe('sanitize: header values end where their structure ends (PR #2 review)', () => {
+  it.each([
+    [`{ headers: { cookie: 'pref="dark"; sid=SECRET' } }`, `{ headers: { cookie: '[redacted]' } }`],
+    [
+      `{ headers: { cookie: "name=o'brien; sid=SECRET" } }`,
+      `{ headers: { cookie: "[redacted]" } }`,
+    ],
+    ['{"cookie":"pref=\\"dark\\"; sid=SECRET"}', '{"cookie":"[redacted]"}'],
+    [
+      "Map(1) { 'set-cookie' => [ 'a=]x', 'sid=SECRET; Path=/' ] }",
+      "Map(1) { 'set-cookie' => [redacted] }",
+    ],
+    [`{ headers: { cookie: [ 'x=]', 'sid=SECRET' ] } }`, '{ headers: { cookie: [redacted] } }'],
+    [
+      '{ headers: { cookie: `a=\'b\'; c="d"; sid=SECRET` } }',
+      '{ headers: { cookie: `[redacted]` } }',
+    ],
+    [`{ cookie: [ "o'x", \`a'"]b\`, 'sid=SECRET' ] }`, '{ cookie: [redacted] }'],
+    ['{\\"cookie\\":\\"sid=SECRET\\"} tail', '{\\"cookie\\":[redacted]'],
+  ])('%s', (input, expected) => {
+    const out = sanitize(input);
+    expect(out).toBe(expected);
+    expect(out).not.toContain('SECRET');
+  });
+
+  it('redacts to the end of the line when the value does not open with a quote', () => {
+    expect(sanitize(`cookie: pref="dark"; sid=SECRET\nnext line`)).toBe(
+      'cookie: [redacted]\nnext line',
+    );
+    expect(sanitize(`cookie=a'b; sid=SECRET`)).toBe('cookie=[redacted]');
+  });
+
+  it('redacts to the end when a string or an array never closes', () => {
+    expect(sanitize("cookie: 'sid=SECRET\nmore SECRET")).not.toContain('SECRET');
+    expect(sanitize("cookie: [ 'a',\n 'sid=SECRET'")).not.toContain('SECRET');
+  });
+});
+
+describe('sanitize: IPv6 right after `key:` (PR #2 review)', () => {
+  it.each([
+    ['peer:2001:db8::1 refused', 'peer:[ip] refused'],
+    ['addr:fe80::1%eth0', 'addr:[ip]'],
+    ['ip:2001:db8:85a3:0:0:8a2e:370:7334', 'ip:[ip]'],
+    ['ip:::ffff:203.0.113.5', 'ip:[ip]'],
+  ])('%s', (input, expected) => {
+    expect(sanitize(input)).toBe(expected);
+  });
+});
+
+describe('sanitize: truncation without whitespace (PR #2 review)', () => {
+  it('keeps the prefix up to the last separator', () => {
+    const input = `${'x'.repeat(4000)},${'y'.repeat(6000)}`;
+    expect(sanitize(input)).toBe(`${'x'.repeat(4000)},[truncated]`);
+  });
+
+  it('still drops a split secret', () => {
+    const input = `${'x'.repeat(8 * 1024 - 20)};postgres://user:s3cr3t@db.example/${'z'.repeat(100)}`;
+    const out = sanitize(input);
+    expect(out).not.toMatch(/s3cr|user/);
+    expect(out.endsWith(';[truncated]')).toBe(true);
+  });
+});
+
+describe('sanitize: every pattern is linear on 8 KB, the worst real case (PR #2 review)', () => {
+  const n = 8 * 1024;
+  const unit = (s: string) => s.repeat(Math.ceil(n / s.length)).slice(0, n);
+  it.each(
+    [
+      'a:',
+      'aaaa:',
+      ':',
+      '1:1.',
+      'r:a:',
+      '1.',
+      '111.',
+      'a.',
+      'a://b:',
+      'a://:',
+      'ab://x:',
+      '?a',
+      ' ?a',
+      '?',
+      ' #a',
+      'cookie:',
+      'cookie: [',
+      "cookie: ['",
+      'cookie:"\\',
+      '\\"cookie\\":',
+    ].map((s) => [s]),
+  )('%j', (s) => {
+    const input = unit(s);
+    sanitize(input);
+    const start = performance.now();
+    sanitize(input);
+    expect(performance.now() - start).toBeLessThan(50);
+  });
+});

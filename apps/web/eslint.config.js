@@ -13,7 +13,15 @@ import svelte from 'eslint-plugin-svelte';
 import globals from 'globals';
 import ts from 'typescript-eslint';
 
-const DOMAINS = ['fight', 'betting', 'leaderboard', 'profile', 'layout'];
+/**
+ * Deepest folder level under `components/ui/` that the per-depth relative rule covers (`ui/x.ts`
+ * is 0, `ui/button/button.svelte` is 1). That rule is only needed for paths that step straight
+ * out of `ui/` into a sibling (`../chat/X` from `ui/x.ts`), which never name `components/`; paths
+ * that climb higher and come back through `components/<x>/` are caught at any depth. A primitive
+ * deeper than this falls outside every `ui/` file group, so `tests/eslint/boundaries.test.ts`
+ * fails if one appears.
+ */
+export const UI_MAX_DEPTH = 3;
 
 const KIT_MESSAGE =
   'Kit 3 has no `$lib`, and `$env/*` and `$app/environment` are deprecated: use `#lib/…` and `$app/env/*` (RF-A14).';
@@ -68,16 +76,33 @@ const featuresValueRestriction = (relative) => [
 
 const UI_MESSAGE =
   'Primitives in `ui/` import nothing from features, domain components or Paraglide messages, not even types (ADR-0009 D4).';
-/** @param {boolean} relative @param {boolean} allowMessages */
-const uiRestriction = (relative, allowMessages) => [
+/**
+ * Everything outside `components/ui/` is off limits, not a closed list of domains, so a new
+ * domain folder is covered on day one (TA-10). Relative paths leave `ui/` in two ways:
+ * - climbing higher and coming back through `components/<x>/` (`../../components/chat/X`): the
+ *   path names `components/`, so one regex covers every depth;
+ * - climbing exactly one level more than the file's depth under `ui/` (`../chat/X` from `ui/x.ts`,
+ *   `../../chat/X` from `ui/card/x.ts`): the path never names `components/`, so each depth gets
+ *   its own regex.
+ * Dot segments after a normal segment (`../button/../../chat`) and `./../` are rejected outright.
+ * @param {boolean} relative @param {boolean} allowMessages @param {number} depth
+ */
+const uiRestriction = (relative, allowMessages, depth) => [
   { regex: '^#lib/features/', message: UI_MESSAGE },
-  { regex: `^#lib/components/(?:${DOMAINS.join('|')})/`, message: UI_MESSAGE },
+  { regex: '^#lib/components/(?!ui/)', message: UI_MESSAGE },
+  { regex: '^#lib/(?:.*/)?\\.\\.?(?:/|$)', message: UI_MESSAGE },
   ...(allowMessages ? [] : [{ regex: '^#lib/paraglide/', message: UI_MESSAGE }]),
   ...(relative
     ? [
         { group: ['**/features/**'], message: UI_MESSAGE },
-        { group: DOMAINS.map((d) => `**/components/${d}/**`), message: UI_MESSAGE },
-        { regex: `^\\.{1,2}/(?:.*/)?(?:${DOMAINS.join('|')})/`, message: UI_MESSAGE },
+        // Climbing to `lib/` (or higher) and coming back down through `components/<x>/`.
+        { regex: '^\\.{1,2}/(?:.*/)?components/(?!ui(?:/|$))', message: UI_MESSAGE },
+        // Stepping straight out of `ui/` into a sibling folder, which never names `components/`.
+        { regex: `^(?:\\.\\./){${depth + 1}}(?!ui(?:/|$)|\\.\\./)`, message: UI_MESSAGE },
+        {
+          regex: '^\\./\\.\\.?/|^(?:\\.\\.?/)*(?:[^./][^/]*/)+\\.\\.?(?:/|$)',
+          message: UI_MESSAGE,
+        },
         ...(allowMessages ? [] : [{ group: ['**/paraglide/**'], message: UI_MESSAGE }]),
       ]
     : []),
@@ -98,7 +123,8 @@ function restrictedImports(relative, extra) {
   ];
 }
 
-const URL_PROPS = '/^(origin|host|href)$/';
+const URL_PROPS = '/^(origin|host|hostname|href|port|protocol)$/';
+const FORWARDING_HEADERS = '/^(?:host|forwarded|x-forwarded-.*)$/i';
 const ABSOLUTE_URL_MESSAGE =
   'Never build absolute URLs from the request (`Host` is client-controlled); use PUBLIC_ORIGIN (plan-a decision 20).';
 const absoluteUrlSelectors = [
@@ -107,12 +133,42 @@ const absoluteUrlSelectors = [
   "MemberExpression[object.type='Identifier'][object.name='request'][property.name='url']",
   "MemberExpression[object.type='MemberExpression'][object.property.name='request'][property.name='url']",
   "NewExpression[callee.name='URL'][arguments.length>=2]",
-  "CallExpression[callee.property.name='toString'][callee.object.property.name='url']",
-  "CallExpression[callee.property.name='toString'][callee.object.name='url']",
+  "CallExpression[callee.property.name=/^(toString|toJSON)$/][callee.object.property.name='url']",
+  "CallExpression[callee.property.name=/^(toString|toJSON)$/][callee.object.name='url']",
   "CallExpression[callee.name='String'][arguments.0.property.name='url']",
   "CallExpression[callee.name='String'][arguments.0.name='url']",
   "TemplateLiteral > MemberExpression.expressions[property.name='url']",
   "TemplateLiteral > Identifier.expressions[name='url']",
+  // Destructuring `origin`, `host` or `href` out of a URL (TA-10).
+  `VariableDeclarator[init.type='MemberExpression'][init.property.name='url'] > ObjectPattern > Property[key.name=${URL_PROPS}]`,
+  `VariableDeclarator[init.type='Identifier'][init.name='url'] > ObjectPattern > Property[key.name=${URL_PROPS}]`,
+  `AssignmentExpression[right.type='MemberExpression'][right.property.name='url'] > ObjectPattern > Property[key.name=${URL_PROPS}]`,
+  `AssignmentExpression[right.type='Identifier'][right.name='url'] > ObjectPattern > Property[key.name=${URL_PROPS}]`,
+  `Property[key.name='url'] > ObjectPattern > Property[key.name=${URL_PROPS}]`,
+  // `new URL(event.url)` copies the client-controlled `Host` (TA-10).
+  "NewExpression[callee.name='URL'] > MemberExpression.arguments[property.name='url']",
+  "NewExpression[callee.name='URL'] > Identifier.arguments[name='url']",
+  // PR #2 review: computed access, `URL.parse`, `'' + url` and `new Request(url)`.
+  `MemberExpression[object.type='MemberExpression'][object.property.name='url'][property.value=${URL_PROPS}]`,
+  `MemberExpression[object.type='Identifier'][object.name='url'][property.value=${URL_PROPS}]`,
+  "CallExpression[callee.object.name='URL'][callee.property.name='parse'][arguments.length>=2]",
+  "CallExpression[callee.object.name='URL'][callee.property.name='parse'] > MemberExpression.arguments[property.name='url']",
+  "CallExpression[callee.object.name='URL'][callee.property.name='parse'] > Identifier.arguments[name='url']",
+  "BinaryExpression[operator='+'] > MemberExpression[property.name='url']",
+  "BinaryExpression[operator='+'] > Identifier[name='url']",
+  "NewExpression[callee.name='Request'] > MemberExpression.arguments[property.name='url']",
+  "NewExpression[callee.name='Request'] > Identifier.arguments[name='url']",
+  // The `Host`, `Forwarded` and `X-Forwarded-*` headers are client-controlled too (TA-10). A
+  // template literal as the name of a header to read is never needed, so it is not allowed.
+  "CallExpression[callee.property.name='get'][callee.object.property.name='headers'][arguments.0.type='TemplateLiteral']",
+  "CallExpression[callee.property.name='get'][callee.object.name='headers'][arguments.0.type='TemplateLiteral']",
+  `MemberExpression[object.callee.property.name='fromEntries'][property.name=${FORWARDING_HEADERS}]`,
+  `MemberExpression[object.callee.property.name='fromEntries'][property.value=${FORWARDING_HEADERS}]`,
+  `CallExpression[callee.property.name='get'][arguments.0.value=${FORWARDING_HEADERS}]`,
+  `MemberExpression[object.property.name='headers'][property.name=${FORWARDING_HEADERS}]`,
+  `MemberExpression[object.property.name='headers'][property.value=${FORWARDING_HEADERS}]`,
+  `MemberExpression[object.name='headers'][property.name=${FORWARDING_HEADERS}]`,
+  `MemberExpression[object.name='headers'][property.value=${FORWARDING_HEADERS}]`,
 ].map((selector) => ({ selector, message: ABSOLUTE_URL_MESSAGE }));
 
 /**
@@ -181,22 +237,22 @@ export function createConfig({ relativePatterns = true } = {}) {
         ]),
       },
     },
-    {
-      files: [UI],
+    ...Array.from({ length: UI_MAX_DEPTH + 1 }, (_, depth) => ({
+      files: [`src/lib/components/ui/${'*/'.repeat(depth)}*.{js,ts,svelte}`],
       ignores: [A11Y],
       rules: {
         '@typescript-eslint/no-restricted-imports': restrictedImports(r, [
           rendererRestriction,
-          /** @param {boolean} rel */ (rel) => uiRestriction(rel, false),
+          /** @param {boolean} rel */ (rel) => uiRestriction(rel, false, depth),
         ]),
       },
-    },
+    })),
     {
       files: [A11Y],
       rules: {
         '@typescript-eslint/no-restricted-imports': restrictedImports(r, [
           rendererRestriction,
-          /** @param {boolean} rel */ (rel) => uiRestriction(rel, true),
+          /** @param {boolean} rel */ (rel) => uiRestriction(rel, true, 0),
         ]),
       },
     },

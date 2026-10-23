@@ -52,5 +52,4 @@ e2e-install:
 
 # Generated code the tools need (Kit types, compiled Paraglide messages). Does not touch versioned files.
 _web-prepare:
-    pnpm --filter web exec node --input-type=module -e "import { compile } from '@inlang/paraglide-js'; import options from './paraglide.options.js'; await compile(options);"
-    pnpm --filter web exec svelte-kit sync
+    pnpm --filter web run sync
