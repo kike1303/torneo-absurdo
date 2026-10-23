@@ -353,7 +353,14 @@ _check-web: _web-prepare
 Sin cambios: la fase A no agrega workflows. Los jobs `web` y `e2e` llegan con la fase C (RF-C10), que reutiliza `just check` (con la línea de `check-compose.mjs` que C le suma, RF-C6) y `just e2e` tal como quedan aquí. Como referencia para C, en local `just check` debería tardar menos de 1 min y `just e2e` unos 2 a 3 min con los navegadores ya instalados.
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+
+1. **Paso 1, `pnpm ignored-builds`.** Con pnpm 10.34.7 el comando imprime "Cannot identify as no node_modules found" aunque `node_modules` existe. La comprobación equivalente es que `node_modules/.modules.yaml` no tiene la clave `ignoredBuilds`, y que `strictDepBuilds: true` habría hecho fallar `pnpm install` si alguna dependencia tuviera scripts. Las fechas de la tabla de versiones se volvieron a comprobar el 2026-10-23 00:03 UTC y no cambiaron; Node 22.23.4 sigue siendo la última 22.x.
+2. **Paso 2, peer opcional de `runed`.** `bits-ui@2.20.0` depende de `runed@0.35.1`, que declara `@sveltejs/kit ^2.21.0` como peer **opcional**. pnpm avisa (`unmet peer`), pero el único módulo de `runed` que importa Kit es `useSearchParams` (`$app/environment`, `$app/navigation`, `$app/state`), y `bits-ui` no lo usa. Si una primitiva futura lo usara, el build fallaría en vez de fallar en silencio.
+3. **Paso 2, CLI de shadcn-svelte 1.7.0.**
+   - `add` **no tiene `--no-deps`**; solo `--no-deps-install` (escribe las dependencias en `package.json` sin instalar). Se usa `add --no-deps-install -y`, y la verificación de que `package.json` y el lockfile no cambian se mantiene (con `button`, `package.json` quedó idéntico; si un `add` futuro lo cambia, se revierte con git antes del commit).
+   - `init` exige elegir un *preset* de forma interactiva (`--preset` espera un código de shadcn-svelte.com/create, no un nombre). En la copia desechable se aceptaron los valores por defecto con `expect`. Propuso `#lib` en los cinco alias, más `style: "vega"`, `iconLibrary`, `menuColor` y `menuAccent`, que no se copian a nuestro `components.json` (no hacen falta para `add`).
+   - En una carpeta sin `packageManager`, `corepack pnpm dlx` resuelve pnpm 12.15.0. Para la copia desechable se usó `pnpm@10.34.7` explícito, y en el repo los shims de corepack respetan `packageManager`.
+   - **El registro cambió de estilo.** `init` en limpio añade `cn@^0.5.0`, `@lucide/svelte@^1.61.0`, `@fontsource-variable/inter` y `shadcn-svelte/tailwind.css`, y el `button` actual (estilo `vega`) trae `h-8`, `focus-visible:ring-3`, `focus-visible:ring-ring/50` y `hover:bg-[color-mix(…)]`, distintos de lo que supone la tabla de la decisión 8. Nada de eso entra: `utils.ts` sigue a mano (decisión 5), no se añaden dependencias, y la revisión del paso 10 ajusta cada primitiva a los tokens, al anillo de D6 y a 44 px, ampliando la tabla de la decisión 8 con lo que haga falta.
 
 ## Revisión
 
