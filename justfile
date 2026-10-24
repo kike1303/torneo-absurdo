@@ -1,6 +1,11 @@
-# Torneo Absurdo — task runner. Requires Node >= 22.17 with corepack enabled (`corepack enable`).
+# Torneo Absurdo — task runner. Requires Node >= 22.17 with corepack enabled (`corepack enable`),
+# the Rust toolchain of rust-toolchain.toml (rustup installs it) and, since phase B, Docker.
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
+
+pg_port := env("DEV_PG_PORT", "5432")
+# Only the test recipes use this default; it is never exported globally (plan-b, devops note 5).
+test_db_url := env("DATABASE_URL", "postgres://torneo:torneo_dev@127.0.0.1:" + pg_port + "/torneo")
 
 # List the available recipes
 default:
@@ -10,22 +15,40 @@ default:
 install:
     pnpm install --frozen-lockfile
 
-# Run the web app in dev mode (phase A: web only). Needs apps/web/.env (see .env.example)
-dev: _web-prepare
-    pnpm --filter web dev
+# Ctrl-C stops the server and the web; Postgres stays up (`just db-down`).
+# Needs apps/server/.env and apps/web/.env (copy the .env.example files).
+# Postgres, the server and the web in dev mode
+dev: _web-prepare db-up
+    #!/usr/bin/env bash
+    # bash 3.2 compatible (macOS): no `wait -n` (plan-b decision 24).
+    set -euo pipefail
+    for file in apps/server/.env apps/web/.env; do
+        if [ ! -f "$file" ]; then
+            echo "Missing $file: copy $file.example" >&2
+            exit 1
+        fi
+    done
+    trap 'trap - INT TERM; kill 0' INT TERM
+    # The server .env is loaded only in this subshell: DATABASE_URL is never exported globally.
+    (set -a; . apps/server/.env; set +a; exec cargo run -p server --locked) &
+    pnpm --filter web dev &
+    wait
 
 # Production build of the web app
 build: _web-prepare
     pnpm --filter web build
 
-# Format everything Prettier owns
+# Format everything Prettier owns (and Rust)
 fmt:
     pnpm exec prettier --write .
+    cargo fmt --all
 
-# Format, lint, types, unit tests and repo checks; stops at the first failure
-check: _check-web
+# Needs Docker since phase B (the Rust tests use the dev Postgres).
+# Format, lint, types, unit and integration tests and repo checks; stops at the first failure
+check: check-web check-rust
 
-_check-web: _web-prepare
+# The web half of `check` (no Docker needed)
+check-web: _web-prepare
     pnpm exec prettier --check .
     pnpm --filter web exec eslint .
     pnpm --filter web exec svelte-check --fail-on-warnings
@@ -36,10 +59,22 @@ _check-web: _web-prepare
     node scripts/check-prerender.mjs
     node scripts/check-kit-config.mjs
 
-# Unit tests (web and repo scripts)
+# The Rust half of `check`: fmt, clippy, tests (with Postgres), freshness of `gen`, ts-rs graph
+check-rust:
+    cargo fmt --all --check
+    cargo clippy --workspace --all-targets --locked -- -D warnings
+    cargo clippy -p protocol --features ts --all-targets --locked -- -D warnings
+    {{just_executable()}} db-up
+    DATABASE_URL='{{test_db_url}}' cargo test --workspace --locked
+    {{just_executable()}} _check-gen
+    {{just_executable()}} _check-ts-rs-graph
+
+# Unit and integration tests (web, repo scripts and Rust)
 test: _web-prepare
     pnpm --filter web exec vitest run
     pnpm exec vitest run --config scripts/vitest.config.mjs
+    {{just_executable()}} db-up
+    DATABASE_URL='{{test_db_url}}' cargo test --workspace --locked
 
 # End-to-end tests against `node build` (Chromium and WebKit)
 e2e: _web-prepare
@@ -54,13 +89,27 @@ e2e-install:
 _web-prepare:
     pnpm --filter web run sync
 
-# Every Cargo.lock version must be >= 3 days old on crates.io (plan-b decision 16). Uses the
-# network (one request per second), so it is not part of `check`. Run it on every lock change.
+# Uses the network (one request per second), so it is not part of `check`.
+# Run it on every Cargo.lock change, before building (plan-b decision 16).
+# Every Cargo.lock version must be at least 3 days old on crates.io
 crate-age:
     node scripts/check-crate-age.mjs
 
-# Generate the TypeScript types of crates/protocol into packages/protocol-ts (RF-B6).
+# cargo deny check bans (RF-B2). Always in CI; locally only if cargo-deny is installed.
+deny:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v cargo-deny >/dev/null 2>&1; then
+        cargo deny check bans
+    elif [ -n "${CI:-}" ]; then
+        echo "cargo-deny is required in CI" >&2
+        exit 1
+    else
+        echo "cargo-deny is not installed, skipping (cargo install --locked cargo-deny@0.20.2)"
+    fi
+
 # Empties generated/ first: ts-rs never deletes the file of a removed type.
+# Generate the TypeScript types of crates/protocol into packages/protocol-ts (RF-B6)
 gen:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -92,6 +141,20 @@ _check-gen:
         exit "$status"
     fi
     node scripts/compare-trees.mjs "$backup" "$src"
+
+# RF-B3: ts-rs never in the server's normal graph; protocol without features has no ts-rs nor tokio
+_check-ts-rs-graph:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if cargo tree -p server -e normal --locked --prefix none | grep -qE '^ts-rs '; then
+        echo "ts-rs is in the normal dependency graph of server (RF-B3)" >&2
+        exit 1
+    fi
+    if cargo tree -p protocol -e normal --locked --prefix none | grep -qE '^(ts-rs|tokio) '; then
+        echo "protocol pulls ts-rs or tokio without the ts feature (RF-B3)" >&2
+        exit 1
+    fi
+    echo "check-ts-rs-graph: ok"
 
 # Start the development Postgres (infra/compose.dev.yml) and wait until it is healthy. Idempotent.
 db-up:
