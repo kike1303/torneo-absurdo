@@ -12,7 +12,7 @@ approvals:
 linear: TA-5
 depends_on: ["0005", "0006", "0007", "0008"]
 created: 2026-10-21
-updated: 2026-10-22
+updated: 2026-10-24
 ---
 
 # Aviso de privacidad integral — Torneo Absurdo (borrador)
@@ -40,7 +40,7 @@ Solo tratamos los datos necesarios para que el Servicio funcione. **No pedimos n
 | Sesiones | Fechas de inicio y último uso de cada sesión, familia de navegador y sistema operativo (p. ej. "Chrome en Android", sin versión exacta) y un seudónimo de tu IP | Mantener tu sesión segura y dejarte ver y cerrar tus sesiones |
 | Historial de eventos de seguridad | Tipo de evento (inicio de sesión, vinculación de proveedor, bono, rescate, apuesta), fecha y un seudónimo de tu IP | Limitar abusos y relacionar cuentas entre sí para detectar granjas de cuentas |
 | Datos temporales de inicio de sesión | Proveedor elegido, página a la que volver y, si vinculas un proveedor, tu identificador interno | Completar el inicio de sesión de forma segura; se borran en 10 minutos o al completarlo |
-| Registros técnicos del servidor | Ruta, método, resultado y fecha de cada petición, **sin IP ni cookies** | Diagnosticar fallas y mantener el Servicio |
+| Registros técnicos del servidor | Por cada petición: método, ruta genérica (por ejemplo `/api/health`, sin parámetros ni consulta), código de resultado, duración, fecha y hora, y un identificador aleatorio de la petición que no tiene relación contigo. **Sin IP, cookies, cabeceras, navegador ni identificadores de usuario** | Diagnosticar fallas y mantener el Servicio |
 | Registros de moderación | Sanciones y acciones de administración que te afecten, con su motivo | Aplicar las reglas del juego y poder revisar decisiones |
 
 **Sobre el seudónimo de tu IP:** no guardamos tu dirección IP. Guardamos un valor calculado a partir de ella con una clave secreta (`ip_hash`, un HMAC), que nos permite saber si dos eventos vienen de la misma red sin ver la IP. En IPv6 se calcula sobre el prefijo de red (`/64`), no sobre la dirección completa. Sin esa clave no podemos obtener tu IP a partir del seudónimo, y la clave nunca se entrega a nadie.
@@ -92,9 +92,11 @@ Algunos de estos proveedores pueden almacenar datos fuera de México.
 | Sesiones, con su seudónimo de IP y familia de navegador | Hasta que caducan o cierras sesión (máximo 30 días) |
 | Historial de eventos de seguridad | El mayor entre 30 días y la duración de la temporada más 7 días |
 | Datos temporales de inicio de sesión | 10 minutos, o menos si completas el inicio de sesión |
-| Registros técnicos del servidor | Se sobrescriben automáticamente por volumen; normalmente `{{PLAZO_LOGS}}` |
+| Registros técnicos del servidor | Se sobrescriben automáticamente por volumen; normalmente en menos de 3 semanas |
 | Copias de seguridad | 7 días en el servidor y 30 días en Cloudflare R2 |
 | Registros de moderación | `{{PLAZO_REGISTROS_MODERACION}}` |
+
+La aplicación web también guarda registros técnicos, pero **solo de errores** (no registra cada visita) y sin datos tuyos: ni IP, ni cookies, ni cabeceras, ni la dirección completa de la página. Como escribe poco, esos registros pueden durar más que los del servidor antes de sobrescribirse.
 
 El registro de movimientos de monedas es inmutable por diseño. Si eliminas tu cuenta, borramos en ese momento tus identificadores de Google o Discord, tus sesiones, tu alias y tu historial de eventos de seguridad. Tus movimientos de monedas, apuestas y resultados se conservan **seudonimizados**: ligados a un identificador interno, sin tu alias ni tu cuenta de Google o Discord. Además se conservan:
 - los registros de moderación que te afecten, durante su plazo;
@@ -131,7 +133,7 @@ Decisiones que este aviso necesita antes de publicarse:
 5. **Cookies de preferencia:** la cookie de idioma ya quedó fijada en la spec de 001 (`locale`, 1 año, solo por elección explícita en el selector). Falta confirmar con legal si las cookies de preferencia (`locale` y `theme`) cuentan como necesarias o se declaran aparte como "de preferencia".
 6. **Revisión legal** del texto completo antes de publicarlo. Puntos concretos: la autoridad competente con la LFPDPPP de 2025, si hace falta consentimiento expreso o basta el aviso, los medios para limitar el uso y revocar el consentimiento, los plazos ARCO, los tratamientos automatizados (`farm-report`) y en qué países guardan datos Hostinger y R2.
 7. **Retención de `auth_events`:** la spec de auth debe fijar si el job de retención borra la fila completa o solo el `ip_hash`. Recomendación: la fila completa. Este aviso asume eso.
-8. **Logs de `web`:** la spec de 001 debe fijar que `web` (adapter-node, `handleError`, `hooks`) nunca registra `getClientAddress()`, `X-Forwarded-For`, cookies ni headers sensibles. ADR-0008 solo lo garantiza para el server. También debe fijar qué registra `tower-http::trace` sobre el usuario y el plazo típico de los logs (`{{PLAZO_LOGS}}`).
+8. **Logs de `web` y del server:** resuelto en la spec de 001. `web` no registra peticiones, solo arranque y errores saneados, nunca `getClientAddress()`, `X-Forwarded-For`, cookies ni headers (RF-A19). El server escribe una línea por petición con solo `ts`, `level`, `method`, `route` (la plantilla), `status`, `latency_ms` y `request_id` aleatorio (RF-B15), y lo prueban canarios contra el binario. **Plazo medido en la fase B** (2026-10-24, binario `--release`): la línea de `/api/health` mide 192 B, 290 B con el envoltorio de `json-file`; con 5,760 healthchecks al día son unos 1.67 MB/día, así que 3 × 10 MiB duran como máximo 18.8 días sin tráfico ni despliegues. Por la regla de `plan-b.md` (menos de 19 días), el aviso dice "menos de 3 semanas". Falta que la fase C lo confirme con `prod-local` (1 h en reposo) y que la feature de auth actualice la fila "Registros técnicos" si agrega un campo (por ejemplo `user_id`).
 9. **Flujo ARCO** (spec de cuentas): la verificación desde la sesión es obligatoria. La respuesta de acceso incluye solo datos propios, nunca cuentas correlacionadas, el contenido de `farm-report` sobre terceros ni `IP_HASH_KEY`.
 
 ## Revisión

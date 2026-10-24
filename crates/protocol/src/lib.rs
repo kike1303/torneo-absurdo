@@ -1,0 +1,21 @@
+//! Wire types shared by the server (`apps/server`) and the web client (`@torneo/protocol`).
+//!
+//! Contract (RF-B3, RF-B4):
+//! - Pure data: no I/O, no async runtime, no clock.
+//! - No human-readable text: only codes (`domain.reason`) that the client maps to i18n keys.
+//! - No 64-bit (or wider) integers in exported types: `ts-rs` maps them to `bigint` and
+//!   JavaScript numbers lose precision above 2^53. `just gen` fails if one slips in.
+//! - Enums with data use `#[serde(tag = "...", rename_all = "snake_case")]`; code enums use
+//!   `#[serde(rename = "domain.reason")]` on every variant, and each code enum owns one prefix.
+//!
+//! TypeScript bindings are generated with the `ts` feature (`just gen`); the server never
+//! enables it.
+#![forbid(unsafe_code)]
+
+mod error;
+mod health;
+mod ws;
+
+pub use error::{ApiError, ApiErrorCode, ErrorCode, WsErrorCode};
+pub use health::HealthResponse;
+pub use ws::{ClientMessage, ServerMessage};

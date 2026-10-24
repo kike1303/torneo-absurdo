@@ -23,6 +23,10 @@ approvals:
     date: 2026-10-23
   - by: devops-engineer
     date: 2026-10-23
+  - by: security-reviewer
+    date: 2026-10-23
+  - by: owner
+    date: 2026-10-23
 linear: TA-1
 depends_on: []
 created: 2026-10-21
@@ -121,31 +125,36 @@ Cada requisito dice cómo se verifica (→). "CI" significa que lo prueba un job
 **Protocol y tipos TS**
 - **RF-B3.** `crates/protocol` es una librería pura: sin I/O, sin `tokio`, sin reloj, y sin texto para humanos (ADR-0007). Dependencias normales: `serde` (y `serde_json` solo en tests). `ts-rs` es **opcional**, detrás de la feature `ts` (`#[cfg_attr(feature = "ts", derive(TS))]`), para que el server y el futuro `engine-wasm` no la compilen. → `cargo tree -p server -e normal` no contiene `ts-rs` (chequeo en `just check`).
 - **RF-B4.** Convenciones del protocolo (se copian a "Tipos compartidos" de `docs/architecture.md`):
-  - Enums con datos: `#[serde(tag = "type", rename_all = "snake_case")]`. Enums de códigos: `rename_all = "snake_case"`.
-  - Códigos de error como `dominio.motivo` (`ws.origin_forbidden`), definidos como enums, no como `String` libre.
+  - Enums con datos: `#[serde(tag = "type", rename_all = "snake_case")]`. Enums de códigos: **`#[serde(rename = "dominio.motivo")]` en cada variante**, sin `rename_all` (enmienda 2026-10-23 b): `rename_all = "snake_case"` daría `origin_forbidden` sin el dominio. `ts-rs` respeta el `rename` y genera la unión de cadenas literales.
+  - Códigos de error como `dominio.motivo` (`ws.origin_forbidden`), definidos como enums, no como `String` libre. Cada enum de códigos es dueño de un solo prefijo de dominio (`ApiErrorCode` → `http.*`, `WsErrorCode` → `ws.*`).
   - **Nada de enteros de 64 bits o más** (`u64`, `i64`, `u128`, `i128`, `usize`) en tipos exportados: `ts-rs` los mapea a `bigint` y `serde_json` los serializa como número, que JS pierde por encima de 2^53. Si hace falta, se serializan como cadena con `#[ts(type = "string")]` y un serializador explícito. → `just gen` falla si algún archivo generado contiene `bigint`.
 - **RF-B5.** Tipos de 001 en `crates/protocol`:
   - `HealthResponse`: `{"status":"ok","version":"<APP_VERSION>"}` o `{"status":"db_unavailable"}` (enum con `tag = "status"`).
   - `ClientMessage` y `ServerMessage` del WS, con una sola variante `Echo { payload: String }` cada uno (`{"type":"echo","payload":"…"}`).
-  - `ApiErrorCode` y `ApiError { error: ApiErrorCode }` con, por ahora, `http.not_found` y `http.method_not_allowed`; `WsErrorCode` con `ws.origin_forbidden`, `ws.capacity`, `ws.invalid_message`, `ws.echo_disabled`, `ws.pong_timeout` y `ws.idle_timeout`.
-  → tests de serialización (forma JSON exacta de cada caso).
+  - `ApiErrorCode` con, por ahora, `http.not_found` y `http.method_not_allowed`; `WsErrorCode` con `ws.origin_forbidden`, `ws.capacity`, `ws.invalid_message`, `ws.echo_disabled`, `ws.rate_limited`, `ws.pong_timeout` y `ws.idle_timeout`.
+  - `ErrorCode`, unión **sin etiquetar** de los dos: `#[serde(untagged)] enum ErrorCode { Http(ApiErrorCode), Ws(WsErrorCode) }`, que en TS es `ApiErrorCode | WsErrorCode`. `ApiError { error: ErrorCode }` es el cuerpo de **toda** respuesta HTTP de error del server, incluidas las del handshake de `/ws` (403 `ws.origin_forbidden`, 503 `ws.capacity`), así que ningún código existe dos veces (enmienda 2026-10-23 b).
+  - **Los conjuntos de cadenas no se solapan**: ninguna cadena serializada de `ApiErrorCode` es igual a una de `WsErrorCode` (lo garantiza el prefijo de RF-B4). Con `untagged`, serde prueba las variantes en orden, y un solapamiento haría ambigua la deserialización.
+  - **Los códigos de dominios nuevos van en un enum y una variante nueva** de `ErrorCode` (por ejemplo, `AuthErrorCode` con `auth.csrf_origin` y `ErrorCode::Auth`), nunca dentro de `ApiErrorCode` ni de `WsErrorCode`.
+  → tests de serialización (forma JSON exacta de cada caso, también a través de `ErrorCode` y `ApiError`, ida y vuelta); unit de no solapamiento: cada enum de códigos expone `ALL: &[Self]`, un `match` exhaustivo en el test obliga a que `ALL` liste todas las variantes, y el test comprueba que cada cadena empieza con el prefijo de su enum y que la unión de los conjuntos no tiene repetidos.
 - **RF-B6.** `just gen` genera los tipos con `ts-rs` (`cargo test -p protocol --features ts`, con `TS_RS_EXPORT_DIR` apuntando a `packages/protocol-ts/src/generated/`), escribe el barril `packages/protocol-ts/src/index.ts`, formatea con Prettier y antepone a cada archivo un comentario de "archivo generado, no editar". Los archivos generados **se commitean**. `packages/protocol-ts` es el paquete pnpm `@torneo/protocol`, exporta el TS fuente (sin paso de build) y lo consume `apps/web`. → CI: `just gen` seguido de `git diff --exit-code -- packages/protocol-ts` en el job `rust`.
-- **RF-B7.** La web usa los tipos: `src/lib/features/system/health.ts` y `src/lib/features/system/echo.ts` usan `HealthResponse`, `ClientMessage` y `ServerMessage` de `@torneo/protocol` y mapean cada código a una llave de Paraglide. La página `src/routes/dev/status/+page.svelte` (detrás del guard de RF-A16) muestra el estado del server y hace un eco de ida y vuelta. → `svelte-check` y Vitest de `health.ts` con fixtures de los dos casos de `HealthResponse` (criterio B2 del intent).
+- **RF-B7.** La web usa los tipos: `src/lib/features/system/health.ts` y `src/lib/features/system/echo.ts` usan `HealthResponse`, `ClientMessage` y `ServerMessage` de `@torneo/protocol` y mapean cada código a una llave de Paraglide: una `ws_close_reason_*` por cada `WsErrorCode` (incluida `ws_close_reason_rate_limited` para `ws.rate_limited`; enmienda 2026-10-23 b), con un `switch` exhaustivo que no compila si falta alguna. La página `src/routes/dev/status/+page.svelte` (detrás del guard de RF-A16) muestra el estado del server y hace un eco de ida y vuelta. → `svelte-check` y Vitest de `health.ts` con fixtures de los dos casos de `HealthResponse` (criterio B2 del intent).
 
 **Server**
 - **RF-B8.** Configuración por variables de entorno (tabla en "Diseño"). Si falta una obligatoria o es inválida, el server registra `config.invalid` con el **nombre** de la variable (nunca su valor) y sale con código 1. `PUBLIC_ORIGIN` debe ser un origen (`esquema://host[:puerto]`, sin ruta ni barra final). → unit e integración.
 - **RF-B9.** Arranque (ADR-0006 D3 y D10): conecta a la BD reintentando cada 2 s hasta 60 s; si no lo logra, sale con código 1. Después corre `sqlx::migrate!` y **solo entonces** abre el puerto. Pool con `max_connections = 8`. Hay una migración inicial (`…_baseline.sql`) sin tablas de dominio, que solo prueba la cadena de migraciones. → integración: tras arrancar, `_sqlx_migrations` contiene la baseline; con una BD inalcanzable, la función de espera devuelve error en el plazo configurado (el test la llama con un plazo corto) y `main` lo convierte en código 1.
 - **RF-B10.** `GET /api/health` (ADR-0006 D3): `SELECT 1` con timeout de 1 s. El resultado de la BD se **cachea 1 s** y hay como mucho una consulta en vuelo (las peticiones concurrentes esperan la misma), para que una ráfaga externa no ocupe el pool de 8 conexiones ni tumbe el healthcheck. Responde 200 con `HealthResponse::Ok { version }` o 503 con `HealthResponse::DbUnavailable`, con `Cache-Control: no-store`. Sin rate limit y sin sesión. `version` sale de `option_env!("APP_VERSION")` en compilación, con `dev` por defecto, y debe cumplir `^(v\d+\.\d+\.\d+|sha-[0-9a-f]{7}|dev)$`. → integración (criterio B3 del intent), con un proxy TCP del test entre el server y Postgres que el test corta y restaura (200 → 503 → 200 sin reiniciar el server; el test espera más que el TTL de la caché entre cada paso), y un caso con 50 peticiones concurrentes que generan una sola consulta (contador del proxy).
-- **RF-B11.** Subcomando `server healthcheck`: `GET http://127.0.0.1:${PORT}/api/health` con timeout de 2 s; sale con 0 si recibe 200 y con 1 en cualquier otro caso (503, timeout, conexión rechazada). Cliente HTTP sin TLS (no arrastra rustls ni OpenSSL a este camino). → integración con el binario real: 0 con la BD arriba, 1 con el proxy cortado y 1 sin server.
+- **RF-B11.** Subcomando `server healthcheck`: `GET http://127.0.0.1:${PORT}/api/health` con timeout de 2 s (supone que `BIND_ADDR` es `0.0.0.0` o `127.0.0.1`; ver la tabla de variables); sale con 0 si recibe 200 y con 1 en cualquier otro caso (503, timeout, conexión rechazada). Cliente HTTP sin TLS (no arrastra rustls ni OpenSSL a este camino). → integración con el binario real: 0 con la BD arriba, 1 con el proxy cortado y 1 sin server.
 - **RF-B12.** Rutas desconocidas: 404 con `ApiError { error: "http.not_found" }`. Ninguna respuesta lleva `Access-Control-Allow-*`, tampoco un preflight `OPTIONS` con `Origin` ajeno: no se monta `CorsLayer` (ADR-0008 D4). Todas las respuestas llevan `X-Content-Type-Options: nosniff` y `Strict-Transport-Security: max-age=31536000` (como en RF-A10). **Solo lectura hasta auth**: una capa en la raíz del router responde 405 `http.method_not_allowed` a todo método distinto de `GET`, `HEAD` y `OPTIONS`, en cualquier ruta. La feature de auth la reemplaza por el middleware de `Origin` de ADR-0008 D4, así que nadie agrega una mutación sin quitarla a conciencia ("Áreas de preocupación" 2). → integración (criterio B5 del intent), con `POST /api/health` → 405 y las dos cabeceras en una respuesta 200 y en una 404.
 - **RF-B13.** **WebSocket `/ws`** (ver "Diseño → WebSocket"):
-  - Handshake: `Origin` debe ser exactamente `PUBLIC_ORIGIN`; si falta o es ajeno, 403 con `ApiError { error: "ws.origin_forbidden" }` y no hay upgrade (ADR-0008 D6).
-  - Tope global de sockets `WS_MAX_CONNECTIONS` (por defecto 2000): al llegar al tope, 503 `ws.capacity`.
-  - Por socket: mensaje de 4 KB como máximo, **fijado en el protocolo** con `max_message_size` y `max_frame_size` de `WebSocketUpgrade` (no se comprueba después de recibir: los valores por defecto de tungstenite, 64 MB por mensaje y 16 MB por frame, permitirían un OOM-kill con 256 MB); al pasarlo, cierre `1009`, o corte de la conexión si tungstenite ya la invalidó. 10 mensajes por cada 10 s (cierre `1008`); un frame binario cierra con `1003`; un texto que no es un `ClientMessage` válido cierra con `1008` y razón `ws.invalid_message`.
+  - **Orden de los chequeos del handshake** (enmienda 2026-10-23 b): `Origin` → upgrade → semáforo. El primero que falla responde y los siguientes no corren. Así, una petición sin `Origin` válido nunca llega a los demás chequeos, y solo una petición de upgrade válida toma un permiso del tope.
+    1. `Origin` debe ser exactamente `PUBLIC_ORIGIN`; si falta o es ajeno, 403 con `ApiError { error: "ws.origin_forbidden" }` y no hay upgrade (ADR-0008 D6).
+    2. **Upgrade**: `WebSocketUpgrade` se extrae como `Result<_, WebSocketUpgradeRejection>`. Si la petición no es un upgrade válido (por ejemplo, `GET /ws` con `Origin` válido y sin `Connection: upgrade`/`Upgrade: websocket`), responde con **el estado que da el rechazo de axum** (un 4xx: 400, o 426 si la conexión no se puede actualizar), **cuerpo vacío** y sin `Content-Type`, para no emitir el texto en inglés del rechazo (ADR-0007: el API solo emite códigos). No se agrega un código nuevo. Lleva las cabeceras de RF-B12 (`nosniff` y HSTS) y genera la línea normal de RF-B15 con `route: "/ws"`.
+    3. Tope global de sockets `WS_MAX_CONNECTIONS` (por defecto 2000), con un semáforo: si no hay permiso, 503 `ws.capacity`. El permiso vive lo que vive el socket.
+  - Por socket: mensaje de 4 KB como máximo, **fijado en el protocolo** con `max_message_size` y `max_frame_size` de `WebSocketUpgrade` (no se comprueba después de recibir: los valores por defecto de tungstenite, 64 MB por mensaje y 16 MB por frame, permitirían un OOM-kill con 256 MB); al pasarlo, cierre `1009`, o corte de la conexión si tungstenite ya la invalidó. 10 mensajes por cada 10 s (cierre `1008` con razón `ws.rate_limited`; enmienda 2026-10-23 b); un frame binario cierra con `1003`; un texto que no es un `ClientMessage` válido cierra con `1008` y razón `ws.invalid_message`.
   - **Vida del socket** (no depende de auth): el server manda un ping cada **30 s**; si no recibe ningún frame del cliente (pong incluido) en **60 s**, cierra con `1008` y razón `ws.pong_timeout`, y suelta la conexión TCP si el cierre no se completa en 5 s. **Inactividad**: un socket que no envía ningún mensaje de datos aceptado en **120 s** se cierra con `1008` y razón `ws.idle_timeout`; en 001, con el eco apagado no hay mensaje aceptado, así que en producción todo socket vive como máximo 120 s. La feature del WS real redefine la inactividad (por ejemplo, "sin suscripciones"), porque un espectador escucha sin hablar. Los tres valores son campos de la configuración del WS con esos valores por defecto; **no** son variables de entorno, y los tests los acortan al construir el server.
   - **Eco**: si `ENABLE_WS_ECHO === "1"`, un `Echo { payload }` se responde con `ServerMessage::Echo` con el mismo `payload`. Con cualquier otro valor, o sin la variable, un `Echo` cierra con `1008` y razón `ws.echo_disabled`. **Defensa extra**: si `ENABLE_WS_ECHO === "1"` pero `PUBLIC_ORIGIN` empieza con `https://`, el server deja el eco apagado y registra `warn` `ws.echo_refused` al arrancar (dev, tests y e2e usan `http://localhost`); si lo enciende, registra `warn` `ws.echo_enabled`. Esto cubre una variable puesta a mano en la UI de Coolify, que `check-compose.mjs` no ve.
   - El server nunca registra `payload` ni el valor de `Origin`.
-  → integración (criterio B4 del intent y los casos de cada límite, incluidos: un cliente que no lee el socket, y por eso no contesta pings, queda cerrado tras el plazo de pong; un cliente que contesta pings pero no manda nada se cierra con `ws.idle_timeout`; y el eco con `PUBLIC_ORIGIN=https://…` queda apagado).
+  → integración (criterio B4 del intent y los casos de cada límite, incluidos: `GET /ws` con `Origin` válido y sin cabeceras de upgrade → 4xx, cuerpo vacío, `nosniff`, HSTS y una línea de petición con `route: "/ws"`; `GET /ws` sin `Origin` y sin upgrade → 403 `ws.origin_forbidden`; con el tope en 0, una petición sin upgrade da el 4xx y no 503; un cliente que no lee el socket, y por eso no contesta pings, queda cerrado tras el plazo de pong; un cliente que contesta pings pero no manda nada se cierra con `ws.idle_timeout`; y el eco con `PUBLIC_ORIGIN=https://…` queda apagado).
 - **RF-B14.** Apagado ordenado (ADR-0006 D10): con `SIGTERM` o `SIGINT`, deja de aceptar conexiones, cierra cada WS con `1012` y termina en ≤ 10 s. → integración: un cliente WS conectado recibe `1012` y el proceso sale con 0 antes de 10 s.
 
 **Logs del server (ADR-0008 D3 y aviso, "Pendiente" punto 8)**
@@ -175,7 +184,7 @@ Cada requisito dice cómo se verifica (→). "CI" significa que lo prueba un job
 **Compose de producción (ADR-0006 D1–D4, D11)**
 - **RF-C4.** `infra/docker-compose.yml` con **solo** `web` y `server`, con `image: ghcr.io/kike1303/torneo-absurdo/{server,web}:${IMAGE_TAG:?}` y sin `build:`; redes externas `torneo-edge` y `torneo-db` y el alias `torneo-server` (D1); las etiquetas Traefik `torneo-*` de D2, con `observability.accesslogs=false` en los cuatro routers y la regla `Host` construida con `${PUBLIC_HOST:?}`; healthchecks en forma exec con 15 s / 3 s / 3 / 30 s (D3); `web` con `depends_on: server: service_healthy`; `mem_limit` = `memswap_limit` (256 MB y 384 MB) y `NODE_OPTIONS=--max-old-space-size=256` (D4); `restart: unless-stopped`; logs **explícitos** `logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }` (el plazo de "Diseño → Logs" supone el envoltorio de `json-file`, y no se depende del driver por defecto del daemon del VPS); `stop_grace_period: 15s` en `server`; sin `ports:`. Además, como endurecimiento: `platform: linux/amd64`, `read_only: true` (con `tmpfs: /tmp:size=16m` en `web`; sin tamaño, el tmpfs puede crecer hasta la mitad de la RAM del host y lo escrito cuenta contra los 384 MB), `cap_drop: [ALL]` y `security_opt: ["no-new-privileges:true"]` en los dos. `web` recibe `PUBLIC_ORIGIN=https://${PUBLIC_HOST}` (el mismo valor que el server; lo usa el guard de RF-A23), `ADDRESS_HEADER=X-Forwarded-For`, `XFF_DEPTH=1` (ADR-0008 D5), `HOST=0.0.0.0` y `PORT=3000`. **Origen de la petición en `web`** (enmienda 2026-10-22): adapter-node 6 quitó `ORIGIN` y `paths.origin` no se define (RF-A10), así que `event.url.origin` es `https://` + `Host`. `web` **no** recibe `ORIGIN`, `PROTOCOL_HEADER`, `HOST_HEADER` ni `PORT_HEADER`: el esquema queda fijo en `https` (Traefik termina TLS) y el host sale del `Host` que Traefik reenvía, que su regla `Host(${PUBLIC_HOST})` ya restringe. **Detrás de Traefik** (enmienda 2026-10-23), ningún header que el cliente pueda falsificar cambia el origen. Quien llega directo al contenedor (`prod-local` en `127.0.0.1:3000`, u otro contenedor de `torneo-edge`) sí elige el `Host`, y por eso `web` nunca arma URLs absolutas con `event.url` ("Seguridad"). **Cabeceras en Traefik** (enmienda 2026-10-23): el router `torneo-web` lleva el middleware propio `torneo-web-headers` (prefijo de ADR-0006 D2), de tipo `headers`, con `contentTypeNosniff=true`, `referrerPolicy=strict-origin-when-cross-origin`, `stsSeconds=31536000`, `stsIncludeSubdomains=false` y `stsPreload=false`, los mismos valores que RF-A10. Así cubre las respuestas de `web` que no pasan por `handle`: los estáticos de `/_app/*` y de `static/`, que sirve `sirv`, y la 308 de Kit de `/healthz/` a `/healthz` (desviación 16 de `plan-a.md`). `hooks.server.ts` sigue poniendo las suyas (RF-A10), porque `prod-local` y los e2e no tienen Traefik. Cada cabecera debe salir **una sola vez**: si Traefik y `handle` la duplican, se corrige en el middleware y no se quita de `handle`. `torneo-web-http` solo redirige y no lleva este middleware. `server` recibe `DATABASE_URL=${DATABASE_URL:?}`, `PUBLIC_ORIGIN=https://${PUBLIC_HOST}` y `RUST_LOG=info`. → `check-compose.mjs` y job `images` (`docker compose config` sin `IMAGE_TAG` sale con error; criterio C7 del intent).
 - **RF-C5.** `infra/local.env`, **commiteado**, con los valores de la forma local y ningún secreto: `PUBLIC_HOST=localhost` y el `DATABASE_URL` del Postgres local de `compose.local.yml` (usuario y contraseña de desarrollo). Un comentario al inicio dice que las variables de producción (`IMAGE_TAG`, `PUBLIC_HOST`, `DATABASE_URL`) viven **solo en Coolify** y que no se crea `infra/.env` con valores reales. No hay `infra/.env.example`: este archivo cumple esa función sin invitar a guardar el `DATABASE_URL` real en el disco. → revisión.
-- **RF-C6.** `scripts/check-compose.mjs` (en `just check` y en el job `images`) analiza el YAML crudo de `infra/docker-compose.yml` y falla si: hay servicios distintos de `web` y `server` (esta regla no aplica a `compose.local.yml`, que agrega `postgres`); hay `build:` o `ports:`; una imagen no termina en `:${IMAGE_TAG:?}`; falta alguna etiqueta o valor de RF-C4 (incluidos `logging` y el tamaño del `tmpfs`); aparece `ENABLE_DEV_CATALOG` o `ENABLE_WS_ECHO`; aparece `ORIGIN`, `PROTOCOL_HEADER`, `HOST_HEADER` o `PORT_HEADER` en `web`; falta el middleware `torneo-web-headers` en el router `torneo-web`, o le falta alguno de sus cinco valores de RF-C4, o `stsIncludeSubdomains` o `stsPreload` valen `true` (enmienda 2026-10-23); el `PUBLIC_ORIGIN` de `web` no es idéntico al de `server`; o `RUST_LOG` vale algo más verboso que `info`. Además falla si faltan en `.dockerignore` las entradas de RF-C3 con su forma `**/`, o si la versión del `FROM rust:` de `apps/server/Dockerfile` no coincide con `rust-toolchain.toml`. → unit con fixtures.
+- **RF-C6.** `scripts/check-compose.mjs` (en `just check` y en el job `images`) analiza el YAML crudo de `infra/docker-compose.yml` y falla si: hay servicios distintos de `web` y `server` (esta regla no aplica a `compose.local.yml`, que agrega `postgres`); hay `build:` o `ports:`; una imagen no termina en `:${IMAGE_TAG:?}`; falta alguna etiqueta o valor de RF-C4 (incluidos `logging` y el tamaño del `tmpfs`); aparece `ENABLE_DEV_CATALOG` o `ENABLE_WS_ECHO`; aparece `ORIGIN`, `PROTOCOL_HEADER`, `HOST_HEADER` o `PORT_HEADER` en `web`; aparece `BIND_ADDR` en `server` (enmienda 2026-10-23 b: el contenedor usa el valor por defecto `0.0.0.0`, que es el que supone `server healthcheck`); falta el middleware `torneo-web-headers` en el router `torneo-web`, o le falta alguno de sus cinco valores de RF-C4, o `stsIncludeSubdomains` o `stsPreload` valen `true` (enmienda 2026-10-23); el `PUBLIC_ORIGIN` de `web` no es idéntico al de `server`; o `RUST_LOG` vale algo más verboso que `info`. Además falla si faltan en `.dockerignore` las entradas de RF-C3 con su forma `**/`, o si la versión del `FROM rust:` de `apps/server/Dockerfile` no coincide con `rust-toolchain.toml`. → unit con fixtures.
 
 **Forma local con las imágenes de producción**
 - **RF-C7.** `just prod-local [tag]`:
@@ -319,6 +328,7 @@ Cada requisito dice cómo se verifica (→). "CI" significa que lo prueba un job
 | `DATABASE_URL` | server | sí (`:?` en el compose) | — | Coolify; dev `apps/server/.env`; `prod-local` `infra/local.env` |
 | `PUBLIC_ORIGIN` | server | sí | `https://${PUBLIC_HOST}` | compose; dev `http://localhost:5173` |
 | `PORT` | server | no | `8080` | — |
+| `BIND_ADDR` | server | no | `0.0.0.0` | dev `127.0.0.1` en `apps/server/.env.example`; **nunca** en el compose de producción (`check-compose.mjs` la prohíbe en `server`, fase C). Se parsea como `IpAddr`; un valor inválido es `config.invalid` (RF-B8). `server healthcheck` llama a `127.0.0.1`, así que solo funciona con `0.0.0.0` o `127.0.0.1` (enmienda 2026-10-23 b). No se llama `HOST` porque zsh y algunos CI ya la definen, y para no confundirla con el `HOST` de `web` |
 | `RUST_LOG` | server | no | `info` (nunca más verboso en prod, RF-C6) | compose |
 | `WS_MAX_CONNECTIONS` | server | no | `2000` | — |
 | `ENABLE_WS_ECHO` | server | no | ausente = eco apagado; solo `1` lo enciende | solo `.env` de dev y tests; nunca en el compose |
@@ -345,7 +355,7 @@ Cada requisito dice cómo se verifica (→). "CI" significa que lo prueba un job
 | Ruta | Método | Respuesta | Notas |
 |---|---|---|---|
 | `/api/health` | GET | 200 `HealthResponse::Ok` · 503 `DbUnavailable` | `Cache-Control: no-store`; sin sesión ni rate limit; resultado de la BD cacheado 1 s |
-| `/ws` | GET (upgrade) | 101 · 403 `ws.origin_forbidden` · 503 `ws.capacity` | ver abajo |
+| `/ws` | GET (upgrade) | 101 · 403 `ws.origin_forbidden` · 4xx sin cuerpo (no es upgrade) · 503 `ws.capacity` | chequeos en ese orden (RF-B13); ver abajo |
 | cualquier otra | GET, HEAD, OPTIONS | 404 `http.not_found` | sin CORS |
 | cualquiera | otro método | 405 `http.method_not_allowed` | solo lectura hasta auth (RF-B12) |
 | (web) `/healthz` | GET | 200 | fuera de i18n; sin logs |
@@ -501,7 +511,7 @@ Las dos preguntas del owner quedaron resueltas arriba; se conservan para trazabi
   - `/api/health` 200 → 503 → 200 con un proxy TCP del test entre el server y Postgres; 50 peticiones concurrentes → una sola consulta;
   - `server healthcheck` con el binario real: 0, 1 (proxy cortado) y 1 (sin server);
   - espera de la BD que falla en el plazo y `main` → código 1; migración baseline aplicada antes de abrir el puerto;
-  - `/ws`: `Origin` ausente o ajeno → 403; eco encendido → vuelve igual; eco apagado → `1008 ws.echo_disabled`; 4 KB + 1 byte → `1009`; 11 mensajes en 10 s → `1008`; frame binario → `1003`; JSON inválido → `1008 ws.invalid_message`; con `WS_MAX_CONNECTIONS=2`, el tercer upgrade → 503 `ws.capacity`; con plazos acortados, un cliente que no lee el socket (no contesta pings) queda cerrado tras el plazo de pong, y uno que contesta pings sin mandar mensajes se cierra con `1008 ws.idle_timeout`;
+  - `/ws`: `Origin` ausente o ajeno → 403; eco encendido → vuelve igual; eco apagado → `1008 ws.echo_disabled`; 4 KB + 1 byte → `1009`; 11 mensajes en 10 s → `1008 ws.rate_limited`; frame binario → `1003`; JSON inválido → `1008 ws.invalid_message`; con `WS_MAX_CONNECTIONS=2`, el tercer upgrade → 503 `ws.capacity`; con plazos acortados, un cliente que no lee el socket (no contesta pings) queda cerrado tras el plazo de pong, y uno que contesta pings sin mandar mensajes se cierra con `1008 ws.idle_timeout`;
   - `SIGTERM` con un socket abierto → `1012` y salida en ≤ 10 s;
   - sin CORS: `OPTIONS` con `Origin: https://evil.example` y `GET` → ninguna respuesta con `Access-Control-Allow-*`;
   - `POST /api/health` y `DELETE /cualquier` → 405 `http.method_not_allowed`; `nosniff` y HSTS en una 200 y en una 404;
@@ -584,6 +594,27 @@ Surge de la revisión de security-reviewer a la enmienda de Kit 3 (hallazgo 1), 
 **Efecto en los planes.** `plan-a.md` no cambia: la regla de ESLint y las cabeceras de `handle` ya están implementadas. El plan de la fase C incluye el middleware, el chequeo de RF-C6 y las dos verificaciones con `curl -I`.
 
 **Revisión de la enmienda:** security-reviewer (regla de URLs absolutas, RF-C4 y los valores de HSTS) y devops-engineer (middleware de Traefik, RF-C6, RF-C7 y RF-C18).
+
+## Enmienda 2026-10-23 (b): fase B
+
+Surge de la revisión del architect a `plan-b.md` (entrada `architect — 2026-10-23`, respuestas 1 a 4). No cambia el alcance. Las aprobaciones anteriores siguen valiendo para todo lo que esta enmienda no toca.
+
+| Cambio | Dónde |
+|---|---|
+| `ws.rate_limited` nuevo en `WsErrorCode`: el cierre por tasa es `Close(1008, "ws.rate_limited")` y la web lo traduce con `ws_close_reason_rate_limited` | RF-B5, RF-B7, RF-B13, "Estrategia de pruebas" |
+| `ApiError { error: ApiErrorCode }` → `ApiError { error: ErrorCode }`, con `ErrorCode` = unión sin etiquetar `ApiErrorCode \| WsErrorCode`. Los conjuntos de cadenas no se solapan (unit), y cada dominio nuevo (auth) va en un enum y una variante nueva | RF-B4, RF-B5 |
+| Los enums de códigos usan `#[serde(rename = "dominio.motivo")]` por variante, no `rename_all` | RF-B4 |
+| `BIND_ADDR` nueva en el server: opcional, `IpAddr`, por defecto `0.0.0.0`. `server healthcheck` supone `0.0.0.0` o `127.0.0.1`. `check-compose.mjs` la prohíbe en `server` (fase C) | "Variables de entorno", RF-B11, RF-C6 |
+| Orden de los chequeos de `/ws`: `Origin` → upgrade → semáforo. `GET /ws` sin upgrade responde con el estado de axum (4xx), cuerpo vacío, sin `Content-Type` y con `nosniff` y HSTS | RF-B13, "API / mensajes WS" |
+
+**Seguridad de los cambios.** El cuerpo vacío en el rechazo del upgrade evita texto en inglés en el API (ADR-0007), y no filtra nada: el estado es el mismo que da axum. Poner el semáforo después del upgrade evita que peticiones que no son WebSocket gasten o sondeen el tope. Con `BIND_ADDR`, un bind en una IP que no sea de loopback ni `0.0.0.0` haría fallar el healthcheck del contenedor, y por eso el compose no la acepta. En dev, `127.0.0.1` evita publicar el 8080 en la LAN (RNF "Seguridad").
+
+**Efecto en los planes.** `plan-b.md` incorpora las respuestas 1 a 4 (su paso 2 espera la aprobación de esta enmienda) y corrige el orden de su decisión 10, que hoy pone el semáforo antes del upgrade. El plan de la fase C agrega la regla de `BIND_ADDR` a `check-compose.mjs`.
+
+**Nota (2026-10-23, revisión de `plan-b.md` ronda 2).** La variable que aquí se llamaba `HOST` pasa a llamarse `BIND_ADDR`, a propuesta de backend-engineer. zsh define `HOST` con el nombre de la máquina, algunos perfiles y entornos de CI la exportan, y `web` ya usa `HOST` (adapter-node) con otro dueño. Con `HOST`, un nombre de máquina heredado haría fallar el arranque con `config.invalid`, y otra IP rompería el healthcheck. Solo cambia el nombre: el tipo, el valor por defecto, la condición del healthcheck y la prohibición en el compose son las mismas. Toca la tabla de variables, RF-B11 y RF-C6. `HOST` de `web` (RF-C4) no cambia.
+
+**Revisión de la enmienda:** security-reviewer (orden del handshake, rechazo sin cuerpo, `BIND_ADDR` y su efecto en el healthcheck, `ErrorCode` sin etiquetar). El cambio de nombre de la nota anterior también pasa por security-reviewer.
+
 ## Revisión
 
 ### product-owner — 2026-10-21 — APPROVE
@@ -928,3 +959,33 @@ El comportamiento de Traefik lo saco de lo que conozco del middleware `headers` 
 2. **No hace falta Traefik en `compose.local.yml`.** Exigiría TLS local, un `certresolver` falso y sobrescribir etiquetas, lo que rompe la regla de "solo agrega". RF-C6, con el chequeo estático en `just check` y en `images`, y RF-C18, con la prueba real contra el proxy de Coolify antes del primer despliegue, cubren el riesgo.
 
 Sin errores que pidan cambios.
+
+### architect — 2026-10-23 — ENMIENDA (b): fase B
+- Cambié lo que resume "Enmienda 2026-10-23 (b): fase B": RF-B4, RF-B5, RF-B7, RF-B11, RF-B13, RF-C6, la tabla de variables de entorno, la de "API / mensajes WS" y "Estrategia de pruebas". No toqué las aprobaciones ni las revisiones anteriores.
+- `status: in-review`. Pido revisión de la enmienda a **security-reviewer**.
+
+### security-reviewer — 2026-10-23 — APPROVE (enmienda b)
+
+**🤖 security-reviewer**
+
+**Verifiqué:** el bloque de la enmienda (b) en `git diff`:
+- `ErrorCode` sin etiquetar: cada enum tiene un solo prefijo y hay un test de no solapamiento que no compila si falta una variante.
+- `ws.rate_limited`.
+- `HOST` como `IpAddr`: el compose no tiene `ports:`, y si el valor está mal falla cerrado.
+- El orden `Origin` → upgrade → semáforo: no corre nada caro antes del semáforo.
+- `GET /ws` sin upgrade: el cuerpo va vacío, lleva `nosniff` y HSTS y se registra en el log sin `Origin`.
+
+**Hallazgos:** ninguno Important. Hay tres nits:
+1. **El semáforo, con `try_acquire_owned` antes de responder 101.** El permiso se pasa al closure de `on_upgrade`. Con `acquire().await` las peticiones se encolan sin límite, y eso permite un DoS por memoria.
+2. **El 4xx del rechazo.** Hay que decir "el 4xx que dé axum", porque `HEAD /ws` responde 405, y el test debe aceptar cualquier 4xx.
+3. **El nombre `HOST`.** Puede llegar exportado con el nombre de la máquina. En ese caso falla cerrado, pero conviene considerar `BIND_ADDR`, a criterio del architect.
+
+### security-reviewer — 2026-10-23 — APPROVE (BIND_ADDR)
+
+**🤖 security-reviewer**
+
+**Verifiqué:** el diff de la spec en RF-B11, RF-C6, la tabla de variables y la nota de la enmienda (b).
+- Solo cambia el nombre. El tipo, el valor por defecto, la condición del healthcheck y la prohibición en el compose siguen igual.
+- El riesgo baja: un `HOST` que exporte el shell ya no tumba el arranque.
+- Un `HOST` que quede suelto en `server` no tiene efecto.
+- `check-compose.mjs` (fase C) debe prohibir `BIND_ADDR` en `server` y tener un fixture que lo pruebe.
