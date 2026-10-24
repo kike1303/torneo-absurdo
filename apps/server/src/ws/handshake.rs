@@ -16,10 +16,14 @@ pub async fn handler(
     headers: HeaderMap,
     upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Response {
-    // 1. Exact `Origin` (ADR-0008 D6). The value is never logged.
-    let origin_ok = headers
-        .get(header::ORIGIN)
-        .is_some_and(|origin| origin.as_bytes() == ws.public_origin.as_bytes());
+    // 1. Exactly one `Origin`, equal to `PUBLIC_ORIGIN` (ADR-0008 D6). With several, the
+    //    request is ambiguous (a proxy or the browser could read a different one): reject it.
+    //    The value is never logged.
+    let mut origins = headers.get_all(header::ORIGIN).iter();
+    let origin_ok = match (origins.next(), origins.next()) {
+        (Some(origin), None) => origin.as_bytes() == ws.public_origin.as_bytes(),
+        _ => false,
+    };
     if !origin_ok {
         return error_response(StatusCode::FORBIDDEN, WsErrorCode::OriginForbidden);
     }

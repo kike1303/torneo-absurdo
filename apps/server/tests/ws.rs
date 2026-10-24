@@ -93,6 +93,25 @@ async fn a_missing_or_foreign_origin_is_403_without_upgrade() {
 }
 
 #[tokio::test]
+async fn two_origin_headers_are_403_even_if_one_is_valid() {
+    let (app, ws_state) = start_echo(true, 2000, SLOW).await;
+    for (first, second) in [
+        (ORIGIN, ORIGIN),
+        (ORIGIN, "https://evil.example"),
+        ("https://evil.example", ORIGIN),
+    ] {
+        let mut headers = UPGRADE.to_vec();
+        headers.push(("origin", first));
+        headers.push(("origin", second));
+        let response = http::send(app.addr, "GET", "/ws", &headers).await;
+        assert_eq!(response.status, 403, "{first} + {second}");
+        assert_eq!(response.text(), r#"{"error":"ws.origin_forbidden"}"#);
+        assert!(response.header("upgrade").is_none());
+    }
+    assert_eq!(ws_state.available_permits(), 2000);
+}
+
+#[tokio::test]
 async fn a_valid_origin_without_upgrade_gets_axums_4xx_with_an_empty_body() {
     // Cap 0: a request that is not an upgrade must never reach the cap (no 503).
     let (app, _) = start_echo(true, 0, SLOW).await;
