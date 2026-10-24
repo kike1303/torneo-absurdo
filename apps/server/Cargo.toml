@@ -37,7 +37,7 @@ thiserror.workspace = true
 tungstenite.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["process"] }
+tokio = { workspace = true, features = ["process", "test-util"] }
 tokio-tungstenite.workspace = true
 futures-util.workspace = true
 

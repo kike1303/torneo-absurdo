@@ -57,25 +57,41 @@ pub async fn connect_with_retry(
     options: PgConnectOptions,
     retry: RetryConfig,
 ) -> Result<PgPool, StartupError> {
+    retry_every(retry, || async {
+        pool_options()
+            .connect_with(options.clone())
+            .await
+            .map_err(|error| error_kind(&error))
+    })
+    .await
+}
+
+/// Runs `attempt` until it succeeds, starting one every `retry.interval` (measured from the
+/// start of the previous attempt), up to `retry.deadline`. Each failure logs its kind.
+pub async fn retry_every<T, F, Fut>(retry: RetryConfig, mut attempt: F) -> Result<T, StartupError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, &'static str>>,
+{
     let deadline = Instant::now() + retry.deadline;
     loop {
-        let attempt =
-            tokio::time::timeout_at(deadline, pool_options().connect_with(options.clone())).await;
-        match attempt {
-            Ok(Ok(pool)) => return Ok(pool),
-            Ok(Err(error)) => {
-                tracing::warn!(event = "db.unavailable", error_kind = error_kind(&error));
+        let started = Instant::now();
+        match tokio::time::timeout_at(deadline, attempt()).await {
+            Ok(Ok(value)) => return Ok(value),
+            Ok(Err(kind)) => {
+                tracing::warn!(event = "db.unavailable", error_kind = kind);
             }
             Err(_) => {
                 tracing::warn!(event = "db.unavailable", error_kind = "timeout");
                 return Err(StartupError::DbUnavailable);
             }
         }
-        if Instant::now() + retry.interval >= deadline {
+        let next = started + retry.interval;
+        if next >= deadline {
             tokio::time::sleep_until(deadline).await;
             return Err(StartupError::DbUnavailable);
         }
-        tokio::time::sleep(retry.interval).await;
+        tokio::time::sleep_until(next).await;
     }
 }
 
@@ -111,5 +127,52 @@ impl PgProbe {
 impl DbProbe for PgProbe {
     fn ping(&self) -> PingFuture<'_> {
         Box::pin(async move { sqlx::query("SELECT 1").execute(&self.pool).await.is_ok() })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use super::*;
+
+    /// Attempts start every `interval` from the start of the previous one, not `interval`
+    /// after it fails (each attempt here takes 1.5 s, like a slow refused connection).
+    #[tokio::test(start_paused = true)]
+    async fn attempts_start_every_interval() {
+        let origin = Instant::now();
+        let starts = Arc::new(Mutex::new(Vec::new()));
+        let recorded = starts.clone();
+        let result: Result<(), StartupError> = retry_every(
+            RetryConfig {
+                interval: Duration::from_secs(2),
+                deadline: Duration::from_secs(9),
+            },
+            || {
+                let recorded = recorded.clone();
+                async move {
+                    recorded.lock().unwrap().push(origin.elapsed().as_millis());
+                    tokio::time::sleep(Duration::from_millis(1500)).await;
+                    Err("io")
+                }
+            },
+        )
+        .await;
+        assert_eq!(result, Err(StartupError::DbUnavailable));
+        assert_eq!(origin.elapsed(), Duration::from_secs(9));
+        assert_eq!(*starts.lock().unwrap(), [0, 2000, 4000, 6000, 8000]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_success_returns_at_once() {
+        let mut calls = 0;
+        let result = retry_every(RetryConfig::default(), || {
+            calls += 1;
+            let outcome = if calls < 3 { Err("io") } else { Ok(calls) };
+            async move { outcome }
+        })
+        .await;
+        assert_eq!(result, Ok(3));
     }
 }
