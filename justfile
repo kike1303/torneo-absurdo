@@ -92,3 +92,22 @@ _check-gen:
         exit "$status"
     fi
     node scripts/compare-trees.mjs "$backup" "$src"
+
+# Start the development Postgres (infra/compose.dev.yml) and wait until it is healthy. Idempotent.
+db-up:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! docker info >/dev/null 2>&1; then
+        echo 'Docker is not responding: `just check` needs Docker since phase B' >&2
+        exit 1
+    fi
+    docker compose -f infra/compose.dev.yml up -d --wait
+
+# Stop the development Postgres (keeps the volume)
+db-down:
+    docker compose -f infra/compose.dev.yml down
+
+# Drop the development Postgres volume (and any leftover torneo_test_* databases) and start again
+db-reset:
+    docker compose -f infra/compose.dev.yml down -v
+    {{just_executable()}} db-up
