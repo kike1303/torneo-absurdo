@@ -31,6 +31,15 @@ export default defineConfig({
       },
     }),
   ],
+  // RF-B17, plan-b decision 23: /api and /ws go to the server without rewriting the path, without
+  // changeOrigin (the browser Origin reaches the server intact) and without xfwd. The anchored
+  // regular expressions keep /apix and /wsx in web.
+  server: {
+    proxy: {
+      '^/api(?:/|$)': { target: 'http://127.0.0.1:8080' },
+      '^/ws$': { target: 'ws://127.0.0.1:8080', ws: true },
+    },
+  },
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],

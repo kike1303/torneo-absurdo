@@ -108,7 +108,6 @@ test('RF-A16 / test 6: without ENABLE_DEV_CATALOG every /dev/** route is 404 and
     '/en/dev/components',
     '/es/dev/error-probe',
     '/es/dev/components/__data.json',
-    // Does not exist in phase A (arrives in B): a 404 here is not guard coverage.
     '/es/dev/status',
   ]) {
     const res = await raw(NO_CATALOG, path);

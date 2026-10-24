@@ -14,6 +14,8 @@ const baseEnv = {
 
 export default defineConfig({
   testDir: './e2e',
+  // Runs against `just dev` with playwright.dev.config.ts, never here.
+  testIgnore: ['dev-status.spec.ts'],
   outputDir: './test-results/artifacts',
   fullyParallel: false,
   workers: 1,
