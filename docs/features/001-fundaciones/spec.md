@@ -2,7 +2,7 @@
 id: "001"
 title: Fundaciones del monorepo
 type: spec
-status: approved
+status: in-review
 risk: high
 author: architect
 reviewers: [product-owner, security-reviewer, devops-engineer, owner, frontend-engineer]
@@ -27,10 +27,12 @@ approvals:
     date: 2026-10-23
   - by: owner
     date: 2026-10-23
+  - by: security-reviewer
+    date: 2026-10-24
 linear: TA-1
 depends_on: []
 created: 2026-10-21
-updated: 2026-10-23
+updated: 2026-10-24
 ---
 
 # Spec: Fundaciones del monorepo
@@ -176,9 +178,9 @@ Cada requisito dice cómo se verifica (→). "CI" significa que lo prueba un job
   - `cargo chef cook --zigbuild --release --target x86_64-unknown-linux-musl`.
   - `ARG APP_VERSION` se declara **después** del `cook`, para que cambiar la versión no invalide la capa de dependencias.
   - **Todas** las etapas `FROM` por digest, incluido el builder `rust:<versión>`, cuya versión es la misma de `rust-toolchain.toml` (si no, rustup descarga la toolchain en cada build en frío; `check-compose.mjs` compara las dos).
-  - Usa `SQLX_OFFLINE=true` y termina en `gcr.io/distroless/static-debian12:nonroot`, con el binario en `/server`.
+  - Usa `SQLX_OFFLINE=true` y termina en `gcr.io/distroless/static-debian13:nonroot` (enmienda 2026-10-24), con el binario en `/server`.
   → job `images`: construye, y `readelf -l` sobre el binario extraído no muestra `INTERP` (un binario musl es `static-pie` y el `ldd` de glibc puede responder "statically linked" en vez de "not a dynamic executable"; `readelf` cubre la verificación 8 de ADR-0006 sin depender de esa salida).
-- **RF-C2.** `apps/web/Dockerfile`: etapa de build con `FROM --platform=$BUILDPLATFORM node:22-…@sha256:…` (el resultado de `adapter-node` es JS, sin código nativo), y final `gcr.io/distroless/nodejs22-debian12:nonroot` por digest. Los dos digests corresponden a Node ≥ 22.17 (mínimo de SvelteKit 3), y el de build usa la misma versión que `.node-version` (RF-A1). Todas las dependencias de `apps/web` van en `devDependencies` para que Vite las empaquete: la imagen final contiene `build/` y `package.json`, **sin `node_modules`**. → job `images`: `/app/node_modules` no existe en la imagen y un **smoke test** (`docker run` de la imagen con `read_only`, `PUBLIC_ORIGIN=http://localhost:3000` y el puerto atado a `127.0.0.1`; sin `ORIGIN`, que adapter-node 6 ya no lee) responde 200 en `/healthz` y en `/en/`, y el mismo `docker run` **sin** `PUBLIC_ORIGIN` termina con código distinto de 0 antes de abrir el puerto (RF-A23). Esto prueba que el bundle es autocontenido, cosa que los e2e no prueban porque corren con `node_modules` presente.
+- **RF-C2.** `apps/web/Dockerfile`: etapa de build con `FROM --platform=$BUILDPLATFORM node:22-…@sha256:…` (el resultado de `adapter-node` es JS, sin código nativo), y final `gcr.io/distroless/nodejs22-debian13:nonroot` por digest (enmienda 2026-10-24). Los dos digests corresponden a Node ≥ 22.17 (mínimo de SvelteKit 3), y el de build usa la misma versión que `.node-version` (RF-A1). Todas las dependencias de `apps/web` van en `devDependencies` para que Vite las empaquete: la imagen final contiene `build/` y `package.json`, **sin `node_modules`**. → job `images`: `/app/node_modules` no existe en la imagen y un **smoke test** (`docker run` de la imagen con `read_only`, `PUBLIC_ORIGIN=http://localhost:3000` y el puerto atado a `127.0.0.1`; sin `ORIGIN`, que adapter-node 6 ya no lee) responde 200 en `/healthz` y en `/en/`, y el mismo `docker run` **sin** `PUBLIC_ORIGIN` termina con código distinto de 0 antes de abrir el puerto (RF-A23). Esto prueba que el bundle es autocontenido, cosa que los e2e no prueban porque corren con `node_modules` presente.
 - **RF-C3.** `.dockerignore` en la raíz que excluye, al menos, `.git`, `**/target`, `**/node_modules`, `**/.env`, `**/.env.*` (con `!**/.env.example`), `private/` y `content/_local/`. Las formas con `**/` son obligatorias: en `.dockerignore`, `.env` sin prefijo solo excluye el de la raíz del contexto, y un `infra/.env` o `apps/server/.env` acabaría en una capa del builder y en la caché de buildx. → `check-compose.mjs` verifica esas entradas con su forma `**/`, y `scripts/check-dockerignore.sh` (job `images`) lo prueba con Docker: crea `infra/.env` y `apps/server/.env` de prueba (los borra con `trap`), construye `scripts/fixtures/context.Dockerfile` (`FROM scratch` + `COPY . /ctx`) con `--output type=local` a un directorio temporal, y comprueba que en la salida no existen `ctx/infra/.env`, `ctx/apps/server/.env`, `ctx/private` ni `ctx/.git`, y sí existe `ctx/apps/server/.env.example`. No necesita ninguna imagen base.
 
 **Compose de producción (ADR-0006 D1–D4, D11)**
@@ -615,6 +617,33 @@ Surge de la revisión del architect a `plan-b.md` (entrada `architect — 2026-1
 
 **Revisión de la enmienda:** security-reviewer (orden del handshake, rechazo sin cuerpo, `BIND_ADDR` y su efecto en el healthcheck, `ErrorCode` sin etiquetar). El cambio de nombre de la nota anterior también pasa por security-reviewer.
 
+## Enmienda 2026-10-24: distroless debian13
+
+Surge de `plan-c.md` ("Bloqueo de inicio", decisión 2). No cambia el alcance ni el diseño. Las aprobaciones anteriores siguen valiendo para todo lo que esta enmienda no toca.
+
+| Cambio | Dónde |
+|---|---|
+| La base final del server pasa de `gcr.io/distroless/static-debian12:nonroot` a `gcr.io/distroless/static-debian13:nonroot` | RF-C1 |
+| La base final de `web` pasa de `gcr.io/distroless/nodejs22-debian12:nonroot` a `gcr.io/distroless/nodejs22-debian13:nonroot` | RF-C2 |
+
+**Motivo.** Las imágenes `-debian12` de distroless ya no reciben parches. Lo verifiqué el 2026-10-24:
+- El README de `GoogleContainerTools/distroless` publica solo imágenes `-debian13` y dice: "Any other tags are considered deprecated and are no longer updated".
+- La última subida de `nodejs22-debian12` en `gcr.io` es del 2026-02-14, y la de `static-debian12` del 2026-08-21. `nodejs22-debian13` y `static-debian13` tienen subidas del 2026-10-23.
+
+Una base sin parches contradice el propósito de "actualizadas por Dependabot" de ADR-0006 D5. Dependabot mueve digests dentro de la misma etiqueta y no cambia de `-debian12` a `-debian13`.
+
+**Lo que no cambia.**
+- Las dos siguen siendo distroless `nonroot` (UID 65532), sin shell, fijadas por digest de índice y con la antigüedad mínima de 3 días.
+- `nodejs22-debian13` mantiene `/nodejs/bin/node` como entrypoint, que es la ruta del healthcheck de ADR-0006 D3. Su digest debe corresponder a la versión de `.node-version`, igual que antes (RF-C2).
+- `check-compose.mjs` sigue exigiendo que la base final de `web` sea `nodejs<major de .node-version>-`, sin fijar la versión de Debian.
+- El binario del server es estático (musl, D8) y no depende de la libc de la base. Los builders (`rust:…-bookworm`, `node:…-bookworm-slim`) no cambian: solo compilan, y su versión de Debian no llega a la imagen final.
+
+**Mantenimiento.** El salto a la siguiente versión de Debian no lo hace Dependabot. Cuando distroless deprecie `-debian13`, se cambia a mano en una enmienda como esta.
+
+**ADR-0006.** D5 nombra `-debian12`. Le agregué una nota fechada en "Notas", sin cambiar su `status` ni sus approvals. El cuerpo de D5 se corrige cuando el owner dé el OK.
+
+**Revisión de la enmienda:** security-reviewer (bases de las imágenes finales) y el owner, porque toca el texto de un ADR. devops-engineer propuso el cambio.
+
 ## Revisión
 
 ### product-owner — 2026-10-21 — APPROVE
@@ -989,3 +1018,19 @@ Sin errores que pidan cambios.
 - El riesgo baja: un `HOST` que exporte el shell ya no tumba el arranque.
 - Un `HOST` que quede suelto en `server` no tiene efecto.
 - `check-compose.mjs` (fase C) debe prohibir `BIND_ADDR` en `server` y tener un fixture que lo pruebe.
+
+### architect — 2026-10-24 — ENMIENDA: distroless debian13
+- Cambié RF-C1 y RF-C2 (`-debian12` → `-debian13`) y agregué la sección "Enmienda 2026-10-24: distroless debian13". No toqué las aprobaciones ni las revisiones anteriores.
+- `status: in-review`. Pido revisión de la enmienda a **security-reviewer** y el OK del **owner**.
+
+### security-reviewer — 2026-10-24 — APPROVE (enmienda debian13)
+
+**🤖 security-reviewer**
+
+**Verifiqué:** el diff de RF-C1, RF-C2, la sección "Enmienda 2026-10-24: distroless debian13" y la nota de ADR-0006.
+- Solo cambia la versión de Debian de las bases finales. Siguen siendo `:nonroot` (UID 65532), sin shell, fijadas por digest de índice y con la antigüedad mínima de 3 días.
+- La ruta del healthcheck no cambia: `nodejs22-debian13` usa `/nodejs/bin/node` como entrypoint (plan-c, decisión 2), y el healthcheck del server es `/server healthcheck`, en forma exec. No necesita shell.
+- El server es estático (musl, D8). Los builders `-bookworm` no llegan a la imagen final.
+- El riesgo baja: con `-debian12` sin parches, un CVE de la base (por ejemplo, en OpenSSL o en la glibc de `nodejs22`) quedaba abierto en producción sin que Dependabot lo arreglara.
+- La nota de ADR-0006 no cambia el `status` ni las approvals. El cuerpo de D5 sigue diciendo `-debian12` hasta el OK del owner. Es correcto.
+- **Sugerencia (no bloquea, ya existía):** como el digest manda sobre la etiqueta, un digest de la variante `latest` (root) escrito como `:nonroot@sha256:…` pasaría sin error. El job `images` debería comprobar `docker inspect -f '{{.Config.User}}'` = `65532` (o `nonroot`) en las dos imágenes finales.
