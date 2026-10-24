@@ -36,6 +36,7 @@ mimalloc.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["process"] }
 tokio-tungstenite.workspace = true
 futures-util.workspace = true
 
