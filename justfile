@@ -95,12 +95,12 @@ _web-prepare:
 crate-age:
     node scripts/check-crate-age.mjs
 
-# cargo deny check bans (RF-B2). Always in CI; locally only if cargo-deny is installed.
+# cargo deny check bans sources (RF-B2). Always in CI; locally only if cargo-deny is installed.
 deny:
     #!/usr/bin/env bash
     set -euo pipefail
     if command -v cargo-deny >/dev/null 2>&1; then
-        cargo deny check bans
+        cargo deny check bans sources
     elif [ -n "${CI:-}" ]; then
         echo "cargo-deny is required in CI" >&2
         exit 1

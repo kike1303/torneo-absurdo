@@ -1,4 +1,4 @@
-# cargo-deny configuration (RF-B2). Run with `just deny` (`cargo deny check bans`).
+# cargo-deny configuration (RF-B2). Run with `just deny` (`cargo deny check bans sources`).
 
 [graph]
 targets = ["x86_64-unknown-linux-musl"]
@@ -9,4 +9,13 @@ deny = [
     { crate = "openssl-sys" },
     { crate = "openssl" },
     { crate = "aws-lc-sys" },
+    # The server recognises tungstenite's capacity error behind axum::Error to close with
+    # 1009 (ws/session.rs). A second tungstenite (an axum bump) would silently break that.
+    { crate = "tungstenite", deny-multiple-versions = true },
 ]
+
+# Only crates.io (same rule as scripts/check-crate-age.mjs).
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
