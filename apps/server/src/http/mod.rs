@@ -30,6 +30,7 @@ pub fn router(state: AppState) -> Router {
             "/api/health",
             get(health::handler).fallback(errors::method_not_allowed),
         )
+        .route("/ws", get(crate::ws::handler))
         .fallback(errors::not_found)
         .method_not_allowed_fallback(errors::method_not_allowed)
         .with_state(state)

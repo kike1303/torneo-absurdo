@@ -21,7 +21,12 @@ impl DbProbe for AlwaysUp {
 }
 
 async fn app() -> support::app::RunningApp {
-    support::app::start(AppState::new(Arc::new(AlwaysUp), &Settings::default())).await
+    support::app::start(AppState::new(
+        Arc::new(AlwaysUp),
+        &Settings::default(),
+        support::app::ws_state(),
+    ))
+    .await
 }
 
 fn assert_security_headers(response: &Response) {
@@ -110,7 +115,11 @@ async fn security_headers_on_a_200_and_head_works() {
 #[tokio::test]
 async fn slow_headers_are_cut_after_the_header_read_timeout() {
     let app = support::app::start_with(
-        AppState::new(Arc::new(AlwaysUp), &Settings::default()),
+        AppState::new(
+            Arc::new(AlwaysUp),
+            &Settings::default(),
+            support::app::ws_state(),
+        ),
         HttpConfig {
             header_read_timeout: Duration::from_millis(300),
         },

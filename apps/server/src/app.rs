@@ -17,6 +17,7 @@ use tokio_util::task::TaskTracker;
 use crate::config::Config;
 use crate::db::{self, DbProbe, PgProbe, RetryConfig};
 use crate::http::{self, health::HealthConfig, health::HealthState};
+use crate::ws::{WsConfig, WsState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum StartupError {
@@ -52,24 +53,43 @@ pub struct Settings {
     pub health: HealthConfig,
     pub db_retry: RetryConfig,
     pub http: HttpConfig,
+    pub ws: WsConfig,
 }
 
 #[derive(Clone)]
 pub struct AppState {
     pub health: Arc<HealthState>,
+    pub ws: Arc<WsState>,
 }
 
 impl AppState {
-    pub fn new(probe: Arc<dyn DbProbe>, settings: &Settings) -> Self {
+    pub fn new(probe: Arc<dyn DbProbe>, settings: &Settings, ws: WsState) -> Self {
         Self {
             health: Arc::new(HealthState::new(probe, settings.health)),
+            ws: Arc::new(ws),
         }
+    }
+
+    /// The WebSocket state from the configuration.
+    pub fn ws_from_config(config: &Config, settings: &Settings) -> WsState {
+        WsState::new(
+            config.public_origin.clone(),
+            config.echo.is_enabled(),
+            config.ws_max_connections,
+            settings.ws,
+        )
     }
 }
 
 impl FromRef<AppState> for Arc<HealthState> {
     fn from_ref(state: &AppState) -> Self {
         state.health.clone()
+    }
+}
+
+impl FromRef<AppState> for Arc<WsState> {
+    fn from_ref(state: &AppState) -> Self {
+        state.ws.clone()
     }
 }
 
@@ -105,7 +125,8 @@ pub async fn serve(
         .map_err(|_| StartupError::Bind)?
         .port();
     tracing::info!(event = "server.listening", port);
-    let state = AppState::new(Arc::new(PgProbe::new(pool)), &settings);
+    let ws = AppState::ws_from_config(config, &settings);
+    let state = AppState::new(Arc::new(PgProbe::new(pool)), &settings, ws);
     serve_listener(listener, state, settings.http, shutdown)
         .await
         .map_err(|_| StartupError::Serve)

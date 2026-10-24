@@ -3,6 +3,7 @@
 use std::net::SocketAddr;
 
 use server::app::{AppState, HttpConfig, serve_listener};
+use server::ws::{WsConfig, WsState};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -42,4 +43,12 @@ impl Drop for RunningApp {
         }
         self.task.abort();
     }
+}
+
+/// Origin the in-process tests use.
+pub const ORIGIN: &str = "http://localhost:5173";
+
+/// WebSocket state with the echo on, a cap of 2000 and the default lifetimes.
+pub fn ws_state() -> WsState {
+    WsState::new(ORIGIN.to_owned(), true, 2000, WsConfig::default())
 }

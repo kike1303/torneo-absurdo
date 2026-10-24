@@ -6,6 +6,7 @@ pub mod bin;
 pub mod db;
 pub mod http;
 pub mod pg_proxy;
+pub mod ws;
 
 /// A port that was free a moment ago (the listener is dropped before returning).
 pub fn free_port() -> u16 {

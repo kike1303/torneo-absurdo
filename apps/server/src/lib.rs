@@ -13,5 +13,6 @@ pub mod shutdown;
 pub mod telemetry;
 pub mod version;
 pub mod version_rule;
+pub mod ws;
 
 pub use cli::{CliError, Command, exit_code, parse, run_cli};

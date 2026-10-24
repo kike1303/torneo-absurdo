@@ -66,6 +66,7 @@ async fn health_follows_the_database_without_restarting() {
     let app = support::app::start(AppState::new(
         probe.clone(),
         &settings(Duration::from_millis(100)),
+        support::app::ws_state(),
     ))
     .await;
 
@@ -98,6 +99,7 @@ async fn fifty_concurrent_requests_make_one_query() {
     let app = support::app::start(AppState::new(
         probe.clone(),
         &settings(Duration::from_secs(5)),
+        support::app::ws_state(),
     ))
     .await;
 
@@ -112,6 +114,7 @@ async fn a_slow_database_answers_503_at_the_timeout() {
     let app = support::app::start(AppState::new(
         Arc::new(Slow),
         &settings(Duration::from_millis(100)),
+        support::app::ws_state(),
     ))
     .await;
     let started = Instant::now();
