@@ -35,7 +35,7 @@ Requisitos: **Node ≥ 22.17** (versión exacta en `.node-version`; `nvm` no la 
 - `just gen`: regenera `packages/protocol-ts` desde `crates/protocol` (`ts-rs`). Hay que correrlo y commitear el resultado cada vez que cambia un tipo de `protocol`; `just check` falla si quedó desactualizado.
 - `just db-up` / `just db-down` / `just db-reset`: Postgres de desarrollo (`infra/compose.dev.yml`, `127.0.0.1:${DEV_PG_PORT:-5432}`). `db-reset` borra el volumen y las bases `torneo_test_*` que hayan quedado.
 - `just crate-age`: comprueba en crates.io que toda versión de `Cargo.lock` tenga al menos 3 días. Usa la red; córrelo **antes de compilar** cada vez que cambie el lock y baja lo marcado con `cargo update -p <crate>@<versión> --precise <anterior>`.
-- `just deny`: `cargo deny check bans` (sin OpenSSL ni aws-lc); en local solo si `cargo-deny` está instalado.
+- `just deny`: `cargo deny check bans sources` (sin OpenSSL ni aws-lc, una sola versión de `tungstenite` y solo crates.io como fuente); en local solo si `cargo-deny` está instalado.
 - `just fmt`: Prettier y `cargo fmt` en escritura.
 - Llegan en la fase C: imágenes, `prod-local`, la CI y el hook `pre-push`.
 

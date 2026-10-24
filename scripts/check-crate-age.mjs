@@ -107,6 +107,9 @@ export function isTooYoung(createdAt, now, minDays = MIN_AGE_DAYS) {
  */
 export async function checkCrateAge({ lockText, fetchCreatedAt, now, pace, members }) {
   const { registry, problems } = classifyPackages(parseCargoLock(lockText), members);
+  // Fail closed: an empty or truncated lock must never pass as "nothing too young".
+  if (registry.length === 0)
+    problems.push('no crates.io packages in Cargo.lock (empty or wrong file?)');
   /** @type {{ name: string, version: string, createdAt: string }[]} */
   const young = [];
   let checked = 0;

@@ -104,3 +104,18 @@ describe('checkCrateAge (network simulated)', () => {
     expect(result.problems).toEqual(['itoa@1.0.15: lookup failed (HTTP 503)']);
   });
 });
+
+describe('checkCrateAge fails closed (PR #3 review)', () => {
+  it.each(['empty', 'workspace-only'])(
+    'a lock without crates.io packages (%s) is a problem',
+    async (name) => {
+      const fetchCreatedAt = vi.fn(async () => '2026-01-01T00:00:00Z');
+      const result = await checkCrateAge({ lockText: fixture(name), fetchCreatedAt, now: NOW });
+      expect(fetchCreatedAt).not.toHaveBeenCalled();
+      expect(result.checked).toBe(0);
+      expect(result.problems).toEqual([
+        expect.stringMatching(/no crates\.io packages in Cargo\.lock/),
+      ]);
+    },
+  );
+});
