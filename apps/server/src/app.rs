@@ -126,11 +126,47 @@ pub async fn serve(
         .port();
     tracing::info!(event = "server.listening", port);
     let ws = AppState::ws_from_config(config, &settings);
+    let sockets = ws.tracker();
+    let close_sockets = ws.shutdown_token();
     let state = AppState::new(Arc::new(PgProbe::new(pool)), &settings, ws);
-    serve_listener(listener, state, settings.http, shutdown)
-        .await
-        .map_err(|_| StartupError::Serve)
+
+    // On the signal: stop accepting and close every WebSocket with 1012 at the same time.
+    let stop = CancellationToken::new();
+    let on_signal = stop.clone();
+    tokio::spawn(async move {
+        shutdown.await;
+        on_signal.cancel();
+    });
+    let stopped = stop.clone();
+    let mut server = tokio::spawn(serve_listener(listener, state, settings.http, async move {
+        stopped.cancelled().await
+    }));
+    tokio::select! {
+        () = stop.cancelled() => {}
+        // Never ends before the signal; if it does, there is nothing left to drain.
+        result = &mut server => {
+            return result.map_err(|_| StartupError::Serve)?.map_err(|_| StartupError::Serve);
+        }
+    }
+    tracing::info!(event = "server.stopping");
+    close_sockets.cancel();
+    sockets.close();
+    // hyper does not track upgraded connections: wait for them through the tracker. The
+    // whole drain is bounded so the process ends within Docker's 10 s (ADR-0006 D10).
+    let drained = tokio::time::timeout(SHUTDOWN_DEADLINE, async {
+        let _ = (&mut server).await;
+        sockets.wait().await;
+    })
+    .await;
+    if drained.is_err() {
+        server.abort();
+        tracing::warn!(event = "server.shutdown_timeout");
+    }
+    Ok(())
 }
+
+/// Upper bound for the drain after the signal (Docker sends SIGKILL at 10 s).
+pub const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(9);
 
 /// Serves the router on an already bound listener until `shutdown` resolves, then stops
 /// accepting, lets in-flight requests finish and returns (the in-process tests use it

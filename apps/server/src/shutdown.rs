@@ -1,4 +1,8 @@
-//! Shutdown signals (RF-B14).
+//! Shutdown signals (RF-B14, plan-b decision 11).
+//!
+//! `app::serve` turns the signal into a `CancellationToken`: the listener stops accepting,
+//! every WebSocket closes with 1012 (each socket holds a `TaskTrackerToken` taken in the
+//! handshake), and the drain is bounded by `app::SHUTDOWN_DEADLINE`.
 
 /// Resolves on `SIGTERM` or `SIGINT`.
 pub async fn signal() {
