@@ -4,7 +4,7 @@ type: architecture
 status: draft
 author: architect
 created: 2026-10-20
-updated: 2026-10-20
+updated: 2026-10-24
 ---
 
 # Arquitectura general
@@ -62,7 +62,15 @@ Scheduled ─▶ BettingOpen ─▶ BettingClosed ─▶ Live ─▶ Settled
 - `character_ratings`, `seasons`, `season_stats`
 
 ## Tipos compartidos
-`crates/protocol` define los mensajes WS y los DTOs del API con serde, y genera TypeScript en `packages/protocol-ts` (con `ts-rs` o similar, se decide en 001).
+`crates/protocol` define los mensajes WS y los DTOs del API con serde. Es una librería pura: sin I/O, sin `tokio`, sin reloj y sin texto para humanos (ADR-0007).
+
+- **Generación:** `ts-rs`, opcional detrás de la feature `ts` para que el server no lo compile. `just gen` vacía `packages/protocol-ts/src/generated/`, exporta un `.ts` por tipo (imports con `.js`), les antepone la cabecera de "generado, no editar", escribe el barril `src/index.ts` (`export type *`) y formatea con Prettier. Los archivos generados se commitean, y `just check` falla si están desactualizados. Nunca se editan a mano.
+- **Paquete:** `@torneo/protocol` (`packages/protocol-ts`) exporta el TS fuente, sin paso de build. `apps/web` lo consume con `import type`.
+- **Convenciones (RF-B4):**
+  - Enums con datos: `#[serde(tag = "type", rename_all = "snake_case")]` (o el campo de etiqueta que corresponda, como `status` en `HealthResponse`).
+  - Códigos de error: `dominio.motivo` (`ws.origin_forbidden`), como enums con `#[serde(rename = "dominio.motivo")]` en cada variante, nunca `String` libre. Cada enum de códigos es dueño de un solo prefijo (`ApiErrorCode` → `http.*`, `WsErrorCode` → `ws.*`) y expone `ALL` y `as_str()`.
+  - `ErrorCode` es la unión sin etiquetar de los enums de códigos y `ApiError { error: ErrorCode }` es el cuerpo de toda respuesta HTTP de error. Un dominio nuevo (por ejemplo `auth.*`) agrega su enum y su variante en `ErrorCode`; los conjuntos de cadenas no se solapan (lo comprueba un test).
+  - Nada de enteros de 64 bits o más (`u64`, `i64`, `u128`, `i128`, `usize`) en tipos exportados: `just gen` falla si aparece `bigint`. Si hace falta, se serializan como cadena.
 
 ## Despliegue
 Un `infra/docker-compose.yml` con los servicios `web`, `server` y `postgres`, desplegado por Coolify en el VPS. Las imágenes se construyen fuera del VPS (ADR-0006).
