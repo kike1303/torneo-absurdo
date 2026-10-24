@@ -103,3 +103,90 @@ async fn the_pool_has_eight_connections() {
     assert_eq!(pool.options().get_max_connections(), 8);
     pool.close().await;
 }
+
+async fn run_to_exit(envs: &[(&str, &str)]) -> bin::Finished {
+    bin::spawn(&[], envs).finish(Duration::from_secs(10)).await
+}
+
+fn single_json_line(lines: &[String]) -> serde_json::Value {
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    serde_json::from_str(&lines[0]).unwrap()
+}
+
+#[tokio::test]
+async fn missing_public_origin_is_config_invalid() {
+    let finished = run_to_exit(&[("DATABASE_URL", "postgres://u:p@127.0.0.1:1/x")]).await;
+    assert_eq!(finished.status.code(), Some(1));
+    let line = single_json_line(&finished.stdout);
+    assert_eq!(line["event"], "config.invalid");
+    assert_eq!(line["var"], "PUBLIC_ORIGIN");
+    assert!(finished.stderr.is_empty());
+}
+
+#[tokio::test]
+async fn an_invalid_value_never_reaches_the_output() {
+    let finished = run_to_exit(&[
+        ("DATABASE_URL", "postgres://u:p@127.0.0.1:1/x"),
+        ("PUBLIC_ORIGIN", "https://x.example/ruta-canario"),
+    ])
+    .await;
+    assert_eq!(finished.status.code(), Some(1));
+    let line = single_json_line(&finished.stdout);
+    assert_eq!(line["var"], "PUBLIC_ORIGIN");
+    for text in finished.stdout.iter().chain(&finished.stderr) {
+        assert!(!text.contains("canario"), "{text}");
+    }
+    assert!(finished.stderr.is_empty());
+}
+
+#[tokio::test]
+async fn bind_addr_must_be_an_ip() {
+    let finished = run_to_exit(&[
+        ("DATABASE_URL", "postgres://u:p@127.0.0.1:1/x"),
+        ("PUBLIC_ORIGIN", "http://localhost:5173"),
+        ("BIND_ADDR", "no-es-ip"),
+    ])
+    .await;
+    assert_eq!(finished.status.code(), Some(1));
+    let line = single_json_line(&finished.stdout);
+    assert_eq!(line["event"], "config.invalid");
+    assert_eq!(line["var"], "BIND_ADDR");
+}
+
+#[tokio::test]
+async fn a_failed_bind_exits_with_one_without_the_address() {
+    let db = TestDb::create().await;
+    let url = db.url();
+    let finished = run_to_exit(&[
+        ("DATABASE_URL", &url),
+        ("PUBLIC_ORIGIN", "http://localhost:5173"),
+        ("BIND_ADDR", "192.0.2.1"),
+        ("PORT", "8080"),
+    ])
+    .await;
+    assert_eq!(finished.status.code(), Some(1));
+    let line = finished
+        .stdout
+        .iter()
+        .find(|l| l.contains("server.bind_failed"))
+        .unwrap_or_else(|| panic!("{:?}", finished.stdout));
+    let value: serde_json::Value = serde_json::from_str(line).unwrap();
+    assert_eq!(value["error_kind"], "addr_not_available");
+    for text in finished.stdout.iter().chain(&finished.stderr) {
+        assert!(
+            !text.contains("192.0.2.1") && !text.contains("8080"),
+            "{text}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_unknown_subcommand_exits_with_two() {
+    let finished = bin::spawn(&["migrate"], &[])
+        .finish(Duration::from_secs(10))
+        .await;
+    assert_eq!(finished.status.code(), Some(2));
+    let line = single_json_line(&finished.stdout);
+    assert_eq!(line["event"], "cli.invalid");
+    assert!(finished.stderr.is_empty());
+}

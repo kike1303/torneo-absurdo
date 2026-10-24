@@ -49,6 +49,22 @@ fn read_lines(
     })
 }
 
+/// Runs the binary once and waits for it. On macOS the first exec of a freshly linked binary
+/// is scanned by the system (about half a second), which would count against timing tests.
+pub async fn warm_up() {
+    static WARM: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+    WARM.get_or_init(|| async {
+        let _ = Command::new(env!("CARGO_BIN_EXE_server"))
+            .arg("--warm-up")
+            .env_clear()
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
+    })
+    .await;
+}
+
 pub fn spawn(args: &[&str], envs: &[(&str, &str)]) -> ServerProcess {
     let mut command = Command::new(env!("CARGO_BIN_EXE_server"));
     command
