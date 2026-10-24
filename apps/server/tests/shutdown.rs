@@ -97,3 +97,64 @@ async fn new_connections_are_refused_right_after_the_signal() {
     let finished = server.finish(Duration::from_secs(10)).await;
     assert_eq!(finished.status.code(), Some(0));
 }
+
+mod in_process {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use server::app::{AppState, HttpConfig, Settings, run_until_shutdown};
+    use server::db::{DbProbe, PingFuture};
+    use server::ws::{WsConfig, WsState};
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
+
+    use super::ORIGIN;
+    use super::support::ws::{self, Ending};
+
+    struct AlwaysUp;
+
+    impl DbProbe for AlwaysUp {
+        fn ping(&self) -> PingFuture<'_> {
+            Box::pin(async { true })
+        }
+    }
+
+    /// A signal right after the handshake: the socket upgraded at that moment must still
+    /// get 1012 (it is in the tracker from the handshake on), never a bare TCP close.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_socket_upgraded_right_before_the_signal_gets_1012() {
+        for attempt in 0..100 {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let config = WsConfig {
+                close_grace: Duration::from_secs(2),
+                ..WsConfig::default()
+            };
+            let ws_state = WsState::new(ORIGIN.to_owned(), true, 10, config);
+            let state = AppState::new(Arc::new(AlwaysUp), &Settings::default(), ws_state);
+            let (signal, signalled) = oneshot::channel::<()>();
+            let server = tokio::spawn(run_until_shutdown(
+                listener,
+                state,
+                HttpConfig::default(),
+                async move {
+                    let _ = signalled.await;
+                },
+            ));
+            let mut client = ws::connect(addr, ORIGIN).await.unwrap();
+            signal.send(()).unwrap();
+            let ending = ws::ending(&mut client, Duration::from_secs(3)).await;
+            assert_eq!(
+                ending,
+                Ending::Close(1012, String::new()),
+                "attempt {attempt}"
+            );
+            ws::assert_stream_ends(&mut client, Duration::from_secs(3)).await;
+            tokio::time::timeout(Duration::from_secs(5), server)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+        }
+    }
+}

@@ -126,9 +126,20 @@ pub async fn serve(
         .port();
     tracing::info!(event = "server.listening", port);
     let ws = AppState::ws_from_config(config, &settings);
-    let sockets = ws.tracker();
-    let close_sockets = ws.shutdown_token();
     let state = AppState::new(Arc::new(PgProbe::new(pool)), &settings, ws);
+    run_until_shutdown(listener, state, settings.http, shutdown).await
+}
+
+/// Serves until `shutdown` resolves, then stops accepting, closes every WebSocket with 1012
+/// and waits for the HTTP connections and the sockets, bounded by [`SHUTDOWN_DEADLINE`].
+pub async fn run_until_shutdown(
+    listener: TcpListener,
+    state: AppState,
+    http_config: HttpConfig,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), StartupError> {
+    let sockets = state.ws.tracker();
+    let close_sockets = state.ws.shutdown_token();
 
     // On the signal: stop accepting and close every WebSocket with 1012 at the same time.
     let stop = CancellationToken::new();
@@ -138,23 +149,25 @@ pub async fn serve(
         on_signal.cancel();
     });
     let stopped = stop.clone();
-    let mut server = tokio::spawn(serve_listener(listener, state, settings.http, async move {
+    let mut server = tokio::spawn(serve_listener(listener, state, http_config, async move {
         stopped.cancelled().await
     }));
-    tokio::select! {
-        () = stop.cancelled() => {}
-        // Never ends before the signal; if it does, there is nothing left to drain.
-        result = &mut server => {
-            return result.map_err(|_| StartupError::Serve)?.map_err(|_| StartupError::Serve);
-        }
-    }
+    // `biased`: once the signal arrives, `serve_listener` also finishes right away, and an
+    // unbiased select could pick that branch and skip closing the sockets.
+    let ended_early = tokio::select! {
+        biased;
+        () = stop.cancelled() => None,
+        result = &mut server => Some(result),
+    };
     tracing::info!(event = "server.stopping");
     close_sockets.cancel();
     sockets.close();
     // hyper does not track upgraded connections: wait for them through the tracker. The
     // whole drain is bounded so the process ends within Docker's 10 s (ADR-0006 D10).
     let drained = tokio::time::timeout(SHUTDOWN_DEADLINE, async {
-        let _ = (&mut server).await;
+        if ended_early.is_none() {
+            let _ = (&mut server).await;
+        }
         sockets.wait().await;
     })
     .await;
@@ -162,7 +175,13 @@ pub async fn serve(
         server.abort();
         tracing::warn!(event = "server.shutdown_timeout");
     }
-    Ok(())
+    match ended_early {
+        // The server stopped without a signal: report it.
+        Some(result) => result
+            .map_err(|_| StartupError::Serve)?
+            .map_err(|_| StartupError::Serve),
+        None => Ok(()),
+    }
 }
 
 /// Upper bound for the drain after the signal (Docker sends SIGKILL at 10 s).
