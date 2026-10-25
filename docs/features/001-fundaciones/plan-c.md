@@ -2,7 +2,7 @@
 id: "001"
 title: Fundaciones del monorepo — fase C
 type: plan
-status: in-review
+status: approved
 risk: high
 author: devops-engineer
 reviewers: [architect, security-reviewer]
@@ -10,6 +10,8 @@ approvals:
   - by: architect
     date: 2026-10-24
   - by: security-reviewer
+    date: 2026-10-24
+  - by: owner
     date: 2026-10-24
 linear: TA-1
 depends_on: []

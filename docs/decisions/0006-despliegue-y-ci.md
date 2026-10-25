@@ -231,7 +231,7 @@ updated: 2026-10-21
 
 ## Notas
 
-### 2026-10-24 — architect: bases distroless `-debian13` (pendiente del OK del owner)
+### 2026-10-24 — architect: bases distroless `-debian13` (OK del owner el 2026-10-24)
 - **Qué:** D5 nombra `gcr.io/distroless/static-debian12:nonroot` y `gcr.io/distroless/nodejs22-debian12:nonroot`. Propongo `static-debian13:nonroot` y `nodejs22-debian13:nonroot`.
 - **Por qué:** distroless ya no actualiza las imágenes `-debian12`. Su README publica solo `-debian13` y dice que "any other tags are considered deprecated and are no longer updated". En `gcr.io`, la última subida de `nodejs22-debian12` es del 2026-02-14 y la de `static-debian12` del 2026-08-21. Con esas bases, "actualizadas por Dependabot" deja de proteger, porque Dependabot solo mueve el digest dentro de la misma etiqueta.
 - **Qué no cambia:** la decisión de D5 (distroless `nonroot`, fijadas por digest, Dependabot). También se mantienen el entrypoint `/nodejs/bin/node` del healthcheck de D3 y el binario estático de D8.

@@ -2,7 +2,7 @@
 id: "001"
 title: Fundaciones del monorepo
 type: spec
-status: in-review
+status: approved
 risk: high
 author: architect
 reviewers: [product-owner, security-reviewer, devops-engineer, owner, frontend-engineer]
@@ -28,6 +28,8 @@ approvals:
   - by: owner
     date: 2026-10-23
   - by: security-reviewer
+    date: 2026-10-24
+  - by: owner
     date: 2026-10-24
 linear: TA-1
 depends_on: []
