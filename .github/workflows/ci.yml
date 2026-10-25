@@ -1,0 +1,473 @@
+# CI of every PR and of every push to main (RF-C8 to RF-C12, ADR-0006 D7, plan-c decisions 14 to
+# 19 and 23). `ci-ok` is the only required check: a skipped job counts as success, so a docs-only
+# PR finishes with changes + policy + ci-ok.
+#
+# Policy (scripts/check-workflows.mjs, job `policy`): root permissions contents: read and a closed
+# per-job table, actions pinned by SHA, checkout without persisted credentials, no
+# continue-on-error, and no ${{ }} inside run: (every value goes through env:).
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # main is never cancelled, so its cache warm-up always finishes.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      web: ${{ steps.filter.outputs.web }}
+      images: ${{ steps.filter.outputs.images }}
+    steps:
+      # A push to main diffs against the previous commit with git; a PR uses the API.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          # ADR-0006 D7 plus RF-C8, plan-c decision 16 and the deviations of plan-c (web reads
+          # everything that check-web reads: Prettier inputs and check-compose inputs).
+          filters: |
+            common: &common
+              - justfile
+              - .github/workflows/**
+              - .github/actions/**
+            rust:
+              - *common
+              - crates/**
+              - apps/server/**
+              - Cargo.toml
+              - Cargo.lock
+              - rust-toolchain.toml
+              - .cargo/**
+              - .sqlx/**
+              - content/**
+              - packages/protocol-ts/**
+              - deny.toml
+              - clippy.toml
+              - infra/compose.dev.yml
+            web:
+              - *common
+              - apps/web/**
+              - packages/**
+              - crates/protocol/**
+              - crates/engine/**
+              - crates/engine-wasm/**
+              - package.json
+              - pnpm-lock.yaml
+              - pnpm-workspace.yaml
+              - .node-version
+              - scripts/**
+              - .npmrc
+              - .prettierrc*
+              - .prettierignore
+              - eslint.config.*
+              - .editorconfig
+              - infra/**
+              - .dockerignore
+              - '**/Dockerfile'
+              - rust-toolchain.toml
+              - .github/dependabot.yml
+            images:
+              - *common
+              - infra/**
+              - '**/Dockerfile'
+              - .dockerignore
+              - scripts/check-compose.mjs
+              - scripts/check-dockerignore.sh
+              - scripts/fixtures/context.Dockerfile
+              - scripts/local-networks.sh
+              - Cargo.lock
+              - rust-toolchain.toml
+              - pnpm-lock.yaml
+
+  # Always runs (no if:), with the minimum: Node, the root dependencies (yaml, vitest) and just.
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-just
+      - uses: ./.github/actions/setup-js
+        with:
+          filter: .
+      - name: check-workflows (RF-C12)
+        run: node scripts/check-workflows.mjs
+      - name: check-workflows tests
+        run: pnpm exec vitest run --config scripts/vitest.policy.config.mjs
+
+  rust:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-just
+      # Full install: _check-gen formats with Prettier, whose tailwind plugin resolves apps/web.
+      - uses: ./.github/actions/setup-js
+      - name: musl-tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends musl-tools
+      - name: Rust toolchain of rust-toolchain.toml
+        run: |
+          rustup toolchain install --no-self-update
+          rustc --version
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - name: Install cargo-deny 0.20.2 (pinned SHA-256)
+        run: |
+          set -euo pipefail
+          version=0.20.2
+          sum=9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+          name="cargo-deny-$version-x86_64-unknown-linux-musl"
+          curl -fsSL --proto '=https' --tlsv1.2 -o "$RUNNER_TEMP/cargo-deny.tar.gz" \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/$version/$name.tar.gz"
+          (cd "$RUNNER_TEMP" && echo "$sum  cargo-deny.tar.gz" | sha256sum -c -)
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/cargo-deny.tar.gz" -C "$RUNNER_TEMP/bin" --strip-components=1 \
+            "$name/cargo-deny"
+          rm -f "$RUNNER_TEMP/cargo-deny.tar.gz"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/cargo-deny" --version
+      # fmt, clippy, db-up (Postgres of compose.dev.yml, no services:), tests, gen freshness.
+      - run: just check-rust
+      - run: just deny
+      - name: musl build of server (dev profile, RF-C9)
+        run: cargo build -p server --locked --target x86_64-unknown-linux-musl
+      - name: Static binary (no INTERP, RF-C1)
+        run: |
+          set -euo pipefail
+          bin=target/x86_64-unknown-linux-musl/debug/server
+          if readelf -lW "$bin" | grep -q INTERP; then
+            echo "$bin has an INTERP program header: it is not static" >&2
+            exit 1
+          fi
+          file "$bin"
+
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-just
+      - uses: ./.github/actions/setup-js
+      # The scripts/ tests exclude check-workflows (it runs in policy, RF-C10).
+      - run: just check-web
+
+  e2e:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-just
+      - uses: ./.github/actions/setup-js
+      - name: Playwright version
+        id: playwright
+        run: |
+          set -euo pipefail
+          version="$(pnpm --filter web exec playwright --version | awk '{print $2}')"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "bad version: $version" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Restore the Playwright browsers
+        id: browsers
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - name: Install the browsers (or only their system dependencies)
+        env:
+          CACHE_HIT: ${{ steps.browsers.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          if [ "$CACHE_HIT" = true ]; then
+            pnpm --filter web exec playwright install-deps chromium webkit
+          else
+            pnpm --filter web exec playwright install --with-deps chromium webkit
+          fi
+      - name: Save the Playwright browsers (push to main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.browsers.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.browsers.outputs.cache-primary-key }}
+      # Two instances (catalog and no catalog), Chromium plus WebKit for theme and CSP (RF-C10).
+      - run: just e2e
+      - name: Upload screenshots and server logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-screenshots-and-logs
+          path: |
+            apps/web/test-results/screenshots
+            apps/web/test-results/logs
+          if-no-files-found: warn
+          retention-days: 14
+
+  images:
+    needs: changes
+    if: needs.changes.outputs.images == 'true'
+    runs-on: ubuntu-24.04
+    # plan-c decision 16: the architect allows up to 35 after the first cold run (deviations).
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      REPO: ghcr.io/kike1303/torneo-absurdo
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-just
+      - uses: ./.github/actions/setup-js
+        with:
+          filter: .
+      - name: check-compose (RF-C6)
+        run: node scripts/check-compose.mjs
+      - name: compose config without IMAGE_TAG fails (RF-C4)
+        run: |
+          set -uo pipefail
+          if out="$(env -u IMAGE_TAG docker compose --env-file infra/local.env \
+            -f infra/docker-compose.yml config 2>&1)"; then
+            echo "docker compose config succeeded without IMAGE_TAG" >&2
+            exit 1
+          fi
+          if ! grep -q IMAGE_TAG <<<"$out"; then
+            echo "the error does not name IMAGE_TAG:" >&2
+            echo "$out" >&2
+            exit 1
+          fi
+          echo "fails as expected: $(grep -m1 IMAGE_TAG <<<"$out")"
+      - name: .dockerignore with Docker (RF-C3)
+        run: bash scripts/check-dockerignore.sh
+      - name: Image version
+        id: version
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          short="${HEAD_SHA:0:7}"
+          [[ "$short" =~ ^[0-9a-f]{7}$ ]] || { echo "bad sha: $short" >&2; exit 1; }
+          echo "app_version=sha-$short" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # The cache is read by every run and written only by a push to main (RF-C11).
+      - name: Build server
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/server/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          provenance: false
+          sbom: false
+          tags: ghcr.io/kike1303/torneo-absurdo/server:ci
+          build-args: APP_VERSION=${{ steps.version.outputs.app_version }}
+          cache-from: type=gha,scope=server
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=server' || '' }}
+      - name: Build web
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          provenance: false
+          sbom: false
+          tags: ghcr.io/kike1303/torneo-absurdo/web:ci
+          cache-from: type=gha,scope=web
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=web' || '' }}
+      - name: Non-root user, Node version, static binary, no node_modules (RF-C1, RF-C2)
+        run: |
+          set -euo pipefail
+          for svc in server web; do
+            user="$(docker inspect -f '{{.Config.User}}' "$REPO/$svc:ci")"
+            case "$user" in
+              65532 | nonroot) echo "$svc user: $user" ;;
+              *) echo "$svc runs as '$user', expected 65532 or nonroot" >&2; exit 1 ;;
+            esac
+          done
+          want="v$(cat .node-version)"
+          got="$(docker run --rm "$REPO/web:ci" --version)"
+          if [ "$got" != "$want" ]; then
+            echo "web image runs Node $got, .node-version says $want" >&2
+            exit 1
+          fi
+          echo "web Node: $got"
+          cid="$(docker create "$REPO/server:ci")"
+          docker cp "$cid:/server" "$RUNNER_TEMP/server"
+          docker rm "$cid" >/dev/null
+          if readelf -lW "$RUNNER_TEMP/server" | grep -q INTERP; then
+            echo "the server binary has an INTERP program header" >&2
+            exit 1
+          fi
+          file "$RUNNER_TEMP/server"
+          cid="$(docker create "$REPO/web:ci")"
+          count="$(docker export "$cid" | tar -t | grep -c '^app/node_modules/' || true)"
+          docker rm "$cid" >/dev/null
+          if [ "$count" != 0 ]; then
+            echo "the web image has app/node_modules/ ($count entries)" >&2
+            exit 1
+          fi
+          echo "web image without app/node_modules/"
+      - name: Smoke test of the web image alone (RF-C2)
+        run: |
+          set -euo pipefail
+          cid="$(docker run -d --read-only --cap-drop ALL --security-opt no-new-privileges \
+            -p 127.0.0.1:3001:3000 -e PUBLIC_ORIGIN=http://localhost:3001 -e HOST=0.0.0.0 \
+            -e PORT=3000 "$REPO/web:ci")"
+          trap 'docker rm -f "$cid" >/dev/null' EXIT
+          for _ in $(seq 1 30); do
+            curl -fsS -o /dev/null http://127.0.0.1:3001/healthz && break
+            sleep 1
+          done
+          curl -fsS -o /dev/null -w '/healthz %{http_code}\n' http://127.0.0.1:3001/healthz
+          curl -fsS -o /dev/null -w '/en/ %{http_code}\n' http://127.0.0.1:3001/en/
+          # Without PUBLIC_ORIGIN the guard of RF-A23 exits before listening.
+          set +e
+          timeout 60 docker run --rm --name web-no-origin "$REPO/web:ci"
+          status=$?
+          set -e
+          docker rm -f web-no-origin >/dev/null 2>&1 || true
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "web without PUBLIC_ORIGIN exited with $status, expected a startup failure" >&2
+            exit 1
+          fi
+          echo "web without PUBLIC_ORIGIN exits with $status"
+      # plan-c decision 16: the production compose plus the local Postgres, in amd64.
+      - name: prod-local up
+        env:
+          IMAGE_TAG: ci
+        run: just _prod-local-up
+      - name: Health, version and headers (RF-C7)
+        env:
+          APP_VERSION: ${{ steps.version.outputs.app_version }}
+        run: |
+          set -euo pipefail
+          for svc in server web postgres; do
+            state="$(docker inspect -f '{{.State.Health.Status}}' "torneo-local-$svc-1")"
+            echo "$svc: $state"
+            [ "$state" = healthy ] || exit 1
+          done
+          health="$(curl -fsS http://127.0.0.1:8080/api/health)"
+          echo "/api/health: $health"
+          version="$(jq -r .version <<<"$health")"
+          if [ "$version" != "$APP_VERSION" ]; then
+            echo "version is $version, expected $APP_VERSION" >&2
+            exit 1
+          fi
+          curl -fsS -o /dev/null -w '/healthz %{http_code}\n' http://127.0.0.1:3000/healthz
+          headers="$(curl -fsS -I http://127.0.0.1:3000/es/)"
+          echo "$headers"
+          for name in x-content-type-options referrer-policy strict-transport-security; do
+            count="$(grep -ci "^$name:" <<<"$headers" || true)"
+            if [ "$count" != 1 ]; then
+              echo "/es/ sends $name $count times, expected once" >&2
+              exit 1
+            fi
+          done
+          if grep -i '^strict-transport-security:' <<<"$headers" | grep -Eqi 'includesubdomains|preload'; then
+            echo "HSTS must not carry includeSubDomains or preload" >&2
+            exit 1
+          fi
+          # Baseline without Traefik (RF-C7): printed, not asserted.
+          curl -sS -I http://127.0.0.1:3000/_app/version.json
+          curl -sS -I http://127.0.0.1:3000/healthz/
+      - name: Idle memory under the RNF (server < 64 MB, web < 200 MB)
+        run: |
+          set -euo pipefail
+          sleep 30
+          stats="$(docker stats --no-stream --format '{{.Name}} {{.MemUsage}}')"
+          echo "$stats"
+          to_bytes() {
+            awk -v v="$1" 'BEGIN {
+              n = v; sub(/[A-Za-z]+$/, "", n); u = v; sub(/^[0-9.]+/, "", u)
+              m["B"] = 1; m["KiB"] = 1024; m["MiB"] = 1048576; m["GiB"] = 1073741824
+              m["kB"] = 1000; m["MB"] = 1000000; m["GB"] = 1000000000
+              if (!(u in m) || n == "") exit 1
+              printf "%.0f\n", n * m[u]
+            }'
+          }
+          fail=0
+          for pair in torneo-local-server-1:64000000 torneo-local-web-1:200000000; do
+            name="${pair%%:*}"
+            limit="${pair##*:}"
+            usage="$(awk -v n="$name" '$1 == n { print $2 }' <<<"$stats")"
+            bytes="$(to_bytes "$usage")" || { echo "cannot parse $name usage '$usage'" >&2; exit 1; }
+            echo "$name: $bytes B (limit $limit B)"
+            if [ "$bytes" -ge "$limit" ]; then
+              echo "$name uses $usage at idle, over the RNF" >&2
+              fail=1
+            fi
+          done
+          exit "$fail"
+      - name: Container logs on failure
+        if: failure()
+        run: |
+          for svc in server web postgres; do
+            echo "::group::$svc"
+            docker logs "torneo-local-$svc-1" 2>&1 | tail -n 100 || true
+            echo "::endgroup::"
+          done
+      - name: prod-local down
+        if: always()
+        run: just prod-local-down
+
+  # The only required check (plan-c decision 19): skipped jobs count as success.
+  ci-ok:
+    needs: [changes, policy, rust, web, e2e, images]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in
+              failure | cancelled) echo "a required job ended in $r" >&2; exit 1 ;;
+            esac
+          done

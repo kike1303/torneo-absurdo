@@ -448,6 +448,10 @@ describe('check-workflows (RF-C12, plan-c decision 23)', () => {
     expect(checkWorkflows(valid)).toEqual([]);
   });
 
+  it('passes on the real repository', () => {
+    expect(checkWorkflows(loadTree(fileURLToPath(new URL('../../', import.meta.url))))).toEqual([]);
+  });
+
   it('accepts environment: { name: production } on deploy', () => {
     const tree = mutated({ [REL]: [[DEPLOY_ENV, '    environment:\n      name: production\n']] });
     expect(checkWorkflows(tree)).toEqual([]);

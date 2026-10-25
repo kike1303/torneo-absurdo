@@ -1,0 +1,22 @@
+# plan-c decision 14: just from its GitHub release, verified by a pinned SHA-256 before anything is
+# extracted, and only the binary is extracted. Same version as the owner's machine.
+name: setup-just
+description: Install just 1.58.0 (x86_64 musl) checked against a pinned SHA-256.
+runs:
+  using: composite
+  steps:
+    - name: Install just 1.58.0
+      shell: bash
+      run: |
+        set -euo pipefail
+        version=1.58.0
+        sum=4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d
+        archive="$RUNNER_TEMP/just.tar.gz"
+        curl -fsSL --proto '=https' --tlsv1.2 -o "$archive" \
+          "https://github.com/casey/just/releases/download/$version/just-$version-x86_64-unknown-linux-musl.tar.gz"
+        (cd "$RUNNER_TEMP" && echo "$sum  just.tar.gz" | sha256sum -c -)
+        mkdir -p "$RUNNER_TEMP/bin"
+        tar -xzf "$archive" -C "$RUNNER_TEMP/bin" just
+        rm -f "$archive"
+        echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+        "$RUNNER_TEMP/bin/just" --version

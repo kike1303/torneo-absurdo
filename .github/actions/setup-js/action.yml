@@ -1,0 +1,64 @@
+# plan-c decision 14: Node from .node-version, pnpm through corepack (the version and hash of
+# packageManager) and the pnpm store cache. The cache is read everywhere and written only by a
+# push to main (security-reviewer condition 7), so a PR never writes a cache entry.
+# Not `cache: pnpm` of setup-node: it needs pnpm on the PATH before setup-node, and corepack only
+# provides it afterwards (deviation from ADR-0006 D7).
+name: setup-js
+description: Node, pnpm via corepack, pnpm store cache (saved only on main) and a frozen install.
+inputs:
+  filter:
+    description: Optional pnpm --filter for the install (for example `.` for the root only).
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: .node-version
+        package-manager-cache: false
+
+    - name: Enable corepack and locate the pnpm store
+      id: pnpm
+      shell: bash
+      env:
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        FILTER: ${{ inputs.filter }}
+      run: |
+        set -euo pipefail
+        corepack enable
+        pnpm --version
+        echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+        # A partial store (policy installs the root only) never shares a key with a full one.
+        if [ -n "$FILTER" ]; then
+          echo "scope=filter-$(printf '%s' "$FILTER" | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
+        else
+          echo "scope=all" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Restore the pnpm store
+      id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.pnpm.outputs.store }}
+        key: pnpm-store-${{ runner.os }}-${{ steps.pnpm.outputs.scope }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: pnpm-store-${{ runner.os }}-${{ steps.pnpm.outputs.scope }}-
+
+    - name: pnpm install --frozen-lockfile
+      shell: bash
+      env:
+        FILTER: ${{ inputs.filter }}
+      run: |
+        set -euo pipefail
+        if [ -n "$FILTER" ]; then
+          pnpm install --frozen-lockfile --filter "$FILTER"
+        else
+          pnpm install --frozen-lockfile
+        fi
+
+    - name: Save the pnpm store (push to main only)
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.pnpm.outputs.store }}
+        key: ${{ steps.restore.outputs.cache-primary-key }}
