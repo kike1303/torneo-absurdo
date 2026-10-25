@@ -457,6 +457,36 @@ Con unos 30 PRs y 30 pushes a `main` al mes, en una mezcla típica, son unos 700
    - **Qué cambia frente a `86234e85…`:** el hijo `linux/amd64` es el mismo (`04f6411f…`, creado el 2026-10-21 21:51 UTC). El hijo `linux/arm64/v8` es el anterior (`65215e66…`, del 2026-10-21 01:17 UTC, en vez de `c8d02717…`). También cambia `ppc64le`, que no se usa. Los dos traen `RUST_VERSION=1.99.1`. El índice siguiente (`54e39a2f…`, registrado el 2026-10-22 a las 03:58 UTC) no se puede probar que cumpla los 3 días antes de las 03:58 de hoy, así que lo descarto.
    - **Efecto:** ninguno en CI, porque el `amd64` es idéntico. En la Mac, el `chef` corre sobre el `arm64` anterior. Dependabot moverá el digest cuando abra su primer PR.
    - El resto de la tabla de "Versiones fijadas" coincide al 2026-10-25: los digests de `node`, `postgres` y los dos `-debian13` (por `timeUploadedMs`), los diez SHAs de actions, `cargo-chef` 0.1.78, `cargo-zigbuild` 0.23.4 (ni una ni otra retiradas), `yaml` 2.9.1 (sin dependencias) y los SHA-256 de zig `x86_64` y `aarch64`, `just` 1.58.0 y `cargo-deny` 0.20.2, recalculados con una descarga de cada archivo.
+2. **C1-3, `wget` no viene en `rust:1.99.1-slim-bookworm`.** La decisión 1 decía que sí. `chef` instala `wget` junto con `xz-utils` en el mismo `apt-get` (paquetes de Debian firmados). `gcc` y `ca-certificates` sí vienen.
+3. **C1-3, `rustup toolchain install --no-self-update`.** Sin la opción, rustup 1.29.1 se autoactualiza a 1.29.2 durante el build, y esa descarga no está fijada. Con la opción solo agrega el target musl y `rustfmt`/`clippy` sobre la toolchain 1.99.1 de la imagen.
+4. **C1-3, aviso del linker de zig.** El `build` en `release` emite `warning: linker stderr: ignoring deprecated linker optimization setting '1'` (lint `linker_messages` de rustc). Es benigno: el binario sale estático y pasa `readelf`. No afecta al job `rust`, que compila con `musl-tools` y no con zig (decisión 17). Si molesta, se resuelve al subir zig y `cargo-zigbuild`.
+5. **C1-6, los fixtures de `check-compose` son mutaciones del fixture válido.** Hay un solo directorio válido (`scripts/__fixtures__/check-compose/valid/`, copia de los nueve archivos que lee el script), más `dockerignore-elsewhere/`. Los demás casos (70, uno por regla, más uno de `dockerignore-elsewhere`) son ediciones de una línea sobre el válido, declaradas en una tabla de `check-compose.test.mjs`. Cada edición comprueba que el texto que reemplaza existe, así que si el fixture válido cambia, el test falla en vez de esconder una regla. Copiar el compose entero unas 60 veces habría sumado miles de líneas al PR sin mejorar la cobertura.
+6. **C1-6, reglas de más en `check-compose.mjs`.** Todas apuntan en la dirección de RF-C1, RF-C4 y RF-C7:
+   - la base final de cada Dockerfile tiene que ser una etiqueta `:nonroot`;
+   - el compose de producción no lleva `name:` (decisión 12);
+   - `compose.local.yml` solo puede tener `services` y `volumes` en la raíz, porque un `networks:` ahí pisaría las redes externas;
+   - la regla de `127.0.0.1:` también aplica a `postgres`;
+   - `!**/.env.example` tiene que ir después de `**/.env.*`, porque en `.dockerignore` gana la última regla.
+
+   El listado de `*.dockerignore` exime a `scripts/__fixtures__/check-compose/`, que son datos de prueba que BuildKit nunca lee.
+7. **C1-6, `RUST_LOG`.** La regla rechaza `debug` y `trace` en cualquier directiva, pero no exige el valor exacto `info`, como dice RF-C6 ("más verboso que `info`"). Sí exige que la variable esté.
+8. **C1-6, `pnpm-lock.yaml`.** `pnpm add -Dw yaml@2.9.1` también reescribe los identificadores de peer de `vite`, porque `yaml` es su peer opcional (`vite@8.3.4(...)(yaml@2.9.1)`). No se mueve ninguna versión: el único paquete nuevo es `yaml@2.9.1`.
+9. **C1-7, recetas y volumen.**
+   - Hay una receta interna nueva, `_prod-local-preflight`, que comparten `prod-local` y `_prod-local-up`. Así la CI también la usa.
+   - Los puertos se comprueban con `/dev/tcp` de bash, no con `nc`, porque `nc -G` solo existe en macOS.
+   - `prod-local` valida el `tag` (`vX.Y.Z` o `sha-<7>`) antes del `pull`.
+   - `compose.local.yml` le da a `postgres` un volumen con nombre (`torneo-local-pg`). Es lo que conserva `prod-local-down` sin `-v`.
+10. **Medidas de C1-3 y C1-4 (Mac ARM, Colima con 2 CPU, 2 GiB y Rosetta).**
+    - **Build del server:** en frío, unos 4 min (112 s de `chef`, 97 s del `cook` y 27 s del `build`); en caliente, 26 s, cambiando `APP_VERSION` y con el `cook` en caché. Con 2 GiB alcanzó: no hubo que subir Colima a 4 GiB.
+    - **Build de `web`:** 42 s en frío.
+    - **Binario:** 5,266,192 B, `ELF 64-bit LSB executable, x86-64, statically linked, stripped`. `readelf -lW` no muestra `INTERP` y `readelf -dW` no muestra `NEEDED`.
+    - **Imágenes (`docker image ls` / comprimida):** `server` 14.5 MB / 3.4 MB; `web` 218 MB / 55.9 MB.
+    - **Memoria de `prod-local`** (unos 25 s después de `healthy`, bajo Rosetta, solo como referencia): `server` 12.6 MiB, `web` 108 MiB y `postgres` 58 MiB. Tras 1 h en reposo: `server` 12.6 MiB, `web` 61.5 MiB y `postgres` 19.4 MiB.
+11. **C1-8, plazo de logs: 18.8 días, así que el aviso no cambia.**
+    - **Medición:** `prod-local` en reposo durante 3,606 s, del 2026-10-25 02:50 a las 03:50 UTC. El `LogPath` de `torneo-local-server-1` pasó de 465 B a 70,330 B (+69,865 B, 243 líneas, ~289 B por línea con el envoltorio de `json-file`).
+    - **Cálculo:** 1,673,970 B/día, y 31,457,280 / 1,673,970 = **18.79 días**.
+    - **Comparación:** coincide con los 18.8 de B y queda por debajo de 21, así que "menos de 3 semanas" sigue siendo cierto y `docs/legal/aviso-de-privacidad.md` no cambia.
+    - **Condiciones:** durante la hora corrieron `just check` y `just e2e`, que no le hacen peticiones a `prod-local`. Las únicas líneas son las del healthcheck de Docker cada 15 s.
 
 ## Revisión
 
