@@ -93,7 +93,7 @@ jobs:
                 echo "$IMAGE_REPO/$img:$t already exists: published tags never move" >&2
                 exit 1
               fi
-              if ! grep -Eqi 'not found|manifest unknown' <<<"$out"; then
+              if ! grep -Eqi 'not found|manifest unknown|name unknown' <<<"$out"; then
                 echo "cannot tell whether $IMAGE_REPO/$img:$t exists:" >&2
                 echo "$out" >&2
                 exit 1
