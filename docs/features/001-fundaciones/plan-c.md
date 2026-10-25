@@ -16,7 +16,7 @@ approvals:
 linear: TA-1
 depends_on: []
 created: 2026-10-24
-updated: 2026-10-24
+updated: 2026-10-25
 ---
 
 # Plan: Fundaciones del monorepo — fase C (desde spec.md 2026-10-23)
@@ -505,6 +505,47 @@ Con unos 30 PRs y 30 pushes a `main` al mes, en una mezcla típica, son unos 700
       - **Labels con mayúsculas.** Antes las claves se pasaban a minúsculas, así que una pisaba a la otra en el chequeo, pero Docker recibía las dos: por ejemplo, `...headers.STSPRELOAD=true` junto a `...stsPreload=false`, o `routers.TORNEO-WEB.MIDDLEWARES=` vacío. Ahora dos claves que solo difieren en mayúsculas fallan, y cada clave tiene que estar escrita exactamente como en RF-C4.
       - **Esto cambia la decisión 9,** que comparaba las claves sin distinguir mayúsculas: el test que lo aceptaba ahora exige la grafía exacta.
     - **Nits.** El comentario de `apps/server/Dockerfile` ahora nombra `wget`. `prod-local` corre la comprobación previa una sola vez, antes del build, y después llama a la receta interna nueva `_prod-local-start` (redes y `compose up`). `_prod-local-up`, la que usará la CI, sigue haciendo la comprobación previa y luego `_prod-local-start`.
+13. **C2-10, `check-workflows.mjs` va más allá de RF-C12.** Todo apunta en la misma dirección que la decisión 23:
+    - **Ningún `${{ }}` dentro de `run:`**, con cualquier contexto, no solo con los datos controlables (`inputs.*`, `github.event.*`, `github.head_ref`, `github.ref_name`). Así la regla no depende de mantener una lista: todo valor llega a `run:` por `env:`, también en las acciones compuestas.
+    - **`secrets`** se busca en los valores ya parseados (dentro de `${{ }}`, en todo `if:`, que es una expresión aunque no lleve `${{ }}`, y en cualquier clave `secrets:`), nunca en los comentarios. Los contextos no distinguen mayúsculas, así que `SECRETS.X` también falla.
+    - **Reglas de más:**
+      - el conjunto de jobs de `ci.yml` y `release.yml` es exactamente el de la tabla, así que también falla si falta uno;
+      - `ci-ok` necesita todos los demás jobs y corre con `if: always()`;
+      - `policy` no tiene `if:`;
+      - `continue-on-error` también está prohibido en los pasos de las acciones compuestas;
+      - las acciones locales tienen que ser `composite`;
+      - mismo endurecimiento del YAML que `check-compose` (ni anclas, ni alias, ni `<<`, ni etiquetas explícitas, ni *warnings*).
+    - Las reglas de texto crudo (la plataforma de despliegue, `/api/v1/deploy` y la fusión automática) sí leen los comentarios, así que los workflows nombran a la plataforma solo de forma genérica.
+    - **Fixtures:** hay un solo conjunto válido mínimo (`scripts/__fixtures__/check-workflows/valid/`), independiente de los workflows reales para que un bump de Dependabot no obligue a resincronizarlo, y 54 mutaciones de una o dos líneas, una por regla y con las cuatro sintaxis de `secrets`, como en la desviación 5. Un test exige además que el repo real pase.
+14. **C2-11, filtros de `changes` más amplios que D7 y RF-C8.**
+    - **`web`** agrega `.editorconfig`, `infra/**`, `.dockerignore`, `**/Dockerfile`, `rust-toolchain.toml` y `.github/dependabot.yml`. Son las entradas de `check-web`: Prettier formatea el YAML de `infra/` y de `.github/`, y `check-compose.mjs` lee `infra/`, `.dockerignore`, los Dockerfiles y `rust-toolchain.toml`. Sin ellas, un PR que solo tocara esos archivos dejaría `check-web` en rojo en `main` con `ci-ok` en verde.
+    - **`rust`** agrega `clippy.toml` (lo lee clippy) e `infra/compose.dev.yml` (el Postgres de `db-up`; un bump de su digest corre los tests de Rust).
+15. **C2-11, detalles de las acciones y de los jobs.**
+    - **`setup-js`.** La llave de la caché incluye el alcance del install (`all`, o el hash del `filter`). Sin eso, `policy` (que solo instala la raíz) podría guardar en `main` un store parcial bajo la misma llave que el completo, y los demás jobs tendrían un `cache-hit` que no saltaría nunca el `save`. También fija `package-manager-cache: false`: `setup-node` v7 solo la activa para npm, pero así queda explícito.
+    - **`e2e`.** Con la caché de navegadores restaurada corre `playwright install-deps` (los paquetes del sistema no se guardan en la caché); sin ella, `install --with-deps`. El artefacto sube `test-results/screenshots` y `test-results/logs` con `if: always()`, por 14 días.
+    - **`images`.** Además de la decisión 16, corre el smoke test de RF-C2 con la imagen `web` sola: `--read-only`, `127.0.0.1:3001`, 200 en `/healthz` y `/en/`, y salida distinta de 0 y de 124 sin `PUBLIC_ORIGIN`. Si un paso falla, vuelca las últimas 100 líneas de `docker logs` de los tres contenedores. Los logs del server ya pasan por la allowlist de campos de B, y el `postgres` es el local, sin datos reales.
+    - **`release.yml/build`.**
+      - El chequeo de que ninguna de las dos etiquetas existe distingue "no existe" (`not found`, `manifest unknown` o `name unknown`, la respuesta de GHCR cuando el paquete todavía no existe) de cualquier otro error, que también hace fallar el job.
+      - La igualdad de digests compara el SHA-256 del manifiesto crudo de las dos etiquetas.
+      - El checkout corre solo en un tag, no en el rollback.
+      - El login usa `github.token`, no `secrets.GITHUB_TOKEN`.
+    - **`check-hooks.sh`** además exige `#!/bin/sh` como primera línea y pasa `sh -n` sobre el hook. Probado en negativo, en un clon temporal: con `100644` y con `exec just test`, falla con el mensaje de cada caso.
+16. **C2-11, `actionlint` no está instalado,** y por la regla del encargo no lo instalé. En su lugar:
+    - los 34 bloques `run:` de los dos workflows y las dos acciones pasan `bash -n`;
+    - el parser de `yaml` lee los cuatro archivos sin errores;
+    - `check-workflows.mjs` pasa sobre el repo;
+    - el paso de memoria se probó con salidas de ejemplo de `docker stats` (`190.7MiB` pasa y `191MiB` falla contra 200,000,000 B).
+    - El job `policy` se simuló en un clon superficial (`git clone --depth 1`): `pnpm install --frozen-lockfile --filter .` instala solo la raíz (59 paquetes), y `check-workflows.mjs`, sus 59 tests y `check-hooks.sh` pasan.
+
+    Lo que solo valida GitHub (expresiones, contextos e inputs de cada action) se ve en la primera corrida del PR.
+17. **C2-14, `architecture.md`.** El comando de `torneo-db` (`docker network create --driver bridge torneo-db`, sin subred fija) sale de RF-C7, porque ADR-0006 D1 no lo escribe. El fragmento de la configuración del proxy nombra el servicio `traefik` del compose del proxy, y advierte que se agrega `torneo-edge` sin quitar la red `coolify`.
+18. **Evidencia local de C2 (Mac ARM, Colima, 2026-10-25, con load average de 280 a 410 por otra sesión).**
+    - **`just check`:** verde en 73 s. Prettier sin cambios; los 1213 tests de Vitest de `web` y los 200 de `scripts/` (8 archivos, sin `check-workflows`); `check-tokens`, `check-i18n`, `check-prerender`, `check-kit-config` y `check-compose`; `cargo fmt`, clippy dos veces, `cargo test --workspace` con Postgres, `_check-gen` y `check-ts-rs-graph`.
+      - La primera corrida falló en un solo test de tiempo ajeno a C2: `sanitize.test.ts`, "`a://:`" lineal en 8 KB, que tardó 109 ms contra un tope de 50 ms con la máquina a load 370. Solo pasa 72/72, y la segunda corrida completa salió verde. C2 no toca `apps/web` (`git diff --stat ccfcf1e -- apps/web` vacío).
+    - **`just e2e`:** verde, 63/63 en 42 s.
+      - La primera corrida falló en un test de WebKit (`theme.spec.ts`, RF-A8: una navegación inesperada a `/es/`; lo más probable es que el clic llegara antes de la hidratación, sin verificar). Una repetición aislada (`--repeat-each 3`) falló en "test 5, no flicker" de WebKit: `__firstFrameTheme` llegó `undefined`, porque la sonda de `requestAnimationFrame` no corrió antes del `evaluate`. Los dos son de tiempo y aparecen con la CPU saturada (load de unos 400).
+      - El runner de Actions no tiene esa carga, pero si aparecen ahí, son candidatos a revisión de qa-engineer (esperar a la hidratación), no de C2.
+    - **`policy` simulado** en un clon superficial: verde (desviación 16).
 
 ## Revisión
 
