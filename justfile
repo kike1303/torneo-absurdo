@@ -174,3 +174,8 @@ db-down:
 db-reset:
     docker compose -f infra/compose.dev.yml down -v
     {{just_executable()}} db-up
+
+# Needs Docker. Never opens nor changes an existing .env (plan-c decision 11).
+# Prove with Docker that .dockerignore keeps .env files, .git and build outputs out of the context
+check-dockerignore:
+    bash scripts/check-dockerignore.sh
