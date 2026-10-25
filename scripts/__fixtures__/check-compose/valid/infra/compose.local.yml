@@ -1,0 +1,38 @@
+# Override of docker-compose.yml for `just prod-local` only (RF-C7). It only adds: the local
+# Postgres on `torneo-db` and the ports of `web` and `server` on 127.0.0.1. It never changes the
+# images, labels, networks or environment of `web` and `server` (scripts/check-compose.mjs).
+# Development credentials only; never production values.
+
+services:
+  postgres:
+    # Same digest as infra/compose.dev.yml (scripts/check-compose.mjs compares them).
+    image: postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+    # Same tuning as the Coolify Postgres (ADR-0006 D4).
+    command:
+      ['postgres', '-c', 'shared_buffers=128MB', '-c', 'max_connections=20', '-c', 'work_mem=4MB']
+    environment:
+      POSTGRES_USER: torneo
+      POSTGRES_PASSWORD: torneo_local
+      POSTGRES_DB: torneo
+    mem_limit: 512m
+    memswap_limit: 512m
+    volumes:
+      - torneo-local-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U torneo -d torneo']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      - torneo-db
+
+  server:
+    ports:
+      - '127.0.0.1:8080:8080'
+
+  web:
+    ports:
+      - '127.0.0.1:3000:3000'
+
+volumes:
+  torneo-local-pg:

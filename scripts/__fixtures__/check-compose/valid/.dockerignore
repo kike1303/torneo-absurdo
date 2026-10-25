@@ -1,0 +1,27 @@
+# Build context of apps/server/Dockerfile and apps/web/Dockerfile (RF-C3).
+# The `**/` forms are mandatory: in .dockerignore a bare `.env` only matches the root of the
+# context, so `apps/server/.env` would end up in a builder layer and in the buildx cache.
+# scripts/check-compose.mjs checks these entries; scripts/check-dockerignore.sh proves them.
+# Never add a `<name>.Dockerfile.dockerignore` next to a Dockerfile: BuildKit prefers it over this one.
+
+# Secrets and private material
+**/.env
+**/.env.*
+!**/.env.example
+private/
+content/_local/
+
+# VCS and agent files
+.git
+.claude/
+
+# Build outputs, dependencies and generated code (rebuilt inside the image)
+**/target
+**/node_modules
+**/.svelte-kit
+apps/web/build
+apps/web/test-results
+apps/web/src/lib/paraglide
+
+# Not needed by any image
+docs/
