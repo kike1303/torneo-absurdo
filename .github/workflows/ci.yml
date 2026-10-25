@@ -116,6 +116,8 @@ jobs:
         run: node scripts/check-workflows.mjs
       - name: check-workflows tests
         run: pnpm exec vitest run --config scripts/vitest.policy.config.mjs
+      - name: just hooks in a temporary clone (RF-C17)
+        run: bash scripts/check-hooks.sh
 
   rust:
     needs: changes
