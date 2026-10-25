@@ -274,6 +274,10 @@ function parseYaml(text, file, problems) {
   try {
     const document = parseDocument(text);
     if (document.errors.length > 0) throw document.errors[0];
+    // A warning (for example an unknown tag) means the parser and Compose may disagree.
+    for (const warning of document.warnings) {
+      problems.push(`${file}: yaml-warnings: ${warning.message.split('\n')[0]}`);
+    }
     // Compose resolves anchors, aliases and `<<` merge keys; the YAML 1.2 core schema of `yaml`
     // keeps `<<` as a literal key. Forbidding all three makes the script see what Compose sees.
     visit(document, {
@@ -289,6 +293,9 @@ function parseYaml(text, file, problems) {
         if (!isAlias(node) && node.anchor) {
           problems.push(`${file}: yaml-anchors: anchor &${node.anchor} is not allowed`);
         }
+        // Compose honours !reset and !override in any file and drops or replaces the key, while
+        // the parser keeps the value: no explicit tag at all (!reset, !override, !!str, ...).
+        if (node.tag) problems.push(`${file}: yaml-tags: ${node.tag} is not allowed`);
       },
     });
     const doc = document.toJS();
@@ -430,11 +437,23 @@ function checkProduction(doc, webHeaderLabels, problems) {
       problems.push(`${at}: rust-log: RUST_LOG must not be more verbose than info`);
     }
 
-    // Labels: exact set, keys compared without case (Traefik ignores it).
-    /** @type {Map<string, string>} */
+    // Labels: exact set. Docker keeps keys that differ only in case as separate labels, so two
+    // such keys are rejected (one could hide the other) and each key must have the exact
+    // spelling of RF-C4.
+    /** @type {Map<string, string>} lowercase key → value */
     const labels = new Map();
+    /** @type {Map<string, string>} lowercase key → key as written */
+    const spelled = new Map();
     for (const [k, v] of toMap(s.labels)) {
-      labels.set(k.toLowerCase(), normalizeInterpolation(v ?? ''));
+      const lower = k.toLowerCase();
+      if (spelled.has(lower)) {
+        problems.push(
+          `${at}: labels: ${k} collides with ${spelled.get(lower)} (keys differ only in case)`,
+        );
+        continue;
+      }
+      spelled.set(lower, k);
+      labels.set(lower, normalizeInterpolation(v ?? ''));
     }
     labelsBySvc[svc] = labels;
     for (const [k, v] of labels) {
@@ -474,6 +493,13 @@ function checkProduction(doc, webHeaderLabels, problems) {
     }
     for (const k of labels.keys()) {
       if (!expectedLower.has(k)) problems.push(`${at}: labels: unexpected ${k}`);
+    }
+    const expectedSpelling = new Map(Object.keys(expected).map((k) => [k.toLowerCase(), k]));
+    for (const [lower, written] of spelled) {
+      const exact = expectedSpelling.get(lower);
+      if (exact && exact !== written) {
+        problems.push(`${at}: labels: ${written} must be spelled ${exact}`);
+      }
     }
   }
 

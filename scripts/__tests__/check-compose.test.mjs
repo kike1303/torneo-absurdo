@@ -694,6 +694,77 @@ const REVIEW_CASES = [
     { [DI]: [['docs/\n', 'docs/\n!private/notes.md\n']] },
     /reinclude: !private\/notes\.md is not allowed/,
   ],
+  // Explicit YAML tags: Compose honours !reset and !override even in the base file and drops or
+  // replaces the key, while the parser keeps the value (security re-review of PR #4).
+  [
+    '!reset on cap_drop',
+    { [C]: [['    cap_drop: [ALL]\n', '    cap_drop: !reset [ALL]\n']] },
+    /docker-compose\.yml: yaml-tags: !reset is not allowed/,
+  ],
+  [
+    '!reset on labels',
+    {
+      [C]: [
+        [
+          '    labels:\n      - traefik.enable=true\n',
+          '    labels: !reset\n      - traefik.enable=true\n',
+        ],
+      ],
+    },
+    /docker-compose\.yml: yaml-tags: !reset is not allowed/,
+  ],
+  [
+    '!reset on the postgres volume',
+    {
+      [L]: [
+        ['    volumes:\n      - torneo-local-pg', '    volumes: !reset\n      - torneo-local-pg'],
+      ],
+    },
+    /compose\.local\.yml: yaml-tags: !reset is not allowed/,
+  ],
+  [
+    '!override in compose.local.yml',
+    {
+      [L]: [
+        [
+          "    ports:\n      - '127.0.0.1:8080:8080'",
+          "    ports: !override\n      - '127.0.0.1:8080:8080'",
+        ],
+      ],
+    },
+    /compose\.local\.yml: yaml-tags: !override is not allowed/,
+  ],
+  [
+    '!!str on a value',
+    { [C]: [['    restart: unless-stopped\n', '    restart: !!str unless-stopped\n']] },
+    /yaml-tags: tag:yaml\.org,2002:str is not allowed/,
+  ],
+  // Label keys that differ only in case: Docker keeps both, so they must not collide and must be
+  // spelled exactly as in RF-C4.
+  [
+    'labels colliding in case (STSPRELOAD)',
+    {
+      [C]: [
+        [
+          `      - ${HEADERS}.stsPreload=false\n`,
+          `      - ${HEADERS}.STSPRELOAD=true\n      - ${HEADERS}.stsPreload=false\n`,
+        ],
+      ],
+    },
+    /labels: .*\.stsPreload collides with .*\.STSPRELOAD \(keys differ only in case\)/,
+  ],
+  [
+    'labels colliding in case (empty middlewares)',
+    {
+      [C]: [
+        [
+          '      - traefik.http.routers.torneo-web.middlewares=torneo-web-headers\n',
+          '      - traefik.http.routers.TORNEO-WEB.MIDDLEWARES=\n      - traefik.http.routers.torneo-web.middlewares=torneo-web-headers\n',
+        ],
+      ],
+    },
+    /labels: traefik\.http\.routers\.torneo-web\.middlewares collides with traefik\.http\.routers\.TORNEO-WEB\.MIDDLEWARES/,
+  ],
 ];
 
 describe('check-compose (RF-C3, RF-C4, RF-C6)', () => {
@@ -728,13 +799,15 @@ describe('check-compose (RF-C3, RF-C4, RF-C6)', () => {
     expect(valid.read(L)).toContain('  postgres:\n');
   });
 
-  it('compares label keys without case, like Traefik', () => {
+  it('requires the exact spelling of each label key, not only the same key without case', () => {
     const tree = mutated({
       [C]: [
         ['torneo-web.observability.accesslogs=false', 'torneo-web.observability.accessLogs=false'],
       ],
     });
-    expect(checkCompose(tree)).toEqual([]);
+    expect(checkCompose(tree)).toContain(
+      `${C}: services.web: labels: traefik.http.routers.torneo-web.observability.accessLogs must be spelled traefik.http.routers.torneo-web.observability.accesslogs`,
+    );
   });
 
   it('accepts any message in ${VAR:?message}', () => {
