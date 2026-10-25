@@ -451,7 +451,12 @@ Repo público: los minutos son ilimitados (ADR-0006), así que la estimación es
 Con unos 30 PRs y 30 pushes a `main` al mes, en una mezcla típica, son unos 700–900 min/mes, por debajo de los ~2,000 de referencia aunque el repo pasara a privado. La caché `gha` (cuota de 10 GB) la escriben solo `main` (rust-cache, pnpm, Playwright y las dos imágenes con `scope`), y el release no escribe nada (RF-C13).
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+
+1. **C1-1, digest del builder de Rust (excepción del owner, 2026-10-25).** El owner autorizó empezar C1 antes de las 10:45 UTC del 2026-10-25, con esta regla: si existe un digest anterior de `rust:1.99.1-slim-bookworm` que ya cumpla los 3 días, se usa ese; si no, el del plan. **Existe, y es el que uso:** `rust:1.99.1-slim-bookworm@sha256:11d39e118fbc6aba0c89511ff6810dcbad03e7c28d78e3f9d59b714f8d4e08dc`.
+   - **Fuente:** historial de `repos/rust/remote/1.99.1-slim-bookworm.md` en `docker-library/repo-info`. El commit `b1870c3` (2026-10-21 23:04 UTC) registra ese índice, así que se subió antes de esa hora y cumple los 3 días desde el 2026-10-24 23:04 UTC. La consulta fue el 2026-10-25 a las 02:29 UTC.
+   - **Qué cambia frente a `86234e85…`:** el hijo `linux/amd64` es el mismo (`04f6411f…`, creado el 2026-10-21 21:51 UTC). El hijo `linux/arm64/v8` es el anterior (`65215e66…`, del 2026-10-21 01:17 UTC, en vez de `c8d02717…`). También cambia `ppc64le`, que no se usa. Los dos traen `RUST_VERSION=1.99.1`. El índice siguiente (`54e39a2f…`, registrado el 2026-10-22 a las 03:58 UTC) no se puede probar que cumpla los 3 días antes de las 03:58 de hoy, así que lo descarto.
+   - **Efecto:** ninguno en CI, porque el `amd64` es idéntico. En la Mac, el `chef` corre sobre el `arm64` anterior. Dependabot moverá el digest cuando abra su primer PR.
+   - El resto de la tabla de "Versiones fijadas" coincide al 2026-10-25: los digests de `node`, `postgres` y los dos `-debian13` (por `timeUploadedMs`), los diez SHAs de actions, `cargo-chef` 0.1.78, `cargo-zigbuild` 0.23.4 (ni una ni otra retiradas), `yaml` 2.9.1 (sin dependencias) y los SHA-256 de zig `x86_64` y `aarch64`, `just` 1.58.0 y `cargo-deny` 0.20.2, recalculados con una descarga de cada archivo.
 
 ## Revisión
 
