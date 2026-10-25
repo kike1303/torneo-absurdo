@@ -11,7 +11,8 @@ FROM --platform=$BUILDPLATFORM rust:1.99.1-slim-bookworm@sha256:11d39e118fbc6aba
 ARG BUILDARCH
 WORKDIR /app
 
-# xz-utils unpacks zig; the slim image has gcc (host build scripts) and ca-certificates.
+# wget downloads zig and xz-utils unpacks it (the slim image has neither); gcc (host build
+# scripts) and ca-certificates already come with it.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends wget xz-utils \
     && rm -rf /var/lib/apt/lists/*

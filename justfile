@@ -220,11 +220,16 @@ prod-local tag="": _prod-local-preflight
         echo "tag must be vX.Y.Z or sha-<7 hex>" >&2
         exit 1
     fi
-    IMAGE_TAG="$tag" {{just_executable()}} _prod-local-up
+    # The preflight already ran (before the build), so go straight to the start.
+    IMAGE_TAG="$tag" {{just_executable()}} _prod-local-start
 
-# DATABASE_URL and PUBLIC_HOST of the shell are dropped: only infra/local.env feeds the compose.
 # Start the stack with an existing IMAGE_TAG, without building (also used by the CI job `images`)
 _prod-local-up: _prod-local-preflight
+    {{just_executable()}} _prod-local-start
+
+# DATABASE_URL and PUBLIC_HOST of the shell are dropped: only infra/local.env feeds the compose.
+# Networks and `compose up`, without the preflight (shared by prod-local and _prod-local-up)
+_prod-local-start:
     #!/usr/bin/env bash
     set -euo pipefail
     : "${IMAGE_TAG:?IMAGE_TAG is required}"
