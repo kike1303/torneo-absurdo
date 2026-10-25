@@ -469,7 +469,7 @@ Con unos 30 PRs y 30 pushes a `main` al mes, en una mezcla típica, son unos 700
    - `!**/.env.example` tiene que ir después de `**/.env.*`, porque en `.dockerignore` gana la última regla.
 
    El listado de `*.dockerignore` exime a `scripts/__fixtures__/check-compose/`, que son datos de prueba que BuildKit nunca lee.
-7. **C1-6, `RUST_LOG`.** La regla rechaza `debug` y `trace` en cualquier directiva, pero no exige el valor exacto `info`, como dice RF-C6 ("más verboso que `info`"). Sí exige que la variable esté.
+7. **C1-6, `RUST_LOG` (corregida en la revisión del PR #4).** La primera versión solo rechazaba las palabras `debug` y `trace`, y dejaba pasar `warn`, `off`, un target sin nivel (`server`, `info,sqlx`), que en `EnvFilter` es TRACE, y niveles numéricos (`info,server=5`). Ahora la regla exige el valor exacto `info` que fija RF-C4, con un fixture para cada una de esas cinco formas. `warn` y `off` también quedan fuera porque quitarían la línea de `/api/health` en la que se apoya el plazo de logs (desviación 11).
 8. **C1-6, `pnpm-lock.yaml`.** `pnpm add -Dw yaml@2.9.1` también reescribe los identificadores de peer de `vite`, porque `yaml` es su peer opcional (`vite@8.3.4(...)(yaml@2.9.1)`). No se mueve ninguna versión: el único paquete nuevo es `yaml@2.9.1`.
 9. **C1-7, recetas y volumen.**
    - Hay una receta interna nueva, `_prod-local-preflight`, que comparten `prod-local` y `_prod-local-up`. Así la CI también la usa.
@@ -487,6 +487,20 @@ Con unos 30 PRs y 30 pushes a `main` al mes, en una mezcla típica, son unos 700
     - **Cálculo:** 1,673,970 B/día, y 31,457,280 / 1,673,970 = **18.79 días**.
     - **Comparación:** coincide con los 18.8 de B y queda por debajo de 21, así que "menos de 3 semanas" sigue siendo cierto y `docs/legal/aviso-de-privacidad.md` no cambia.
     - **Condiciones:** durante la hora corrieron `just check` y `just e2e`, que no le hacen peticiones a `prod-local`. Las únicas líneas son las del healthcheck de Docker cada 15 s.
+12. **Revisión del PR #4 (architect, security-reviewer y qa-engineer): `check-compose.mjs` se endurece.** Para cada hallazgo, primero un fixture que fallaba y después el arreglo.
+    - **Anclas, alias y `<<`.** `yaml` (esquema core de YAML 1.2) deja `<<` como clave literal, pero Compose sí lo resuelve, así que `<<: *ancla` podía meter `ports`, `privileged` o `docker.sock` sin que el script lo viera. Ahora el parser recorre el documento y rechaza cualquier ancla, alias o clave `<<` en los tres archivos de compose.
+    - **Listas cerradas de claves.**
+      - Raíz de producción: solo `services` y `networks`, así que `include` y las extensiones `x-*` fallan.
+      - Raíz de `compose.local.yml`: siguen siendo solo `services` y `volumes`, y `volumes` solo puede tener `torneo-local-pg`, sin opciones.
+      - `server` y `web`: exactamente las claves de RF-C4. Faltar una o sobrar otra (`privileged`, `cap_add`, `user`, `env_file`, `extends`, `volumes`, `network_mode`…) falla.
+      - `healthcheck`: exactamente `test`, `interval`, `timeout`, `retries` y `start_period`, así que `disable: true` falla.
+      - `logging`: exactamente `driver` y `options`.
+      - `depends_on`: exactamente `server: { condition: service_healthy }`.
+      - Redes externas: exactamente `{ external: true }`, sin `name:`. En `torneo-edge`, `server` solo lleva el alias, sin `ipv4_address`; `torneo-db` no lleva opciones.
+      - `postgres` de `compose.local.yml`: claves cerradas, el `command` de D4, las variables `POSTGRES_USER`, `POSTGRES_PASSWORD` y `POSTGRES_DB`, el único volumen `torneo-local-pg:/var/lib/postgresql/data` y un healthcheck sin `disable`.
+    - **`.dockerignore`.** Rechaza cualquier línea `!` distinta de `!**/.env.example`. Es más amplio que lo pedido (reinclusiones de `.env*`), porque reincluir algo de `private/` o de `.git` es igual de grave, y `check-dockerignore.sh` solo prueba archivos llamados `.env`.
+    - **Fixture válido.** Un test exige que `valid/` sea idéntico, byte a byte, a los nueve archivos reales. Así un bump de Dependabot obliga a resincronizarlo en el mismo PR.
+    - **Nits.** El comentario de `apps/server/Dockerfile` ahora nombra `wget`. `prod-local` corre la comprobación previa una sola vez, antes del build, y después llama a la receta interna nueva `_prod-local-start` (redes y `compose up`). `_prod-local-up`, la que usará la CI, sigue haciendo la comprobación previa y luego `_prod-local-start`.
 
 ## Revisión
 
