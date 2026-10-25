@@ -1,0 +1,47 @@
+# Minimal valid release.yml for check-workflows tests. Not a real workflow.
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: echo "$INPUT_TAG"
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions: {}
+    steps:
+      - env:
+          DEPLOY_MODE: ${{ vars.DEPLOY_MODE }}
+        run: |
+          if [ "$DEPLOY_MODE" = api ]; then
+            echo "DEPLOY_MODE=api is not implemented: it requires a new OK from the owner" >&2
+            exit 1
+          fi
+  verify:
+    needs: deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - run: echo verify
