@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse } from 'yaml';
+import { isAlias, isScalar, parseDocument, visit } from 'yaml';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -42,7 +42,9 @@ const HEALTH_TEST = {
 const MEMORY = { server: '256m', web: '384m' };
 const PUBLIC_ORIGIN = 'https://${PUBLIC_HOST:?}';
 const ENV = {
-  server: { DATABASE_URL: '${DATABASE_URL:?}', PUBLIC_ORIGIN, RUST_LOG: null },
+  // Exactly info (RF-C4): `warn` or `off` drop the /api/health line the log retention relies on,
+  // and a bare target (`info,sqlx`) or a number (`server=5`) turns on TRACE.
+  server: { DATABASE_URL: '${DATABASE_URL:?}', PUBLIC_ORIGIN, RUST_LOG: 'info' },
   web: {
     PUBLIC_ORIGIN,
     ADDRESS_HEADER: 'X-Forwarded-For',
@@ -56,6 +58,67 @@ const FORBIDDEN_ENV = {
   server: ['BIND_ADDR'],
   web: ['ORIGIN', 'PROTOCOL_HEADER', 'HOST_HEADER', 'PORT_HEADER'],
 };
+// Closed lists of keys (RF-C4): anything else (privileged, cap_add, user, env_file, extends,
+// volumes, network_mode, ...) fails, so the hardening cannot be bypassed by an extra key.
+const ROOT_KEYS = ['networks', 'services'];
+const SERVICE_KEYS = {
+  server: [
+    'cap_drop',
+    'environment',
+    'healthcheck',
+    'image',
+    'labels',
+    'logging',
+    'mem_limit',
+    'memswap_limit',
+    'networks',
+    'platform',
+    'read_only',
+    'restart',
+    'security_opt',
+    'stop_grace_period',
+  ],
+  web: [
+    'cap_drop',
+    'depends_on',
+    'environment',
+    'healthcheck',
+    'image',
+    'labels',
+    'logging',
+    'mem_limit',
+    'memswap_limit',
+    'networks',
+    'platform',
+    'read_only',
+    'restart',
+    'security_opt',
+    'tmpfs',
+  ],
+};
+const HEALTH_KEYS = ['interval', 'retries', 'start_period', 'test', 'timeout'];
+const POSTGRES_KEYS = [
+  'command',
+  'environment',
+  'healthcheck',
+  'image',
+  'mem_limit',
+  'memswap_limit',
+  'networks',
+  'volumes',
+];
+const POSTGRES_COMMAND = [
+  'postgres',
+  '-c',
+  'shared_buffers=128MB',
+  '-c',
+  'max_connections=20',
+  '-c',
+  'work_mem=4MB',
+];
+const POSTGRES_ENV = ['POSTGRES_DB', 'POSTGRES_PASSWORD', 'POSTGRES_USER'];
+const POSTGRES_HEALTH_KEYS = ['interval', 'retries', 'test', 'timeout'];
+const LOCAL_VOLUME = 'torneo-local-pg';
 const DEV_ONLY_VARS = ['ENABLE_DEV_CATALOG', 'ENABLE_WS_ECHO'];
 const LOCAL_PORTS = { server: ['127.0.0.1:8080:8080'], web: ['127.0.0.1:3000:3000'] };
 const DOCKERIGNORE_REQUIRED = [
@@ -209,7 +272,26 @@ function parseYaml(text, file, problems) {
     return null;
   }
   try {
-    const doc = parse(text);
+    const document = parseDocument(text);
+    if (document.errors.length > 0) throw document.errors[0];
+    // Compose resolves anchors, aliases and `<<` merge keys; the YAML 1.2 core schema of `yaml`
+    // keeps `<<` as a literal key. Forbidding all three makes the script see what Compose sees.
+    visit(document, {
+      Pair(_, pair) {
+        if (isScalar(pair.key) && pair.key.value === '<<') {
+          problems.push(`${file}: yaml-anchors: merge key << is not allowed`);
+        }
+      },
+      Alias(_, node) {
+        problems.push(`${file}: yaml-anchors: alias *${node.source} is not allowed`);
+      },
+      Node(_, node) {
+        if (!isAlias(node) && node.anchor) {
+          problems.push(`${file}: yaml-anchors: anchor &${node.anchor} is not allowed`);
+        }
+      },
+    });
+    const doc = document.toJS();
     if (!doc || typeof doc !== 'object') {
       problems.push(`${file}: yaml: not a mapping`);
       return null;
@@ -244,11 +326,20 @@ function checkProduction(doc, webHeaderLabels, problems) {
     problems.push(`${f}: services: must be exactly server and web (found ${names.join(', ')})`);
   }
   if ('name' in doc) problems.push(`${f}: no-name: top-level name is set by Coolify`);
+  for (const key of Object.keys(doc)) {
+    if (!ROOT_KEYS.includes(key)) problems.push(`${f}: root-keys: ${key} is not allowed`);
+  }
 
   const nets = doc.networks ?? {};
   for (const net of ['torneo-edge', 'torneo-db']) {
-    if (nets[net]?.external !== true) {
-      problems.push(`${f}: networks: ${net} must be declared with external: true`);
+    // `name:` would point the external network somewhere else.
+    if (!same(nets[net], { external: true })) {
+      problems.push(`${f}: networks: ${net} must be declared with external: true and nothing else`);
+    }
+  }
+  for (const net of Object.keys(nets)) {
+    if (!['torneo-edge', 'torneo-db'].includes(net)) {
+      problems.push(`${f}: networks: only torneo-edge and torneo-db (found ${net})`);
     }
   }
 
@@ -262,6 +353,14 @@ function checkProduction(doc, webHeaderLabels, problems) {
     if (!s || typeof s !== 'object') continue;
     const at = `${f}: services.${svc}`;
 
+    for (const key of Object.keys(s)) {
+      if (!SERVICE_KEYS[svc].includes(key)) {
+        problems.push(`${at}: service-keys: ${key} is not allowed`);
+      }
+    }
+    for (const key of SERVICE_KEYS[svc]) {
+      if (!(key in s)) problems.push(`${at}: service-keys: ${key} is required`);
+    }
     if ('build' in s) problems.push(`${at}: no-build: build is forbidden (images come from GHCR)`);
     if ('ports' in s) problems.push(`${at}: no-ports: ports are forbidden (Traefik routes)`);
 
@@ -281,6 +380,10 @@ function checkProduction(doc, webHeaderLabels, problems) {
     }
 
     const hc = s.healthcheck ?? {};
+    // `disable: true` would make depends_on service_healthy and `up --wait` meaningless.
+    if (!same(Object.keys(hc).sort(), HEALTH_KEYS)) {
+      problems.push(`${at}: healthcheck: keys must be exactly ${HEALTH_KEYS.join(', ')}`);
+    }
     if (!same(hc.test, HEALTH_TEST[svc])) {
       problems.push(`${at}: healthcheck: test must be ${JSON.stringify(HEALTH_TEST[svc])}`);
     }
@@ -294,7 +397,8 @@ function checkProduction(doc, webHeaderLabels, problems) {
       logging.driver !== 'json-file' ||
       opts['max-size'] !== '10m' ||
       opts['max-file'] !== '3' ||
-      Object.keys(opts).length !== 2
+      Object.keys(opts).length !== 2 ||
+      !same(Object.keys(logging).sort(), ['driver', 'options'])
     ) {
       problems.push(
         `${at}: logging: must be driver json-file with options max-size "10m" and max-file "3"`,
@@ -394,7 +498,7 @@ function checkProduction(doc, webHeaderLabels, problems) {
       );
     }
   }
-  if (web.depends_on?.server?.condition !== 'service_healthy') {
+  if (!same(web.depends_on, { server: { condition: 'service_healthy' } })) {
     problems.push(`${f}: services.web: depends-on: server with condition service_healthy`);
   }
   if (server.stop_grace_period !== '15s') {
@@ -418,9 +522,18 @@ function checkProduction(doc, webHeaderLabels, problems) {
   if (!same([...serverNets.keys()].sort(), ['torneo-db', 'torneo-edge'])) {
     problems.push(`${f}: services.server: networks: server must be on torneo-edge and torneo-db`);
   }
-  const aliases = serverNets.get('torneo-edge')?.aliases;
-  if (!same(aliases, ['torneo-server'])) {
-    problems.push(`${f}: services.server: networks: alias torneo-server on torneo-edge`);
+  // Only the alias: no fixed ipv4_address (10.250.0.2 is the proxy, TRUSTED_PROXIES).
+  if (!same(serverNets.get('torneo-edge'), { aliases: ['torneo-server'] })) {
+    problems.push(
+      `${f}: services.server: networks: alias torneo-server on torneo-edge and nothing else`,
+    );
+  }
+  const emptyNet = (v) => v === null || v === undefined || same(v, {});
+  if (!emptyNet(serverNets.get('torneo-db'))) {
+    problems.push(`${f}: services.server: networks: torneo-db takes no options`);
+  }
+  if (!emptyNet(webNets.get('torneo-edge'))) {
+    problems.push(`${f}: services.web: networks: torneo-edge takes no options`);
   }
 }
 
@@ -483,6 +596,32 @@ function checkLocal(local, dev, problems) {
   if (!same([...networksOf(pg.networks).keys()], ['torneo-db'])) {
     problems.push(`${f}: services.postgres: networks: postgres must be only on torneo-db`);
   }
+  const at = `${f}: services.postgres`;
+  for (const key of Object.keys(pg)) {
+    if (!POSTGRES_KEYS.includes(key)) problems.push(`${at}: service-keys: ${key} is not allowed`);
+  }
+  if (!same(pg.command, POSTGRES_COMMAND)) {
+    problems.push(`${at}: command: must be ${JSON.stringify(POSTGRES_COMMAND)}`);
+  }
+  for (const name of toMap(pg.environment).keys()) {
+    if (!POSTGRES_ENV.includes(name)) {
+      problems.push(`${at}: env-allowlist: ${name} is not an allowed variable for postgres`);
+    }
+  }
+  const volumes = [`${LOCAL_VOLUME}:/var/lib/postgresql/data`];
+  if (!same(pg.volumes, volumes)) {
+    problems.push(`${at}: volumes: must be ${JSON.stringify(volumes)}`);
+  }
+  if (!same(Object.keys(pg.healthcheck ?? {}).sort(), POSTGRES_HEALTH_KEYS)) {
+    problems.push(`${at}: healthcheck: keys must be exactly ${POSTGRES_HEALTH_KEYS.join(', ')}`);
+  }
+  const localVolumes = local.volumes ?? {};
+  if (
+    !same(Object.keys(localVolumes), [LOCAL_VOLUME]) ||
+    !(localVolumes[LOCAL_VOLUME] === null || same(localVolumes[LOCAL_VOLUME], {}))
+  ) {
+    problems.push(`${f}: volumes: only ${LOCAL_VOLUME}, without options`);
+  }
 }
 
 /**
@@ -506,6 +645,13 @@ function checkDockerignore(text, files, problems) {
     const example = lines.lastIndexOf('!**/.env.example');
     if (env !== -1 && example !== -1 && example < env) {
       problems.push(`${f}: entries: !**/.env.example must come after **/.env.*`);
+    }
+    // A re-inclusion can bring back a secret (`!**/.env.production`, `!private/...`), and
+    // check-dockerignore.sh only probes files named `.env`.
+    for (const line of lines) {
+      if (line.startsWith('!') && line !== '!**/.env.example') {
+        problems.push(`${f}: reinclude: ${line} is not allowed (only !**/.env.example)`);
+      }
     }
   }
   for (const file of files) {

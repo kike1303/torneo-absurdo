@@ -490,7 +490,230 @@ const CASES = [
   ],
 ];
 
+const SERVER_START = `  server:\n    image: ghcr.io/kike1303/torneo-absurdo/${SERVER_IMAGE}\n`;
+const WEB_START = '  web:\n    image: ghcr.io/kike1303/torneo-absurdo/web:';
+const SERVER_HC = "      test: ['CMD', '/server', 'healthcheck']\n";
+const PG_START = '  postgres:\n';
+
+/** PR #4 review: RUST_LOG, YAML merge keys and closed key lists. */
+/** @type {[string, Record<string, [string, string][]>, RegExp][]} */
+const REVIEW_CASES = [
+  // RUST_LOG must be exactly info (RF-C4): levels, numbers and bare targets all change the output.
+  ...['warn', 'off', 'server', "'info,server=5'", 'info,sqlx'].map(
+    (value) =>
+      /** @type {[string, Record<string, [string, string][]>, RegExp]} */ ([
+        `RUST_LOG ${value}`,
+        { [C]: [[SERVER_ENV, `      RUST_LOG: ${value}\n`]] },
+        /services\.server: env: RUST_LOG must be info/,
+      ]),
+  ),
+  // YAML anchors, aliases and merge keys: compose resolves them, the parser does not.
+  [
+    'merge key with an anchor',
+    {
+      [C]: [
+        [
+          'services:\n',
+          "x-evil: &evil\n  ports: ['0.0.0.0:8080:8080']\n  privileged: true\n\nservices:\n",
+        ],
+        [SERVER_START, `${SERVER_START}    <<: *evil\n`],
+      ],
+    },
+    /docker-compose\.yml: yaml-anchors: merge key << is not allowed/,
+  ],
+  [
+    'alias without merge',
+    {
+      [C]: [
+        [
+          '    mem_limit: 256m\n    memswap_limit: 256m\n',
+          '    mem_limit: &m 256m\n    memswap_limit: *m\n',
+        ],
+      ],
+    },
+    /docker-compose\.yml: yaml-anchors: alias \*m is not allowed/,
+  ],
+  [
+    'merge key in compose.local.yml',
+    { [L]: [[PG_START, `${PG_START}    <<: { ports: ['0.0.0.0:5432:5432'] }\n`]] },
+    /compose\.local\.yml: yaml-anchors: merge key << is not allowed/,
+  ],
+  // Closed list of top-level keys
+  [
+    'include at the root',
+    { [C]: [['services:\n', 'include:\n  - extra.yml\n\nservices:\n']] },
+    /docker-compose\.yml: root-keys: include is not allowed/,
+  ],
+  [
+    'x- extension at the root',
+    { [C]: [['services:\n', 'x-defaults: {}\n\nservices:\n']] },
+    /root-keys: x-defaults is not allowed/,
+  ],
+  [
+    'include in compose.local.yml',
+    { [L]: [['services:\n', 'include:\n  - extra.yml\n\nservices:\n']] },
+    /compose\.local\.yml: only-adds: top-level include/,
+  ],
+  // Closed list of service keys
+  ...[
+    ['privileged in web', 'web', '    privileged: true\n', 'privileged'],
+    ['cap_add in web', 'web', '    cap_add: [SYS_ADMIN]\n', 'cap_add'],
+    ["user '0' in web", 'web', "    user: '0'\n", 'user'],
+    ['env_file in server', 'server', '    env_file: [../apps/server/.env]\n', 'env_file'],
+    ['extends in server', 'server', '    extends: { file: extra.yml, service: base }\n', 'extends'],
+    [
+      'docker.sock in server',
+      'server',
+      "    volumes: ['/var/run/docker.sock:/var/run/docker.sock']\n",
+      'volumes',
+    ],
+    ['network_mode in server', 'server', '    network_mode: host\n', 'network_mode'],
+  ].map(
+    ([name, svc, line, key]) =>
+      /** @type {[string, Record<string, [string, string][]>, RegExp]} */ ([
+        name,
+        {
+          [C]: [
+            [
+              svc === 'web' ? WEB_START : SERVER_START,
+              (svc === 'web' ? WEB_START : SERVER_START).replace(/^(  \w+:\n)/, `$1${line}`),
+            ],
+          ],
+        },
+        new RegExp(`services\\.${svc}: service-keys: ${key} is not allowed`),
+      ]),
+  ),
+  [
+    'healthcheck disabled',
+    { [C]: [[SERVER_HC, `${SERVER_HC}      disable: true\n`]] },
+    /services\.server: healthcheck: keys must be exactly/,
+  ],
+  [
+    'logging with another option key',
+    { [C]: [["        max-file: '3'\n", "        max-file: '3'\n      mode: non-blocking\n"]] },
+    /services\.server: logging/,
+  ],
+  [
+    'depends_on with more keys',
+    {
+      [C]: [
+        [
+          '        condition: service_healthy\n',
+          '        condition: service_healthy\n        restart: true\n',
+        ],
+      ],
+    },
+    /depends-on: server with condition service_healthy/,
+  ],
+  [
+    'external network renamed',
+    {
+      [C]: [
+        [
+          '  torneo-edge:\n    external: true\n',
+          '  torneo-edge:\n    external: true\n    name: coolify\n',
+        ],
+      ],
+    },
+    /networks: torneo-edge must be declared with external: true and nothing else/,
+  ],
+  [
+    'server with a fixed IP',
+    {
+      [C]: [
+        [
+          '        aliases: [torneo-server]\n',
+          '        aliases: [torneo-server]\n        ipv4_address: 10.250.0.2\n',
+        ],
+      ],
+    },
+    /alias torneo-server on torneo-edge/,
+  ],
+  // postgres of compose.local.yml
+  [
+    'privileged postgres',
+    { [L]: [[PG_START, `${PG_START}    privileged: true\n`]] },
+    /services\.postgres: service-keys: privileged is not allowed/,
+  ],
+  [
+    'postgres with docker.sock',
+    {
+      [L]: [
+        [
+          '      - torneo-local-pg:/var/lib/postgresql/data\n',
+          '      - torneo-local-pg:/var/lib/postgresql/data\n      - /var/run/docker.sock:/var/run/docker.sock\n',
+        ],
+      ],
+    },
+    /services\.postgres: volumes: must be/,
+  ],
+  [
+    'postgres env outside the list',
+    {
+      [L]: [
+        [
+          '      POSTGRES_DB: torneo\n',
+          '      POSTGRES_DB: torneo\n      POSTGRES_HOST_AUTH_METHOD: trust\n',
+        ],
+      ],
+    },
+    /services\.postgres: env-allowlist: POSTGRES_HOST_AUTH_METHOD/,
+  ],
+  [
+    'postgres healthcheck disabled',
+    {
+      [L]: [
+        [
+          "      test: ['CMD-SHELL', 'pg_isready -U torneo -d torneo']\n",
+          "      test: ['CMD-SHELL', 'pg_isready -U torneo -d torneo']\n      disable: true\n",
+        ],
+      ],
+    },
+    /services\.postgres: healthcheck: keys must be exactly/,
+  ],
+  [
+    'another local volume',
+    {
+      [L]: [
+        [
+          '  torneo-local-pg:\n',
+          '  torneo-local-pg:\n  host:\n    driver_opts: { type: none, o: bind, device: / }\n',
+        ],
+      ],
+    },
+    /compose\.local\.yml: volumes: only torneo-local-pg/,
+  ],
+  // .dockerignore re-inclusions
+  [
+    're-included .env.production',
+    { [DI]: [['docs/\n', 'docs/\n!**/.env.production\n']] },
+    /\.dockerignore: reinclude: !\*\*\/\.env\.production is not allowed/,
+  ],
+  [
+    're-included private file',
+    { [DI]: [['docs/\n', 'docs/\n!private/notes.md\n']] },
+    /reinclude: !private\/notes\.md is not allowed/,
+  ],
+];
+
 describe('check-compose (RF-C3, RF-C4, RF-C6)', () => {
+  it('keeps the valid fixture identical to the real files', () => {
+    const real = loadTree(fileURLToPath(new URL('../../', import.meta.url)));
+    for (const file of Object.values(FILES)) {
+      expect(valid.read(file), `${file}: resync scripts/__fixtures__/check-compose/valid/`).toBe(
+        real.read(file),
+      );
+    }
+  });
+
+  it.each(REVIEW_CASES)('fails on: %s', (_name, edits, pattern) => {
+    const problems = checkCompose(mutated(edits));
+    expect(
+      problems.some((p) => pattern.test(p)),
+      problems.join('\n') || '(no problems)',
+    ).toBe(true);
+  });
+
   it('passes on the valid fixture', () => {
     expect(checkCompose(valid)).toEqual([]);
   });
