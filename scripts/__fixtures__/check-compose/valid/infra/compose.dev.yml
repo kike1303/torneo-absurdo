@@ -1,0 +1,25 @@
+# Local development database only (RF-B17). Production uses Coolify's standalone Postgres.
+# `just db-up` starts it, `just db-down` stops it (keeps the volume), `just db-reset` drops it.
+# Development credentials only; never production values.
+name: torneo-dev
+
+services:
+  postgres:
+    # postgres:17.10-alpine, multi-arch index digest (linux/amd64 and linux/arm64).
+    image: postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+    environment:
+      POSTGRES_USER: torneo
+      POSTGRES_PASSWORD: torneo_dev
+      POSTGRES_DB: torneo
+    ports:
+      - '127.0.0.1:${DEV_PG_PORT:-5432}:5432'
+    volumes:
+      - torneo-dev-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U torneo -d torneo']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  torneo-dev-pg:

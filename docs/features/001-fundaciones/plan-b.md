@@ -2,7 +2,7 @@
 id: "001"
 title: Fundaciones del monorepo — fase B
 type: plan
-status: approved
+status: done
 risk: high
 author: backend-engineer
 reviewers: [architect, security-reviewer]

@@ -229,6 +229,15 @@ updated: 2026-10-21
 - **Canal de notificaciones de Coolify** para fallos de backup y de despliegue. Recomendación: un webhook de Discord a un canal privado del owner. Se configura en la UI de Coolify (Notifications → Discord) antes del primer despliegue a producción.
 - **Configuración de GitHub** (la hace devops-engineer con el OK del owner cuando exista la CI): environment `production` con el owner como required reviewer y *deployment branches and tags* limitados a `v*` y `main`; "Require approval for all external contributors"; ruleset de `main` (PR obligatorio, 0 aprobaciones, `ci-ok`) y de tags `v*`; poner públicos los paquetes de GHCR después del primer push.
 
+## Notas
+
+### 2026-10-24 — architect: bases distroless `-debian13` (OK del owner el 2026-10-24)
+- **Qué:** D5 nombra `gcr.io/distroless/static-debian12:nonroot` y `gcr.io/distroless/nodejs22-debian12:nonroot`. Propongo `static-debian13:nonroot` y `nodejs22-debian13:nonroot`.
+- **Por qué:** distroless ya no actualiza las imágenes `-debian12`. Su README publica solo `-debian13` y dice que "any other tags are considered deprecated and are no longer updated". En `gcr.io`, la última subida de `nodejs22-debian12` es del 2026-02-14 y la de `static-debian12` del 2026-08-21. Con esas bases, "actualizadas por Dependabot" deja de proteger, porque Dependabot solo mueve el digest dentro de la misma etiqueta.
+- **Qué no cambia:** la decisión de D5 (distroless `nonroot`, fijadas por digest, Dependabot). También se mantienen el entrypoint `/nodejs/bin/node` del healthcheck de D3 y el binario estático de D8.
+- **Dónde está el detalle:** spec de 001, "Enmienda 2026-10-24: distroless debian13", y `plan-c.md` (decisión 2).
+- **Estado:** esta nota no cambia el `status` ni las approvals del ADR. Con el OK del owner, el texto de D5 pasa a `-debian13`.
+
 ## Revisión
 ### devops-engineer — 2026-10-20 — REQUEST_CHANGES
 - Verifiqué:

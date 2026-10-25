@@ -1,0 +1,132 @@
+# Production stack that Coolify deploys (RF-C4, ADR-0006 D1 to D4). Only `web` and `server`:
+# Postgres is a standalone Coolify resource, reached through the external `torneo-db` network.
+# IMAGE_TAG, PUBLIC_HOST and DATABASE_URL come from Coolify; locally, `just prod-local` exports
+# IMAGE_TAG and reads infra/local.env. No `name:` (Coolify sets its own), no `build:`, no `ports:`.
+# scripts/check-compose.mjs enforces the exact shape of this file.
+
+services:
+  server:
+    image: ghcr.io/kike1303/torneo-absurdo/server:${IMAGE_TAG:?IMAGE_TAG is required}
+    platform: linux/amd64
+    restart: unless-stopped
+    stop_grace_period: 15s
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    mem_limit: 256m
+    memswap_limit: 256m
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      PUBLIC_ORIGIN: https://${PUBLIC_HOST:?PUBLIC_HOST is required}
+      RUST_LOG: info
+    healthcheck:
+      test: ['CMD', '/server', 'healthcheck']
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    # The privacy notice promises "less than 3 weeks" of logs: 3 x 10 MB of json-file, filled at
+    # least by the /api/health line of this healthcheck every 15 s (spec "Logs"). Changing the
+    # driver, the sizes, the interval or the log level of /api/health changes that promise.
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    networks:
+      torneo-edge:
+        aliases: [torneo-server]
+      torneo-db: {}
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=torneo-edge
+      - traefik.http.routers.torneo-api.rule=Host(`${PUBLIC_HOST:?PUBLIC_HOST is required}`) && (PathPrefix(`/api`) || PathPrefix(`/ws`))
+      - traefik.http.routers.torneo-api.priority=100
+      - traefik.http.routers.torneo-api.entrypoints=https
+      - traefik.http.routers.torneo-api.tls.certresolver=letsencrypt
+      - traefik.http.routers.torneo-api.service=torneo-api
+      - traefik.http.routers.torneo-api.observability.accesslogs=false
+      - traefik.http.routers.torneo-api-http.rule=Host(`${PUBLIC_HOST:?PUBLIC_HOST is required}`) && (PathPrefix(`/api`) || PathPrefix(`/ws`))
+      - traefik.http.routers.torneo-api-http.priority=100
+      - traefik.http.routers.torneo-api-http.entrypoints=http
+      - traefik.http.routers.torneo-api-http.service=torneo-api
+      - traefik.http.routers.torneo-api-http.middlewares=torneo-https-redirect
+      - traefik.http.routers.torneo-api-http.observability.accesslogs=false
+      - traefik.http.services.torneo-api.loadbalancer.server.port=8080
+      - traefik.http.middlewares.torneo-https-redirect.redirectscheme.scheme=https
+      - traefik.http.middlewares.torneo-https-redirect.redirectscheme.permanent=true
+
+  web:
+    image: ghcr.io/kike1303/torneo-absurdo/web:${IMAGE_TAG:?IMAGE_TAG is required}
+    platform: linux/amd64
+    restart: unless-stopped
+    read_only: true
+    # Sized: an unbounded tmpfs can grow to half of the host RAM and counts against mem_limit.
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    mem_limit: 384m
+    memswap_limit: 384m
+    environment:
+      PUBLIC_ORIGIN: https://${PUBLIC_HOST:?PUBLIC_HOST is required}
+      ADDRESS_HEADER: X-Forwarded-For
+      XFF_DEPTH: '1'
+      HOST: 0.0.0.0
+      PORT: '3000'
+      NODE_OPTIONS: --max-old-space-size=256
+    depends_on:
+      server:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          '/nodejs/bin/node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    networks:
+      - torneo-edge
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=torneo-edge
+      - traefik.http.routers.torneo-web.rule=Host(`${PUBLIC_HOST:?PUBLIC_HOST is required}`)
+      - traefik.http.routers.torneo-web.priority=1
+      - traefik.http.routers.torneo-web.entrypoints=https
+      - traefik.http.routers.torneo-web.tls.certresolver=letsencrypt
+      - traefik.http.routers.torneo-web.service=torneo-web
+      - traefik.http.routers.torneo-web.middlewares=torneo-web-headers
+      - traefik.http.routers.torneo-web.observability.accesslogs=false
+      - traefik.http.routers.torneo-web-http.rule=Host(`${PUBLIC_HOST:?PUBLIC_HOST is required}`)
+      - traefik.http.routers.torneo-web-http.priority=1
+      - traefik.http.routers.torneo-web-http.entrypoints=http
+      - traefik.http.routers.torneo-web-http.service=torneo-web
+      - traefik.http.routers.torneo-web-http.middlewares=torneo-https-redirect
+      - traefik.http.routers.torneo-web-http.observability.accesslogs=false
+      - traefik.http.services.torneo-web.loadbalancer.server.port=3000
+      - traefik.http.middlewares.torneo-https-redirect.redirectscheme.scheme=https
+      - traefik.http.middlewares.torneo-https-redirect.redirectscheme.permanent=true
+      # Same values as SECURITY_HEADERS (apps/web/src/lib/server/hooks/security-headers.ts), for the
+      # responses that never reach `handle` (sirv statics and Kit's 308). Never includeSubDomains.
+      - traefik.http.middlewares.torneo-web-headers.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.torneo-web-headers.headers.referrerPolicy=strict-origin-when-cross-origin
+      - traefik.http.middlewares.torneo-web-headers.headers.stsSeconds=31536000
+      - traefik.http.middlewares.torneo-web-headers.headers.stsIncludeSubdomains=false
+      - traefik.http.middlewares.torneo-web-headers.headers.stsPreload=false
+
+networks:
+  # Created once on the VPS (docs/architecture.md); locally by scripts/local-networks.sh.
+  torneo-edge:
+    external: true
+  torneo-db:
+    external: true

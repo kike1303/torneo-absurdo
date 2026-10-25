@@ -58,6 +58,7 @@ check-web: _web-prepare
     node scripts/check-i18n.mjs
     node scripts/check-prerender.mjs
     node scripts/check-kit-config.mjs
+    node scripts/check-compose.mjs
 
 # The Rust half of `check`: fmt, clippy, tests (with Postgres), freshness of `gen`, ts-rs graph
 check-rust:
@@ -174,3 +175,73 @@ db-down:
 db-reset:
     docker compose -f infra/compose.dev.yml down -v
     {{just_executable()}} db-up
+
+# Needs Docker. Never opens nor changes an existing .env (plan-c decision 11).
+# Prove with Docker that .dockerignore keeps .env files, .git and build outputs out of the context
+check-dockerignore:
+    bash scripts/check-dockerignore.sh
+
+# Fails early if 127.0.0.1:3000 or :8080 is taken (`just dev` uses 8080) and shows the daemon in use
+_prod-local-preflight:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "docker context: $(docker context show)"
+    if ! docker info >/dev/null 2>&1; then
+        echo "Docker is not responding" >&2
+        exit 1
+    fi
+    for port in 3000 8080; do
+        if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+            echo "127.0.0.1:$port is in use: stop \`just dev\` or run \`just prod-local-down\`" >&2
+            exit 1
+        fi
+    done
+
+# Without a tag, builds the images locally as :local; with a tag (vX.Y.Z or sha-<7>), pulls them.
+# Needs Docker with amd64 emulation (Colima or Docker Desktop with Rosetta). Stop with prod-local-down.
+# The production images with the production compose, plus a local Postgres, on 127.0.0.1
+[positional-arguments]
+prod-local tag="": _prod-local-preflight
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tag="${1:-}"
+    repo=ghcr.io/kike1303/torneo-absurdo
+    if [ -z "$tag" ]; then
+        tag=local
+        for svc in server web; do
+            docker buildx build --platform linux/amd64 -f "apps/$svc/Dockerfile" \
+                -t "$repo/$svc:local" --load .
+        done
+    elif [[ "$tag" =~ ^(v[0-9]+\.[0-9]+\.[0-9]+|sha-[0-9a-f]{7})$ ]]; then
+        for svc in server web; do
+            docker pull --platform linux/amd64 "$repo/$svc:$tag"
+        done
+    else
+        echo "tag must be vX.Y.Z or sha-<7 hex>" >&2
+        exit 1
+    fi
+    # The preflight already ran (before the build), so go straight to the start.
+    IMAGE_TAG="$tag" {{just_executable()}} _prod-local-start
+
+# Start the stack with an existing IMAGE_TAG, without building (also used by the CI job `images`)
+_prod-local-up: _prod-local-preflight
+    {{just_executable()}} _prod-local-start
+
+# DATABASE_URL and PUBLIC_HOST of the shell are dropped: only infra/local.env feeds the compose.
+# Networks and `compose up`, without the preflight (shared by prod-local and _prod-local-up)
+_prod-local-start:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${IMAGE_TAG:?IMAGE_TAG is required}"
+    bash scripts/local-networks.sh up
+    env -u DATABASE_URL -u PUBLIC_HOST IMAGE_TAG="$IMAGE_TAG" docker compose -p torneo-local \
+        --env-file infra/local.env -f infra/docker-compose.yml -f infra/compose.local.yml \
+        up -d --wait --wait-timeout 180
+    docker compose -p torneo-local ps
+
+# Keeps the Postgres volume. Never removes a network without the torneo.local=1 label.
+# Stop `prod-local` and remove the networks it created
+prod-local-down:
+    env -u DATABASE_URL -u PUBLIC_HOST IMAGE_TAG=unused docker compose -p torneo-local \
+        --env-file infra/local.env -f infra/docker-compose.yml -f infra/compose.local.yml down
+    bash scripts/local-networks.sh down
