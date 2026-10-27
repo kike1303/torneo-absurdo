@@ -13,6 +13,7 @@ import {
 import { validateTimeline, type Side, type StrikeCue } from '../src/timeline/index.ts';
 import { MANIFESTS } from './support/placeholders.ts';
 import {
+  goldenScene,
   shuffled,
   spikeScene,
   spikeTimeline,
@@ -306,5 +307,24 @@ describe('endings by time (005 RF6, RF7)', () => {
     for (const t of times(0, p.durationMs, 50)) {
       expect(at(p, t).banners.map((b) => b.code)).not.toContain('time');
     }
+  });
+});
+
+describe('endings by time on the engine goldens (005 RF7)', () => {
+  it.each([
+    ['decision-a', 'win', 'a', 'decision'],
+    ['decision-b', 'win', 'b', 'decision'],
+    ['draw', 'draw', null, 'draw'],
+  ] as const)('%s: phase, winner and ending around time_up and the closing', (name, ...rest) => {
+    const [closingPhase, winner, ending] = rest;
+    const p = goldenScene(name);
+    const s = (t: number) => sceneAt(p, t, OPTS);
+    expect(s(85_999)).toMatchObject({ phase: 'fight', winner: null, ending: null });
+    expect(s(86_000)).toMatchObject({ phase: 'time_up', winner: null, ending: null });
+    expect(s(86_000).banners.map((b) => b.code)).toEqual(['time']);
+    expect(s(87_499)).toMatchObject({ phase: 'time_up', ending: null });
+    expect(s(87_500)).toMatchObject({ phase: closingPhase, winner, ending });
+    expect(s(90_000)).toMatchObject({ phase: 'finished', winner, ending });
+    expect(s(90_000).banners.map((b) => b.code)).toEqual(['time']);
   });
 });

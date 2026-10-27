@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { RendererError, createPlayer, type PlayerState } from '../src/player/index.ts';
 import type { Cue, StrikeCue } from '../src/timeline/index.ts';
 import { FakeClock, FakeStage, options } from './support/fake-stage.ts';
+import { goldenTimeline } from './support/scenes.ts';
 
 // RF-A11, RF-A14 (test 7 of ADR-0009) and RF-A19, plan-a2 decisions 2 to 4.
 const ASSETS = new Map<string, unknown>([
@@ -15,11 +16,11 @@ const CUES = spike.cues as unknown as Cue[];
 const DURATION = spike.duration_ms;
 const STRIKES = CUES.filter((c): c is StrikeCue => c.type === 'strike');
 
-async function setup(reducedMotion = false) {
+async function setup(reducedMotion = false, timeline: unknown = spike) {
   const clock = new FakeClock();
   const stage = new FakeStage();
   const player = createPlayer(options(clock, { reducedMotion }), stage);
-  await player.load(spike, ASSETS);
+  await player.load(timeline, ASSETS);
   const fired: [number, number][] = [];
   player.onCue((_cue, index) => fired.push([index, clock.now]));
   const states: PlayerState[] = [];
@@ -246,5 +247,50 @@ describe('reduced motion never changes the timing (ADR-0009 test 7, RF-A14)', ()
       t: s.t,
     });
     expect(switched.stage.scenes.map(pick)).toEqual(off.stage.scenes.map(pick));
+  });
+});
+
+describe('endings by time in the player (005 RF7, RF8)', () => {
+  const draw = goldenTimeline('draw');
+  const closing = draw.cues.at(-1)?.at_ms ?? 0;
+  const firstStrike = draw.cues.find((c) => c.type === 'strike')?.at_ms ?? 0;
+
+  it('snapshot() of the draw: ending from the draw cue on, no winner', async () => {
+    const { player } = await setup(false, draw);
+    player.seek(closing - 1);
+    expect(player.snapshot()).toMatchObject({ phase: 'time_up', winner: null, ending: null });
+    player.seek(closing);
+    expect(player.snapshot()).toMatchObject({ phase: 'draw', winner: null, ending: 'draw' });
+    player.seek(draw.duration_ms);
+    expect(player.snapshot()).toMatchObject({ phase: 'finished', winner: null, ending: 'draw' });
+  });
+
+  it('a decision gives its winner and the decision ending in finished', async () => {
+    const { player } = await setup(false, goldenTimeline('decision-b'));
+    player.seek(Number.POSITIVE_INFINITY);
+    expect(player.snapshot()).toMatchObject({
+      phase: 'finished',
+      winner: 'b',
+      ending: 'decision',
+    });
+  });
+
+  it('frame stats count from the first strike to the draw cue', async () => {
+    const { player, runTo, clock } = await setup(false, draw);
+    player.seek(firstStrike - 100);
+    player.play();
+    runTo(clock.now + 1600);
+    // 1 600 ms of 16 ms frames, minus the ~100 ms before the first strike.
+    const early = player.getFrameStats().frames;
+    expect(early).toBeGreaterThanOrEqual(93);
+    expect(early).toBeLessThanOrEqual(95);
+    // A seek resets the stats: 1 600 ms up to the draw cue, then nothing more.
+    player.seek(closing - 1600);
+    runTo(clock.now + 1600);
+    const before = player.getFrameStats().frames;
+    expect(before).toBeGreaterThanOrEqual(99);
+    expect(before).toBeLessThanOrEqual(101);
+    runTo(clock.now + 2000);
+    expect(player.getFrameStats().frames - before).toBeLessThanOrEqual(1);
   });
 });
