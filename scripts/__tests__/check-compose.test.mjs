@@ -457,6 +457,7 @@ const CASES = [
   ],
   ['target without **/', { [DI]: [['**/target\n', 'target\n']] }, /entries: missing \*\*\/target/],
   ['private/ missing', { [DI]: [['private/\n', '']] }, /entries: missing private\//],
+  ['tools/ missing', { [DI]: [['\ntools/\n', '\n']] }, /entries: missing tools\//],
   [
     'example before .env.*',
     { [DI]: [['**/.env.*\n!**/.env.example\n', '!**/.env.example\n**/.env.*\n']] },
