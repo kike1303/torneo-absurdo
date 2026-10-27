@@ -19,11 +19,18 @@ describe('e2e log whitelist (plan-a decision 12)', () => {
     expect(whitelistProblems([START, LISTEN, LISTEN])).not.toEqual([]);
     expect(whitelistProblems([START, ERROR, LISTEN])).not.toEqual([]);
     expect(whitelistProblems([START])).not.toEqual([]);
+    expect(
+      whitelistProblems([
+        START,
+        LISTEN,
+        '{"ts":"t","level":"error","event":"x","error_message":"m"}',
+      ]),
+    ).not.toEqual([]);
   });
 
   it('rejects canaries anywhere', () => {
     for (const canary of Object.values(CANARIES)) {
-      const line = `{"ts":"t","level":"error","event":"e","error_message":"${canary}"}`;
+      const line = `{"ts":"t","level":"error","event":"e","stack":"${canary}"}`;
       expect(whitelistProblems([START, LISTEN, line])).not.toEqual([]);
     }
   });
