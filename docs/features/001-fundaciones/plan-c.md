@@ -649,26 +649,29 @@ Ejecución del checklist RF-C19. El detalle y los enlaces a cada corrida están 
   - #30, con `generated/` editado a mano: falla `_check-gen`.
   - #31, con un cambio en `deny.toml`: corre `rust`.
   - #32: `images` en caliente tardó 132 s. Hubo que tocar también el fixture; el texto de (f) ya está corregido arriba.
-- **1.** TA-8 tiene la checklist de RF-C18 y está bloqueado por auth y por TA-6.
+- **1.** TA-8 tiene la checklist de RF-C18 y está bloqueado por auth y por TA-6. La constancia del owner sobre "durante la feature 001" está en la descripción de TA-6 (decisión del 2026-10-21).
 - **2.** Se configuró `fork-pr-contributor-approval: all_external_contributors`. Los permisos de workflow quedan en lectura y sin aprobar PRs, y se activó `sha_pinning_required: true` con el OK del owner.
 - **3.** El environment `production` quedó así:
   - reviewer `kike1303`;
   - `prevent_self_review: false` y `can_admins_bypass: false`;
   - despliegue permitido solo desde `main` y desde tags `v*`.
 - **4.** Se crearon dos rulesets:
-  - `main`: sin borrado ni force-push, con PR obligatorio de 0 aprobaciones y `ci-ok` requerido (`integration_id` 15368).
+  - `main`: sin borrado ni force-push, con PR obligatorio de 0 aprobaciones y `ci-ok` requerido (`integration_id` 15368). Sin `bypass_actors`.
   - `release-tags`: protege `v*` y solo un admin puede saltárselo.
 
   GitHub agregó por su cuenta `require_extra_approval_for_unattributed_changes: true` al ruleset de `main`.
-- **5.** Se activaron las alertas de Dependabot y los security fixes automáticos.
+- **5.** Se activaron las alertas de Dependabot y los security fixes automáticos. GitHub aceptó `dependabot.yml`: abrió PRs de los cinco ecosistemas (#7 a #21, y después de la desviación 22 los grupos #25 `docker-images` y #26 `npm-minor-patch`). El #9 (`postgres` en `/infra`) confirma que lee los compose, así que el riesgo de que no los leyera queda cerrado.
 - **6.** Se guardó la evidencia de los GET en JSON, sin tokens.
 - **7.** Se empujó el tag `v0.0.1` sobre `3a844c6` (run 40447558309).
   - `build` salió en verde. `server` y `web` publicaron `v0.0.1` y `sha-3a844c6` sobre el mismo digest, y cada una es un solo manifiesto `application/vnd.oci.image.manifest.v1+json`.
+  - El job `build` tardó 1 min 37 s, muy por debajo del límite de 20 min (RNF de velocidad, sin contar la espera del environment).
+  - La retención de `server` y de `web` (con 10 versiones como máximo) salió en verde. `actions/delete-package-versions` avisa que apunta a Node 20 y que GitHub lo fuerza a correr en Node 24, y funciona. Es el riesgo ya anotado y no bloquea.
   - El owner rechazó `deploy` en la UI y `verify` no corrió (criterios C5 y C6).
 - **8.** El owner puso públicos los dos paquetes. El manifiesto de `v0.0.1` responde 200 a un token anónimo de `ghcr.io`.
 - **9.** Pruebas de `workflow_dispatch`:
   - Desde una rama que no es `main` (run 40448914407): `build` reutilizó el tag sin reconstruir, y `deploy` falló en 1 s con *"not allowed to deploy to production due to environment protection rules"*, sin pedir aprobación.
   - Con `tag=v1$(id)` (run 40448916592): `build` falló en "Validate the tag" y no se construyó ni publicó nada.
+  - Después se borró la rama `ta-1-dispatch-probe`.
 - **10.** El intent, la spec y los tres planes de 001 quedan en `done`, y TA-1 pasa a Done.
 
 ## Revisión

@@ -69,30 +69,30 @@ En las tres fases: los comandos de `CLAUDE.md` se actualizan con lo que la fase 
 
 ## Criterios de éxito
 **Fase A**
-- [ ] `just check` pasa en limpio y falla si falta una llave de i18n en algún idioma.
-- [ ] Cambiar de idioma funciona en `/es` y `/en` y persiste por cookie.
-- [ ] Pasan los tests 1–6, 8 y 9 de ADR-0009 (el 7 es del renderer y está fuera de alcance).
-- [ ] `/healthz` de `web` responde 200.
-- [ ] Ante una petición con `Cookie`, `Authorization` y `X-Forwarded-For`, y ante un error que pasa por `handleError`, los logs de `web` no contienen la IP del cliente (`getClientAddress()`), `X-Forwarded-For`, cookies ni los headers sensibles de ADR-0008 D3 (test en CI).
+- [x] `just check` pasa en limpio y falla si falta una llave de i18n en algún idioma.
+- [x] Cambiar de idioma funciona en `/es` y `/en` y persiste por cookie.
+- [x] Pasan los tests 1–6, 8 y 9 de ADR-0009 (el 7 es del renderer y está fuera de alcance).
+- [x] `/healthz` de `web` responde 200.
+- [x] Ante una petición con `Cookie`, `Authorization` y `X-Forwarded-For`, y ante un error que pasa por `handleError`, los logs de `web` no contienen la IP del cliente (`getClientAddress()`), `X-Forwarded-For`, cookies ni los headers sensibles de ADR-0008 D3 (test en CI).
 
 **Fase B**
-- [ ] Un solo comando levanta en local web, server y Postgres, con migraciones aplicadas.
-- [ ] Un tipo definido en `crates/protocol` aparece en TS con `just gen` y se usa en la web.
-- [ ] `/api/health` responde 200 con `version` cuando la BD está arriba y 503 cuando está abajo; el subcomando de healthcheck sale con 0 o 1 en cada caso (test de integración en CI).
-- [ ] Un mensaje enviado al WebSocket de eco vuelve igual (test de integración en CI).
-- [ ] Una respuesta del server no lleva `Access-Control-Allow-Origin` (ni ante un preflight ajeno), y los logs del server no contienen `Cookie`, `Set-Cookie`, `Authorization`, `X-Internal-Secret` ni `X-Client-Ip`.
-- [ ] `just check` cubre también formato, lint y tests de Rust y pasa en limpio.
+- [x] Un solo comando levanta en local web, server y Postgres, con migraciones aplicadas.
+- [x] Un tipo definido en `crates/protocol` aparece en TS con `just gen` y se usa en la web.
+- [x] `/api/health` responde 200 con `version` cuando la BD está arriba y 503 cuando está abajo; el subcomando de healthcheck sale con 0 o 1 en cada caso (test de integración en CI).
+- [x] Un mensaje enviado al WebSocket de eco vuelve igual (test de integración en CI).
+- [x] Una respuesta del server no lleva `Access-Control-Allow-Origin` (ni ante un preflight ajeno), y los logs del server no contienen `Cookie`, `Set-Cookie`, `Authorization`, `X-Internal-Secret` ni `X-Client-Ip`.
+- [x] `just check` cubre también formato, lint y tests de Rust y pasa en limpio.
 
 **Fase C**
-- [ ] Un PR de solo `docs/**` termina con `ci-ok` en verde en ≤ 2 min sin correr `rust` ni `web`; un PR que toca `crates/protocol/**` corre los dos; un job fallido deja `ci-ok` en rojo.
-- [ ] El job `rust` pasa `cargo deny check bans` y comprueba que el binario es estático.
-- [ ] CI falla si algún workflow usa `pull_request_target`, y ningún job de `ci.yml` referencia `secrets.*` salvo `GITHUB_TOKEN` (ADR-0006, verificación 9).
-- [ ] En un PR, el job `images` construye las dos imágenes sin hacer push.
-- [ ] Un tag de prueba publica `server` y `web` en GHCR con `vX.Y.Z` y `sha-<7>`, cada una como manifiesto de imagen y no como índice (ADR-0006 D5).
-- [ ] Con `DEPLOY_MODE=manual`, `deploy` espera la aprobación del environment `production` y no hace ninguna llamada a Coolify (ADR-0006, verificaciones 10 y 17).
-- [ ] El compose de producción sin `IMAGE_TAG` falla al levantar, y la forma local con Postgres levanta las imágenes de producción.
-- [ ] `just hooks` instala el `pre-push`, que corre `just check`.
-- [ ] `docs/architecture.md` ("Despliegue") y los comandos de `CLAUDE.md` reflejan lo construido.
+- [x] Un PR de solo `docs/**` termina con `ci-ok` en verde en ≤ 2 min sin correr `rust` ni `web`; un PR que toca `crates/protocol/**` corre los dos; un job fallido deja `ci-ok` en rojo.
+- [x] El job `rust` pasa `cargo deny check bans` y comprueba que el binario es estático.
+- [x] CI falla si algún workflow usa `pull_request_target`, y ningún job de `ci.yml` referencia `secrets.*` salvo `GITHUB_TOKEN` (ADR-0006, verificación 9).
+- [x] En un PR, el job `images` construye las dos imágenes sin hacer push.
+- [x] Un tag de prueba publica `server` y `web` en GHCR con `vX.Y.Z` y `sha-<7>`, cada una como manifiesto de imagen y no como índice (ADR-0006 D5).
+- [x] Con `DEPLOY_MODE=manual`, `deploy` espera la aprobación del environment `production` y no hace ninguna llamada a Coolify (ADR-0006, verificaciones 10 y 17).
+- [x] El compose de producción sin `IMAGE_TAG` falla al levantar, y la forma local con Postgres levanta las imágenes de producción.
+- [x] `just hooks` instala el `pre-push`, que corre `just check`.
+- [x] `docs/architecture.md` ("Despliegue") y los comandos de `CLAUDE.md` reflejan lo construido.
 
 ## Fuera de alcance
 - Auth y sesiones (feature propia, ADR-0008), incluidos el middleware de `Origin`/CSRF, la IP del cliente con `TRUSTED_PROXIES` y el rate limiting.
