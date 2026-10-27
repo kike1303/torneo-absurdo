@@ -31,7 +31,8 @@ RUN set -eu; \
     rm /tmp/zig.tar.xz
 ENV PATH=/opt/zig:$PATH
 
-# Same toolchain as the image: rustup only adds the musl target and the listed components.
+# Same toolchain as the image: rustup adds the targets of rust-toolchain.toml (musl and, for the
+# engine checks, wasm32-unknown-unknown and wasm32-wasip1, unused here) and the listed components.
 COPY rust-toolchain.toml ./
 RUN rustup toolchain install --no-self-update
 

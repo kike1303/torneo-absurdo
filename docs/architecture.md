@@ -35,7 +35,7 @@ updated: 2026-10-27
 
 ## Principios
 1. **El servidor Rust es la fuente de verdad** de usuarios, sesiones, monedas, apuestas, peleas y rankings. SvelteKit solo presenta: hace SSR llamando al API y no tiene base de datos propia.
-2. **Motor puro**: `engine::simulate(seed, fighter_a, fighter_b, ruleset) -> FightLog`. Sin I/O, sin reloj y determinista en todas las plataformas (nativo y WASM).
+2. **Motor puro**: `engine::simulate(seed, a, b, ruleset) -> Result<FightLog, SpecError>`. Sin I/O, sin reloj y determinista en todas las plataformas (nativo y WASM). Devuelve `Result` porque valida los personajes, que en `engine-wasm` llegan del cliente; con entradas válidas la simulación no falla (refinamiento de la firma de ADR-0001, preocupación 1 de la [spec de 003](features/003-motor-de-pelea/spec.md)).
 3. **Sin video**: el cliente recibe eventos y anima. Se sincroniza con el reloj del servidor (`server_time` y offset).
 4. **Sin texto en el dominio**: el motor y el protocolo emiten códigos; la UI y el narrador los traducen (ADR-0007).
 5. **Contenido como datos**: personajes y frases en `content/`, versionados y validados en CI.
@@ -67,7 +67,7 @@ Scheduled ─▶ BettingOpen ─▶ BettingClosed ─▶ Live ─▶ Settled
 - `character_ratings`, `seasons`, `season_stats`
 
 ## Tipos compartidos
-`crates/protocol` define los mensajes WS y los DTOs del API con serde. Es una librería pura: sin I/O, sin `tokio`, sin reloj y sin texto para humanos (ADR-0007).
+`crates/protocol` define los mensajes WS, los DTOs del API y el log de pelea (`FightLog`, `FightEvent` y sus enums, feature 003) con serde. Es una librería pura: sin I/O, sin `tokio`, sin reloj y sin texto para humanos (ADR-0007).
 
 - **Generación:** `ts-rs`, opcional detrás de la feature `ts` para que el server no lo compile. `just gen` vacía `packages/protocol-ts/src/generated/`, exporta un `.ts` por tipo (imports con `.js`), les antepone la cabecera de "generado, no editar", escribe el barril `src/index.ts` (`export type *`) y formatea con Prettier. Los archivos generados se commitean, y `just check` falla si están desactualizados. Nunca se editan a mano.
 - **Paquete:** `@torneo/protocol` (`packages/protocol-ts`) exporta el TS fuente, sin paso de build. `apps/web` lo consume con `import type`.
@@ -76,6 +76,16 @@ Scheduled ─▶ BettingOpen ─▶ BettingClosed ─▶ Live ─▶ Settled
   - Códigos de error: `dominio.motivo` (`ws.origin_forbidden`), como enums con `#[serde(rename = "dominio.motivo")]` en cada variante, nunca `String` libre. Cada enum de códigos es dueño de un solo prefijo (`ApiErrorCode` → `http.*`, `WsErrorCode` → `ws.*`) y expone `ALL` y `as_str()`.
   - `ErrorCode` es la unión sin etiquetar de los enums de códigos y `ApiError { error: ErrorCode }` es el cuerpo de toda respuesta HTTP de error. Un dominio nuevo (por ejemplo `auth.*`) agrega su enum y su variante en `ErrorCode`; los conjuntos de cadenas no se solapan (lo comprueba un test).
   - Nada de enteros de 64 bits o más (`u64`, `i64`, `u128`, `i128`, `usize`) en tipos exportados: `just gen` falla si aparece `bigint`. Si hace falta, se serializan como cadena.
+
+## Motor de pelea
+
+> Detalle: [spec de 003](features/003-motor-de-pelea/spec.md) y [plan-a](features/003-motor-de-pelea/plan-a.md). Si algo no coincide, manda la spec.
+
+- **Crates.** `crates/engine` (librería pura: `simulate`, `Seed`, `Ruleset`, `CharacterSpec`, `SpecError` y la serialización canónica) y `crates/engine-wasm` (un `cdylib` con `wasm-bindgen` que exporta solo `simulate` y devuelve códigos de error `dominio.motivo`). La fase B agrega `crates/content` (carga y valida `content/characters/`) y `crates/sim` (simulaciones masivas y balance).
+- **Dirección de dependencias:** `protocol ← engine ← engine-wasm` (y, en la fase B, `content` y `sim`; más adelante, el server). El motor depende de `protocol` sin la feature `ts`: los tipos del log viven en `protocol` y el motor no compila `ts-rs` (lo comprueba `_check-ts-rs-graph`).
+- **Pureza:** lints `deny` en `lib.rs`, `crates/engine/clippy.toml` (sin `HashMap`/`HashSet`, reloj ni semillas del sistema) y `scripts/check-engine.mjs` (grafo y features de `engine`; en `engine-wasm`, ni el token `unsafe` ni atributos que relajen `unsafe_code`, ni `include!` ni `#[path]`), todo dentro de `just check`. `engine` y `engine-wasm` heredan `unsafe_code = "forbid"` del workspace, sin excepciones.
+- **Serialización canónica:** `canonical_json(&FightLog)` y `canonical_spec_json(&CharacterSpec)` son `serde_json::to_vec` compacto, con los campos en orden de declaración y sin mapas ni floats. "Idéntico byte a byte" significa que devuelven los mismos bytes. Los dorados de `crates/engine/tests/golden/` lo comprueban en nativo y en `wasm32-wasip1` (`just _check-wasm`), y los `log-*.json` son también los fixtures del adaptador de 002.
+- **Versionado:** `Ruleset::for_version(n)`; antes de la primera pelea de producción, la versión 1 puede cambiar regenerando los dorados en el mismo PR, y después todo cambio es una versión nueva (ADR-0001, RF10 de 003).
 
 ## Renderer de peleas
 
@@ -208,7 +218,7 @@ Son los cambios en el proxy compartido que el owner aprobó el 2026-10-21. Se ha
 > - **"Reset configuration to default" del proxy en Coolify quita `torneo-edge` y la IP `10.250.0.2`.** Después de un reset, de reiniciar el proxy o de actualizar Coolify, se repite el paso 2 y la verificación 15 de ADR-0006.
 
 ### Prerrequisitos del primer despliegue a producción (bloquean; RF-C18)
-Ninguno se cumple en la feature 001. Se siguen en Linear (TA-8, bloqueado por la feature de auth y por TA-6).
+Ninguno se cumple en la feature 001. Los puntos 1 a 4 se siguen en Linear (TA-8, bloqueado por la feature de auth y por TA-6), el 5 en TA-13 y el 6 en la feature 002.
 
 1. **Límites anónimos de ADR-0008 D6 y D7 en `/ws`, implementados y probados:** como máximo 50 sockets simultáneos por `ip_key`, y upgrade a 30/min con ráfaga de 10 por IP, con `TRUSTED_PROXIES=10.250.0.2/32` (ADR-0006 D2).
 2. **Las verificaciones de ADR-0006 que no se hicieron en el cierre de 001** (RF-C19), más dos comprobaciones con el stack desplegado:
@@ -225,3 +235,5 @@ Ninguno se cumple en la feature 001. Se siguen en Linear (TA-8, bloqueado por la
    - `curl -I` a `https://${PUBLIC_HOST}/es/`, `/_app/version.json` y `/healthz/` (la 308). Las tres respuestas traen `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin` y `Strict-Transport-Security: max-age=31536000`, sin `includeSubDomains` ni `preload` y cada una una sola vez (Traefik solo emite HSTS sobre TLS).
 3. **La configuración de GitHub de RF-C19**, si no se hizo en el cierre de 001: rulesets de `main` (con `ci-ok` requerido) y de tags `v*`, el environment `production` con el owner como reviewer y `can_admins_bypass: false`, aprobación de workflows para todos los contribuidores externos y las alertas de Dependabot.
 4. **Preparación del VPS** (sección anterior), con la verificación 15 de ADR-0006 en verde, y la **prueba de restauración** de backups de ADR-0006 D9.
+5. **Peleas re-simulables antes de abrir apuestas (RF22 de 003, TA-13).** Ninguna pelea de producción abre apuestas si no se cumple una de estas dos condiciones: (a) se publican como snapshot inmutable, junto con el commit, los `canonical_spec_json` de los dos personajes y la `ruleset_version`; o (b) el commit se extiende a `SHA-256(seed ‖ canonical_spec_json(a) ‖ canonical_spec_json(b) ‖ ruleset_version)`, lo que enmienda ADR-0002 con el OK del owner. TA-13 también cubre que el `FightLog` completo no salga del server antes de `Settled`, igual que la semilla.
+6. **`timeline_version` 2 del renderer (preocupación 7 de la spec de 003).** Ninguna feature publica peleas reales sin una `Timeline` que exprese el fin por tiempo: un cue `time_up`, una victoria por decisión sin `ko` y un cierre sin ganador (empate). Mientras no exista, el adaptador de 002 rechaza esos logs con `adapter.unsupported_ending`.

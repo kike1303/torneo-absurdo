@@ -1,5 +1,5 @@
 [toolchain]
 channel = "1.99.1"
 components = ["rustfmt", "clippy"]
-targets = ["x86_64-unknown-linux-musl"]
+targets = ["x86_64-unknown-linux-musl", "wasm32-unknown-unknown", "wasm32-wasip1"]
 profile = "minimal"

@@ -1,0 +1,95 @@
+engine v0.1.0 (/repo/crates/engine)
+rand_chacha v0.9.0
+ppv-lite86 feature "simd"
+ppv-lite86 v0.2.21
+zerocopy feature "default"
+zerocopy v0.8.63
+zerocopy-derive feature "default"
+zerocopy-derive v0.8.63 (proc-macro)
+proc-macro2 feature "default"
+proc-macro2 v1.0.107
+unicode-ident feature "default"
+unicode-ident v1.0.27
+proc-macro2 feature "proc-macro"
+proc-macro2 v1.0.107 (*)
+quote feature "default"
+quote v1.0.47
+proc-macro2 v1.0.107 (*)
+quote feature "proc-macro"
+quote v1.0.47 (*)
+proc-macro2 feature "proc-macro" (*)
+syn feature "default"
+syn v2.0.119
+proc-macro2 v1.0.107 (*)
+quote v1.0.47 (*)
+unicode-ident feature "default" (*)
+syn feature "clone-impls"
+syn v2.0.119 (*)
+syn feature "derive"
+syn v2.0.119 (*)
+syn feature "parsing"
+syn v2.0.119 (*)
+syn feature "printing"
+syn v2.0.119 (*)
+syn feature "proc-macro"
+syn v2.0.119 (*)
+proc-macro2 feature "proc-macro" (*)
+quote feature "proc-macro" (*)
+syn feature "full"
+syn v2.0.119 (*)
+zerocopy feature "simd"
+zerocopy v0.8.63 (*)
+rand_core feature "default"
+rand_core v0.9.5
+protocol feature "default"
+protocol v0.1.0 (/repo/crates/protocol)
+serde feature "default"
+serde v1.0.229
+serde_core feature "result"
+serde_core v1.0.229
+serde_derive feature "default"
+serde_derive v1.0.229 (proc-macro)
+proc-macro2 feature "proc-macro" (*)
+quote feature "proc-macro" (*)
+syn feature "clone-impls"
+syn v3.0.9
+proc-macro2 v1.0.107 (*)
+quote v1.0.47 (*)
+unicode-ident feature "default" (*)
+syn feature "derive"
+syn v3.0.9 (*)
+syn feature "parsing"
+syn v3.0.9 (*)
+syn feature "printing"
+syn v3.0.9 (*)
+syn feature "proc-macro"
+syn v3.0.9 (*)
+proc-macro2 feature "proc-macro" (*)
+quote feature "proc-macro" (*)
+serde_derive feature "default" (*)
+serde feature "std"
+serde v1.0.229 (*)
+serde_core feature "std"
+serde_core v1.0.229 (*)
+serde feature "derive"
+serde v1.0.229 (*)
+serde feature "serde_derive"
+serde v1.0.229 (*)
+serde feature "default" (*)
+serde feature "derive" (*)
+serde_json feature "default"
+serde_json v1.0.154
+memchr v2.8.3
+serde v1.0.229 (*)
+serde_core v1.0.229 (*)
+itoa feature "default"
+itoa v1.0.18
+zmij feature "default"
+zmij v1.0.23
+serde_json feature "std"
+serde_json v1.0.154 (*)
+serde_core feature "std" (*)
+memchr feature "std"
+memchr v2.8.3
+memchr feature "alloc"
+memchr v2.8.3

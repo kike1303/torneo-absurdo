@@ -1,0 +1,21 @@
+# Clippy reads only the nearest clippy.toml, so the two options of the root file are repeated.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+# 003 RF5: the engine is pure. Every rand_core path has `allow-invalid`, so a future rand_core
+# that moves or drops an item does not make clippy reject the file (`OsRng`, `from_os_rng` and
+# `try_from_os_rng` do not even exist without `os_rng`: the engine alone, the wasm target).
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "iteration order is not deterministic; use BTreeMap or Vec" },
+    { path = "std::collections::HashSet", reason = "iteration order is not deterministic; use BTreeSet or Vec" },
+    { path = "std::time::Instant", reason = "the engine has no clock" },
+    { path = "std::time::SystemTime", reason = "the engine has no clock" },
+    { path = "rand_core::OsRng", reason = "the only randomness is ChaCha20 seeded with the Seed", allow-invalid = true },
+]
+disallowed-methods = [
+    { path = "rand_core::SeedableRng::from_os_rng", reason = "seed only with Seed (ChaCha20Rng::from_seed)", allow-invalid = true },
+    { path = "rand_core::SeedableRng::try_from_os_rng", reason = "seed only with Seed (ChaCha20Rng::from_seed)", allow-invalid = true },
+    { path = "rand_core::SeedableRng::from_rng", reason = "seed only with Seed (ChaCha20Rng::from_seed)", allow-invalid = true },
+    { path = "rand_core::SeedableRng::try_from_rng", reason = "seed only with Seed (ChaCha20Rng::from_seed)", allow-invalid = true },
+    { path = "rand_core::SeedableRng::seed_from_u64", reason = "seed only with Seed (ChaCha20Rng::from_seed)", allow-invalid = true },
+]

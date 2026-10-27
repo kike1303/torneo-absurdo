@@ -1,0 +1,1 @@
+{"slug":"turtle","stats":{"hp":100,"attack":1,"defense":100,"speed":40,"special":1},"personality":{"aggression":0,"caution":100,"showmanship":0},"abilities":[{"id":"shell_bump","kind":"heavy","power":20,"cooldown":5,"element":null}],"weaknesses":[]}

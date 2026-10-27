@@ -1,6 +1,5 @@
 [workspace]
-# Explicit members: crates/engine and crates/engine-wasm are still empty (RF-B1).
-members = ["apps/server", "crates/protocol"]
+members = ["apps/server", "crates/engine", "crates/engine-wasm", "crates/protocol"]
 resolver = "3"
 
 [workspace.package]
@@ -13,6 +12,10 @@ publish = false
 # Cargo.lock and must be at least 3 days old (`just crate-age`, plan-b decision 16).
 [workspace.dependencies]
 protocol = { path = "crates/protocol" }
+engine = { path = "crates/engine" }
+# No default features: no `std`, `os_rng` nor `serde` in the engine (003 RF5, RF6).
+rand_chacha = { version = "=0.9.0", default-features = false }
+wasm-bindgen = "=0.2.129"
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "matched-path", "tokio", "ws"] }
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync", "io-util"] }
 tokio-util = { version = "=0.7.20", features = ["rt"] }
@@ -50,3 +53,14 @@ print_stderr = "deny"
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# An overflow panics instead of silently diverging between profiles (003 RNF).
+[profile.release.package.engine]
+overflow-checks = true
+
+# Unoptimised ChaCha makes the engine tests slow in debug; integer results do not change.
+[profile.dev.package.rand_chacha]
+opt-level = 3
+
+[profile.dev.package.ppv-lite86]
+opt-level = 3

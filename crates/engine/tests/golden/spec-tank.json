@@ -1,0 +1,1 @@
+{"slug":"tank","stats":{"hp":90,"attack":60,"defense":80,"speed":30,"special":40},"personality":{"aggression":50,"caution":70,"showmanship":20},"abilities":[{"id":"ground_slam","kind":"heavy","power":60,"cooldown":3,"element":"ground"},{"id":"boulder_toss","kind":"special","power":50,"cooldown":6,"element":"ground"}],"weaknesses":["water"]}

@@ -1,0 +1,2 @@
+# Engine goldens are compared byte by byte (003 plan-a, decision 6): no line-ending conversion.
+crates/engine/tests/golden/* -text

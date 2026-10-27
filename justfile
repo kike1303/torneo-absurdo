@@ -70,11 +70,14 @@ check-web: _web-prepare
     node scripts/check-compose.mjs
     node scripts/check-workflows.mjs
 
-# The Rust half of `check`: fmt, clippy, tests (with Postgres), freshness of `gen`, ts-rs graph
+# The Rust half of `check`: fmt, clippy, engine purity and WASM (no Docker), tests (with
+# Postgres), freshness of `gen`, ts-rs graph
 check-rust:
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cargo clippy -p protocol --features ts --all-targets --locked -- -D warnings
+    {{just_executable()}} _check-engine
+    {{just_executable()}} _check-wasm
     {{just_executable()}} db-up
     DATABASE_URL='{{test_db_url}}' cargo test --workspace --locked
     {{just_executable()}} _check-gen
@@ -170,7 +173,27 @@ _check-gen:
     fi
     node scripts/compare-trees.mjs "$backup" "$src"
 
-# RF-B3: ts-rs never in the server's normal graph; protocol without features has no ts-rs nor tokio
+# RF5, RF19, RF20: engine graph and features, engine-wasm unsafe and lints
+_check-engine:
+    node scripts/check-engine.mjs
+
+# RF18: engine and bindings compile for the browser; the same goldens pass in WASI.
+# --nocapture: under panic = abort a failure is a trap, so the panic message must not be captured.
+_check-wasm:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for target in wasm32-unknown-unknown wasm32-wasip1; do
+        if ! rustup target list --installed | grep -qx "$target"; then
+            echo "missing target $target: run \`rustup toolchain install\` in the repo" >&2
+            exit 1
+        fi
+    done
+    cargo clippy -p engine -p engine-wasm --target wasm32-unknown-unknown --locked -- -D warnings
+    CARGO_TARGET_WASM32_WASIP1_RUNNER="node --disable-warning=ExperimentalWarning {{justfile_directory()}}/scripts/wasi-runner.mjs" \
+        cargo test -p engine --test golden --target wasm32-wasip1 --locked -- --nocapture
+
+# RF-B3: ts-rs never in the server's normal graph; protocol without features has no ts-rs nor tokio.
+# 003: neither in engine nor engine-wasm (they depend on protocol without `ts`).
 _check-ts-rs-graph:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -182,6 +205,12 @@ _check-ts-rs-graph:
         echo "protocol pulls ts-rs or tokio without the ts feature (RF-B3)" >&2
         exit 1
     fi
+    for crate in engine engine-wasm; do
+        if cargo tree -p "$crate" -e normal --locked --prefix none | grep -qE '^(ts-rs|tokio) '; then
+            echo "$crate pulls ts-rs or tokio (003 RF5)" >&2
+            exit 1
+        fi
+    done
     echo "check-ts-rs-graph: ok"
 
 # Start the development Postgres (infra/compose.dev.yml) and wait until it is healthy. Idempotent.
