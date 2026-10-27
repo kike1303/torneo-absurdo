@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import { checkWorkflows, loadTree } from '../check-workflows.mjs';
 
@@ -592,5 +594,83 @@ describe('check-workflows (RF-C12, plan-c decision 23)', () => {
       ],
     });
     expect(checkWorkflows(tree)).toEqual([]);
+  });
+});
+
+const ROOT_URL = new URL('../../', import.meta.url);
+
+/** Recipes of the justfile: name → { deps, body }. */
+function justRecipes(text) {
+  /** @type {Record<string, { deps: string[], body: string[] }>} */
+  const recipes = {};
+  let current = null;
+  for (const line of text.split('\n')) {
+    const header = /^([A-Za-z_][\w-]*)[^:=]*:(?!=)\s*(.*)$/.exec(line);
+    if (header && !line.includes(':=')) {
+      current = {
+        deps: header[2].split(/\s+/).filter((d) => /^[A-Za-z_][\w-]*$/.test(d)),
+        body: [],
+      };
+      recipes[header[1]] = current;
+    } else if (current && /^\s+\S/.test(line)) {
+      current.body.push(line);
+    } else if (!/^\s*$/.test(line)) {
+      current = null;
+    }
+  }
+  return recipes;
+}
+
+/** Every scripts/... path a set of recipes runs, following dependencies and `just X` calls. */
+function scriptsOfRecipes(recipes, start) {
+  const seen = new Set();
+  const scripts = new Set();
+  const visit = (name) => {
+    if (seen.has(name) || !recipes[name]) return;
+    seen.add(name);
+    for (const dep of recipes[name].deps) visit(dep);
+    for (const line of recipes[name].body) {
+      for (const m of line.matchAll(/scripts\/[\w./-]+/g)) scripts.add(m[0]);
+      for (const m of line.matchAll(/\{\{just_executable\(\)\}\}\s+([\w-]+)/g)) visit(m[1]);
+    }
+  };
+  start.forEach(visit);
+  return scripts;
+}
+
+const globToRegExp = (glob) =>
+  new RegExp(
+    `^${glob
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*\*/g, '\u0000')
+      .replace(/\*/g, '[^/]*')
+      .replace(/\u0000/g, '.*')}$`,
+  );
+
+describe('ci.yml filters cover what each job runs (review of PR #5)', () => {
+  const ci = parse(readFileSync(new URL('.github/workflows/ci.yml', ROOT_URL), 'utf8'));
+  const recipes = justRecipes(readFileSync(new URL('justfile', ROOT_URL), 'utf8'));
+  const filterStep = ci.jobs.changes.steps.find((step) => step.id === 'filter');
+  const filters = parse(filterStep.with.filters);
+  const jobs = Object.entries(ci.jobs)
+    .map(([id, job]) => [
+      id,
+      job,
+      /needs\.changes\.outputs\.(\w+) == 'true'/.exec(job.if ?? '')?.[1],
+    ])
+    .filter(([, , filter]) => filter);
+
+  it('finds the gated jobs', () => {
+    expect(jobs.map(([id]) => id).sort()).toEqual(['e2e', 'images', 'rust', 'web']);
+  });
+
+  it.each(jobs)('every script that %s runs is in its filter', (_id, job, filter) => {
+    const globs = filters[filter].flat(Infinity).map(globToRegExp);
+    const runs = job.steps.map((step) => step.run ?? '').join('\n');
+    const called = [...runs.matchAll(/\bjust\s+([\w-]+)/g)].map((m) => m[1]);
+    const scripts = scriptsOfRecipes(recipes, called);
+    for (const m of runs.matchAll(/scripts\/[\w./-]+/g)) scripts.add(m[0]);
+    const missing = [...scripts].filter((script) => !globs.some((g) => g.test(script)));
+    expect(missing, `add to the ${filter} filter of ci.yml`).toEqual([]);
   });
 });

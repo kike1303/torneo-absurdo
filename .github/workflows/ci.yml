@@ -63,6 +63,9 @@ jobs:
               - deny.toml
               - clippy.toml
               - infra/compose.dev.yml
+              # Run by _check-gen inside check-rust (review of PR #5).
+              - scripts/gen-protocol-ts.mjs
+              - scripts/compare-trees.mjs
             web:
               - *common
               - apps/web/**
