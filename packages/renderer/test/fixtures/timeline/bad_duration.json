@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/duration_ms",
+      "value": 0
+    }
+  ],
+  "expect": {
+    "code": "timeline.bad_duration",
+    "path": "/duration_ms"
+  }
+}

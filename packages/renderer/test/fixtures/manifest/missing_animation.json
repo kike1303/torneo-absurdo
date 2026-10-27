@@ -1,0 +1,12 @@
+{
+  "ops": [
+    {
+      "op": "delete",
+      "path": "/animations/win"
+    }
+  ],
+  "expect": {
+    "code": "manifest.missing_animation",
+    "path": "/animations/win"
+  }
+}

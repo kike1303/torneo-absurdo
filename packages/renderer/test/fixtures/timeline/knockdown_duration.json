@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/4/duration_ms",
+      "value": 500
+    }
+  ],
+  "expect": {
+    "code": "timeline.knockdown_duration",
+    "path": "/cues/4/duration_ms"
+  }
+}

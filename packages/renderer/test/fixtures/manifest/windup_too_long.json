@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/animations/attack_heavy/frame_ms",
+      "value": [401, 100]
+    }
+  ],
+  "expect": {
+    "code": "manifest.windup_too_long",
+    "path": "/animations/attack_heavy/impact_frame"
+  }
+}

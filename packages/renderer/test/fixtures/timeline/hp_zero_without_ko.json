@@ -1,0 +1,12 @@
+{
+  "ops": [
+    {
+      "op": "delete",
+      "path": "/cues/7"
+    }
+  ],
+  "expect": {
+    "code": "timeline.hp_zero_without_ko",
+    "path": "/cues/6/target_hp"
+  }
+}

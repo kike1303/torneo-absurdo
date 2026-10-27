@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/1/type",
+      "value": "taunt"
+    }
+  ],
+  "expect": {
+    "code": "timeline.unknown_cue_type",
+    "path": "/cues/1/type"
+  }
+}

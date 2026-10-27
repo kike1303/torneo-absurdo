@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/animations/idle/frames/0",
+      "value": 9
+    }
+  ],
+  "expect": {
+    "code": "manifest.animation_frame_index",
+    "path": "/animations/idle/frames/0"
+  }
+}

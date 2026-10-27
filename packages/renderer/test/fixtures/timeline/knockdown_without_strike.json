@@ -1,0 +1,18 @@
+{
+  "ops": [
+    {
+      "op": "insert",
+      "path": "/cues/1",
+      "value": {
+        "at_ms": 200,
+        "type": "knockdown",
+        "fighter": "b",
+        "duration_ms": 800
+      }
+    }
+  ],
+  "expect": {
+    "code": "timeline.knockdown_without_strike",
+    "path": "/cues/1"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/8/fighter",
+      "value": "b"
+    }
+  ],
+  "expect": {
+    "code": "timeline.win_side",
+    "path": "/cues/8/fighter"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/animations/hit",
+      "value": {
+        "frames": [0, 1],
+        "frame_ms": [2000, 1500],
+        "loop": false
+      }
+    }
+  ],
+  "expect": {
+    "code": "manifest.animation_too_long",
+    "path": "/animations/hit/frame_ms"
+  }
+}

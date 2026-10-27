@@ -1,0 +1,17 @@
+{
+  "ops": [
+    {
+      "op": "insert",
+      "path": "/cues/8",
+      "value": {
+        "at_ms": 8000,
+        "type": "ko",
+        "fighter": "b"
+      }
+    }
+  ],
+  "expect": {
+    "code": "timeline.ko_count",
+    "path": "/cues/8"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/timeline_version",
+      "value": 2
+    }
+  ],
+  "expect": {
+    "code": "timeline.unsupported_version",
+    "path": "/timeline_version"
+  }
+}

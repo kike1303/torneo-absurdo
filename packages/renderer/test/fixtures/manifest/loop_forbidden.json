@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/animations/ko/loop",
+      "value": true
+    }
+  ],
+  "expect": {
+    "code": "manifest.loop_forbidden",
+    "path": "/animations/ko/loop"
+  }
+}
