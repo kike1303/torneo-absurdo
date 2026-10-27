@@ -4,7 +4,7 @@ type: architecture
 status: draft
 author: architect
 created: 2026-10-20
-updated: 2026-10-25
+updated: 2026-10-26
 ---
 
 # Arquitectura general
@@ -77,7 +77,7 @@ Scheduled ─▶ BettingOpen ─▶ BettingClosed ─▶ Live ─▶ Settled
 > Fuente de las decisiones: [ADR-0006](decisions/0006-despliegue-y-ci.md). Detalle de la fase C: [spec de 001](features/001-fundaciones/spec.md) (RF-C1 a RF-C19) y [plan-c](features/001-fundaciones/plan-c.md). Esta sección es el resumen operativo; si algo no coincide, mandan el ADR y la spec.
 
 ### Piezas
-- **Postgres es un recurso standalone de Coolify** (`postgres:17-alpine`, 512 MB, `shared_buffers=128MB`, 20 conexiones), **fuera del compose** y sin puerto público. Sus backups son los programados de Coolify (diarios a las 09:00 UTC, 7 días en el VPS y 30 días en Cloudflare R2; ADR-0006 D9).
+- **Postgres es un recurso standalone de Coolify** (`postgres:17-alpine`, 512 MB, `shared_buffers=128MB`, 20 conexiones), **fuera del compose** y sin puerto público. Sus parámetros de log no escriben datos de las filas ni sentencias ([ADR-0012](decisions/0012-logs-y-cabeceras-de-seguridad.md) A9; paso 6 de "Preparación del VPS"). Sus backups son los programados de Coolify (diarios a las 09:00 UTC, 7 días en el VPS y 30 días en Cloudflare R2; ADR-0006 D9).
 - **`infra/docker-compose.yml` tiene solo `web` y `server`.** Los dos usan `image: ghcr.io/kike1303/torneo-absurdo/{server,web}:${IMAGE_TAG:?}` y ninguno tiene `build:` ni `ports:`. Coolify lee el compose de `main`, con el auto-deploy apagado, y le pone `IMAGE_TAG`, `PUBLIC_HOST` y `DATABASE_URL` como variables de entorno. Esas variables viven **solo en Coolify**: no hay `infra/.env` con valores reales. `scripts/check-compose.mjs` exige la forma exacta del archivo:
   - `mem_limit` = `memswap_limit` (256 MB `server` y 384 MB `web`, con `NODE_OPTIONS=--max-old-space-size=256`);
   - healthchecks en forma exec (15 s / 3 s / 3 / 30 s), y `web` espera a que `server` esté `healthy`;
@@ -148,6 +148,40 @@ Son los cambios en el proxy compartido que el owner aprobó el 2026-10-21. Se ha
    ```
    El primero no tiene que imprimir nada.
 5. **Limpieza de Docker de Coolify** (Servers → Settings): diaria y además al pasar el 80 % de disco, con **"Delete Unused Volumes" apagado**.
+6. **Configuración del Postgres standalone** (ADR-0006 D4 y ADR-0012 A9). En el recurso de Postgres de Coolify, el límite de memoria es 512 MB y la "Custom PostgreSQL Configuration" lleva el tuning de D4 y los parámetros de log de A9. Son los mismos valores que el `command` de `infra/compose.local.yml` y, solo los de log, el de `infra/compose.dev.yml` (`scripts/check-compose.mjs` compara los dos compose; en el VPS lo confirma la consulta de los prerrequisitos):
+   ```ini
+   shared_buffers = 128MB
+   max_connections = 20
+   work_mem = 4MB
+   log_error_verbosity = terse
+   log_min_error_statement = panic
+   log_statement = none
+   log_min_duration_statement = -1
+   log_min_duration_sample = -1
+   log_connections = off
+   log_disconnections = off
+   log_transaction_sample_rate = 0
+   log_statement_sample_rate = 1
+   log_lock_waits = off
+   ```
+   - Con los valores por defecto, Postgres escribe en su log el `DETAIL` (`Key (…)=(…)`, `Failing row contains (…)`) y la línea `STATEMENT` de cada error. `terse` y `panic` los quitan, y las líneas `ERROR` quedan solo con el mensaje primario. Los cuatro últimos son los valores por defecto, fijados para que nadie encienda el registro muestreado de sentencias (`log_min_duration_sample`) ni de transacciones completas (`log_transaction_sample_rate`) al diagnosticar latencia.
+   - `log_line_prefix` se deja en `%m [%p] ` (sin `%h` ni `%r`), `log_hostname` en `off`, y no se cargan `auto_explain` ni `pg_stat_statements` con salida a log.
+   - Un valor inválido hace que Postgres no arranque, y el healthcheck de Coolify lo muestra. Nunca se queda con los valores por defecto.
+   - Los `FATAL` de conexión (`no pg_hba.conf entry for host "…"`) llevan la IP en el mensaje primario, y `terse` no la quita. Se acepta **solo mientras Postgres no tenga puerto público** y solo `server` se conecte por `torneo-db` (ADR-0006). Si eso cambia, se revisa A9 antes.
+   - Al subir de mayor se revisan los parámetros: en PostgreSQL 18, `log_connections` pasa a ser una lista.
+7. **Rotación de los logs de Postgres** (ADR-0012 A7). El recurso standalone no usa nuestro compose, así que su `LogConfig` viene del daemon. Se comprueba con:
+   ```sh
+   docker inspect <contenedor-postgres> --format '{{json .HostConfig.LogConfig}}'
+   ```
+   Tiene que mostrar `{"Type":"json-file","Config":{"max-file":"3","max-size":"10m"}}`. Si no, el **plan B** es fijarlo en `/etc/docker/daemon.json`:
+   - Los valores de `log-opts` van **como cadenas**. Con `"max-file": 3`, `dockerd` no arranca:
+     ```json
+     { "log-driver": "json-file", "log-opts": { "max-size": "10m", "max-file": "3" } }
+     ```
+   - Se **fusiona** con el `daemon.json` que ya exista, sin reemplazarlo. El instalador de Coolify suele escribir uno, a menudo con estos mismos valores.
+   - Antes de aplicarlo se valida: `sudo dockerd --validate --config-file /etc/docker/daemon.json`.
+   - `log-opts` no se recarga con `SIGHUP`: hay que **reiniciar `dockerd`**, lo que reinicia todos los contenedores del VPS compartido, Coolify incluido. Pide una **ventana y el OK del owner**.
+   - Solo vale para los contenedores creados después: tras el reinicio se recrea el recurso de Postgres en Coolify y se repite el `docker inspect`.
 
 > **Advertencias.**
 > - **Nunca borrar `torneo-edge`.** Si la red no existe, el compose del proxy falla y se caen **todas** las apps del VPS. `just prod-local-down` solo borra redes con la etiqueta `torneo.local=1`, así que no la toca.
@@ -159,6 +193,15 @@ Ninguno se cumple en la feature 001. Se siguen en Linear (TA-8, bloqueado por la
 1. **Límites anónimos de ADR-0008 D6 y D7 en `/ws`, implementados y probados:** como máximo 50 sockets simultáneos por `ip_key`, y upgrade a 30/min con ráfaga de 10 por IP, con `TRUSTED_PROXIES=10.250.0.2/32` (ADR-0006 D2).
 2. **Las verificaciones de ADR-0006 que no se hicieron en el cierre de 001** (RF-C19), más dos comprobaciones con el stack desplegado:
    - `docker inspect` de `web` y `server`: `ReadonlyRootfs`, `CapDrop`, `SecurityOpt` y `LogConfig`, para confirmar que Coolify respeta el endurecimiento y los logs al reescribir el compose.
+   - `docker inspect` del contenedor de Postgres: `LogConfig` es `json-file` con `max-size` `10m` y `max-file` `3`. Si no, plan B de `daemon.json` y recrear el recurso (paso 7 de "Preparación del VPS", ADR-0012 A7).
+   - Los parámetros de log de ADR-0012 A9 en el Postgres de producción. Cada fila tiene el valor del paso 6 de "Preparación del VPS", con `source` distinto de `default` en los fijados, y `log_line_prefix` no lleva `%h` ni `%r`:
+     ```sql
+     SELECT name, setting, source FROM pg_settings WHERE name IN (
+       'log_error_verbosity', 'log_min_error_statement', 'log_statement',
+       'log_min_duration_statement', 'log_min_duration_sample', 'log_connections', 'log_disconnections',
+       'log_transaction_sample_rate', 'log_statement_sample_rate', 'log_lock_waits',
+       'log_line_prefix', 'log_hostname') ORDER BY name;
+     ```
    - `curl -I` a `https://${PUBLIC_HOST}/es/`, `/_app/version.json` y `/healthz/` (la 308). Las tres respuestas traen `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin` y `Strict-Transport-Security: max-age=31536000`, sin `includeSubDomains` ni `preload` y cada una una sola vez (Traefik solo emite HSTS sobre TLS).
 3. **La configuración de GitHub de RF-C19**, si no se hizo en el cierre de 001: rulesets de `main` (con `ci-ok` requerido) y de tags `v*`, el environment `production` con el owner como reviewer y `can_admins_bypass: false`, aprobación de workflows para todos los contribuidores externos y las alertas de Dependabot.
 4. **Preparación del VPS** (sección anterior), con la verificación 15 de ADR-0006 en verde, y la **prueba de restauración** de backups de ADR-0006 D9.

@@ -107,15 +107,28 @@ const POSTGRES_KEYS = [
   'networks',
   'volumes',
 ];
-const POSTGRES_COMMAND = [
-  'postgres',
-  '-c',
-  'shared_buffers=128MB',
-  '-c',
-  'max_connections=20',
-  '-c',
-  'work_mem=4MB',
+/** Tuning of the Coolify Postgres (ADR-0006 D4). */
+const POSTGRES_TUNING = ['shared_buffers=128MB', 'max_connections=20', 'work_mem=4MB'];
+/**
+ * Log parameters of ADR-0012 A9: no DETAIL, STATEMENT, statements or client hosts in the logs.
+ * The last four are the defaults, fixed so that no sampling ever logs statements or transactions.
+ */
+const POSTGRES_LOG_PARAMS = [
+  'log_error_verbosity=terse',
+  'log_min_error_statement=panic',
+  'log_statement=none',
+  'log_min_duration_statement=-1',
+  'log_min_duration_sample=-1',
+  'log_connections=off',
+  'log_disconnections=off',
+  'log_transaction_sample_rate=0',
+  'log_statement_sample_rate=1',
+  'log_lock_waits=off',
 ];
+/** @param {string[]} params */
+const postgresCommand = (params) => ['postgres', ...params.flatMap((p) => ['-c', p])];
+const POSTGRES_COMMAND = postgresCommand([...POSTGRES_TUNING, ...POSTGRES_LOG_PARAMS]);
+const POSTGRES_DEV_COMMAND = postgresCommand(POSTGRES_LOG_PARAMS);
 const POSTGRES_ENV = ['POSTGRES_DB', 'POSTGRES_PASSWORD', 'POSTGRES_USER'];
 const POSTGRES_HEALTH_KEYS = ['interval', 'retries', 'test', 'timeout'];
 const LOCAL_VOLUME = 'torneo-local-pg';
@@ -603,6 +616,12 @@ function checkLocal(local, dev, problems) {
         problems.push(`${f}: services.${svc}: loopback-ports: ${p} must bind 127.0.0.1`);
       }
     }
+  }
+  // compose.dev.yml carries the same log parameters, without the tuning (ADR-0012 A9).
+  if (!same(dev?.services?.postgres?.command, POSTGRES_DEV_COMMAND)) {
+    problems.push(
+      `${FILES.dev}: services.postgres: command: must be ${JSON.stringify(POSTGRES_DEV_COMMAND)}`,
+    );
   }
   const pg = services.postgres;
   if (!pg) {
