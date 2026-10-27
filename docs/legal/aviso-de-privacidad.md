@@ -12,7 +12,7 @@ approvals:
 linear: TA-5
 depends_on: ["0005", "0006", "0007", "0008"]
 created: 2026-10-21
-updated: 2026-10-24
+updated: 2026-10-26
 ---
 
 # Aviso de privacidad integral — Torneo Absurdo (borrador)
@@ -97,6 +97,8 @@ Algunos de estos proveedores pueden almacenar datos fuera de México.
 | Registros de moderación | `{{PLAZO_REGISTROS_MODERACION}}` |
 
 La aplicación web también guarda registros técnicos, pero **solo de errores** (no registra cada visita) y sin datos tuyos: ni IP, ni cookies, ni cabeceras, ni la dirección completa de la página. Como escribe poco, esos registros pueden durar más que los del servidor antes de sobrescribirse.
+
+La base de datos también guarda registros técnicos (arranque, mantenimiento y errores), configurados para que **no contengan datos tuyos**: ni el contenido de tus datos, ni las consultas, ni tu IP. Como escribe poco, esos registros pueden durar más de 3 semanas antes de sobrescribirse.
 
 El registro de movimientos de monedas es inmutable por diseño. Si eliminas tu cuenta, borramos en ese momento tus identificadores de Google o Discord, tus sesiones, tu alias y tu historial de eventos de seguridad. Tus movimientos de monedas, apuestas y resultados se conservan **seudonimizados**: ligados a un identificador interno, sin tu alias ni tu cuenta de Google o Discord. Además se conservan:
 - los registros de moderación que te afecten, durante su plazo;
