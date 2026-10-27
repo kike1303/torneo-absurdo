@@ -18,6 +18,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/protocol-ts/package.json packages/protocol-ts/package.json
+COPY packages/renderer/package.json packages/renderer/package.json
 RUN --mount=type=cache,id=torneo-pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --store-dir /pnpm/store --filter 'web...'
 
