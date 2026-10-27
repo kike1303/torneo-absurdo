@@ -2,7 +2,7 @@
 id: "002"
 title: Spike de renderizado de peleas — fase A1
 type: plan
-status: approved
+status: done
 risk: medium
 author: frontend-engineer
 reviewers: [architect]
@@ -12,7 +12,7 @@ approvals:
 linear: TA-2
 depends_on: ["001"]
 created: 2026-10-26
-updated: 2026-10-26
+updated: 2026-10-27
 ---
 
 # Plan: Spike de renderizado de peleas — fase A1 (desde spec.md 2026-10-26)

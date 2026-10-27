@@ -2,7 +2,7 @@
 id: "002"
 title: Spike de renderizado de peleas
 type: spec
-status: approved
+status: done
 risk: medium
 author: architect
 reviewers: [product-owner, game-designer]
@@ -456,3 +456,6 @@ Atendí los cuatro cambios bloqueantes de game-designer y parte de las recomenda
   2. RF-C1: el resultado tiene la forma de `TimelineResult` (`{ ok: true, timeline, ignored }` o `{ ok: false, errors }`) en lugar de un `Result` genérico, y "se cuenta" es `ignored`.
   3. RF-C2 y RF-C3: los tests leen los dorados en su lugar, y el arena empaqueta una sola copia (`log-ko-comeback.json`) comprobada byte a byte contra su dorado, porque el contexto de Docker de `apps/web` no incluye `crates/`. Se aparta de la decisión 6 del plan-a de 003 ("única copia") solo en ese archivo.
 - No reabro la revisión de product-owner ni de game-designer: no cambia lo que ve el usuario, el guion, el vocabulario de cues ni la Timeline v1, y la puerta de publicación sigue en `docs/architecture.md`. **Aviso a game-designer**, autor de 003, porque su pedido de v2 cambia de dueño: su diseño (decisión, empate, `time_up`, más las notas de windup y KO por chip del punto 4 de `plan-c.md`) entra en el issue nuevo, donde sí revisa.
+
+### Cierre — 2026-10-27
+Fases A1 (#36), A2 (#40), B (#41) y C (#42) fusionadas: la feature pasa a `done` al fusionar C, como fija el Resumen. Quedan fuera y con su issue: el go/no-go del owner (RF-B8 y RF-B9) en **TA-20**, y la `timeline_version` 2 (fines sin KO) en **TA-19**.

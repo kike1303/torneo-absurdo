@@ -2,7 +2,7 @@
 id: "002"
 title: Spike de renderizado de peleas
 type: intent
-status: approved
+status: done
 risk: medium
 author: product-owner
 reviewers: [architect]
@@ -12,7 +12,7 @@ approvals:
 linear: TA-2
 depends_on: ["001"]
 created: 2026-10-20
-updated: 2026-10-26
+updated: 2026-10-27
 ---
 
 # Intent: Spike de renderizado de peleas
