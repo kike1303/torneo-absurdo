@@ -1,5 +1,6 @@
-// Engine logs that /dev/arena can play with `?log=<name>` (002 RF-C3, plan-c decision 7). Each
-// one is a byte-exact copy of an engine golden, in its own lazy chunk. Its types come from the
+// Engine logs that /dev/arena can play with `?log=<name>` (002 RF-C3, plan-c decision 7; the
+// endings by time in 005 RF15). Each one is a byte-exact copy of an engine golden, in its own lazy
+// chunk. Its types come from the
 // adapter, so this file never imports the log and the timeline shapes at once (decision 8).
 import {
   timelineFromFightLog,
@@ -11,6 +12,9 @@ type FighterSide = keyof AdaptedTimeline['fighters'];
 
 export const ENGINE_LOGS = {
   'ko-comeback': () => import('./fixtures/log-ko-comeback.json'),
+  'decision-a': () => import('./fixtures/log-decision-a.json'),
+  'decision-b': () => import('./fixtures/log-decision-b.json'),
+  draw: () => import('./fixtures/log-draw.json'),
 } as const;
 
 export type EngineLogName = keyof typeof ENGINE_LOGS;

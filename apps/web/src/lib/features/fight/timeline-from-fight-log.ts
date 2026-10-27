@@ -1,7 +1,8 @@
-// The narrow adapter from the engine log to the renderer timeline v1 (002 RF-C1, plan-c decisions
-// 1 to 3). The only file that knows both shapes (tests/fight-boundary.test.ts). Pure: no I/O, no
-// clock and no randomness; codes only, no text (ADR-0007). It never fixes nor invents anything
-// (RF-C4): what v1 can check is left to `validateTimeline` in `load`.
+// The narrow adapter from the engine log to the renderer timeline v2 (002 RF-C1, plan-c decisions
+// 1 to 3; the endings by time in 005 RF11 to RF13). The only file that knows both shapes
+// (tests/fight-boundary.test.ts). Pure: no I/O, no clock and no randomness; codes only, no text
+// (ADR-0007). It never fixes nor invents anything (RF-C4): what v2 can check is left to
+// `validateTimeline` in `load`.
 import type { AbilityKind, FightEvent, FightLog, Side } from '@torneo/protocol';
 import type { Cue, Move, Timeline } from '@torneo/renderer/timeline';
 
@@ -28,8 +29,13 @@ export type AdapterLog = FightLog;
 
 /** Gap between `ko` and `win` (equal to `TIMELINE_LIMITS.winGapMs`, checked by a test). */
 export const WIN_DELAY_MS = 1500;
-/** Equal to `TIMELINE_VERSION` (checked by a test): only values may not be imported here. */
-const VERSION = 1;
+/**
+ * Gap between `time_up` and its closing, `win` (decision) or `draw` (005 spec P2; equal to
+ * `TIMELINE_LIMITS.winGapMs`, checked by a test).
+ */
+export const CLOSING_DELAY_MS = 1500;
+/** Equal to `TIMELINE_VERSION` (checked by a test): only types may be imported here. */
+const VERSION = 2;
 const MAX_ERRORS = 100;
 
 const MOVE_BY_KIND: Readonly<Record<AbilityKind, Move>> = {
@@ -90,6 +96,7 @@ export function timelineFromFightLog(
   const ignored = { low_hp: 0, moment: 0, unknown: 0 };
   const cues: Cue[] = [];
   const kos: { readonly side: Side; readonly t: number }[] = [];
+  const timeUps: { readonly t: number }[] = [];
   let pending: Pending | null = null;
   let end: { readonly t: number; readonly winner: Side | null } | null = null;
   let previousT = 0;
@@ -190,21 +197,32 @@ export function timelineFromFightLog(
         continue;
       case 'time_up':
         unresolved();
-        fail('adapter.unsupported_ending', path);
+        timeUps.push({ t: event.t });
+        cues.push({ at_ms: event.t, type: 'time_up' });
         continue;
-      case 'end':
+      case 'end': {
         unresolved();
         end = { t: event.t, winner: event.winner };
-        if (event.reason !== 'ko') {
-          fail('adapter.unsupported_ending', path, { reason: event.reason });
+        // Read as a string: a future variant of the protocol is not a type error here.
+        const reason: string = event.reason;
+        if (reason !== 'ko' && reason !== 'decision' && reason !== 'draw') {
+          fail('adapter.unsupported_ending', path, { reason });
           continue;
         }
-        if (kos.length !== 1 || event.winner === null || event.winner === kos[0]?.side) {
-          fail('adapter.outcome_mismatch', path, { kos: kos.length });
-          continue;
+        const winner = event.winner;
+        const ko = kos.length === 1 && timeUps.length === 0 ? kos[0] : undefined;
+        const timeUp = timeUps.length === 1 && kos.length === 0 ? timeUps[0] : undefined;
+        if (reason === 'ko' && ko !== undefined && winner !== null && winner !== ko.side) {
+          cues.push({ at_ms: ko.t + WIN_DELAY_MS, type: 'win', fighter: winner });
+        } else if (reason === 'decision' && timeUp !== undefined && winner !== null) {
+          cues.push({ at_ms: timeUp.t + CLOSING_DELAY_MS, type: 'win', fighter: winner });
+        } else if (reason === 'draw' && timeUp !== undefined && winner === null) {
+          cues.push({ at_ms: timeUp.t + CLOSING_DELAY_MS, type: 'draw' });
+        } else {
+          fail('adapter.outcome_mismatch', path, { kos: kos.length, time_ups: timeUps.length });
         }
-        cues.push({ at_ms: (kos[0]?.t ?? 0) + WIN_DELAY_MS, type: 'win', fighter: event.winner });
         continue;
+      }
       default:
         // A future variant of the protocol: no cue, only counted.
         ignored.unknown++;
