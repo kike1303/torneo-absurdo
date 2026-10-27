@@ -73,7 +73,7 @@ export function formatLogLine(level: LogLevel, fields: LogFields, now: Date = ne
 
 /** Only the frame lines of a stack (ADR-0012 A5), or `undefined` if it has none. */
 function frameLines(stack: string): string | undefined {
-  const frames = stack.split('\n').filter((line) => FRAME_LINE.test(line));
+  const frames = stack.split(/\r\n|[\r\n\u2028\u2029]/).filter((line) => FRAME_LINE.test(line));
   return frames.length > 0 ? frames.join('\n') : undefined;
 }
 

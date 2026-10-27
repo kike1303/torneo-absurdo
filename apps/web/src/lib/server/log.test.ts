@@ -196,6 +196,15 @@ describe('errorFields', () => {
     expect(fields.stack).toBe('    at f (a.js:1:2)\n    at g (b.js:3:4)');
   });
 
+  it('treats CR and Unicode line separators as line breaks', () => {
+    const fields = errorFields({
+      name: 'Error',
+      message: 'm',
+      stack: `Error: other\n    at f (a.js:1:2)\r${CANARY}\u2028${CANARY}\u2029${CANARY}`,
+    });
+    expect(fields.stack).toBe('    at f (a.js:1:2)');
+  });
+
   it('omits stack without any frame line', () => {
     expect(errorFields({ name: 'Error', stack: `Error: ${CANARY}` })).toEqual({
       error_name: 'Error',
