@@ -20,6 +20,11 @@ disallowed-types = [
     { path = "std::net::TcpListener", reason = "the engine has no network" },
     { path = "std::net::UdpSocket", reason = "the engine has no network" },
     { path = "std::thread::Builder", reason = "the engine has no threads" },
+    { path = "std::fs::DirBuilder", reason = "the engine has no I/O" },
+    # Unix-only: `allow-invalid`, so the wasm and Windows builds of clippy accept the file.
+    { path = "std::os::unix::net::UnixStream", reason = "the engine has no network", allow-invalid = true },
+    { path = "std::os::unix::net::UnixListener", reason = "the engine has no network", allow-invalid = true },
+    { path = "std::os::unix::net::UnixDatagram", reason = "the engine has no network", allow-invalid = true },
 ]
 disallowed-methods = [
     { path = "rand_core::SeedableRng::from_os_rng", reason = "seed only with Seed (ChaCha20Rng::from_seed)", allow-invalid = true },
@@ -45,6 +50,9 @@ disallowed-methods = [
     { path = "std::fs::read_link", reason = "the engine has no I/O" },
     { path = "std::fs::hard_link", reason = "the engine has no I/O" },
     { path = "std::fs::canonicalize", reason = "the engine has no I/O" },
+    { path = "std::fs::set_permissions", reason = "the engine has no I/O" },
+    { path = "std::fs::exists", reason = "the engine has no I/O" },
+    { path = "std::net::ToSocketAddrs::to_socket_addrs", reason = "the engine has no network (DNS)" },
     # Path methods that touch the file system (a Path itself is allowed: it is only a string).
     { path = "std::path::Path::read_dir", reason = "the engine has no I/O" },
     { path = "std::path::Path::exists", reason = "the engine has no I/O" },
@@ -66,8 +74,12 @@ disallowed-methods = [
     { path = "std::env::current_exe", reason = "the engine does not read its environment" },
     { path = "std::env::temp_dir", reason = "the engine does not read its environment" },
     { path = "std::env::home_dir", reason = "the engine does not read its environment" },
+    { path = "std::env::set_var", reason = "the engine does not touch its environment" },
+    { path = "std::env::remove_var", reason = "the engine does not touch its environment" },
+    { path = "std::env::set_current_dir", reason = "the engine does not touch its environment" },
     { path = "std::thread::spawn", reason = "the engine has no threads" },
     { path = "std::thread::scope", reason = "the engine has no threads" },
+    { path = "std::thread::sleep", reason = "the engine has no clock" },
     { path = "std::io::stdin", reason = "the engine has no I/O" },
     { path = "std::io::stdout", reason = "the engine has no I/O" },
     { path = "std::io::stderr", reason = "the engine has no I/O" },

@@ -45,11 +45,17 @@ fn main() -> ExitCode {
             .map(content::Character::into_spec)
             .collect(),
         Err(error) => {
-            err(&format!(
-                "sim: content.{} in {}: {error}",
-                error.code(),
-                args.content.display()
-            ));
+            // A failure of the root itself already names it (`at <root>`): say it once.
+            let message = if error.path() == args.content {
+                format!("sim: content.{}: {error}", error.code())
+            } else {
+                format!(
+                    "sim: content.{} in {}: {error}",
+                    error.code(),
+                    args.content.display()
+                )
+            };
+            err(&message);
             return ExitCode::from(EXIT_ERROR);
         }
     };

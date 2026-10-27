@@ -4,8 +4,9 @@
 //! when reading the root fails) and, from `archetype_invalid` on, the `slug` as written in
 //! `character.json`. It is the directory name (`slug_mismatch` comes first) but may still be
 //! malformed: `spec` with `SpecError::SlugInvalid` carries the invalid slug. This is
-//! repository content, not user data, and it says which file to fix. No variant carries the text of `serde_json` or of the operating system (ADR-0007,
-//! ADR-0012): only codes, positions and `io::ErrorKind`.
+//! repository content, not user data, and it says which file to fix. No variant carries the
+//! text of `serde_json` or of the operating system (ADR-0007, ADR-0012): only codes, positions
+//! and `io::ErrorKind`.
 use std::io;
 use std::path::PathBuf;
 

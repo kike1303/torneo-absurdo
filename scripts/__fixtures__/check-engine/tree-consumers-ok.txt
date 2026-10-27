@@ -98,6 +98,10 @@ memchr v2.8.3
 serde feature "default" (*)
 serde feature "derive" (*)
 serde_json feature "default" (*)
+libc feature "default"
+libc v0.2.191
+libc feature "std"
+libc v0.2.191
 thiserror feature "default"
 thiserror v2.0.21
 thiserror-impl feature "default"
@@ -113,6 +117,39 @@ syn feature "printing" (*)
 syn feature "proc-macro" (*)
 thiserror feature "std"
 thiserror v2.0.21 (*)
+
+engine-wasm v0.1.0 (/repo/crates/engine-wasm)
+engine feature "default" (*)
+serde_json feature "default" (*)
+wasm-bindgen feature "default"
+wasm-bindgen v0.2.129
+once_cell v1.21.4
+cfg-if feature "default"
+cfg-if v1.0.5
+wasm-bindgen-macro feature "default"
+wasm-bindgen-macro v0.2.129 (proc-macro)
+quote feature "default" (*)
+wasm-bindgen-macro-support feature "default"
+wasm-bindgen-macro-support v0.2.129
+proc-macro2 feature "default" (*)
+quote feature "default" (*)
+syn feature "default" (*)
+syn feature "extra-traits"
+syn v3.0.9 (*)
+syn feature "full"
+syn v3.0.9 (*)
+syn feature "visit"
+syn v3.0.9 (*)
+syn feature "visit-mut"
+syn v3.0.9 (*)
+bumpalo feature "default"
+bumpalo v3.20.3
+wasm-bindgen-shared feature "default"
+wasm-bindgen-shared v0.2.129
+unicode-ident feature "default" (*)
+wasm-bindgen-shared feature "default" (*)
+wasm-bindgen feature "std"
+wasm-bindgen v0.2.129 (*)
 
 sim v0.1.0 (/repo/crates/sim)
 rand_chacha v0.9.0 (*)

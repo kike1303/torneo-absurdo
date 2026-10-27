@@ -13,5 +13,9 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 
+# Opens character.json without following links nor blocking on a fifo (open_checked).
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [lints]
 workspace = true

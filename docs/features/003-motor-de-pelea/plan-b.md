@@ -224,6 +224,15 @@ Hallazgos bajos de QA de la fase B (backend-engineer, 2026-10-27). Ninguno cambi
 16. **Doc de `ContentError`:** el `slug` va desde `archetype_invalid` y es el escrito en `character.json` (igual al nombre del directorio), que puede no ser válido: `spec` con `SlugInvalid` lleva el inválido. Se corrigió la doc, no el comportamiento.
 17. **Raíz que falta o no se puede leer:** `ContentError::Io` lleva la raíz tal como se pasó (antes, una ruta vacía), así que `sim --content /nonexistent` dice `io (NotFound) at /nonexistent`.
 
+Nits de la revisión del PR #43 (backend-engineer, 2026-10-27). Ninguno cambia el formato del log, las fórmulas, los valores de `Ruleset`, los dorados ni los códigos de error.
+
+18. **`character.json` se comprueba sobre el descriptor abierto (security 1):** `open_checked` abre en unix con `O_NOFOLLOW | O_NONBLOCK` y exige que `fstat` dé un archivo regular con el mismo `dev`/`ino` que vio `symlink_metadata`. Cambiarlo entre las dos llamadas por un symlink, un FIFO u otro archivo da `unexpected_entry`, igual que si lo hubiera visto el primer chequeo, y el FIFO no bloquea. `content` suma `libc` (solo en `cfg(unix)`, `=0.2.191`, que ya estaba en el lock por `tokio`: el lock solo gana la arista). Fuera de unix solo se comprueba el tipo del descriptor. Tests unitarios en `crates/content/src/lib.rs` (symlink a otro archivo y a sí mismo, otro archivo renombrado encima y FIFO).
+19. **Consumidores del motor desde `cargo metadata` (security 2):** `ENGINE_CONSUMERS` deja de estar escrito a mano. `engineConsumers` toma los miembros del workspace que llegan a `engine` por dependencias normales o de build entre miembros, salvo `server` (`NOT_ENGINE_CONSUMERS`). Hoy son `content`, `engine-wasm` y `sim`: `engine-wasm` entra al árbol conjunto y el fixture `tree-consumers-ok.txt` se regeneró con él. Vitest cubre un miembro nuevo, uno transitivo, build sí y dev no, y el server excluido.
+20. **El server no depende de `sim` (security 3):** `checkServerGraph` en `check-engine.mjs` falla si `sim` aparece en `cargo tree -p server -e normal,build,dev`, con tests.
+21. **Más huecos en el `clippy.toml` del motor (security 4):** `std::fs::{DirBuilder, set_permissions, exists}`, `std::env::{set_var, remove_var, set_current_dir}`, `std::os::unix::net::{UnixStream, UnixListener, UnixDatagram}` (con `allow-invalid`, porque no existen en wasm), `ToSocketAddrs::to_socket_addrs` y `std::thread::sleep`. Un módulo de prueba sin commitear dio una advertencia `disallowed_*` por cada uno de los 11, y el clippy de wasm acepta el archivo.
+22. **`sim` nombra la raíz una vez (qa):** si la ruta del error es la raíz, el mensaje es `sim: content.io: io (NotFound) at <raíz>`, sin el `in <raíz>`; `cli.rs` lo comprueba.
+23. **`[--content DIR]`** en el comentario de la receta `sim` y en `docs/architecture.md`, y el doc de `crates/content/src/error.rs` ya no pasa de 100 columnas (architect).
+
 ## Revisión
 
 ### architect — 2026-10-27 — APPROVE

@@ -122,6 +122,12 @@ fn content_and_simulation_errors_exit_with_2_and_their_code() {
         let stderr = text(&output.stderr);
         assert!(stderr.contains(error), "{args:?}: {stderr}");
     }
+    // A missing root is named once, not as `in <root> ... at <root>`.
+    let output = sim(&["--content", "does/not/exist"]);
+    assert_eq!(
+        text(&output.stderr).lines().next(),
+        Some("sim: content.io: io (NotFound) at does/not/exist")
+    );
     let single = fixture("single");
     let output = sim(&["--content", &single]);
     assert_eq!(code(&output), 2);
