@@ -6,7 +6,7 @@
 services:
   postgres:
     # Same digest as infra/compose.dev.yml (scripts/check-compose.mjs compares them).
-    image: postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+    image: postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
     # Same tuning as the Coolify Postgres (ADR-0006 D4).
     command:
       ['postgres', '-c', 'shared_buffers=128MB', '-c', 'max_connections=20', '-c', 'work_mem=4MB']
