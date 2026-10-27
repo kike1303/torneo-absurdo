@@ -2,11 +2,11 @@
 id: "0012"
 title: Contrato de logs y cabeceras de seguridad (CSP y HSTS)
 type: adr
-status: proposed
+status: approved
 risk: high
 author: architect
 reviewers: [security-reviewer, devops-engineer, owner]
-approvals: [{by: security-reviewer, date: 2026-10-26}, {by: devops-engineer, date: 2026-10-26}]
+approvals: [{by: security-reviewer, date: 2026-10-26}, {by: devops-engineer, date: 2026-10-26}, {by: owner, date: 2026-10-26}]
 supersedes: null
 linear: TA-7
 depends_on: ["0002", "0003", "0006", "0007", "0008", "0009"]
@@ -401,3 +401,6 @@ Docs que se actualizan al aprobarse (no son código):
   - **Plan B de `daemon.json` (A7)**: es correcto que valga solo para los contenedores creados después y que haya que recrear el recurso, pero faltan tres detalles operativos que el trabajo 13 debe documentar en `docs/architecture.md`. (a) Los valores de `log-opts` van como cadenas (`{"log-driver": "json-file", "log-opts": {"max-size": "10m", "max-file": "3"}}`), porque con `"max-file": 3` `dockerd` no arranca. (b) Se fusiona con el `daemon.json` que ya exista (el instalador de Coolify suele escribir uno, a menudo con estos mismos valores), sin reemplazarlo. (c) `log-opts` no se recarga con `SIGHUP`, así que hay que reiniciar `dockerd`, lo que reinicia todos los contenedores del VPS compartido, Coolify incluido. Eso pide una ventana y el OK del owner, y antes conviene validar el archivo (`dockerd --validate --config-file /etc/docker/daemon.json`).
   - **Trabajo 11**: `/healthz/` responde con la 308 de Kit, así que `curl -sI` sin `-L` comprueba justo la respuesta que solo pasa por Traefik (bien). Conviene que el paso también exija el código de estado esperado de cada URL (200, 200, 308, 200), para que una 404 o una 502 de Traefik, que salen sin nuestras cabeceras, den un error claro en vez de "falta la cabecera".
   - **`SHOW` de RF-C18**: usar `SELECT name, setting, source FROM pg_settings WHERE name IN (…)`, que en un solo comando muestra el valor y de dónde sale (`configuration file`).
+
+### owner — 2026-10-26 — APPROVE
+- Aprobado por el owner en la sesión de trabajo: "Como owner apruebo el ADR-0012."
