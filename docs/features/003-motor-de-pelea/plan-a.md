@@ -11,7 +11,7 @@ approvals:
 linear: TA-3
 depends_on: ["001"]
 created: 2026-10-26
-updated: 2026-10-26
+updated: 2026-10-27
 ---
 
 # Plan: Motor de pelea v0 — fase A (desde spec.md 2026-10-26)
@@ -131,6 +131,15 @@ _check-wasm:
     CARGO_TARGET_WASM32_WASIP1_RUNNER="node --disable-warning=ExperimentalWarning {{justfile_directory()}}/scripts/wasi-runner.mjs" \
         cargo test -p engine --test golden --target wasm32-wasip1 --locked
 ```
+Extensión de `_check-ts-rs-graph` (nota 1 de la revisión de architect), después de los dos chequeos existentes:
+```just
+    for crate in engine engine-wasm; do
+        if cargo tree -p "$crate" -e normal --locked --prefix none | grep -qE '^(ts-rs|tokio) '; then
+            echo "$crate pulls ts-rs or tokio (003 RF5)" >&2
+            exit 1
+        fi
+    done
+```
 `check-rust` queda: `fmt` → clippy workspace → clippy `protocol --features ts` → `_check-engine` → `_check-wasm` → `db-up` → `cargo test --workspace` → `_check-gen` → `_check-ts-rs-graph`. El runner de cargo se parte por espacios: la ruta absoluta del repo no puede tener espacios (hoy no los tiene; el mensaje de error de cargo lo haría evidente).
 
 ### Fixtures de `FightLog` para 002 (contrato)
@@ -192,7 +201,20 @@ _check-wasm:
 - `images`: corre una vez en este PR por `rust-toolchain.toml` y `Cargo.lock`; la etapa `chef` descarga los targets wasm (+~20 s en frío).
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+1. **`properties.rs` usa 10 pares, no 16.** Con los 16 pares ordenados, el test tardaba 17,4 s en debug (el costo es la simulación, ~0,5 ms por pelea, no las invariantes). Se aplicó la salida prevista en Riesgos: 1000 semillas por par **no ordenado** más los espejos (10 pares), 11,0 s. Los dos lados atacan en todas las peleas, así que las rutas de `a` y `b` se siguen ejercitando; el digest de 1000 peleas sí recorre los 16 pares ordenados.
+2. **Peor caso de eventos con `hp 98`.** "`speed 100`, `defense 100`, `hp 100`" suma 300 sin dejar los mínimos de `attack` y `special` (1). Se usa `hp 98, attack 1, defense 100, speed 100, special 1`; el test exige `events.len() ≤ max_events_bound() = 418` en 1000 semillas.
+3. **`.prettierignore` y `.gitattributes` entraron en el commit de los dorados** (paso 6) y no en el paso 8, para que cada commit pase Prettier.
+4. **Campos de `Ruleset` que la tabla no nombra:** `variance_min = 85` y `variance_span = 31` (el `85 + roll(31)` de "Orden del daño"). Con ellos, más `w_special_desperation_mul` (decisión 5) y los rangos de validación (decisión 8), ninguna constante de juego vive fuera de `Ruleset`. `Ruleset` expone además `interval_min()` y `max_events_bound()` (la cota analítica de la decisión 2, que el test exige igual a 418).
+5. **Ayudas en `protocol` sin cambio de formato:** `Side::opponent()` y `FightEvent::t()`. Son métodos, así que no cambian el JSON ni los `.ts` generados.
+6. **`SpecError` (RF4 da ejemplos):** `slug_invalid`, `stat_out_of_range`, `budget_exceeded`, `personality_out_of_range`, `ability_count`, `ability_id_invalid`, `ability_id_duplicate`, `power_out_of_range`, `cooldown_out_of_range`, `weakness_count`, `weakness_duplicate` y `event_limit`. `EncodeError` es una struct unitaria con el código `encode_failed`.
+7. **Verificación manual de `clippy.toml` (Riesgos), con un módulo temporal no commiteado:**
+   - `cargo clippy -p engine` marcó `HashMap` y `HashSet` (2 usos cada uno), `Instant`, `SystemTime`, `from_rng`, `try_from_rng` y `seed_from_u64`. Con `os_rng` apagado, `from_os_rng`, `try_from_os_rng` y `OsRng` ni siquiera compilan (`E0599`/`E0425`).
+   - `cargo clippy --workspace` (con `os_rng` unificado) marcó además `from_os_rng` y `try_from_os_rng`, y `rand_core::OsRng` en posición de tipo (`use`, parámetro, retorno).
+   - **Límite de clippy:** `disallowed-types` no marca `OsRng` usado como **valor** (`let g = OsRng;`). La guarda real es que `os_rng` está apagado en el grafo de `engine` solo (`check-engine.mjs`), así que ese código no compila con `-p engine` ni para wasm.
+8. **Lints en los tests (nota 3 de la revisión):** los `deny` de `lib.rs` no exigieron ningún `#[allow]` en los `#[cfg(test)]` de `src/`. `allow-unwrap-in-tests` **no** cubre las funciones auxiliares de `tests/common/mod.rs` (lo comprobé: un `unwrap()` en una función que no es `#[test]` falla clippy), así que usan `unwrap_or_else(|e| panic!(…))`, que es válido en los crates de test.
+9. **Hallazgo sobre `wasm-bindgen 0.2.129` (sin desviación):** el shim generado no dispara `unsafe_code` en el crate del usuario (viene de la expansión de una proc-macro externa, donde rustc no reporta el lint). Compilé `engine-wasm` para `wasm32-unknown-unknown` sin el `#[allow(unsafe_code)]` y también con `unsafe_code = "forbid"`, y los dos pasan (el `.wasm` exporta `simulate`). Se mantiene el diseño aprobado de RF19 (`deny` y un único `allow`, vigilados por `check-engine.mjs`); endurecerlo a `forbid` sería una enmienda de la spec que decide architect.
+10. **`seed_hex` acepta mayúsculas y minúsculas.** RF19 solo fija la longitud (64 caracteres); un carácter no hexadecimal, o una longitud distinta, dan `seed.invalid_hex`.
+11. **Vectores dorados elegidos con `search_golden_seeds`:** `log-ko-decisive-crit` (striker contra trickster, semilla 1), `log-ko-knockdown` (trickster contra tank, 0), `log-ko-comeback` (striker contra tank, 4), `log-ko-clutch` (trickster contra trickster, 1), `log-decision-a` (tank contra turtle, 0), `log-decision-b` (turtle contra tank, 1) y `log-draw` (turtle contra turtle, 53). Se descartó tank contra trickster con la semilla 0 para `clutch_ko`, porque es la misma pelea que el vector de knockdown con los lados intercambiados. El empate existe, así que RF9 queda cubierto por el dorado y por el test unitario.
 
 ## Revisión
 
