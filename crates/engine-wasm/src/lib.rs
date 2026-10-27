@@ -113,7 +113,6 @@ pub fn run(
 ///
 /// # Errors
 /// See [`run`].
-#[allow(unsafe_code)] // the wasm-bindgen shim of this function, and nothing else (RF19)
 #[wasm_bindgen]
 pub fn simulate(
     seed_hex: &str,

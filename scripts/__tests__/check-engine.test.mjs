@@ -6,6 +6,7 @@ import {
   checkWasmSources,
   parseCargoTree,
   parseLintTables,
+  stripComments,
 } from '../check-engine.mjs';
 
 // Real `cargo tree -p engine -e normal,features --target all --prefix none` (paths shortened).
@@ -85,73 +86,89 @@ describe('checkEngineGraph (RF5, RF20)', () => {
 });
 
 describe('checkWasmSources (RF19)', () => {
-  const allowed = '#[allow(unsafe_code)]\n#[wasm_bindgen]\npub fn simulate() {}\n';
-  it('passes with a single allow(unsafe_code) and no unsafe token', () => {
-    expect(checkWasmSources([{ file: 'lib.rs', text: allowed }])).toEqual([]);
-  });
+  const exported = '#[wasm_bindgen]\npub fn simulate() {}\n';
+  const check = (text) => checkWasmSources([{ file: 'lib.rs', text }]);
+  const RELAXED = /^lib\.rs: mentions unsafe_code \d+ time\(s\) outside a deny\/forbid list/;
   it('passes with the real sources', () => {
     const text = readFileSync(
       new URL('../../crates/engine-wasm/src/lib.rs', import.meta.url),
       'utf8',
     );
-    expect(checkWasmSources([{ file: 'lib.rs', text }])).toEqual([]);
+    expect(check(text)).toEqual([]);
+    expect(text).not.toMatch(/unsafe_code/);
   });
   it('fails with the token unsafe (code or comment)', () => {
-    expect(checkWasmSources([{ file: 'lib.rs', text: `${allowed}unsafe { x() }\n` }])).toEqual([
+    expect(check(`${exported}unsafe { x() }\n`)).toEqual([
       'lib.rs: contains the token `unsafe` 1 time(s) (RF19)',
     ]);
-    expect(checkWasmSources([{ file: 'a.rs', text: '// this is unsafe\n' }])).toHaveLength(1);
+    expect(check('// this is unsafe\n')).toHaveLength(1);
   });
-  it('fails with two allow(unsafe_code), also across files', () => {
-    expect(checkWasmSources([{ file: 'lib.rs', text: allowed + allowed }])).toEqual([
-      'crates/engine-wasm/src: 2 attributes relax unsafe_code, at most 1 (RF19): lib.rs: #[allow(unsafe_code)]; lib.rs: #[allow(unsafe_code)]',
+  it.each([
+    ['a direct allow', `#[allow(unsafe_code)]\n${exported}`],
+    ['an allow among other lints', `#[allow(dead_code, unsafe_code)]\n${exported}`],
+    ['a nested list', `#[allow(unsafe_code, clippy::all)]\n${exported}`],
+    ['a crate-level allow', `#![allow(unsafe_code)]\n${exported}`],
+    ['an expect', `#[expect(unsafe_code)]\n${exported}`],
+    ['a warn', `#[warn(unsafe_code)]\n${exported}`],
+    ['cfg_attr(all(), allow(unsafe_code))', `#[cfg_attr(all(), allow(unsafe_code))]\n${exported}`],
+    [
+      'a macro that generates #[allow($l)]',
+      'macro_rules! relax { ($l:ident) => { #[allow($l)] #[wasm_bindgen] pub fn third() {} } }\nrelax!(unsafe_code);\n',
+    ],
+    [
+      'a macro body that names it',
+      'macro_rules! m { () => { #[allow(unsafe_code)] fn f() {} } }\n',
+    ],
+    ['a multi-line attribute', `#[allow(\n    dead_code,\n    unsafe_code,\n)]\n${exported}`],
+    [
+      'code after a string with //',
+      `const U: &str = "http://x"; #[allow(unsafe_code)]\n${exported}`,
+    ],
+  ])('fails with %s', (_, text) => {
+    expect(check(text)).toEqual([expect.stringMatching(RELAXED)]);
+  });
+  it('fails with #[path = ...] mod and with include!', () => {
+    expect(check('#[path = "../shim.rs"]\nmod shim;\n')).toEqual([
+      'lib.rs: uses a #[path] attribute (RF19)',
+    ]);
+    expect(check('#[cfg_attr(all(), path = "../shim.rs")]\nmod shim;\n')).toEqual([
+      'lib.rs: uses a #[path] attribute (RF19)',
+    ]);
+    expect(check('include!("../shim.rs");\n')).toEqual(['lib.rs: uses include! (RF19)']);
+    expect(check('include ! ("../shim.rs");\n')).toEqual(['lib.rs: uses include! (RF19)']);
+  });
+  it('allows include_str!, include_bytes! and deny/forbid of unsafe_code', () => {
+    const text = `#![deny(unsafe_code)]\n#![forbid(unsafe_code, dead_code)]\nconst D: &[u8] = include_bytes!("x");\nconst S: &str = include_str!("y");\n${exported}`;
+    expect(check(text)).toEqual([]);
+  });
+  it('ignores unsafe_code in line and block comments, but not after them', () => {
+    expect(
+      check(
+        `// #[allow(unsafe_code)]\n/* #[allow(unsafe_code)] /* nested */ unsafe_code */\n${exported}`,
+      ),
+    ).toEqual([]);
+    expect(check(`/* comment */ #[allow(unsafe_code)]\n${exported}`)).toEqual([
+      expect.stringMatching(RELAXED),
     ]);
     expect(
+      check(`/* a /* nested */ still a comment */ #[allow(unsafe_code)]\n${exported}`),
+    ).toEqual([expect.stringMatching(RELAXED)]);
+  });
+  it('checks every file', () => {
+    expect(
       checkWasmSources([
-        { file: 'a.rs', text: allowed },
-        { file: 'b.rs', text: '#[allow( unsafe_code )]\n#[wasm_bindgen]\npub fn other() {}\n' },
+        { file: 'lib.rs', text: exported },
+        { file: 'other.rs', text: '#[allow(unsafe_code)]\nfn f() {}\n' },
       ]),
-    ).toEqual([expect.stringMatching(/^crates\/engine-wasm\/src: 2 attributes relax unsafe_code/)]);
+    ).toEqual([expect.stringMatching(/^other\.rs: mentions unsafe_code/)]);
   });
-  it('fails with an extra allow that lists unsafe_code among other lints', () => {
-    const text = `${allowed}#[allow(dead_code, unsafe_code)]\n#[wasm_bindgen]\npub fn other() {}\n`;
-    expect(checkWasmSources([{ file: 'lib.rs', text }])).toEqual([
-      expect.stringMatching(/2 attributes relax unsafe_code/),
-    ]);
-  });
-  it('fails with a crate-level allow instead of the one on the function', () => {
-    const text = '#![allow(unsafe_code)]\n\n#[wasm_bindgen]\npub fn simulate() {}\n';
-    expect(checkWasmSources([{ file: 'lib.rs', text }])).toEqual([
-      'lib.rs: crate-level #![allow(unsafe_code)] (RF19: only on the exported function)',
-    ]);
-  });
-  it('fails with an extra expect(unsafe_code) or warn(unsafe_code)', () => {
-    for (const lint of ['expect', 'warn']) {
-      const text = `${allowed}#[${lint}(unsafe_code)]\n#[wasm_bindgen]\npub fn other() {}\n`;
-      expect(checkWasmSources([{ file: 'lib.rs', text }])).toEqual([
-        expect.stringMatching(/2 attributes relax unsafe_code/),
-      ]);
-    }
-  });
-  it('fails if the single allow is not right above the exported function', () => {
-    const notExported = '#[allow(unsafe_code)]\nfn helper() {}\n';
-    expect(checkWasmSources([{ file: 'lib.rs', text: notExported }])).toEqual([
-      'lib.rs: #[allow(unsafe_code)] is not right above the #[wasm_bindgen] pub fn (RF19)',
-    ]);
-    const onAModule =
-      '#[allow(unsafe_code)]\nmod inner {}\n#[wasm_bindgen]\npub fn simulate() {}\n';
-    expect(checkWasmSources([{ file: 'lib.rs', text: onAModule }])).toHaveLength(1);
-    const notPub = '#[allow(unsafe_code)]\n#[wasm_bindgen]\nfn simulate() {}\n';
-    expect(checkWasmSources([{ file: 'lib.rs', text: notPub }])).toHaveLength(1);
-  });
-  it('accepts comments and other attributes between the allow and the function', () => {
-    const text =
-      '#[allow(unsafe_code)] // shim\n/// Docs.\n#[wasm_bindgen]\n#[must_use]\npub fn simulate() {}\n';
-    expect(checkWasmSources([{ file: 'lib.rs', text }])).toEqual([]);
-  });
-  it('ignores stricter levels and lints that only contain the word', () => {
-    const text = `#![deny(unsafe_code)]\n#[allow(not_unsafe_code_lint)]\n${allowed}`;
-    expect(checkWasmSources([{ file: 'lib.rs', text }])).toEqual([]);
+});
+
+describe('stripComments', () => {
+  it('blanks comments, keeps newlines, strings and char literals', () => {
+    expect(stripComments('a // b\nc /* d\ne */ f')).toBe('a     \nc     \n     f');
+    expect(stripComments('"// no" \'/\' r#"/* no */"# x')).toBe('"// no" \'/\' r#"/* no */"# x');
+    expect(stripComments("fn f<'a>(x: &'a str) {} // c")).toBe("fn f<'a>(x: &'a str) {}     ");
   });
 });
 
@@ -169,42 +186,46 @@ describe('parseLintTables', () => {
 });
 
 describe('checkWasmLints (RF19)', () => {
-  const workspace =
-    '[workspace.lints.rust]\nunsafe_code = "forbid"\n\n[workspace.lints.clippy]\nunwrap_used = "deny"\nprint_stdout = "deny"\n';
-  const wasm =
-    '[lints.rust]\nunsafe_code = "deny"\n\n[lints.clippy]\nunwrap_used = "deny"\nprint_stdout = "deny"\n';
+  const workspace = '[workspace.lints.rust]\nunsafe_code = "forbid"\n';
+  const inherits = '[package]\nname = "engine-wasm"\n\n[lints]\nworkspace = true\n';
   it('passes with the real files', () => {
     expect(checkWasmLints(WORKSPACE_TOML, WASM_TOML)).toEqual([]);
   });
-  it('passes when only unsafe_code goes from forbid to deny', () => {
-    expect(checkWasmLints(workspace, wasm)).toEqual([]);
+  it('passes when the crate inherits the workspace lints', () => {
+    expect(checkWasmLints(workspace, inherits)).toEqual([]);
   });
-  it('fails with a different lint level', () => {
-    expect(
-      checkWasmLints(workspace, wasm.replace('unwrap_used = "deny"', 'unwrap_used = "warn"')),
-    ).toEqual([
-      'crates/engine-wasm/Cargo.toml: [lints.clippy] unwrap_used = warn, expected deny (RF19)',
+  it('fails without [lints] workspace = true', () => {
+    expect(checkWasmLints(workspace, '[package]\nname = "engine-wasm"\n')).toEqual([
+      'crates/engine-wasm/Cargo.toml: missing [lints] workspace = true (RF19)',
     ]);
+    expect(checkWasmLints(workspace, '[lints]\nworkspace = false\n')).toHaveLength(2);
   });
-  it('fails with a missing lint', () => {
-    expect(checkWasmLints(workspace, wasm.replace('print_stdout = "deny"\n', ''))).toEqual([
-      'crates/engine-wasm/Cargo.toml: [lints.clippy] print_stdout = (missing), expected deny (RF19)',
+  it('fails with a [lints.*] table of its own (the old deny design)', () => {
+    const own = '[lints.rust]\nunsafe_code = "deny"\n\n[lints.clippy]\nunwrap_used = "deny"\n';
+    expect(checkWasmLints(workspace, own)).toEqual([
+      'crates/engine-wasm/Cargo.toml: own [lints.rust] table (RF19: inherit the workspace lints)',
+      'crates/engine-wasm/Cargo.toml: own [lints.clippy] table (RF19: inherit the workspace lints)',
+      'crates/engine-wasm/Cargo.toml: missing [lints] workspace = true (RF19)',
     ]);
-  });
-  it('fails with an extra lint', () => {
-    expect(checkWasmLints(workspace, `${wasm}dbg_macro = "allow"\n`)).toEqual([
-      'crates/engine-wasm/Cargo.toml: [lints.clippy] dbg_macro = allow, expected (absent) (RF19)',
-    ]);
-  });
-  it('fails if unsafe_code is allow or forbid in engine-wasm', () => {
     expect(
-      checkWasmLints(workspace, wasm.replace('unsafe_code = "deny"', 'unsafe_code = "allow"')),
-    ).toHaveLength(1);
-    expect(
-      checkWasmLints(workspace, wasm.replace('unsafe_code = "deny"', 'unsafe_code = "forbid"')),
+      checkWasmLints(workspace, `${inherits}\n[lints.rust]\nunsafe_code = "allow"\n`),
     ).toHaveLength(1);
   });
-  it('fails with `[lints] workspace = true` (no explicit table)', () => {
-    expect(checkWasmLints(workspace, '[lints]\nworkspace = true\n').length).toBeGreaterThan(0);
+  it('fails with extra keys in [lints] or dotted lints keys', () => {
+    expect(checkWasmLints(workspace, `${inherits}rust = { unsafe_code = "allow" }\n`)).toHaveLength(
+      1,
+    );
+    expect(checkWasmLints(workspace, `${inherits}[package.metadata]\nx = 1\n`)).toEqual([]);
+    expect(
+      checkWasmLints(
+        workspace,
+        '[package]\nlints.rust.unsafe_code = "allow"\n[lints]\nworkspace = true\n',
+      ),
+    ).toHaveLength(1);
+  });
+  it('fails if the workspace does not forbid unsafe_code', () => {
+    expect(checkWasmLints('[workspace.lints.rust]\nunsafe_code = "deny"\n', inherits)).toEqual([
+      'Cargo.toml: [workspace.lints.rust] must have unsafe_code = "forbid"',
+    ]);
   });
 });

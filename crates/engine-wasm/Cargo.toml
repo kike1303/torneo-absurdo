@@ -14,15 +14,7 @@ engine.workspace = true
 serde_json.workspace = true
 wasm-bindgen.workspace = true
 
-# Same as [workspace.lints] except `unsafe_code = "deny"`, so the single exported function can
-# carry the one local `allow` that RF19 permits for the wasm-bindgen shim (003).
-# scripts/check-engine.mjs compares both tables.
-[lints.rust]
-unsafe_code = "deny"
-
-[lints.clippy]
-unwrap_used = "deny"
-expect_used = "deny"
-dbg_macro = "deny"
-print_stdout = "deny"
-print_stderr = "deny"
+# Workspace lints, so unsafe_code = "forbid": the wasm-bindgen 0.2.129 shim needs no allow
+# (003 RF19). scripts/check-engine.mjs fails on any lint table of its own.
+[lints]
+workspace = true
