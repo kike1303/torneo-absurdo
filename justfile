@@ -64,6 +64,7 @@ check-web: _web-prepare
     node scripts/check-prerender.mjs
     node scripts/check-kit-config.mjs
     node scripts/check-compose.mjs
+    node scripts/check-workflows.mjs
 
 # The Rust half of `check`: fmt, clippy, tests (with Postgres), freshness of `gen`, ts-rs graph
 check-rust:
