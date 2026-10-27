@@ -26,7 +26,7 @@ COPY packages packages
 RUN pnpm --filter web build
 
 # distroless/nodejs22-debian13:nonroot, index digest (Node v22.23.4, uid 65532, no shell).
-FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:b0b1352373f14fe86376d423e6d283ea6b85b912ff55ca89bed8d2fe11c257b8
+FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:10747a1323be68f206aed893599d43e6697ad67257e7c42703553f99fbce3d33
 WORKDIR /app
 COPY --from=build /app/apps/web/build build/
 # "type": "module" for build/index.js.
