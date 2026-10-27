@@ -25,3 +25,5 @@ apps/web/src/lib/paraglide
 
 # Not needed by any image
 docs/
+# Local tools (the SFF converter may hold MUGEN input next to it; 002 plan-b decision 16)
+tools/

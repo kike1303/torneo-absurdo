@@ -73,6 +73,7 @@ jobs:
               - *common
               - apps/web/**
               - packages/**
+              - tools/**
               - crates/protocol/**
               - crates/engine/**
               - crates/engine-wasm/**

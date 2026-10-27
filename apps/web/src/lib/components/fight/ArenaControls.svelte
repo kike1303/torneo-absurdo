@@ -11,7 +11,10 @@
 
   interface Props {
     phase: FightStageState;
+    /** The placeholders. */
     options: readonly ArenaFighterId[];
+    /** Fighters converted locally (only in `vite dev`); a second group when there are any. */
+    localOptions?: readonly ArenaFighterId[];
     fighters: Record<Side, ArenaFighterId>;
     reducedMotion: boolean;
     showStats: boolean;
@@ -24,6 +27,7 @@
   let {
     phase,
     options,
+    localOptions = [],
     fighters = $bindable(),
     reducedMotion = $bindable(false),
     showStats = $bindable(false),
@@ -58,9 +62,18 @@
         disabled={phase === 'loading'}
         data-testid={`${idPrefix}-fighter-${side}`}
       >
-        {#each options as id (id)}
-          <option value={id}>{fighterName(id)}</option>
-        {/each}
+        <optgroup label={m.arena_fighters_placeholders()}>
+          {#each options as id (id)}
+            <option value={id}>{fighterName(id)}</option>
+          {/each}
+        </optgroup>
+        {#if localOptions.length > 0}
+          <optgroup label={m.arena_fighters_local()}>
+            {#each localOptions as id (id)}
+              <option value={id}>{fighterName(id)}</option>
+            {/each}
+          </optgroup>
+        {/if}
       </select>
     </div>
   {/each}

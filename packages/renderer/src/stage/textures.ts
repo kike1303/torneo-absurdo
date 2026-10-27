@@ -45,8 +45,9 @@ export async function loadTextures(
       const loaded: Texture[] = [];
       for (const sheet of manifest.sheets) {
         const url = resolveAsset(id, sheet.file);
-        urls.push(url);
         const texture = await sheets.acquire(url);
+        // Only an acquired URL is released: a failed acquire never took a reference.
+        urls.push(url);
         if (texture.width !== sheet.width || texture.height !== sheet.height) {
           throw new RendererError('asset_invalid');
         }

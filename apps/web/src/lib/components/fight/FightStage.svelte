@@ -15,7 +15,9 @@
   } from '@torneo/renderer';
   import { Button } from '#lib/components/ui/button/index.js';
   import { Skeleton } from '#lib/components/ui/skeleton/index.js';
-  import type { ArenaFighterId } from '#lib/features/arena/fighters.js';
+  import type { Timeline } from '@torneo/renderer/timeline';
+  import type { ArenaFighterId, PlaceholderFighterId } from '#lib/features/arena/fighters.js';
+  import type { LocalAssets } from '#lib/features/arena/local-fighters.js';
   import { formatInteger } from '#lib/i18n/format.js';
   import { m } from '#lib/paraglide/messages.js';
   import { getLocale } from '#lib/paraglide/runtime.js';
@@ -32,6 +34,15 @@
     /** Exposes HP and the last cue in `data-*` for the e2e (only /dev/arena asks for it). */
     debug?: boolean;
     phase?: FightStageState;
+    /** Loads the fighters that are not placeholders (`content/_local/sprites/`, only in dev). */
+    local?: LocalAssets;
+    /** Rewrites the timeline before `load` (`?pace=` on /dev/arena). */
+    retime?: (timeline: Timeline) => Timeline;
+    /**
+     * Where the timeline comes from, given the asset of each side (`?log=` on /dev/arena). Without
+     * it, the spike script with these assets.
+     */
+    source?: (assets: Readonly<Record<Side, string>>) => Promise<Timeline>;
   }
 
   let {
@@ -40,15 +51,18 @@
     initialT = 0,
     debug = false,
     phase = $bindable('loading'),
+    local,
+    retime,
+    source,
   }: Props = $props();
 
   type Loader<T> = () => Promise<{ default: T }>;
   // Loaders by fighter id: the manifest JSON and the URL of each sheet (Vite hashes the PNG).
-  const MANIFESTS: Record<ArenaFighterId, Loader<unknown>> = {
+  const MANIFESTS: Record<PlaceholderFighterId, Loader<unknown>> = {
     dummy_a: () => import('@torneo/renderer/placeholders/dummy_a/manifest.json'),
     dummy_b: () => import('@torneo/renderer/placeholders/dummy_b/manifest.json'),
   };
-  const SHEETS: Record<ArenaFighterId, Record<string, Loader<string>>> = {
+  const SHEETS: Record<PlaceholderFighterId, Record<string, Loader<string>>> = {
     dummy_a: {
       'sheet-0.png': () => import('@torneo/renderer/placeholders/dummy_a/sheet-0.png?url'),
     },
@@ -72,6 +86,32 @@
   let systemReduced = $state(false);
   let mounted = $state(false);
   let run = 0;
+  let loadedTimeline: Timeline | null = null;
+
+  function isPlaceholder(id: ArenaFighterId): id is PlaceholderFighterId {
+    return Object.hasOwn(MANIFESTS, id);
+  }
+
+  /** The manifest JSON of a fighter: a bundled placeholder or a local one (by props). */
+  async function loadManifest(id: ArenaFighterId): Promise<unknown> {
+    if (isPlaceholder(id)) return (await MANIFESTS[id]()).default;
+    if (local === undefined)
+      throw Object.assign(new Error('asset_load_failed'), { code: 'asset_load_failed' });
+    return local.loadManifest(id);
+  }
+
+  /** The spike script with the assets of each side (the default `source`). */
+  async function spikeTimeline(assets: Readonly<Record<Side, string>>): Promise<Timeline> {
+    const spike = (await import('@torneo/renderer/fixtures/spike.timeline.json'))
+      .default as unknown as Timeline;
+    return {
+      ...spike,
+      fighters: {
+        a: { ...spike.fighters.a, asset: assets.a },
+        b: { ...spike.fighters.b, asset: assets.b },
+      },
+    };
+  }
 
   const names = $derived({ a: fighterName(fighters.a), b: fighterName(fighters.b) });
   const winnerName = $derived(snapshot?.winner ? names[snapshot.winner] : null);
@@ -88,39 +128,35 @@
     phase = 'loading';
     errorCode = null;
     snapshot = null;
+    loadedTimeline = null;
     const container = host;
     if (container === null) return;
     const side = { a: fighters.a, b: fighters.b };
     try {
       const ids = [...new Set([side.a, side.b])];
-      const [rendererModule, timelineModule, ...manifestModules] = await Promise.all([
+      const [rendererModule, cast, ...manifestModules] = await Promise.all([
         import('@torneo/renderer'),
-        import('@torneo/renderer/fixtures/spike.timeline.json'),
-        ...ids.map((fid) => MANIFESTS[fid]()),
+        (source ?? spikeTimeline)(side),
+        ...ids.map((fid) => loadManifest(fid)),
       ]);
       const urls = (
         await Promise.all(
           ids.flatMap((fid) =>
-            Object.entries(SHEETS[fid]).map(async ([file, load]) => ({
-              fid,
-              file,
-              url: (await load()).default,
-            })),
+            isPlaceholder(fid)
+              ? Object.entries(SHEETS[fid]).map(async ([file, load]) => ({
+                  fid,
+                  file,
+                  url: (await load()).default,
+                }))
+              : [],
           ),
         )
       ).filter((entry) => entry.url !== '');
       if (id !== run) return;
       rendererLoaded = true;
-      const assets = new Map<string, unknown>(
-        ids.map((fid, i) => [fid, manifestModules[i]?.default]),
-      );
-      const timeline = {
-        ...timelineModule.default,
-        fighters: {
-          a: { ...timelineModule.default.fighters.a, asset: side.a },
-          b: { ...timelineModule.default.fighters.b, asset: side.b },
-        },
-      };
+      const assets = new Map<string, unknown>(ids.map((fid, i) => [fid, manifestModules[i]]));
+      const timeline = retime === undefined ? cast : retime(cast);
+      loadedTimeline = timeline;
       const start = performance.now();
       const locale = getLocale();
       const handle = rendererModule.createRenderer(container, {
@@ -133,7 +169,9 @@
         },
         formatNumber: (n) => formatInteger(n, locale),
         resolveAsset: (assetId, file) =>
-          urls.find((u) => u.fid === assetId && u.file === file)?.url ?? '',
+          isPlaceholder(assetId)
+            ? (urls.find((u) => u.fid === assetId && u.file === file)?.url ?? '')
+            : (local?.sheetUrl(assetId, file) ?? ''),
       });
       renderer = handle;
       await handle.load(timeline, assets);
@@ -179,6 +217,11 @@
 
   export function getFrameStats(): FrameStats | null {
     return renderer?.getFrameStats() ?? null;
+  }
+
+  /** The timeline given to the renderer (after `retime`), for the stats JSON. */
+  export function currentTimeline(): Timeline | null {
+    return loadedTimeline;
   }
 
   /** Width of the drawing surface in CSS px, for the stats JSON. */

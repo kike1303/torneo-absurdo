@@ -2,7 +2,7 @@
 id: "002"
 title: Spike de renderizado de peleas — fase A2
 type: plan
-status: approved
+status: done
 risk: medium
 author: frontend-engineer
 reviewers: [architect]

@@ -11,6 +11,6 @@
     "resolveJsonModule": true,
     "esModuleInterop": true
   },
-  "include": ["src", "tests", "e2e", "*.ts", "*.js"],
+  "include": ["src", "tests", "e2e", "vite", "*.ts", "*.js"],
   "exclude": ["node_modules", "build", ".svelte-kit", "src/lib/paraglide", "src/service-worker"]
 }

@@ -7,6 +7,8 @@ const SIZES = [
 ] as const;
 const THEMES = ['light', 'dark'] as const;
 const DIR = 'test-results/screenshots';
+/** Just after the first crit and knockdown of log-ko-comeback (at 29 415 ms). */
+const LOG_SHOT_T = 29_600;
 
 for (const size of SIZES) {
   for (const theme of THEMES) {
@@ -50,3 +52,30 @@ test('header: both selectors fit in one row at 375 px', async ({ page }) => {
   expect(Math.abs((locale?.y ?? 0) - (theme?.y ?? 1))).toBeLessThan(2);
   expect((theme?.x ?? 0) + (theme?.width ?? 0)).toBeLessThanOrEqual(375);
 });
+
+// 002 RF-C3: the arena playing an engine log (ko-comeback), just after its first knockdown.
+for (const size of SIZES) {
+  for (const theme of THEMES) {
+    for (const lang of ['es', 'en'] as const) {
+      test(`arena-log ${lang} ${size.name} ${theme}`, async ({ page }) => {
+        await page
+          .context()
+          .addCookies([{ name: 'theme', value: theme, url: 'http://localhost:4173' }]);
+        await page.setViewportSize(size);
+        await page.goto(`/${lang}/dev/arena?log=ko-comeback&t=${LOG_SHOT_T}`);
+        await expect(page.getByTestId('fight-stage')).toHaveAttribute('data-state', 'playing', {
+          timeout: 15_000,
+        });
+        await page.waitForTimeout(250);
+        await page.screenshot({
+          path: `${DIR}/arena-log-${lang}-${size.name}-${theme}.png`,
+          fullPage: true,
+        });
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow).toBeLessThanOrEqual(0);
+      });
+    }
+  }
+}

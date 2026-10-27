@@ -30,7 +30,7 @@ handle.destroy();
 - `createRenderer` arranca Pixi en el acto; `load` espera esa inicialización, valida la timeline y los manifests (entrada no confiable) y carga las hojas. Rechaza con `RendererError` y un `code`: `webgl_unavailable`, `asset_invalid`, `asset_load_failed` o `timeline_invalid`.
 - **Reloj:** `t = anclaT + (clock() − anclaReloj)`, recortado a `[0, duration_ms]`. `play`, `pause` y `seek` solo mueven el ancla. Sin `seek` ni `pause`, `t = clock()`: así se reproduce en vivo con el reloj del servidor. El renderer nunca cuenta frames.
 - **Cues:** `onCue` dispara cada cue una vez, en orden, cuando la reproducción pasa su `at_ms`. Un `seek` no dispara lo que salta; un salto del reloj (volver de una pestaña oculta) dispara todo el intervalo. `snapshot()` da `t`, fase, ganador, HP y el último cue de la escena aplicada, sin texto.
-- **`Assets` de Pixi es global:** dos renderers en la misma página compartirían la caché de texturas. Hoy hay uno solo (`/dev/arena`), y `destroy` descarga sus hojas. La vista en vivo tiene que respetarlo.
+- **`Assets` de Pixi es global:** por eso las hojas pasan por una caché compartida con conteo de referencias (`src/stage/shared-cache.ts`). Cada URL se carga una vez, `destroy` solo suelta las referencias de su renderer, una hoja se descarga cuando la suelta su último dueño y una carga nueva espera a la descarga en curso. Dos renderers que se solapan (un cambio rápido de luchador, un reintento) no se destruyen las texturas entre sí.
 
 ## Condiciones de CSP (ADR-0012 B4.2)
 - `src/index.ts` importa `pixi.js/unsafe-eval` en su primera línea, antes de crear cualquier renderer.

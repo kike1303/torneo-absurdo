@@ -11,13 +11,17 @@ set -eu
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-subjects="infra/.env apps/server/.env apps/web/.env"
+subjects="infra/.env apps/server/.env apps/web/.env tools/sff-converter/input/canary.sff"
 created=""
+created_dirs=""
 tmp=""
 
 cleanup() {
     for file in $created; do
         rm -f "$file"
+    done
+    for dir in $created_dirs; do
+        rmdir "$dir" 2>/dev/null || true
     done
     if [ -n "$tmp" ]; then
         rm -rf "${tmp:?}"
@@ -27,6 +31,17 @@ trap cleanup EXIT
 
 for file in $subjects; do
     if [ ! -e "$file" ]; then
+        dir="$(dirname "$file")"
+        if [ ! -d "$dir" ]; then
+            # Several levels can be missing (a worktree without tools/): note every missing
+            # ancestor, deepest first, so cleanup's rmdir (empty folders only) undoes just those.
+            d="$dir"
+            while [ ! -d "$d" ]; do
+                created_dirs="$created_dirs $d"
+                d="$(dirname "$d")"
+            done
+            mkdir -p "$dir"
+        fi
         # noclobber: if the file appears between the test and the write, this fails instead of
         # overwriting it.
         (set -C; printf 'CHECK_DOCKERIGNORE_CANARY=%s\n' "$$-$file" >"$file")
@@ -46,7 +61,7 @@ if [ ! -d "$ctx" ]; then
 fi
 
 failed=0
-for path in infra/.env apps/server/.env apps/web/.env private .git content/_local; do
+for path in infra/.env apps/server/.env apps/web/.env private .git content/_local tools; do
     if [ -e "$ctx/$path" ] || [ -L "$ctx/$path" ]; then
         echo "leaked into build context: $path" >&2
         failed=1
