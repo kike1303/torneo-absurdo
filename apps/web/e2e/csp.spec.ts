@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { waitForHydration } from './support/hydration.js';
 
 async function collectViolations(page: Page): Promise<void> {
   await page.addInitScript(() => {
@@ -28,6 +29,7 @@ test('RF-A10: no CSP violations on /es/ and /en/, and the theme script runs', as
 test('RF-A10: no CSP violations in the catalog with a menu and a dialog open', async ({ page }) => {
   await collectViolations(page);
   await page.goto('/es/dev/components');
+  await waitForHydration(page);
   await page.getByTestId('dropdown-trigger').click();
   await expect(page.getByTestId('dropdown-content')).toBeVisible();
   await page.keyboard.press('Escape');
