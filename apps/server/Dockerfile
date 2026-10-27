@@ -7,7 +7,7 @@
 # The rust: version must equal the channel of rust-toolchain.toml (scripts/check-compose.mjs).
 
 # rust:1.99.1-slim-bookworm, multi-arch index digest (linux/amd64 and linux/arm64).
-FROM --platform=$BUILDPLATFORM rust:1.99.1-slim-bookworm@sha256:11d39e118fbc6aba0c89511ff6810dcbad03e7c28d78e3f9d59b714f8d4e08dc AS chef
+FROM --platform=$BUILDPLATFORM rust:1.99.1-slim-bookworm@sha256:86234e857a413004348b471d11a4ebe1aa92d2eae2b6b143cac68fd1ac3c48be AS chef
 ARG BUILDARCH
 WORKDIR /app
 
