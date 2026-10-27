@@ -73,6 +73,9 @@ async fn run_canaries(rust_log: &str) {
     let internal = canary("internal");
     let client_ip = canary("clientip");
     let forwarded = canary("forwarded");
+    let real_ip = canary("realip");
+    let forwarded_rfc = canary("forwardedrfc");
+    let forwarded_value = format!("for={forwarded_rfc}");
     let query = canary("query");
     let origin_host = canary("origin");
     let payload = canary("payload");
@@ -82,6 +85,8 @@ async fn run_canaries(rust_log: &str) {
         ("x-internal-secret", &internal),
         ("x-client-ip", &client_ip),
         ("x-forwarded-for", &forwarded),
+        ("x-real-ip", &real_ip),
+        ("forwarded", &forwarded_value),
     ];
     let foreign_origin = format!("https://{origin_host}.example");
 
@@ -136,6 +141,8 @@ async fn run_canaries(rust_log: &str) {
             &internal,
             &client_ip,
             &forwarded,
+            &real_ip,
+            &forwarded_rfc,
             &query,
             &origin_host,
             &payload,
@@ -164,7 +171,7 @@ async fn run_canaries(rust_log: &str) {
             assert!(allowed.contains(key.as_str()), "field {key} in {line:?}");
         }
         if line["event"] == "http.request" {
-            assert_eq!(line["level"], "INFO");
+            assert_eq!(line["level"], "info");
             let method = line["method"].as_str().unwrap();
             assert!(
                 [
@@ -205,7 +212,7 @@ async fn run_canaries(rust_log: &str) {
     assert!(
         lines
             .iter()
-            .any(|l| l["event"] == "ws.echo_enabled" && l["level"] == "WARN"),
+            .any(|l| l["event"] == "ws.echo_enabled" && l["level"] == "warn"),
         "{lines:?}"
     );
 }

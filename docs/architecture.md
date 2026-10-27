@@ -40,6 +40,11 @@ updated: 2026-10-27
 4. **Sin texto en el dominio**: el motor y el protocolo emiten códigos; la UI y el narrador los traducen (ADR-0007).
 5. **Contenido como datos**: personajes y frases en `content/`, versionados y validados en CI.
 
+## Seguridad y logs
+- **Logs**: un objeto JSON por línea, con una allowlist cerrada de campos por app y sin datos del cliente (IP, cookies, headers, URL, cuerpos ni valores de persona). `web` escribe solo por `apps/web/src/lib/server/log.ts` y registra los errores por código, nunca por su mensaje; el server, por el formateador de `telemetry.rs`; Postgres, con parámetros que no escriben filas ni sentencias. Contrato completo, niveles, plazo y cómo agregar un campo o un evento: [ADR-0012](decisions/0012-logs-y-cabeceras-de-seguridad.md), parte A.
+- **CSP y cabeceras**: la CSP base de `web`, las cabeceras de `web`, del server y de Traefik, lo prohibido y las ampliaciones permitidas (renderer, `engine-wasm`, WebSocket): [ADR-0012](decisions/0012-logs-y-cabeceras-de-seguridad.md), parte B.
+- Auth, sesiones, `Origin`/CSRF y límites por IP: [ADR-0008](decisions/0008-autenticacion.md).
+
 ## Ciclo de vida de una pelea
 
 ```
