@@ -34,6 +34,11 @@ dev: _web-prepare db-up
     pnpm --filter web dev &
     wait
 
+# Applies to every worktree of the clone. The hook checks the working tree and needs Docker.
+# Point git at scripts/git-hooks: the pre-push hook runs `just check` (RF-C17)
+hooks:
+    git config core.hooksPath scripts/git-hooks
+
 # Production build of the web app
 build: _web-prepare
     pnpm --filter web build
@@ -59,6 +64,7 @@ check-web: _web-prepare
     node scripts/check-prerender.mjs
     node scripts/check-kit-config.mjs
     node scripts/check-compose.mjs
+    node scripts/check-workflows.mjs
 
 # The Rust half of `check`: fmt, clippy, tests (with Postgres), freshness of `gen`, ts-rs graph
 check-rust:

@@ -1,0 +1,17 @@
+# Minimal valid composite action for check-workflows tests.
+name: setup
+description: Test fixture.
+inputs:
+  filter:
+    description: pnpm filter
+    default: ''
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+      with:
+        node-version-file: .node-version
+    - shell: bash
+      env:
+        FILTER: ${{ inputs.filter }}
+      run: echo "$FILTER"
