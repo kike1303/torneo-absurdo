@@ -535,6 +535,7 @@ Con unos 30 PRs y 30 pushes a `main` al mes, en una mezcla típica, son unos 700
     - **`setup-js`.** La llave de la caché incluye el alcance del install (`all`, o el hash del `filter`). Sin eso, `policy` (que solo instala la raíz) podría guardar en `main` un store parcial bajo la misma llave que el completo, y los demás jobs tendrían un `cache-hit` que no saltaría nunca el `save`. También fija `package-manager-cache: false`: `setup-node` v7 solo la activa para npm, pero así queda explícito.
     - **`e2e`.** Con la caché de navegadores restaurada corre `playwright install-deps` (los paquetes del sistema no se guardan en la caché); sin ella, `install --with-deps`. El artefacto sube `test-results/screenshots` y `test-results/logs` con `if: always()`, por 14 días.
       - **Instalación de navegadores acotada** (run 40433289185, intento 2). El `apt-get` de `playwright install --with-deps` se colgó bajando del mirror de Ubuntu en Azure hasta agotar los 20 min del job. Ahora el paso tiene su propio `timeout-minutes: 6` y hace como mucho dos intentos de 160 s (`timeout --kill-after=10`), con 10 s de espera y un `dpkg --configure -a` entre ellos. En el peor caso falla en unos 6 min con un `::error::` que dice qué falló, en lugar de consumir el job entero. `check-workflows` ya aceptaba `timeout-minutes` a nivel de paso (solo lo exige por job); un test nuevo lo fija.
+        **Reemplazado por la desviación 21:** el reintento no funcionaba, porque `timeout` mataba `pnpm` pero no el `apt-get` lanzado con `sudo`, que conservaba el lock de dpkg.
     - **`images`.** Además de la decisión 16, corre el smoke test de RF-C2 con la imagen `web` sola: `--read-only`, `127.0.0.1:3001`, 200 en `/healthz` y `/en/`, y salida distinta de 0 y de 124 sin `PUBLIC_ORIGIN`. Si un paso falla, vuelca las últimas 100 líneas de `docker logs` de los tres contenedores. Los logs del server ya pasan por la allowlist de campos de B, y el `postgres` es el local, sin datos reales.
     - **`release.yml/build`.**
       - El chequeo de que ninguna de las dos etiquetas existe distingue "no existe" (`not found`, `manifest unknown` o `name unknown`, la respuesta de GHCR cuando el paquete todavía no existe) de cualquier otro error, que también hace fallar el job.
@@ -586,6 +587,27 @@ Con unos 30 PRs y 30 pushes a `main` al mes, en una mezcla típica, son unos 700
     - **`${{ }}` dentro de `with.script`** falla, por la misma inyección que en `run:` (por ejemplo, con `actions/github-script`).
     - **Las reglas de texto también leen los valores ya parseados.** Antes, un escape YAML como `"…/api/v1/deplo\x79"` o `"\x43oolify"` pasaba la regla de texto crudo.
     - **`check-workflows.mjs` corre en `just check`,** al final de `check-web` y sin sus tests (RF-C10), así que también corre en el hook `pre-push` y en el job `web`.
+21. **`e2e` corre dentro de la imagen oficial de Playwright** (TA-12; reemplaza la caché y la instalación de navegadores de la decisión 14 y el reintento de la desviación 15).
+    - **Por qué.** El mirror de apt de Azure colgó dos veces el `apt-get` de `playwright install --with-deps`: el run 40433289185 consumió los 20 min del job. Y el reintento de `ad83833` no funcionaba. `timeout` mataba `pnpm`, pero el `apt-get` que Playwright lanza con `sudo` seguía vivo con el lock de dpkg, así que el segundo intento fallaba en unos 12 s con `Could not get lock /var/lib/dpkg/lock-frontend` (qa-engineer, CI del PR #6).
+    - **Opción elegida: (a), la imagen, frente a (b), matar el árbol de procesos y cachear.** La (b) arregla el reintento, pero sigue dependiendo de apt en cada corrida, aun con la caché caliente: `install-deps` vuelve a bajar los paquetes del sistema, que la caché no guarda, y un mirror lento sigue costando hasta 6 min y un rojo. La (a) quita apt y la descarga de navegadores del camino de cada PR. Lo único que se baja es la imagen, desde MCR, que no es el mirror que falló.
+    - **Imagen:** `mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea`.
+      - Es un índice multi-arquitectura, con el digest comprobado contra el registro (`Docker-Content-Digest`).
+      - Subida el 2026-10-23 a las 00:41 UTC, según el catálogo de MCR, así que cumple los 3 días desde el 2026-10-26 a las 00:41 UTC.
+      - La versión es la exacta de `@playwright/test` en el lockfile (1.64.1).
+      - Va con `options: --ipc=host`, como recomienda Playwright para Chromium.
+    - **Qué cambia en el job:**
+      - se quitan la versión y la caché de navegadores (`restore` y `save` de `~/.cache/ms-playwright`) y el paso de instalación con su reintento;
+      - un paso nuevo falla con `::error::` si `@playwright/test` no es igual a `PLAYWRIGHT_IMAGE_VERSION` (env del job). Dependabot no actualiza las imágenes de `container:`, así que un bump de `@playwright/test` obliga a subir la imagen en el mismo PR, igual que `rust:` con `rust-toolchain.toml`;
+      - Node sigue siendo el de `.node-version`, por `setup-js`. El Node 24 de la imagen no se usa.
+    - **Verificado:**
+      - `check-workflows` acepta el `container:` con digest (80/80);
+      - la imagen trae `curl`, `tar`, `sha256sum` y `git` (lo que usan `setup-just`, `setup-js` y el checkout), corre como root (sin `sudo`) y tiene `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright` con `chromium-1248` y `webkit-2370`;
+      - los e2e completos corrieron dentro de la imagen (variante arm64, en la Mac), con Node 22.23.4 bajado y verificado contra `SHASUMS256.txt`, `pnpm install --frozen-lockfile`, build y `playwright test`. Resultados:
+        - **Primera corrida:** 62/63. Falló `theme.spec.ts:64` (RF-A8) en WebKit, con una navegación inesperada a `/es/`. Es el mismo test que ya había fallado en la Mac, sin imagen y con la carga alta (desviación 18), así que no viene de la imagen.
+        - **Aislado,** con `--repeat-each`: 5/5 en WebKit y 3/3 en Chromium.
+        - **Segunda corrida completa:** 63/63, 10 de ellos en WebKit, en 49 s.
+        - **Seguimiento para qa-engineer:** RF-A8 es intermitente en WebKit. Lo más probable, sin verificar, es que el clic llegue antes de la hidratación. Es independiente de TA-12.
+    - **Solo en CI:** la variante amd64 de la imagen y el comportamiento de las actions dentro de un `container:` (`setup-node` en el toolcache del contenedor y `HOME=/github/home`). Se ve en la primera corrida del PR. El pull de la imagen (unos 2 GB) suma alrededor de 1 min por corrida, menos que `install --with-deps` (unos 2 min cuando el mirror responde).
 
 ## Revisión
 
