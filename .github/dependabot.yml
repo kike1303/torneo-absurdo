@@ -1,9 +1,12 @@
-# RF-C16 and plan-c decision 22: weekly, with a 3-day cooldown against freshly published malicious
-# versions. No groups and no auto-merge: every PR goes through the same review (RF-C12).
+# RF-C16, plan-c decision 22 and deviation 22: weekly, with a 3-day cooldown against freshly
+# published malicious versions. Minor and patch bumps are grouped per ecosystem (one PR each);
+# majors still arrive one by one. No auto-merge: every PR goes through the same review (RF-C12).
 # A rust: bump without rust-toolchain.toml, or a node: bump without .node-version, fails in
 # scripts/check-compose.mjs on purpose: bump both in the same PR.
 # @playwright/test is coupled too: its npm bump fails the e2e job until the Playwright image of
 # ci.yml (tag and digest) and PLAYWRIGHT_IMAGE_VERSION move with it (ADR-0006 note 2026-10-26).
+# A Dockerfile or compose bump
+# also needs scripts/__fixtures__/check-compose/valid/ resynced in the same PR.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -14,6 +17,10 @@ updates:
     cooldown:
       default-days: 3
     open-pull-requests-limit: 5
+    groups:
+      actions-minor-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
 
   - package-ecosystem: cargo
     directory: /
@@ -22,6 +29,16 @@ updates:
     cooldown:
       default-days: 3
     open-pull-requests-limit: 5
+    ignore:
+      # deny.toml: a single tungstenite, the one axum brings. Both move only with axum.
+      - dependency-name: tungstenite
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']
+      - dependency-name: tokio-tungstenite
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']
+    groups:
+      cargo-minor-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
 
   # pnpm workspace (pnpm-lock.yaml at the root).
   - package-ecosystem: npm
@@ -31,8 +48,23 @@ updates:
     cooldown:
       default-days: 3
     open-pull-requests-limit: 5
+    ignore:
+      # Node 22 (ADR-0006): the types follow the runtime.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+      # 6.0.x while typescript-eslint asks for <6.1.
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']
+      # Bumped by hand together with the container: image of the e2e job.
+      - dependency-name: '@playwright/test'
+      - dependency-name: playwright
+      - dependency-name: playwright-core
+    groups:
+      npm-minor-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
 
-  # Base image digests of the two Dockerfiles.
+  # Base images of the two Dockerfiles (tags and digests).
   - package-ecosystem: docker
     directories: ['/apps/server', '/apps/web']
     schedule:
@@ -40,8 +72,17 @@ updates:
     cooldown:
       default-days: 3
     open-pull-requests-limit: 5
+    ignore:
+      # Node 22 (ADR-0006); the runtime image is distroless nodejs22.
+      - dependency-name: node
+        update-types: ['version-update:semver-major']
+    groups:
+      # No update-types: digest-only bumps have none. One PR for both Dockerfiles, so the
+      # check-compose fixture is resynced once.
+      docker-images:
+        patterns: ['*']
 
-  # The Postgres digest of infra/compose.dev.yml and infra/compose.local.yml (the docker
+  # The Postgres image of infra/compose.dev.yml and infra/compose.local.yml (the docker
   # ecosystem does not read compose files).
   - package-ecosystem: docker-compose
     directory: /infra
@@ -50,3 +91,10 @@ updates:
     cooldown:
       default-days: 3
     open-pull-requests-limit: 5
+    ignore:
+      # Postgres 17 (ADR-0006). Moving to 18 is a separate decision.
+      - dependency-name: postgres
+        update-types: ['version-update:semver-major']
+    groups:
+      compose-images:
+        patterns: ['*']
