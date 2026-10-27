@@ -327,13 +327,15 @@ El adaptador es `timelineFromFightLog` (RF-C1 de 002), del lado del consumidor.
 | `time_up`, `end` con `decision` o `draw` | **No expresable en v1 →** `timeline_version` 2 (ver la preocupación 7) |
 
 ### Modelo de simulación (ruleset v1)
-Cada fila es un campo de `Ruleset` con su valor v1. Los valores se afinan en la fase B con `sim`, y cambiar la forma de una fórmula enmienda esta spec. En la tabla, "‰" es sobre 1000 y todas las divisiones son enteras, en el orden escrito. Las cifras de esta tabla se comprobaron con la reimplementación aproximada en Python del game-designer, con un roster de cuatro arquetipos y 10 000 peleas:
-- win rate marginal por stat entre 44 y 52 %;
-- 92,8 % de las peleas en 45–90 s;
-- momentos en el 32,7 %;
-- 100 % de KO;
-- separación mínima entre impactos de 700 ms;
-- 50,2 % de victorias del lado `a` en los espejos.
+Cada fila es un campo de `Ruleset` con su valor v1. Los valores se afinan en la fase B con `sim`, y cambiar la forma de una fórmula enmienda esta spec. En la tabla, "‰" es sobre 1000 y todas las divisiones son enteras, en el orden escrito. Las cifras de esta tabla se midieron con `sim` (`just sim`, motor real y los cuatro homenajes de `content/`, semilla raíz por defecto): 9996 cruces (6 pares, 833 semillas por par, en las dos orientaciones) y 3332 espejos:
+- win rate por personaje entre 47,7 y 51,1 % (cruces de 41,7 a 58,2 %);
+- 94,6 % de las peleas en 45–90 s (p10/p50/p90 de `end.t` = 46,8/53,9/63,5 s);
+- momentos en el 38,0 % (comeback 13,3, decisive_crit 11,2 y clutch_ko 23,6 %);
+- 100 % de KO, 0 % de `time_up` y 0 % de `draw`;
+- separación mínima entre impactos de 700 ms (invariante de RF2, no una medición);
+- 49,8 % de victorias del lado `a` en los espejos.
+
+Antes de la fase B, estas cifras salían de la reimplementación aproximada en Python del game-designer (ver la Revisión).
 
 | Concepto (campos) | Regla v1 |
 |---|---|
@@ -422,7 +424,7 @@ Seed (32 B, server or sim) ──▶ engine::simulate(seed, a, b, Ruleset::for_v
 4. **`wasm-bindgen` frente a `unsafe_code = "forbid"`.** Resuelto con `forbid` en los dos crates (enmienda del 2026-10-27). En la implementación se comprobó que el shim de `wasm-bindgen 0.2.129` sale de la expansión de una proc-macro externa, donde rustc no reporta `unsafe_code`. `engine-wasm` compila para `wasm32-unknown-unknown` con `forbid` y sin ningún `allow`, y el `.wasm` exporta `simulate`. Así que el `allow` que pedía la versión anterior no tenía efecto. Con `forbid` el diseño falla cerrado: si un bump de `wasm-bindgen` generara `unsafe` que el lint sí viera, `_check-wasm` fallaría en ese PR y habría que decidir a conciencia (con una enmienda de esta spec). `scripts/check-engine.mjs` sigue vigilando el token `unsafe` y cualquier atributo que relaje el lint (RF19).
 5. **WASI como sustituto del navegador.** El test byte a byte corre en `wasm32-wasip1`, no en el artefacto `wasm32-unknown-unknown` de `wasm-bindgen`. Es el mismo backend wasm32 y el mismo `usize` de 32 bits, y el motor no toca ninguna API de plataforma, así que la equivalencia es razonable. Aun así, la feature de verificación en navegador debe agregar un test del artefacto real. `node:wasi` está marcado como experimental en Node 22: si su API cambia, solo se rompe el runner de 30 líneas.
 6. **Imagen del server.** `apps/server/Dockerfile` copia `rust-toolchain.toml`, y `rustup toolchain install` va a descargar también los dos targets wasm (unas decenas de MB, solo en la etapa builder). Es aceptable. Si devops prefiere evitarlo, el plan de la fase A lo resuelve sin cambiar el canal (`check-compose.mjs` solo enlaza la versión).
-7. **Fin por tiempo frente a la `Timeline` v1 de 002 (decisión).** El `FightLog` **conserva** `time_up`, `decision` y `draw`. El log es el registro honesto y verificable de la pelea (ADR-0002), y un motor que "fuerce" el KO antes del tope necesitaría reglas artificiales que también cambian el balance. El motor las hace raras (RF17: como mucho un 10 % de `time_up` y menos de un 1 % de `draw`; la aproximación del game-designer da ~0 % con el tope de 86 s), pero el formato las expresa.
+7. **Fin por tiempo frente a la `Timeline` v1 de 002 (decisión).** El `FightLog` **conserva** `time_up`, `decision` y `draw`. El log es el registro honesto y verificable de la pelea (ADR-0002), y un motor que "fuerce" el KO antes del tope necesitaría reglas artificiales que también cambian el balance. El motor las hace raras (RF17: como mucho un 10 % de `time_up` y menos de un 1 % de `draw`; con el contenido real, `sim` mide 0 % de `time_up` y de `draw` con el tope de 86 s), pero el formato las expresa. Por eso la ruta de fin por tiempo solo la cubren los dorados del motor (`log-decision-a/b.json`), no el contenido.
 
    Como la `Timeline` v1 no puede expresarlas, **hace falta `timeline_version` 2**, por RF-C4 de 002:
    - **Dueño:** la fase C de 002 (frontend-engineer), con una enmienda de la spec de 002 que la feature 003 pide formalmente al fusionar su fase A.
@@ -435,7 +437,7 @@ Seed (32 B, server or sim) ──▶ engine::simulate(seed, a, b, Ruleset::for_v
    - knockdown emitido por el motor, no derivado en el adaptador, porque cambia el tiempo de la pelea: nadie golpea durante la caída, y eso solo lo puede garantizar la simulación;
    - ≥ 1,5 s de KO a victoria y ≥ 2 s de pose, gracias a `end_ms = 4000`.
 
-   La densidad (≥ 30 golpes, separación media de ~1,9 s) la mide `sim` en la fase B y se ajusta con `interval_*`. La separación que fije el owner en RF-B9 de 002 entra como un ajuste de valores. El cue `taunt` (personalidad) queda como extensión futura: entraría con un evento nuevo, una `ruleset_version` nueva y `timeline_version` 2 o 3, a pedido de game-designer.
+   La densidad la mide `sim`: con el contenido real hay de 36 a 51 resoluciones por pelea (p10 a p90, p50 43), así que se cumplen los ≥ 30 golpes, y la separación media entre resoluciones es de ~1096 ms, por debajo de los ~1,9 s que pidió 002. No es criterio de la fase B: se ajusta con `interval_*`. La separación que fije el owner en RF-B9 de 002 entra como un ajuste de valores. El cue `taunt` (personalidad) queda como extensión futura: entraría con un evento nuevo, una `ruleset_version` nueva y `timeline_version` 2 o 3, a pedido de game-designer.
 9. **Empates y apuestas.** Los produce un `time_up` con HP relativo idéntico, y deben ser menos del 1 % (RF17). En un empate lo natural es un reembolso, y, como todo movimiento de monedas, se hace con asientos del ledger (ADR-0005), nunca tocando saldos. Lo decide la spec de apuestas.
 10. **Debilidades en v0 y balance.** Con solo 2–4 personajes, una debilidad (×5/4) puede inclinar mucho un cruce. El criterio de 40–60 % es global, y una matriz asimétrica es aceptable e interesante para el parimutuel. `sim` avisa, sin fallar, de los cruces fuera de 30–70 %.
 11. **El balance dentro de `just check`.** Un cambio de contenido que desbalancee rompe el check. Es intencional (lo dice el skill `write-character`).
@@ -600,3 +602,9 @@ Seed (32 B, server or sim) ──▶ engine::simulate(seed, a, b, Ruleset::for_v
   - Frontmatter válido. No contradice ADR-0001, 0004, 0005 ni 0010.
 - Compromiso propio, no bloqueante: si en la fase B un `kind` no llega al 3 % con contenido, no voy a bajar el 3 %. Primero ajusto valores de `Ruleset` (decisión 14 de plan-b). Si tampoco alcanza, lo escalo como cambio de forma de la fórmula del momento. Bajar el piso equivaldría a aceptar un momento muerto. Si ajusto cualquier otro umbral, lo registro con su cifra medida en esta sección y en el PR.
 - Cambios pedidos: ninguno. Actualicé mi fecha en `approvals`. `status` sigue `approved`.
+
+### architect — 2026-10-27 — Enmienda editorial (revisión del PR #43)
+- Reemplacé las cifras de la aproximación en Python por las de `sim` (`just sim` en release, ruleset v1, semilla raíz por defecto, 9996 cruces y 3332 espejos, informe en el cuerpo del PR #43): el párrafo de la tabla del ruleset, la preocupación 7 (0 % de `time_up` y de `draw` con el contenido real) y la preocupación 8 (36/43/51 resoluciones por pelea en p10/p50/p90 y separación media de ~1096 ms, frente a los ~1,9 s de 002).
+- Las cifras de la aproximación que quedan en las rondas anteriores de esta Revisión se dejan como registro histórico.
+- No cambia ningún requisito, fórmula ni umbral de RF17: RF17 pasa con los valores iniciales. Las cifras de RF21 (68 acciones, 1200 ms, 418 eventos) no cambian, porque `interval_*` y los windups siguen igual.
+- Es editorial y la escribí yo, así que no la apruebo. `status` sigue `approved`.
