@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  ENGINE_CONSUMERS,
   checkEngineGraph,
   checkWasmLints,
   checkWasmSources,
@@ -12,6 +13,11 @@ import {
 // Real `cargo tree -p engine -e normal,features --target all --prefix none` (paths shortened).
 const TREE_OK = readFileSync(
   new URL('../__fixtures__/check-engine/tree-ok.txt', import.meta.url),
+  'utf8',
+);
+// Real `cargo tree -p content -p sim -e normal,features --target all --prefix none` (paths shortened).
+const TREE_CONSUMERS_OK = readFileSync(
+  new URL('../__fixtures__/check-engine/tree-consumers-ok.txt', import.meta.url),
   'utf8',
 );
 const WORKSPACE_TOML = readFileSync(new URL('../../Cargo.toml', import.meta.url), 'utf8');
@@ -81,6 +87,40 @@ describe('checkEngineGraph (RF5, RF20)', () => {
   it('fails if the output does not contain the engine', () => {
     expect(checkEngineGraph(parseCargoTree('rand_core v0.9.5\n'))).toEqual([
       'engine: not in the cargo tree output',
+    ]);
+  });
+});
+
+describe('checkEngineGraph over the consumers (plan-b decision 13)', () => {
+  const check = (text) => checkEngineGraph(parseCargoTree(text), { roots: ENGINE_CONSUMERS });
+  it('passes with the real graph of content and sim, which contains the engine', () => {
+    expect(ENGINE_CONSUMERS).toEqual(['content', 'sim']);
+    expect(TREE_CONSUMERS_OK).toMatch(/^engine v0\.1\.0 /m);
+    expect(TREE_CONSUMERS_OK).toMatch(/\(command-line\)$/m);
+    expect(TREE_CONSUMERS_OK).toMatch(/\(\*\)$/m);
+    expect(check(TREE_CONSUMERS_OK)).toEqual([]);
+  });
+  it.each([
+    ['rand_chacha', 'std'],
+    ['rand_chacha', 'serde'],
+    ['rand_core', 'os_rng'],
+  ])('fails with %s feature "%s", naming the consumers', (name, flag) => {
+    expect(check(`${TREE_CONSUMERS_OK}${name} feature "${flag}"\n`)).toEqual([
+      `${name}: feature "${flag}" is enabled in the graph of content and sim (RF5)`,
+    ]);
+  });
+  it.each(['getrandom v0.3.4', 'rand v0.9.2', 'tracing v0.1.44', 'log v0.4.29'])(
+    'fails with %s in the graph',
+    (line) => {
+      const name = line.split(' ')[0];
+      expect(check(`${TREE_CONSUMERS_OK}${line}\n`)).toEqual([
+        `${name}: in the normal graph of content and sim (RF5)`,
+      ]);
+    },
+  );
+  it('fails if a consumer is missing from the output', () => {
+    expect(check('content v0.1.0 (/repo/crates/content)\nengine v0.1.0\n')).toEqual([
+      'sim: not in the cargo tree output',
     ]);
   });
 });
