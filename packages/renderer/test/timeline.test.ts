@@ -74,3 +74,62 @@ describe('validateTimeline', () => {
     expect(result.errors[100]?.code).toBe('timeline.too_many_errors');
   });
 });
+
+describe('QA findings', () => {
+  const base = {
+    timeline_version: 1,
+    duration_ms: 8000,
+    fighters: {
+      a: { asset: 'dummy_a', max_hp: 1000 },
+      b: { asset: 'dummy_b', max_hp: 1000 },
+    },
+  };
+
+  it('rejects stacked knockdowns after a single strike', () => {
+    const kds = Array.from({ length: 51 }, (_, i) => ({
+      at_ms: 3000 + i * 2,
+      type: 'knockdown',
+      fighter: 'b',
+      duration_ms: 800,
+    }));
+    const json = {
+      ...base,
+      cues: [
+        { at_ms: 0, type: 'intro' },
+        {
+          at_ms: 3000,
+          type: 'strike',
+          actor: 'a',
+          move: 'attack_heavy',
+          result: 'crit',
+          damage: 1000,
+          target_hp: 0,
+        },
+        ...kds,
+        { at_ms: 4000, type: 'ko', fighter: 'b' },
+        { at_ms: 5500, type: 'win', fighter: 'a' },
+      ],
+    };
+    const result = validateTimeline(json);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toContainEqual(
+      expect.objectContaining({ code: 'timeline.knockdown_duplicate', path: '/cues/3' }),
+    );
+  });
+
+  it('rejects a ko without a strike that left that fighter at 0 HP', () => {
+    const json = {
+      ...base,
+      cues: [
+        { at_ms: 0, type: 'intro' },
+        { at_ms: 3000, type: 'ko', fighter: 'b' },
+        { at_ms: 4500, type: 'win', fighter: 'a' },
+      ],
+    };
+    const result = validateTimeline(json);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toContainEqual({ code: 'timeline.ko_without_zero_hp', path: '/cues/1' });
+  });
+});

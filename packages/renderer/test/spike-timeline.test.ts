@@ -96,24 +96,20 @@ describe('spike.timeline.json', () => {
   it('has a comeback: the winner trails for ≥ 5 s after 50 % and then retakes the lead', () => {
     const half = timeline.duration_ms / 2;
     const curve = hpCurve();
-    let trailingSince: number | null = null;
-    let longest = 0;
-    let retook = false;
-    for (let i = 0; i < curve.length; i++) {
-      const p = curve[i];
-      if (p === undefined) continue;
-      const trailing = p[winner] < p[loser];
-      const next = curve[i + 1]?.at ?? timeline.duration_ms;
-      if (trailing) {
-        trailingSince ??= Math.max(p.at, half);
-        if (next > half) longest = Math.max(longest, next - trailingSince);
-      } else {
-        if (trailingSince !== null && longest >= 5000 && p[winner] > p[loser]) retook = true;
-        trailingSince = null;
+    // Each trailing interval runs from the first strike that puts the winner behind until the
+    // first strike after which it is no longer behind; it counts only if it then leads.
+    const comebacks: { from: number; to: number }[] = [];
+    let since: number | null = null;
+    for (const p of curve) {
+      if (p[winner] < p[loser]) {
+        since ??= p.at;
+      } else if (since !== null) {
+        const from = Math.max(since, half);
+        if (p[winner] > p[loser] && p.at - from >= 5000) comebacks.push({ from, to: p.at });
+        since = null;
       }
     }
-    expect(longest, curveBySecond()).toBeGreaterThanOrEqual(5000);
-    expect(retook, curveBySecond()).toBe(true);
+    expect(comebacks.length, curveBySecond()).toBeGreaterThan(0);
   });
 
   it('ends with a crit or a special', () => {

@@ -188,6 +188,7 @@ function checkCues(
   let introAt: number | undefined;
   let lastStrike: { cue: StrikeCue; i: number } | undefined;
   let firstStrikeSeen = false;
+  let knockedBy = -1;
   const knockdowns: { start: number; end: number }[] = [];
   let ko: { side: Side; at: number; i: number } | undefined;
   let win: { side: Side; at: number; i: number } | undefined;
@@ -252,7 +253,10 @@ function checkCues(
       }
       const s = lastStrike?.cue;
       const lag = s === undefined ? -1 : cue.at_ms - s.at_ms;
-      if (
+      if (lastStrike !== undefined && knockedBy === lastStrike.i) {
+        // One knockdown per strike: stacked knockdowns would also unbound `cueWindow`.
+        sink.add(C.knockdownDuplicate, at(i));
+      } else if (
         s === undefined ||
         otherSide(s.actor) !== cue.fighter ||
         (s.result !== 'hit' && s.result !== 'crit') ||
@@ -261,8 +265,12 @@ function checkCues(
       ) {
         sink.add(C.knockdownWithoutStrike, at(i));
       }
+      if (lastStrike !== undefined) knockedBy = lastStrike.i;
       knockdowns.push({ start: cue.at_ms, end: cue.at_ms + cue.duration_ms });
     } else if (cue.type === 'ko') {
+      if (hp[cue.fighter] !== undefined && hp[cue.fighter] !== 0) {
+        sink.add(C.koWithoutZeroHp, at(i));
+      }
       koCount++;
       if (koCount > 1) sink.add(C.koCount, at(i));
       else ko = { side: cue.fighter, at: cue.at_ms, i };

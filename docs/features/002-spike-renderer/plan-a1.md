@@ -205,6 +205,7 @@ Versiones de la tabla comprobadas de nuevo el 2026-10-26: sin cambios (`pixi.js`
 7. **`tsconfig.node.json` incluye `eslint.config.js`** (`allowJs` y `checkJs`), porque `test/eslint.test.ts` importa `createConfig()`.
 8. **`scripts/__fixtures__/check-compose/valid/apps/web/Dockerfile` resincronizado** con el `COPY` nuevo: el test de `check-compose` exige que el fixture válido coincida con el Dockerfile real. No cambia ninguna regla.
 9. **Destello con movimiento reducido.** Se mantiene, porque es un tinte del sprite y no un destello de pantalla completa (RF-A14: "el impacto se comunica con el tinte").
+10. **Reglas agregadas tras la verificación de QA.** `timeline.knockdown_duplicate`: un solo `knockdown` por `strike` (sin ella, 51 knockdowns tras un golpe pasaban la validación y `cueWindow` llegaba a 54 cues, por encima de `K`). `timeline.ko_without_zero_hp`: un `ko` solo cuando el HP de ese luchador es 0. Además, `sceneAt` lleva un `t` no finito a 0 (`NaN`, `−∞`) o al final (`+∞`), y `prepareScene` copia los `frames` de los manifests antes de congelar, para no congelar los objetos del llamador.
 
 ## Revisión
 

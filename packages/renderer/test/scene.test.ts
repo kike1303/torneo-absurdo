@@ -20,6 +20,7 @@ import {
   syntheticTimeline,
   times,
 } from './support/scenes.ts';
+import { timeline as timeline_ } from './support/timeline-builder.ts';
 
 // RF-A9 and plan-a1 decisions 2 and 16.
 const timeline = spikeTimeline();
@@ -170,5 +171,37 @@ describe('bounded cost without a clock', () => {
         }
       }
     }
+  });
+});
+
+describe('QA findings', () => {
+  it('clamps a non-finite t', () => {
+    expect(sceneAt(prepared, Number.NaN, OPTS)).toEqual(sceneAt(prepared, 0, OPTS));
+    expect(sceneAt(prepared, Number.NEGATIVE_INFINITY, OPTS)).toEqual(sceneAt(prepared, 0, OPTS));
+    expect(sceneAt(prepared, Number.POSITIVE_INFINITY, OPTS)).toEqual(
+      sceneAt(prepared, timeline.duration_ms, OPTS),
+    );
+  });
+
+  it('does not freeze the caller manifests', () => {
+    const manifest = MANIFESTS.get('dummy_a');
+    prepareScene(timeline, MANIFESTS);
+    expect(Object.isFrozen(manifest?.animations.idle.frames)).toBe(false);
+    expect(Object.isFrozen(manifest?.frames)).toBe(false);
+  });
+
+  it('keeps K with a knockdown after every strike (the densest valid case)', () => {
+    const b = timeline_({ maxHp: 1_000_000 });
+    let at = 2000;
+    for (let i = 0; i < 200; i++) {
+      const actor = i % 2 === 0 ? 'a' : 'b';
+      b.strike(at, actor, 'attack_light', 'hit', 1).knockdown(at, actor === 'a' ? 'b' : 'a', 800);
+      at += 801;
+    }
+    const tl = b.finish(at);
+    const p = prepareScene(tl, MANIFESTS);
+    let max = 0;
+    for (let t = 0; t <= tl.duration_ms; t += 16) max = Math.max(max, cueWindow(p, t).length);
+    expect(max).toBeLessThanOrEqual(K);
   });
 });

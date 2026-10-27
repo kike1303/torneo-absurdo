@@ -98,7 +98,8 @@ function timingTable(manifest: SpriteManifest): TimingTable {
     });
     table[code] = {
       code: played,
-      frames: animation.frames,
+      // Copied: deepFreeze must never freeze the caller's manifest.
+      frames: [...animation.frames],
       ends,
       total: sum,
       loop: animation.loop,
