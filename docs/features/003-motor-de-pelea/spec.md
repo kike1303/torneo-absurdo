@@ -2,7 +2,7 @@
 id: "003"
 title: Motor de pelea v0
 type: spec
-status: in-review
+status: changes-requested
 risk: high
 author: architect
 reviewers: [product-owner, security-reviewer, game-designer]
@@ -369,3 +369,33 @@ Seed (32 B, server or sim) ──▶ engine::simulate(seed, a, b, Ruleset::for_v
 - **`rand::distributions` / `gen_range`:** su algoritmo no tiene garantía de estabilidad entre versiones de `rand`. Se usa un `roll` propio sobre `next_u32`.
 
 ## Revisión
+
+### product-owner — 2026-10-26 — REQUEST_CHANGES
+- Verifiqué: frontmatter válido; la spec resuelve el problema del intent (impredecible pero reproducible, balanceable, eventos suficientes para renderer y narrador); cada criterio de éxito tiene requisito y prueba (RF16/RF18 byte a byte, RF17 win rate y momentos, RNF de 10k < 10 s); las tres preguntas abiertas están respondidas; alcance sin scope creep (server, apuestas, commit-reveal completo y reembolsos se derivan a sus specs); coherencia con ADR-0001, 0004, 0005, 0007 y 0010; ritmo frente a "Datos para 003" de 002 (≥ 2 s de intro, ≥ 700 ms entre impactos, ≥ 1500 ms de KO a fin, look-ahead de 400 ms).
+- Cambios pedidos:
+  1. **Techo de duración.** RF17 acepta `end.t` hasta 92 000 ms y 002 suma ≥ 2 s de pose de victoria: una pelea por decisión dura ~94 s en pantalla, fuera de los 45–90 s del intent. Bajar `time_limit_ms` (p. ej. 86 000) y ajustar RF17, o definir qué cuenta como duración de reproducción y registrar la desviación.
+  2. **Peleas sin KO frente a la Timeline v1 de 002**, que exige exactamente un `ko` y un `win` y no tiene cue para `time_up`, `decision` ni `draw`. Completar la tabla de correspondencias (`time_up`, `end` con `decision`/`draw`, y `hit` con `crit = true` → `result: crit`), dejar dicho que exige `timeline_version` 2 (RF-C4 de 002) y quién es su dueño, o decidir que el motor no produce peleas sin KO.
+- No bloqueante: daño excedente vs. `target_hp` de la Timeline (recortar en el adaptador o relajar 002); rango orientativo por cruce, informativo en `sim`; aclarar que `sudden_ko` no es el "favorito perdiendo" de ADR-0010.
+
+### security-reviewer — 2026-10-26 — REQUEST_CHANGES
+- Verifiqué: frontmatter; coherencia con ADR-0001 (el `-> Result` es aceptable) y ADR-0002; `Seed` sin `Serialize` y con `Debug` redactado; el `Debug` de `ChaCha20Rng` en `rand_chacha 0.9.0` no filtra la semilla, pero su `Serialize` (feature `serde`, hoy inactiva) sí la incluye; ninguna versión nueva entra al lock (`rand_chacha 0.9.0`, `rand_core 0.9.5`, `ppv-lite86 0.2.21`, `wasm-bindgen 0.2.129`); por unificación de features `rand_core` se compila hoy con `os_rng`/`getrandom 0.3.4` (vía `tungstenite → rand/std`); cotas de terminación (~270 eventos en el peor caso < tope 512, sin divisiones por cero ni desbordes con stats ≤ 100); `wasm-bindgen-macro-support 0.2.129` traslada los atributos de la función al shim generado, así que `deny` + `allow(unsafe_code)` en el item exportado es viable.
+- Cambios pedidos:
+  1. **Commit-reveal sin `CharacterSpec`:** (a) registrado en Linear como TA-13 (incluye la confidencialidad del `FightLog` hasta `Settled`); enlazarlo desde la preocupación 2; (b) convertir "valorar" en requisito duro: ninguna pelea de producción abre apuestas sin snapshot inmutable publicado o commit extendido (enmienda de ADR-0002 con OK del owner); (c) en 003, `CharacterSpec` con `Serialize` + `Deserialize` y `deny_unknown_fields`, forma canónica (`canonical_spec_json`), test de ida y vuelta y un dorado; el WASM acepta exactamente esa forma.
+  2. **RF21 "sin pánicos":** `#![deny(clippy::indexing_slicing, clippy::panic, clippy::unreachable, clippy::todo, clippy::unimplemented)]` en `engine` y `engine-wasm`; `roll` recibe `NonZeroU32` y calcula 2³² en `u64`; `canonical_json` sin `unwrap_or_default()` (devuelve `Result` o documenta cómo descarta el error sin `expect`).
+  3. **`_check-engine-graph` debe cubrir features:** `crates/engine/clippy.toml` con `disallowed-methods` (`SeedableRng::{from_os_rng, try_from_os_rng, from_rng, seed_from_u64}`) y `disallowed-types` (`OsRng`); el chequeo falla si `rand_chacha`/`rand_core` tienen `serde` u `os_rng` en el grafo del motor; test negativo del script; documentar la resolución de features usada.
+  4. **`allow(unsafe_code)` en `engine-wasm`:** `_check-wasm` falla si `crates/engine-wasm/src` contiene el token `unsafe` o hay más de un `allow(unsafe_code)`; usar `allow`, no `expect`; la tabla `[lints]` de `engine-wasm` replica la del workspace salvo `unsafe_code = "deny"` y una prueba de `scripts/` lo compara.
+- Recomendaciones: targets wasm en `[graph] targets` de `deny.toml`; test exacto `format!("{:?}", seed) == "Seed(<redacted>)"` y declarar que `Seed` no implementa `Display`/`LowerHex`/`Serialize` ni expone los bytes; listar todos los códigos de error de RF19, limitar `a_json`/`b_json` (p. ej. 8 KiB) antes de parsear y nunca devolver el mensaje de `serde_json`; `wasi-runner.mjs` sin `preopens` y con `env: {}`; reembolso de `draw` con asientos del ledger (ADR-0005).
+
+### game-designer — 2026-10-26 — REQUEST_CHANGES
+- Verifiqué: coherencia con el intent y ADR-0001/0004/0007/0010; respuestas a las preguntas abiertas (las acepto); triggers del narrador cubiertos; mapeo a las animaciones de 002 (`low_hp` a 250 ‰ = su "HP < 25 %"); el esquema de personaje alcanza para 2–4 homenajes distintos. Reimplementé la tabla del ruleset v1 en Python (aproximación, no el motor) con 10 000 peleas: win rate marginal por stat hp 64 %, defense 58 %, attack 39 %, speed 39 %, special 33 %; roster de 4 arquetipos 12/32/92/63 %; duración p50 45 s (49 % < 45 s); momentos 6,2 %. Con los cambios 1–4: stats entre 44 y 50 %, 84 % de las peleas en 45–92 s, momentos 17,3 %.
+- Cambios pedidos:
+  1. **Defensa contra especiales:** para `special`, `base = power·(100 + special_atk)/(100 + special_def)`; `defense` solo para `strike` y `heavy`.
+  2. **Constantes re-centradas:** `max_hp = 500 + 4·hp`; `block‰ = 60 + defense/2 + caution`; `dodge‰ = 40 + 2·speed`; `interval = 1800 − 10·speed`.
+  3. **Desesperación:** con HP propio ≤ 250 ‰ al resolver, crítico +150 ‰ y daño ×5/4. Orden entero: varianza → desesperación → crítico → debilidad → bloqueo.
+  4. **Momentos alcanzables:** `comeback` con umbral 250 ‰; redefinir `sudden_ko` (≈ 0 % tal cual), p. ej. KO "al borde" con el ganador a ≤ N ‰ de HP (N = 60 ≈ 20 %), ajustando `MomentKind` antes de fusionar la fase A; definir el `side` de `decisive_crit` (el atacante) y `d_sin_crit` (con desesperación y debilidad, sin el ×3/2).
+  5. **Ajustable en fase B:** enumerar como campos de `Ruleset` todas las constantes (tabla, umbrales de momentos y de desesperación, `intro_ms`, `time_limit_ms`, `end_ms`); un cambio de forma de fórmula enmienda la spec.
+  6. **Ritmo con 002:** `end_ms = 4000`; `time_limit_ms = 86 000`; banda de RF17 45 000–90 000 ms.
+  7. **Recuperación explícita:** `next_at_def = max(…, t_res + 300)` en golpe, bloqueo y esquiva.
+  8. **Medición:** el win rate global excluye espejos; definir `P` en `m = ⌊N/(2·P)⌋` y si los espejos cuentan en N; sesgo del lado `a` agregado sobre todos los espejos; reportar el % de peleas ganadas tras ir ≥ 250 ‰ abajo y advertir (sin fallar) cruces fuera de 30–70 %.
+  9. **Coordinación con 002:** fin por tiempo/empate (igual que el PO); windups del motor (700/1100 ms) más largos que el ≤ 400 ms de las animaciones: el adaptador decide qué se ve.
+  10. **RF14:** el skill `write-character` define dónde viven los nombres localizados de las habilidades (p. ej. `abilities: { <id>: <nombre> }` en el frontmatter de `lore.<locale>.md`).
