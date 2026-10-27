@@ -60,6 +60,8 @@ function send(
   res.statusCode = status;
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Cache-Control', 'no-store');
+  // Same origin only, also for <img> from another site (ADR-0012).
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
   if (type !== null) res.setHeader('Content-Type', type);
   res.setHeader('Content-Length', String(body.length));
   res.end(head ? undefined : body);

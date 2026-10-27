@@ -191,7 +191,12 @@ describe('convert (RF-B5)', () => {
       sprites: [...fixtureSpritesV2(), extra],
       palettes: [{ colors: 32, data: new Uint8Array(128) }],
     });
-    expect(convert({ sff, air: fixtureAir(), map: fixtureMap() }).ok).toBe(true);
+    const unused = ok(convert({ sff, air: fixtureAir(), map: fixtureMap() }));
+    expect(unused.report.notes).toContainEqual({
+      code: 'sff.unsupported_compression',
+      count: 1,
+      data: [{ sprite: 6, compression: 'rle5' }],
+    });
     const air = writeAir(
       ACTIONS.map((a) =>
         a.id === 130 ? { id: 130, frames: [{ group: 7, image: 0, ticks: 5 }] } : a,

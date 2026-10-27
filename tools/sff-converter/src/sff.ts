@@ -4,7 +4,14 @@ import type { RgbaImage } from './image.ts';
 import { INPUT_LIMITS } from './limits.ts';
 import { decodeLz5 } from './lz5.ts';
 import { applyPalette, paletteFromRgb, paletteFromV2, type Palette } from './palette.ts';
-import { checkPcxHeader, decodePcx, isSupportedPcx, pcxPalette, readPcxHeader } from './pcx.ts';
+import {
+  checkPcxHeader,
+  decodePcx,
+  isSupportedPcx,
+  PCX_HEADER,
+  pcxPalette,
+  readPcxHeader,
+} from './pcx.ts';
 import { decodePng, type PngFormat } from './png.ts';
 import { ByteReader } from './reader.ts';
 import { decodeRle8 } from './rle8.ts';
@@ -99,6 +106,23 @@ export function spriteInfo(file: SffFile, index: number): SpriteInfo {
   const compression = V2_FORMATS[node.format] ?? 'unknown';
   const supported = compression !== 'rle5' && compression !== 'unknown';
   return { width: node.width, height: node.height, compression, supported };
+}
+
+/**
+ * The compression of a sprite that owns its data and cannot be decoded, or null. Never throws:
+ * it reads only node fields and, in SFF v1, a PCX header that is fully present. A sprite that
+ * nobody maps is only reported (RF-B3); broken data surfaces when a mapped one is decoded.
+ */
+export function unsupportedCompression(file: SffFile, index: number): Compression | null {
+  if (file.version === 1) {
+    const data = file.sprites[index]?.data;
+    if (data == null || data.length < PCX_HEADER) return null;
+    return isSupportedPcx(readPcxHeader(data.bytes)) ? null : 'pcx';
+  }
+  const node = file.sprites[index];
+  if (node === undefined || node.data === null) return null;
+  const compression = V2_FORMATS[node.format] ?? 'unknown';
+  return compression === 'rle5' || compression === 'unknown' ? compression : null;
 }
 
 export interface DecodeOptions {

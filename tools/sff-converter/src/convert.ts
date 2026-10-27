@@ -19,7 +19,14 @@ import { INPUT_LIMITS } from './limits.ts';
 import { isLooping, timedFrames, type TimedFrame } from './manifest.ts';
 import type { CharacterMap } from './map.ts';
 import { pack } from './pack.ts';
-import { decodeSprite, readSff, resolveSprite, spriteIndexer, spriteInfo } from './sff.ts';
+import {
+  decodeSprite,
+  readSff,
+  resolveSprite,
+  spriteIndexer,
+  spriteInfo,
+  unsupportedCompression,
+} from './sff.ts';
 
 export interface ConvertInput {
   readonly sff: Uint8Array;
@@ -143,6 +150,18 @@ export function convert(input: ConvertInput): ConvertResult {
     }
     area += Math.max(0, info.width) * Math.max(0, info.height);
     if (area > INPUT_LIMITS.mappedAreaMax) fail('convert.too_large', { area });
+  }
+  // Unsupported sprites that no mapped animation uses: a note each, never an abort (RF-B3).
+  const mapped = new Set<number>();
+  for (const index of used.values()) if (index !== -1) mapped.add(resolveSprite(sff, index));
+  for (const sprite of sff.sprites) {
+    if (mapped.has(sprite.index)) continue;
+    const compression = unsupportedCompression(sff, sprite.index);
+    if (compression === null) continue;
+    notes.push({
+      code: compression === 'pcx' ? 'pcx.unsupported' : 'sff.unsupported_compression',
+      data: { sprite: sprite.index, compression },
+    });
   }
   const paletteSprite = sff.version === 1 ? find(map.paletteSprite[0], map.paletteSprite[1]) : -1;
 

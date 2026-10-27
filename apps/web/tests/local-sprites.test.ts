@@ -152,9 +152,11 @@ describe('createLocalSpritesHandler', () => {
     const json = await call(handler, '/__local-sprites/local_a/manifest.json');
     expect(json.status).toBe(200);
     expect(json.headers['content-type']).toBe('application/json; charset=utf-8');
+    expect(json.headers['cross-origin-resource-policy']).toBe('same-origin');
     expect(JSON.parse(json.body.toString('utf8')).id).toBe('local_a');
     const png = await call(handler, '/__local-sprites/local_a/sheet-0.png');
     expect(png.headers).toMatchObject({
+      'cross-origin-resource-policy': 'same-origin',
       'content-type': 'image/png',
       'x-content-type-options': 'nosniff',
       'cache-control': 'no-store',
