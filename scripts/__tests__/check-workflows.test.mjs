@@ -542,6 +542,138 @@ const REVIEW_CASES = [
   ],
 ];
 
+const DIGEST = `@sha256:${'a'.repeat(64)}`;
+const BASH = '    defaults:\n      run:\n        shell: bash\n';
+/** The rust job of the valid fixture inside a pinned container, with bash, plus `extra`. */
+const inContainer = (extra = '', options = '') => ({
+  [CI]: [
+    [
+      RUST_JOB,
+      `${RUST_JOB}    container:\n      image: node:22${DIGEST}\n${options ? `      options: ${options}\n` : ''}${extra}${BASH}`,
+    ],
+  ],
+});
+
+/**
+ * Review of PR #22 (qa-engineer, security-reviewer): container jobs.
+ * @type {[string, Record<string, [string, string][]>, RegExp][]}
+ */
+const CONTAINER_CASES = [
+  // Inside a container, run: defaults to `sh -e`, so `set -o pipefail` exits 2 (qa-engineer).
+  [
+    'container without shell: bash',
+    { [CI]: [[RUST_JOB, `${RUST_JOB}    container: node:22${DIGEST}\n`]] },
+    /container-shell: jobs\.rust/,
+  ],
+  [
+    'container with shell: sh',
+    {
+      [CI]: [
+        [
+          RUST_JOB,
+          `${RUST_JOB}    container: node:22${DIGEST}\n    defaults:\n      run:\n        shell: sh\n`,
+        ],
+      ],
+    },
+    /container-shell: jobs\.rust/,
+  ],
+  // Closed list of container options (security-reviewer).
+  [
+    '--privileged',
+    inContainer('', '--privileged'),
+    /container-options: jobs\.rust\.container: --privileged/,
+  ],
+  ['a mount of /', inContainer('', '-v /:/host'), /container-options: jobs\.rust\.container: -v/],
+  [
+    '--volume',
+    inContainer('', '--volume=/var/run/docker.sock:/var/run/docker.sock'),
+    /container-options:/,
+  ],
+  ['--cap-add', inContainer('', '--cap-add=SYS_ADMIN'), /container-options: .*--cap-add/],
+  ['--ipc=host', inContainer('', '--ipc=host'), /container-options: .*--ipc=host/],
+  ['--network host', inContainer('', '--network host'), /container-options:/],
+  ['--user 0', inContainer('', '--user 0'), /container-options:/],
+  ['--security-opt', inContainer('', '--security-opt seccomp=unconfined'), /container-options:/],
+  ['--shm-size without a size', inContainer('', '--shm-size=lots'), /container-options:/],
+  [
+    'options in a service',
+    {
+      [CI]: [
+        [
+          RUST_JOB,
+          `${RUST_JOB}    services:\n      pg:\n        image: postgres:17${DIGEST}\n        options: --privileged\n`,
+        ],
+      ],
+    },
+    /container-options: jobs\.rust\.services\.pg: --privileged/,
+  ],
+  // Closed list of keys: no credentials, no volumes.
+  [
+    'container credentials',
+    inContainer('      credentials:\n        username: x\n        password: y\n'),
+    /container-keys: jobs\.rust\.container: credentials/,
+  ],
+  [
+    'container volumes',
+    inContainer('      volumes:\n        - /:/host\n'),
+    /container-keys: jobs\.rust\.container: volumes/,
+  ],
+  [
+    'service volumes',
+    {
+      [CI]: [
+        [
+          RUST_JOB,
+          `${RUST_JOB}    services:\n      pg:\n        image: postgres:17${DIGEST}\n        volumes:\n          - /:/host\n`,
+        ],
+      ],
+    },
+    /container-keys: jobs\.rust\.services\.pg: volumes/,
+  ],
+  [
+    'service credentials',
+    {
+      [CI]: [
+        [
+          RUST_JOB,
+          `${RUST_JOB}    services:\n      pg:\n        image: postgres:17${DIGEST}\n        credentials:\n          username: x\n`,
+        ],
+      ],
+    },
+    /container-keys: jobs\.rust\.services\.pg: credentials/,
+  ],
+];
+
+const PW_IMAGE = `mcr.microsoft.com/playwright:v1.64.1-noble${DIGEST}`;
+/** The rust job inside the Playwright image, with bash, and `env` lines for the job. */
+const inPlaywright = (env) => ({
+  [CI]: [
+    [
+      RUST_JOB,
+      `${RUST_JOB}    container:\n      image: ${PW_IMAGE}\n${BASH}${env ? `    env:\n      ${env}\n` : ''}`,
+    ],
+  ],
+});
+
+/**
+ * Review of PR #22 (architect): the Playwright image tag, PLAYWRIGHT_IMAGE_VERSION and
+ * @playwright/test move together.
+ * @type {[string, Record<string, [string, string][]>, RegExp][]}
+ */
+const PLAYWRIGHT_CASES = [
+  ['PLAYWRIGHT_IMAGE_VERSION missing', inPlaywright(''), /playwright-image: jobs\.rust/],
+  [
+    'PLAYWRIGHT_IMAGE_VERSION different from the tag',
+    inPlaywright('PLAYWRIGHT_IMAGE_VERSION: 1.65.0'),
+    /playwright-image: jobs\.rust: PLAYWRIGHT_IMAGE_VERSION 1\.65\.0 .*v1\.64\.1/,
+  ],
+  [
+    'PLAYWRIGHT_IMAGE_VERSION without the Playwright image',
+    { [CI]: [[RUST_JOB, `${RUST_JOB}    env:\n      PLAYWRIGHT_IMAGE_VERSION: 1.64.1\n`]] },
+    /playwright-image: jobs\.rust/,
+  ],
+];
+
 describe('check-workflows (RF-C12, plan-c decision 23)', () => {
   it('passes on the valid fixture', () => {
     expect(checkWorkflows(valid)).toEqual([]);
@@ -590,13 +722,50 @@ describe('check-workflows (RF-C12, plan-c decision 23)', () => {
     expect(checkWorkflows(tree)).toEqual([]);
   });
 
+  it.each(PLAYWRIGHT_CASES)('fails on: %s', (_name, edits, pattern) => {
+    const problems = checkWorkflows(mutated(edits));
+    expect(
+      problems.some((p) => pattern.test(p)),
+      problems.join('\n') || '(no problems)',
+    ).toBe(true);
+  });
+
+  it('accepts PLAYWRIGHT_IMAGE_VERSION equal to the image tag', () => {
+    expect(checkWorkflows(mutated(inPlaywright('PLAYWRIGHT_IMAGE_VERSION: 1.64.1')))).toEqual([]);
+  });
+
+  it.each(CONTAINER_CASES)('fails on: %s', (_name, edits, pattern) => {
+    const problems = checkWorkflows(mutated(edits));
+    expect(
+      problems.some((p) => pattern.test(p)),
+      problems.join('\n') || '(no problems)',
+    ).toBe(true);
+  });
+
+  it('accepts a container with --shm-size and bash in the job defaults', () => {
+    expect(checkWorkflows(mutated(inContainer('', '--shm-size=1g')))).toEqual([]);
+  });
+
+  it('accepts bash in the workflow defaults for a container job', () => {
+    const tree = mutated({
+      [CI]: [
+        [
+          'permissions:\n  contents: read\njobs:',
+          'permissions:\n  contents: read\ndefaults:\n  run:\n    shell: bash\njobs:',
+        ],
+        [RUST_JOB, `${RUST_JOB}    container: node:22${DIGEST}\n`],
+      ],
+    });
+    expect(checkWorkflows(tree)).toEqual([]);
+  });
+
   it('accepts container: and services: pinned by digest', () => {
     const digest = `@sha256:${'a'.repeat(64)}`;
     const tree = mutated({
       [CI]: [
         [
           RUST_JOB,
-          `${RUST_JOB}    container: node:22${digest}\n    services:\n      pg:\n        image: postgres:17${digest}\n`,
+          `${RUST_JOB}    container: node:22${digest}\n    defaults:\n      run:\n        shell: bash\n    services:\n      pg:\n        image: postgres:17${digest}\n`,
         ],
       ],
     });

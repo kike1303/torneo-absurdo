@@ -2,6 +2,8 @@
 # versions. No groups and no auto-merge: every PR goes through the same review (RF-C12).
 # A rust: bump without rust-toolchain.toml, or a node: bump without .node-version, fails in
 # scripts/check-compose.mjs on purpose: bump both in the same PR.
+# @playwright/test is coupled too: its npm bump fails the e2e job until the Playwright image of
+# ci.yml (tag and digest) and PLAYWRIGHT_IMAGE_VERSION move with it (ADR-0006 note 2026-10-26).
 version: 2
 updates:
   - package-ecosystem: github-actions

@@ -194,6 +194,10 @@ jobs:
       # The scripts/ tests exclude check-workflows (it runs in policy, RF-C10).
       - run: just check-web
 
+  # Runs inside the official Playwright image (plan-c deviation 21): the browsers and their
+  # system packages come baked in, so no run depends on the Ubuntu apt mirror nor on the browser
+  # download. The image version must equal @playwright/test of the lockfile (checked below);
+  # Dependabot does not bump container images, so both move together by hand.
   e2e:
     needs: changes
     if: needs.changes.outputs.web == 'true'
@@ -201,57 +205,35 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+    container:
+      # mcr.microsoft.com/playwright:v1.64.1-noble, multi-arch index digest (2026-10-23).
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
+      # Chromium needs a larger /dev/shm than the 64 MB Docker default (Playwright docs). Only
+      # --shm-size is allowed by check-workflows, not --ipc=host, which shares the host IPC.
+      options: --shm-size=1g
+    # Inside a container, run: defaults to `sh -e {0}`: without this, `set -o pipefail` exits 2.
+    defaults:
+      run:
+        shell: bash
+    env:
+      PLAYWRIGHT_IMAGE_VERSION: 1.64.1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-just
+      # Node of .node-version (the image ships its own Node, which is not used).
       - uses: ./.github/actions/setup-js
-      - name: Playwright version
-        id: playwright
+      - name: The image browsers match @playwright/test
         run: |
           set -euo pipefail
           version="$(pnpm --filter web exec playwright --version | awk '{print $2}')"
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "bad version: $version" >&2; exit 1; }
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Restore the Playwright browsers
-        id: browsers
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-      # A slow Ubuntu mirror once hung apt-get here for the whole job (run 40433289185): two
-      # bounded attempts of 160 s inside a 6 min step fail fast with a clear message instead.
-      - name: Install the browsers (or only their system dependencies)
-        timeout-minutes: 6
-        env:
-          CACHE_HIT: ${{ steps.browsers.outputs.cache-hit }}
-        run: |
-          set -euo pipefail
-          if [ "$CACHE_HIT" = true ]; then
-            cmd=(install-deps chromium webkit)
-          else
-            cmd=(install --with-deps chromium webkit)
+          if [ "$version" != "$PLAYWRIGHT_IMAGE_VERSION" ]; then
+            echo "::error::@playwright/test is $version but the e2e image is v$PLAYWRIGHT_IMAGE_VERSION: bump both together" >&2
+            exit 1
           fi
-          for attempt in 1 2; do
-            if timeout --kill-after=10 160 pnpm --filter web exec playwright "${cmd[@]}"; then
-              exit 0
-            fi
-            echo "playwright ${cmd[0]}: attempt $attempt failed or took more than 160 s" >&2
-            if [ "$attempt" = 1 ]; then
-              # A killed apt-get can leave dpkg half configured.
-              sudo dpkg --configure -a || true
-              sleep 10
-            fi
-          done
-          echo "::error::playwright ${cmd[0]} failed twice (slow apt mirror or browser download): re-run the job" >&2
-          exit 1
-      - name: Save the Playwright browsers (push to main only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.browsers.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ steps.browsers.outputs.cache-primary-key }}
+          echo "Playwright $version, browsers in ${PLAYWRIGHT_BROWSERS_PATH:?the image sets PLAYWRIGHT_BROWSERS_PATH}"
+          ls "$PLAYWRIGHT_BROWSERS_PATH"
       # Two instances (catalog and no catalog), Chromium plus WebKit for theme and CSP (RF-C10).
       - run: just e2e
       - name: Upload screenshots and server logs
