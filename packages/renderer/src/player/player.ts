@@ -71,8 +71,9 @@ export function createPlayer(options: RendererOptions, stage: Stage): RendererHa
     // The scene first, so `snapshot()` inside a cue listener already shows that cue.
     render(p, t);
     if (!playback.playing) return;
-    const win = p.win;
-    if (p.firstStrikeAt !== null && t >= p.firstStrikeAt && (win === null || t <= win.at)) {
+    // From the first strike to the closing cue (`win` or `draw`, 005 RF8).
+    const closing = p.win ?? p.draw;
+    if (p.firstStrikeAt !== null && t >= p.firstStrikeAt && (closing === null || t <= closing.at)) {
       recorder.record(elapsedMs);
     }
     const due = dueCues(p.cueTimes, cursor, t);
@@ -169,6 +170,7 @@ export function createPlayer(options: RendererOptions, stage: Stage): RendererHa
         t: scene.t,
         phase: scene.phase,
         winner: scene.winner,
+        ending: scene.ending,
         hp: { a: scene.hud.a.hp, b: scene.hud.b.hp },
         lastCue: pc === undefined ? null : { index, type: pc.cue.type },
       };

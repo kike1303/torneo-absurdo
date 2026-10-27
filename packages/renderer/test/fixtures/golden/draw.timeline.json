@@ -1,0 +1,784 @@
+{
+  "timeline_version": 2,
+  "duration_ms": 90000,
+  "fighters": {
+    "a": {
+      "asset": "dummy_a",
+      "max_hp": 900
+    },
+    "b": {
+      "asset": "dummy_b",
+      "max_hp": 900
+    }
+  },
+  "cues": [
+    {
+      "at_ms": 0,
+      "type": "intro"
+    },
+    {
+      "at_ms": 4100,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 3,
+      "target_hp": 897
+    },
+    {
+      "at_ms": 4800,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 3,
+      "target_hp": 897
+    },
+    {
+      "at_ms": 5939,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 11,
+      "target_hp": 886
+    },
+    {
+      "at_ms": 6649,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 3,
+      "target_hp": 894
+    },
+    {
+      "at_ms": 7915,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "dodge",
+      "damage": 0,
+      "target_hp": 886
+    },
+    {
+      "at_ms": 8629,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 2,
+      "target_hp": 892
+    },
+    {
+      "at_ms": 9910,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 877
+    },
+    {
+      "at_ms": 10610,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "dodge",
+      "damage": 0,
+      "target_hp": 892
+    },
+    {
+      "at_ms": 11793,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 8,
+      "target_hp": 869
+    },
+    {
+      "at_ms": 12793,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_heavy",
+      "result": "dodge",
+      "damage": 0,
+      "target_hp": 892
+    },
+    {
+      "at_ms": 13787,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 10,
+      "target_hp": 859
+    },
+    {
+      "at_ms": 14780,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 11,
+      "target_hp": 881
+    },
+    {
+      "at_ms": 15966,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_heavy",
+      "result": "hit",
+      "damage": 11,
+      "target_hp": 848
+    },
+    {
+      "at_ms": 16670,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 872
+    },
+    {
+      "at_ms": 17834,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 2,
+      "target_hp": 846
+    },
+    {
+      "at_ms": 18571,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 863
+    },
+    {
+      "at_ms": 19765,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 10,
+      "target_hp": 836
+    },
+    {
+      "at_ms": 20465,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "dodge",
+      "damage": 0,
+      "target_hp": 863
+    },
+    {
+      "at_ms": 21601,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 827
+    },
+    {
+      "at_ms": 22301,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 3,
+      "target_hp": 860
+    },
+    {
+      "at_ms": 23547,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 818
+    },
+    {
+      "at_ms": 24547,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_heavy",
+      "result": "hit",
+      "damage": 10,
+      "target_hp": 850
+    },
+    {
+      "at_ms": 25422,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 2,
+      "target_hp": 816
+    },
+    {
+      "at_ms": 26491,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 3,
+      "target_hp": 847
+    },
+    {
+      "at_ms": 27620,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_heavy",
+      "result": "hit",
+      "damage": 11,
+      "target_hp": 805
+    },
+    {
+      "at_ms": 28349,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 838
+    },
+    {
+      "at_ms": 29504,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "dodge",
+      "damage": 0,
+      "target_hp": 805
+    },
+    {
+      "at_ms": 30204,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 829
+    },
+    {
+      "at_ms": 31361,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 8,
+      "target_hp": 797
+    },
+    {
+      "at_ms": 32061,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 10,
+      "target_hp": 819
+    },
+    {
+      "at_ms": 33309,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "dodge",
+      "damage": 0,
+      "target_hp": 797
+    },
+    {
+      "at_ms": 34009,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 11,
+      "target_hp": 808
+    },
+    {
+      "at_ms": 35276,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 3,
+      "target_hp": 794
+    },
+    {
+      "at_ms": 36276,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_heavy",
+      "result": "block",
+      "damage": 3,
+      "target_hp": 805
+    },
+    {
+      "at_ms": 37081,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 10,
+      "target_hp": 784
+    },
+    {
+      "at_ms": 38135,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 10,
+      "target_hp": 795
+    },
+    {
+      "at_ms": 39026,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "dodge",
+      "damage": 0,
+      "target_hp": 784
+    },
+    {
+      "at_ms": 40020,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 786
+    },
+    {
+      "at_ms": 41005,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 10,
+      "target_hp": 774
+    },
+    {
+      "at_ms": 41883,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 8,
+      "target_hp": 778
+    },
+    {
+      "at_ms": 43163,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_heavy",
+      "result": "block",
+      "damage": 2,
+      "target_hp": 772
+    },
+    {
+      "at_ms": 43863,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 769
+    },
+    {
+      "at_ms": 44983,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 11,
+      "target_hp": 761
+    },
+    {
+      "at_ms": 45719,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 8,
+      "target_hp": 761
+    },
+    {
+      "at_ms": 46818,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 11,
+      "target_hp": 750
+    },
+    {
+      "at_ms": 47597,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 10,
+      "target_hp": 751
+    },
+    {
+      "at_ms": 48725,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 741
+    },
+    {
+      "at_ms": 49531,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 8,
+      "target_hp": 743
+    },
+    {
+      "at_ms": 50533,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "crit",
+      "damage": 12,
+      "target_hp": 729
+    },
+    {
+      "at_ms": 51800,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_heavy",
+      "result": "hit",
+      "damage": 10,
+      "target_hp": 733
+    },
+    {
+      "at_ms": 52500,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 3,
+      "target_hp": 726
+    },
+    {
+      "at_ms": 53768,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 8,
+      "target_hp": 725
+    },
+    {
+      "at_ms": 54468,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 3,
+      "target_hp": 723
+    },
+    {
+      "at_ms": 55693,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 8,
+      "target_hp": 717
+    },
+    {
+      "at_ms": 56724,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_heavy",
+      "result": "hit",
+      "damage": 10,
+      "target_hp": 713
+    },
+    {
+      "at_ms": 57606,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 708
+    },
+    {
+      "at_ms": 58527,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 704
+    },
+    {
+      "at_ms": 59425,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 10,
+      "target_hp": 698
+    },
+    {
+      "at_ms": 60385,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 8,
+      "target_hp": 696
+    },
+    {
+      "at_ms": 61296,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "dodge",
+      "damage": 0,
+      "target_hp": 698
+    },
+    {
+      "at_ms": 62358,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 3,
+      "target_hp": 693
+    },
+    {
+      "at_ms": 63455,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_heavy",
+      "result": "hit",
+      "damage": 10,
+      "target_hp": 688
+    },
+    {
+      "at_ms": 64348,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 684
+    },
+    {
+      "at_ms": 65385,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 679
+    },
+    {
+      "at_ms": 66151,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 675
+    },
+    {
+      "at_ms": 67315,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 10,
+      "target_hp": 669
+    },
+    {
+      "at_ms": 68015,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 666
+    },
+    {
+      "at_ms": 69181,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 3,
+      "target_hp": 666
+    },
+    {
+      "at_ms": 69881,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 10,
+      "target_hp": 656
+    },
+    {
+      "at_ms": 71044,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 3,
+      "target_hp": 663
+    },
+    {
+      "at_ms": 71873,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 10,
+      "target_hp": 646
+    },
+    {
+      "at_ms": 73037,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 11,
+      "target_hp": 652
+    },
+    {
+      "at_ms": 74127,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_heavy",
+      "result": "block",
+      "damage": 2,
+      "target_hp": 644
+    },
+    {
+      "at_ms": 75183,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_heavy",
+      "result": "hit",
+      "damage": 8,
+      "target_hp": 644
+    },
+    {
+      "at_ms": 76095,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 635
+    },
+    {
+      "at_ms": 77138,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 3,
+      "target_hp": 641
+    },
+    {
+      "at_ms": 77992,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 2,
+      "target_hp": 633
+    },
+    {
+      "at_ms": 79059,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 11,
+      "target_hp": 630
+    },
+    {
+      "at_ms": 79829,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "crit",
+      "damage": 13,
+      "target_hp": 620
+    },
+    {
+      "at_ms": 81049,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 2,
+      "target_hp": 628
+    },
+    {
+      "at_ms": 81749,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 2,
+      "target_hp": 618
+    },
+    {
+      "at_ms": 82901,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 3,
+      "target_hp": 625
+    },
+    {
+      "at_ms": 83617,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 2,
+      "target_hp": 616
+    },
+    {
+      "at_ms": 84808,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 9,
+      "target_hp": 616
+    },
+    {
+      "at_ms": 86000,
+      "type": "time_up"
+    },
+    {
+      "at_ms": 87500,
+      "type": "draw"
+    }
+  ]
+}

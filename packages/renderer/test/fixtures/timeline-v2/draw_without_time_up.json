@@ -1,0 +1,20 @@
+{
+  "ops": [
+    {
+      "op": "delete",
+      "path": "/cues/6"
+    },
+    {
+      "op": "set",
+      "path": "/cues/6",
+      "value": {
+        "at_ms": 9500,
+        "type": "draw"
+      }
+    }
+  ],
+  "expect": {
+    "code": "timeline.draw_without_time_up",
+    "path": "/cues/6"
+  }
+}

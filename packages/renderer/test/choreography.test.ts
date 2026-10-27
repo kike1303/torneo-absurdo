@@ -8,7 +8,8 @@ import {
   type FighterScene,
 } from '../src/scene/index.ts';
 import type { Side, Timeline } from '../src/timeline/index.ts';
-import { LONG } from './support/scenes.ts';
+import { MANIFESTS } from './support/placeholders.ts';
+import { GOLDEN_NAMES, LONG, goldenScene, goldenTimeline } from './support/scenes.ts';
 import { timeline, type TimelineBuilder } from './support/timeline-builder.ts';
 
 // RF-A9 and spec "Diseño → Coreografía": one test per precedence rule, with minimal timelines
@@ -139,5 +140,62 @@ describe('precedence rules', () => {
     expect(f(4550, 'b').x).toBeCloseTo((MARK_X.b + CONTACT_B) / 2);
     expect(f(4600, 'b')).toMatchObject({ animation: 'attack_heavy', step: 3, x: CONTACT_B });
     expect(f(4600, 'a').animation).toBe('hit');
+  });
+});
+
+describe('endings by time (005 RF5), on the engine goldens', () => {
+  const closingOf = (tl: Timeline) => {
+    const cue = tl.cues.at(-1);
+    if (cue === undefined || (cue.type !== 'win' && cue.type !== 'draw'))
+      throw new Error('closing');
+    return cue;
+  };
+
+  it.each(GOLDEN_NAMES)('%s: the winner holds win and the loser stands in idle', (name) => {
+    const tl = goldenTimeline(name);
+    const prepared = goldenScene(name);
+    const closing = closingOf(tl);
+    for (const t of [tl.duration_ms - 1, tl.duration_ms]) {
+      const { fighters } = sceneAt(prepared, t, OPTS);
+      if (closing.type === 'draw') {
+        for (const side of ['a', 'b'] as const) {
+          expect(fighters[side].animation).toBe(prepared.fighters[side].timing.idle.code);
+          expect(fighters[side].x).toBe(MARK_X[side]);
+        }
+        continue;
+      }
+      const winner = closing.fighter;
+      const loser: Side = winner === 'a' ? 'b' : 'a';
+      expect(fighters[winner].animation).toBe(prepared.fighters[winner].timing.win.code);
+      expect(fighters[loser].animation).toBe(prepared.fighters[loser].timing.idle.code);
+      expect(fighters[loser].x).toBe(MARK_X[loser]);
+    }
+  });
+
+  it('the draw has no win and no ko at any time', () => {
+    const tl = goldenTimeline('draw');
+    const prepared = goldenScene('draw');
+    for (let t = 0; t <= tl.duration_ms; t += 100) {
+      const { fighters } = sceneAt(prepared, t, OPTS);
+      for (const side of ['a', 'b'] as const) {
+        expect(['win', 'ko']).not.toContain(fighters[side].animation);
+      }
+    }
+  });
+
+  it.each(GOLDEN_NAMES)('%s: before the closing, time_up changes no animation', (name) => {
+    const tl = goldenTimeline(name);
+    const closing = closingOf(tl);
+    const prepared = goldenScene(name);
+    // Not a valid v2 (no ending): prepared directly, only to compare the choreography.
+    const without = prepareScene(
+      { ...tl, cues: tl.cues.filter((c) => c.type !== 'time_up') },
+      MANIFESTS,
+    );
+    for (let t = 0; t < closing.at_ms; t += 50) {
+      expect(sceneAt(prepared, t, OPTS).fighters, String(t)).toEqual(
+        sceneAt(without, t, OPTS).fighters,
+      );
+    }
   });
 });

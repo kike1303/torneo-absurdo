@@ -1,4 +1,4 @@
 # Engine goldens are compared byte by byte (003 plan-a, decision 6): no line-ending conversion.
 crates/engine/tests/golden/* -text
-# The arena's copy of a golden is compared byte by byte with it (002 plan-c decision 5).
+# The arena's copies of the goldens are compared byte by byte with them (002 plan-c decision 5, 005 RF15).
 apps/web/src/lib/features/fight/fixtures/* -text

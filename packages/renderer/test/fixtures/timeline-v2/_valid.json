@@ -1,0 +1,71 @@
+{
+  "timeline_version": 2,
+  "duration_ms": 11500,
+  "fighters": {
+    "a": {
+      "asset": "dummy_a",
+      "max_hp": 1000
+    },
+    "b": {
+      "asset": "dummy_b",
+      "max_hp": 1000
+    }
+  },
+  "cues": [
+    {
+      "at_ms": 0,
+      "type": "intro"
+    },
+    {
+      "at_ms": 3200,
+      "type": "strike",
+      "actor": "a",
+      "move": "attack_light",
+      "result": "hit",
+      "damage": 42,
+      "target_hp": 958
+    },
+    {
+      "at_ms": 4100,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_heavy",
+      "result": "dodge",
+      "damage": 0,
+      "target_hp": 1000
+    },
+    {
+      "at_ms": 5000,
+      "type": "strike",
+      "actor": "a",
+      "move": "special",
+      "result": "crit",
+      "damage": 300,
+      "target_hp": 658
+    },
+    {
+      "at_ms": 5000,
+      "type": "knockdown",
+      "fighter": "b",
+      "duration_ms": 1600
+    },
+    {
+      "at_ms": 7000,
+      "type": "strike",
+      "actor": "b",
+      "move": "attack_light",
+      "result": "block",
+      "damage": 10,
+      "target_hp": 990
+    },
+    {
+      "at_ms": 8000,
+      "type": "time_up"
+    },
+    {
+      "at_ms": 9500,
+      "type": "win",
+      "fighter": "a"
+    }
+  ]
+}

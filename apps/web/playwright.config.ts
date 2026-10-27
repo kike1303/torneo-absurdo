@@ -36,12 +36,14 @@ export default defineConfig({
         // WebGL by software for /dev/arena, also in the CI container (002 plan-a2).
         launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] },
       },
+      // Covered by arena.spec.ts in Chromium (005 plan decision 11).
+      testIgnore: ['dev-status.spec.ts', 'arena-webkit.spec.ts'],
     },
     {
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
-      // WebKit runs the theme and CSP tests (plan-a, file table).
-      testMatch: ['theme.spec.ts', 'csp.spec.ts'],
+      // WebKit runs the theme and CSP tests (plan-a, file table) and the draw to the end (005).
+      testMatch: ['theme.spec.ts', 'csp.spec.ts', 'arena-webkit.spec.ts'],
     },
   ],
   webServer: [

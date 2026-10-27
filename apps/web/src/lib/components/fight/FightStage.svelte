@@ -115,6 +115,17 @@
 
   const names = $derived({ a: fighterName(fighters.a), b: fighterName(fighters.b) });
   const winnerName = $derived(snapshot?.winner ? names[snapshot.winner] : null);
+  /** The result text in `finished`, by `ending` (005 RF16): KO, decision or draw. */
+  const result = $derived.by((): { testid: string; text: string } | null => {
+    const ending = snapshot?.ending ?? null;
+    if (ending === 'draw') return { testid: 'fight-draw', text: m.arena_draw() };
+    if (winnerName === null) return null;
+    const text =
+      ending === 'decision'
+        ? m.arena_winner_decision({ name: winnerName })
+        : m.arena_winner({ name: winnerName });
+    return { testid: 'fight-winner', text };
+  });
   const motionReduced = $derived(systemReduced || reducedMotion);
 
   function refresh(): void {
@@ -165,7 +176,11 @@
         clock: () => performance.now() - start,
         labels: {
           names,
-          banners: { fight: m.arena_banner_fight(), ko: m.arena_banner_ko() },
+          banners: {
+            fight: m.arena_banner_fight(),
+            ko: m.arena_banner_ko(),
+            time: m.arena_banner_time(),
+          },
         },
         formatNumber: (n) => formatInteger(n, locale),
         resolveAsset: (assetId, file) =>
@@ -272,6 +287,7 @@
     data-hp-a={debug ? snapshot?.hp.a : undefined}
     data-hp-b={debug ? snapshot?.hp.b : undefined}
     data-last-cue={debug ? snapshot?.lastCue?.index : undefined}
+    data-ending={debug ? (snapshot?.ending ?? undefined) : undefined}
   >
     <div
       bind:this={host}
@@ -290,9 +306,9 @@
     {:else if phase === 'error' && errorCode !== null}
       <p class="text-sm" data-testid="fight-error">{ERROR_MESSAGES[errorCode]()}</p>
       <Button variant="outline" onclick={() => void start()}>{m.arena_retry()}</Button>
-    {:else if phase === 'finished' && winnerName !== null}
-      <p class="font-display text-lg font-semibold" data-testid="fight-winner">
-        {m.arena_winner({ name: winnerName })}
+    {:else if phase === 'finished' && result !== null}
+      <p class="font-display text-lg font-semibold" data-testid={result.testid}>
+        {result.text}
       </p>
       <Button variant="outline" onclick={restart}>{m.arena_replay()}</Button>
     {/if}

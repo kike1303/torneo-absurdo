@@ -11,12 +11,13 @@ import {
 import dummyA from '@torneo/renderer/placeholders/dummy_a/manifest.json';
 import dummyB from '@torneo/renderer/placeholders/dummy_b/manifest.json';
 import {
+  CLOSING_DELAY_MS,
   WIN_DELAY_MS,
   timelineFromFightLog,
   type AdapterResult,
 } from '../src/lib/features/fight/timeline-from-fight-log.js';
 
-// 002 RF-C1 and RF-C4 (plan-c decisions 1 to 3, step 2), with synthetic logs.
+// 002 RF-C1 and RF-C4 (plan-c decisions 1 to 3, step 2) and 005 RF11 to RF13, with synthetic logs.
 const ASSETS = { a: { asset: 'dummy_a' }, b: { asset: 'dummy_b' } } as const;
 
 const a = validateManifest(dummyA, { expectedId: 'dummy_a' });
@@ -93,7 +94,7 @@ function koLog(): FightLog {
 }
 
 const EXPECTED: Timeline = {
-  timeline_version: 1,
+  timeline_version: 2,
   duration_ms: 12400,
   fighters: { a: { asset: 'dummy_a', max_hp: 100 }, b: { asset: 'dummy_b', max_hp: 100 } },
   cues: [
@@ -158,6 +159,22 @@ const EXPECTED: Timeline = {
   ],
 };
 
+/**
+ * The KO log cut after the hit at 7 400 (a at 75 HP, b at 50) and ended by time: `time_up` at
+ * 8 000 and `end` at 12 000 (005 RF12).
+ */
+function timeLog(winner: 'a' | 'b' | null, reason: 'decision' | 'draw'): FightLog {
+  const log = koLog();
+  log.events.splice(at(log.events, 'attack', -1));
+  log.events.push({ type: 'time_up', t: 8000 }, { type: 'end', t: 12000, winner, reason });
+  return log;
+}
+
+/** The cues of a time ending: the KO cues up to the hit at 7 400, `time_up` and the closing. */
+function timeCues(closing: Timeline['cues'][number]): Timeline['cues'] {
+  return [...EXPECTED.cues.slice(0, 7), { at_ms: 8000, type: 'time_up' }, closing];
+}
+
 function withEvents(edit: (events: FightEvent[]) => void): FightLog {
   const log = koLog();
   edit(log.events);
@@ -176,7 +193,7 @@ const at = (events: FightEvent[], type: FightEvent['type'], nth = 0): number => 
 };
 
 describe('timelineFromFightLog', () => {
-  it('maps a KO with every variant to exactly the v1 fields, and v1 accepts it', () => {
+  it('maps a KO with every variant to exactly the v1 fields in a v2, and v2 accepts it', () => {
     const result = timelineFromFightLog(koLog(), ASSETS);
     expect(result).toEqual({
       ok: true,
@@ -203,6 +220,91 @@ describe('timelineFromFightLog', () => {
     if (!result.ok) return;
     expect(result.timeline.cues.at(-3)).toMatchObject({ result: 'block', target_hp: 0 });
     expect(validateTimeline(result.timeline, MANIFESTS).ok).toBe(true);
+  });
+
+  it.each([
+    ['a decision of a', 'a', 'decision', { at_ms: 9500, type: 'win', fighter: 'a' }],
+    ['a decision of b', 'b', 'decision', { at_ms: 9500, type: 'win', fighter: 'b' }],
+    ['a draw', null, 'draw', { at_ms: 9500, type: 'draw' }],
+  ] as const)('maps %s: time_up and its closing CLOSING_DELAY_MS later', (_n, w, reason, cue) => {
+    const result = timelineFromFightLog(timeLog(w, reason), ASSETS);
+    const timeline: Timeline = { ...EXPECTED, duration_ms: 12000, cues: timeCues(cue) };
+    expect(result).toEqual({ ok: true, timeline, ignored: { low_hp: 1, moment: 0, unknown: 0 } });
+    const checked = validateTimeline(timeline, MANIFESTS);
+    expect(checked.ok ? [] : checked.errors).toEqual([]);
+  });
+
+  it.each<[string, () => FightLog, Record<string, number>]>([
+    [
+      'ko with a time_up',
+      () => withEvents((e) => e.splice(at(e, 'ko'), 0, { type: 'time_up', t: 8400 })),
+      { kos: 1, time_ups: 1 },
+    ],
+    [
+      'decision with a ko',
+      () => {
+        const log = timeLog('a', 'decision');
+        log.events.splice(at(log.events, 'time_up'), 0, { type: 'ko', t: 8000, side: 'b' });
+        return log;
+      },
+      { kos: 1, time_ups: 1 },
+    ],
+    [
+      'decision without time_up',
+      () => {
+        const log = timeLog('a', 'decision');
+        log.events.splice(at(log.events, 'time_up'), 1);
+        return log;
+      },
+      { kos: 0, time_ups: 0 },
+    ],
+    [
+      'decision with two time_up',
+      () => {
+        const log = timeLog('a', 'decision');
+        log.events.splice(at(log.events, 'time_up'), 0, { type: 'time_up', t: 8000 });
+        return log;
+      },
+      { kos: 0, time_ups: 2 },
+    ],
+    ['decision without a winner', () => timeLog(null, 'decision'), { kos: 0, time_ups: 1 }],
+    ['draw with a winner', () => timeLog('a', 'draw'), { kos: 0, time_ups: 1 }],
+    [
+      'draw with a ko',
+      () => {
+        const log = timeLog(null, 'draw');
+        log.events.splice(at(log.events, 'time_up'), 0, { type: 'ko', t: 8000, side: 'b' });
+        return log;
+      },
+      { kos: 1, time_ups: 1 },
+    ],
+    [
+      'draw without time_up',
+      () => {
+        const log = timeLog(null, 'draw');
+        log.events.splice(at(log.events, 'time_up'), 1);
+        return log;
+      },
+      { kos: 0, time_ups: 0 },
+    ],
+  ])('outcome_mismatch: %s', (_name, make, data) => {
+    const log = make();
+    const result = timelineFromFightLog(log, ASSETS);
+    expect(result.ok ? [] : result.errors).toEqual([
+      { code: 'adapter.outcome_mismatch', path: `/events/${at(log.events, 'end')}`, data },
+    ]);
+  });
+
+  it('an unknown reason (a future variant of the protocol) gives unsupported_ending', () => {
+    const log = timeLog('a', 'decision');
+    const end = at(log.events, 'end');
+    log.events[end] = { ...log.events[end], reason: 'forfeit' } as unknown as FightEvent;
+    expect(timelineFromFightLog(log, ASSETS)).toEqual({
+      ok: false,
+      errors: [
+        { code: 'adapter.unsupported_ending', path: `/events/${end}`, data: { reason: 'forfeit' } },
+      ],
+    });
   });
 
   it('a dodge takes target_hp from the chain of HP', () => {
@@ -270,25 +372,6 @@ describe('timelineFromFightLog', () => {
       (e) => e.push({ type: 'low_hp', t: 13000, side: 'a', hp: 1 }),
       ['adapter.event_after_end'],
     ],
-    [
-      'unsupported_ending (time_up and decision)',
-      (e) => {
-        e.splice(at(e, 'ko'), 2);
-        e.push(
-          { type: 'time_up', t: 86000 },
-          { type: 'end', t: 90000, winner: 'a', reason: 'decision' },
-        );
-      },
-      ['adapter.unsupported_ending', 'adapter.unsupported_ending'],
-    ],
-    [
-      'unsupported_ending (draw)',
-      (e) => {
-        e.splice(at(e, 'ko'), 2);
-        e.push({ type: 'end', t: 90000, winner: null, reason: 'draw' });
-      },
-      ['adapter.unsupported_ending'],
-    ],
     ['outcome_mismatch (no ko)', (e) => e.splice(at(e, 'ko'), 1), ['adapter.outcome_mismatch']],
     [
       'outcome_mismatch (two ko)',
@@ -340,8 +423,10 @@ describe('timelineFromFightLog', () => {
     expect(codes(errors).at(-1)).toBe('adapter.too_many_errors');
   });
 
-  it('WIN_DELAY_MS and timeline_version are the renderer values', () => {
+  it('WIN_DELAY_MS, CLOSING_DELAY_MS and timeline_version are the renderer values', () => {
     expect(WIN_DELAY_MS).toBe(TIMELINE_LIMITS.winGapMs);
+    expect(CLOSING_DELAY_MS).toBe(TIMELINE_LIMITS.winGapMs);
+    expect(TIMELINE_VERSION).toBe(2);
     const result = timelineFromFightLog(koLog(), ASSETS);
     expect(result.ok && result.timeline.timeline_version).toBe(TIMELINE_VERSION);
   });

@@ -312,6 +312,10 @@ export function buildChoreography(
       case 'win':
         events.push({ time: cue.at_ms, kind: 'win', index, cue });
         break;
+      case 'time_up':
+      case 'draw':
+        // No segments nor holds: nobody changes animation (005 RF5).
+        break;
     }
   });
   events.sort(
@@ -385,8 +389,8 @@ export function buildChoreography(
       const x = curX(sim, time);
       close(sim, time);
       sim.cur = still('knockdown', time, time + cue.duration_ms, 'knockdown', x, index);
-    } else {
-      // ko or win: hold until the end.
+    } else if (cue.type === 'ko' || cue.type === 'win') {
+      // Hold until the end.
       const sim = sims[cue.fighter];
       if (sim.hold !== null) continue;
       const x = curX(sim, time);

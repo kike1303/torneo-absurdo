@@ -1,6 +1,9 @@
-// Shared scenes for the scene tests: the spike script, long-animation manifests and a
-// synthetic 1 000-cue timeline.
+// Shared scenes for the scene tests: the spike script, the engine goldens that end by time,
+// long-animation manifests and a synthetic 1 000-cue timeline.
 import spike from '../../fixtures/spike.timeline.json' with { type: 'json' };
+import decisionA from '../fixtures/golden/decision-a.timeline.json' with { type: 'json' };
+import decisionB from '../fixtures/golden/decision-b.timeline.json' with { type: 'json' };
+import draw from '../fixtures/golden/draw.timeline.json' with { type: 'json' };
 import dummyA from '../../placeholders/dummy_a/manifest.json' with { type: 'json' };
 import dummyB from '../../placeholders/dummy_b/manifest.json' with { type: 'json' };
 import { mulberry32 } from '../../src/fx/prng.ts';
@@ -17,6 +20,23 @@ export function spikeTimeline(): Timeline {
 }
 
 export const spikeScene = (): PreparedScene => prepareScene(spikeTimeline(), MANIFESTS);
+
+/**
+ * The timelines of the engine goldens that end by time, as the adapter of apps/web produces them
+ * (generated and kept fresh by apps/web/tests/golden-timelines.test.ts, 005 plan decision 4).
+ */
+const GOLDENS = { 'decision-a': decisionA, 'decision-b': decisionB, draw } as const;
+export type GoldenName = keyof typeof GOLDENS;
+export const GOLDEN_NAMES = Object.keys(GOLDENS) as GoldenName[];
+
+export function goldenTimeline(name: GoldenName): Timeline {
+  const result = validateTimeline(GOLDENS[name], MANIFESTS);
+  if (!result.ok) throw new Error(JSON.stringify(result.errors));
+  return result.timeline;
+}
+
+export const goldenScene = (name: GoldenName): PreparedScene =>
+  prepareScene(goldenTimeline(name), MANIFESTS);
 
 /** Times from `from` to `to` (inclusive) every `step` ms. */
 export function times(from: number, to: number, step: number): number[] {

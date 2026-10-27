@@ -1,0 +1,31 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/5",
+      "value": {
+        "at_ms": 7000,
+        "type": "strike",
+        "actor": "b",
+        "move": "attack_light",
+        "result": "crit",
+        "damage": 10,
+        "target_hp": 990
+      }
+    },
+    {
+      "op": "insert",
+      "path": "/cues/6",
+      "value": {
+        "at_ms": 7000,
+        "type": "knockdown",
+        "fighter": "a",
+        "duration_ms": 3000
+      }
+    }
+  ],
+  "expect": {
+    "code": "timeline.closing_during_knockdown",
+    "path": "/cues/8/at_ms"
+  }
+}

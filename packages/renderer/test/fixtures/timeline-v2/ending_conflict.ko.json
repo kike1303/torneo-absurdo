@@ -1,0 +1,30 @@
+{
+  "ops": [
+    {
+      "op": "insert",
+      "path": "/cues/6",
+      "value": {
+        "at_ms": 7600,
+        "type": "strike",
+        "actor": "a",
+        "move": "attack_heavy",
+        "result": "hit",
+        "damage": 658,
+        "target_hp": 0
+      }
+    },
+    {
+      "op": "insert",
+      "path": "/cues/7",
+      "value": {
+        "at_ms": 7600,
+        "type": "ko",
+        "fighter": "b"
+      }
+    }
+  ],
+  "expect": {
+    "code": "timeline.ending_conflict",
+    "path": "/cues/8"
+  }
+}

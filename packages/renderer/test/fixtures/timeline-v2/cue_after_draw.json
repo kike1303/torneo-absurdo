@@ -1,0 +1,24 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/7",
+      "value": {
+        "at_ms": 9500,
+        "type": "draw"
+      }
+    },
+    {
+      "op": "push",
+      "path": "/cues",
+      "value": {
+        "at_ms": 9600,
+        "type": "time_up"
+      }
+    }
+  ],
+  "expect": {
+    "code": "timeline.cue_after_draw",
+    "path": "/cues/8"
+  }
+}
