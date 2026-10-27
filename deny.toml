@@ -5,6 +5,9 @@ targets = ["x86_64-unknown-linux-musl"]
 
 [bans]
 multiple-versions = "warn"
+# Without it, duplicates reached only through dev-dependencies are not counted, and a second
+# tungstenite from tokio-tungstenite (server tests) passed (plan-c deviation 22).
+multiple-versions-include-dev = true
 deny = [
     { crate = "openssl-sys" },
     { crate = "openssl" },

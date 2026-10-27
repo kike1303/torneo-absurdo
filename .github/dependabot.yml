@@ -2,11 +2,10 @@
 # published malicious versions. Minor and patch bumps are grouped per ecosystem (one PR each);
 # majors still arrive one by one. No auto-merge: every PR goes through the same review (RF-C12).
 # A rust: bump without rust-toolchain.toml, or a node: bump without .node-version, fails in
-# scripts/check-compose.mjs on purpose: bump both in the same PR.
+# scripts/check-compose.mjs on purpose: bump both in the same PR. Digest and version bumps do not
+# touch scripts/__fixtures__/check-compose/valid/ (its sync test ignores them, deviation 22).
 # @playwright/test is coupled too: its npm bump fails the e2e job until the Playwright image of
 # ci.yml (tag and digest) and PLAYWRIGHT_IMAGE_VERSION move with it (ADR-0006 note 2026-10-26).
-# A Dockerfile or compose bump
-# also needs scripts/__fixtures__/check-compose/valid/ resynced in the same PR.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -77,8 +76,7 @@ updates:
       - dependency-name: node
         update-types: ['version-update:semver-major']
     groups:
-      # No update-types: digest-only bumps have none. One PR for both Dockerfiles, so the
-      # check-compose fixture is resynced once.
+      # No update-types: digest-only bumps have none. One PR for both Dockerfiles.
       docker-images:
         patterns: ['*']
 
