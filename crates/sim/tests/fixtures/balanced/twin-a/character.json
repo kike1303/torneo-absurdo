@@ -1,0 +1,38 @@
+{
+  "slug": "twin-a",
+  "archetype": "test-trickster",
+  "ruleset_version": 1,
+  "stats": {
+    "hp": 45,
+    "attack": 50,
+    "defense": 40,
+    "speed": 95,
+    "special": 70
+  },
+  "personality": {
+    "aggression": 40,
+    "caution": 40,
+    "showmanship": 90
+  },
+  "abilities": [
+    {
+      "id": "tidal_spin",
+      "kind": "special",
+      "power": 70,
+      "cooldown": 3,
+      "element": "water"
+    },
+    {
+      "id": "quick_kick",
+      "kind": "heavy",
+      "power": 30,
+      "cooldown": 0,
+      "element": "air"
+    }
+  ],
+  "weaknesses": [
+    "electric",
+    "ice"
+  ],
+  "rivals": []
+}
