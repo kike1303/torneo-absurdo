@@ -157,12 +157,9 @@ function effectsAt(window: readonly PreparedCue[], t: number, reducedMotion: boo
 }
 
 export function sceneAt(prepared: PreparedScene, time: number, options: SceneOptions): Scene {
-  // A non-finite time never reaches the scene: NaN and −∞ are the start, +∞ the end.
-  const t = Number.isNaN(time)
-    ? 0
-    : time === Number.POSITIVE_INFINITY
-      ? prepared.durationMs
-      : Math.max(0, time);
+  // A time outside [0, duration] never reaches the scene: NaN and −∞ are the start, anything
+  // past the end (+∞ included) is the end.
+  const t = Number.isNaN(time) ? 0 : Math.min(prepared.durationMs, Math.max(0, time));
   const window = cueWindow(prepared, t);
   const fighters = {
     a: fighterAt(prepared, window, 'a', t),

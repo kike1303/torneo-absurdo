@@ -10,7 +10,7 @@ import {
   sceneAtTimeline,
   type PreparedScene,
 } from '../src/scene/index.ts';
-import type { Side, StrikeCue } from '../src/timeline/index.ts';
+import { validateTimeline, type Side, type StrikeCue } from '../src/timeline/index.ts';
 import { MANIFESTS } from './support/placeholders.ts';
 import {
   shuffled,
@@ -21,6 +21,7 @@ import {
   times,
 } from './support/scenes.ts';
 import { timeline as timeline_ } from './support/timeline-builder.ts';
+import { WINDOW_MS, build, maxWindow, sequences } from './support/window-bound.ts';
 
 // RF-A9 and plan-a1 decisions 2 and 16.
 const timeline = spikeTimeline();
@@ -203,5 +204,44 @@ describe('QA findings', () => {
     let max = 0;
     for (let t = 0; t <= tl.duration_ms; t += 16) max = Math.max(max, cueWindow(p, t).length);
     expect(max).toBeLessThanOrEqual(K);
+  });
+});
+
+describe('the bound of cueWindow is 10 (plan-a2 decision 16a)', () => {
+  it('reaches 10 with 6 strikes, 4 of them with a knockdown, on a valid timeline', () => {
+    // 3 × 801 + 2 × 600 = 3 603 ms ≤ 3 700 ms, the last strike with its knockdown.
+    const tl = build(['K', 'S', 'K', 'S', 'K', 'K'], false);
+    expect(validateTimeline(tl, MANIFESTS).ok).toBe(true);
+    expect(maxWindow(tl)).toBe(10);
+    expect(maxWindow(tl)).toBeLessThanOrEqual(K);
+  });
+
+  it('no sequence of minimal gaps passes 10, and 10 is reached', () => {
+    // Larger gaps than the minimum can only take cues out of a window, so the minimal steps
+    // (strike alone, strike with knockdown, closing strike with ko and win) cover every case.
+    expect(WINDOW_MS).toBe(3700);
+    let max = 0;
+    let count = 0;
+    for (const steps of sequences()) {
+      for (const intro of [false, true]) {
+        const tl = build(steps, intro);
+        expect(validateTimeline(tl, MANIFESTS).ok).toBe(true);
+        const m = maxWindow(tl);
+        expect(m, steps.join('')).toBeLessThanOrEqual(10);
+        max = Math.max(max, m);
+        count++;
+      }
+    }
+    expect(count).toBeGreaterThan(100);
+    expect(max).toBe(10);
+  });
+});
+
+describe('sceneAt clamps t to the duration (plan-a2 decision 16b)', () => {
+  it('a finite t past the end is the end', () => {
+    expect(sceneAt(prepared, timeline.duration_ms + 5000, OPTS)).toEqual(
+      sceneAt(prepared, timeline.duration_ms, OPTS),
+    );
+    expect(sceneAt(prepared, timeline.duration_ms + 5000, OPTS).t).toBe(timeline.duration_ms);
   });
 });

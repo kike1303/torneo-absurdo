@@ -29,9 +29,16 @@ export const LOOKBACK_MS = MAX_ACTION_MS + RETURN_MS;
 /** How far ahead it looks: the longest windup (RF-A11). */
 export const LOOKAHEAD_MS = MAX_WINDUP_MS;
 /**
- * Upper bound of `cueWindow(prepared, t).length` for any valid timeline: with ≥ 600 ms between
- * strikes, the 3.7 s window holds at most 7 strikes, plus their knockdowns, the intro, the KO and
- * the win (plan-a1 step 7).
+ * Upper bound of `cueWindow(prepared, t).length` for any valid timeline, with margin. The real
+ * maximum over the closed window [t − 3300, t + 400] (3 700 ms) is 10 (plan-a2 decision 16a):
+ * - two strikes are ≥ 600 ms apart;
+ * - a knockdown (`duration_ms` ≥ 800, no strike in `(at, at + duration]`) pushes the next strike
+ *   to ≥ 801 ms, and a strike has at most one knockdown;
+ * - the strike that leaves HP 0 is followed by `ko` (not a knockdown) and `win` ≥ 1 500 ms later;
+ * - the intro is at 0 and the first strike ≥ 2 000 ms later.
+ * The densest window is 6 strikes, 4 of them with a knockdown (3 × 801 + 2 × 600 = 3 603 ms,
+ * the last strike with its knockdown): 10 cues. `test/scene.test.ts` builds that case and walks
+ * every sequence of minimal gaps to prove the bound.
  */
 export const K = 16;
 
