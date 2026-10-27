@@ -26,6 +26,11 @@ const GIT_VARS = [
   'GIT_OBJECT_DIRECTORY',
 ];
 const OLD_OUTPUT = /^(?:manifest\.json|sheet-[0-9]+\.png)$/;
+/**
+ * Empty file that marks a folder as written by this converter (002 plan-c decision 9 b). Old
+ * output is only deleted next to it, so `--out` never wipes files it did not write.
+ */
+export const OUTPUT_MARKER = '.sff-converter-output';
 
 export interface WriteOptions {
   /** Base environment of the `git` child (default: process.env); the GIT_* above are removed. */
@@ -101,12 +106,23 @@ export function writeOutput(
 
   // 3. Every file it writes is ignored by git (a `!` rule could bring back one of them).
   const env = cleanGitEnv(options.env ?? process.env);
-  for (const file of ['manifest.json', ...sheets.map((s) => s.file)]) {
+  for (const file of ['manifest.json', ...sheets.map((s) => s.file), OUTPUT_MARKER]) {
     checkIgnored(path.join(out, file), existing, env);
   }
 
-  // 4. Only now, the disk.
+  // 4. Old output is only ours to delete next to the marker (a regular file, not a link).
+  const marker = path.join(out, OUTPUT_MARKER);
+  if (existing === out) {
+    const markerStat = lstatSync(marker, { throwIfNoEntry: false });
+    if (markerStat?.isSymbolicLink() === true) fail('write.symlink');
+    const marked = markerStat?.isFile() === true;
+    const old = readdirSync(out).filter((name) => OLD_OUTPUT.test(name));
+    if (!marked && old.length > 0) fail('write.foreign_output', { file: old[0] ?? '' });
+  }
+
+  // 5. Only now, the disk: the marker first, so a run cut halfway can still be cleaned up.
   mkdirSync(out, { recursive: true });
+  writeFileSync(marker, '');
   for (const name of readdirSync(out)) {
     if (OLD_OUTPUT.test(name)) unlinkSync(path.join(out, name));
   }
