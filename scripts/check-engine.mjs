@@ -79,7 +79,31 @@ export function checkEngineGraph(tree) {
 }
 
 const UNSAFE_TOKEN = /\bunsafe\b/g;
-const ALLOW_UNSAFE = /allow\s*\(\s*unsafe_code\s*\)/g;
+// Any allow/expect/warn attribute (outer `#[...]` or crate-level `#![...]`) whose lint list
+// names unsafe_code, e.g. `#[allow(dead_code, unsafe_code)]` or `#![expect(unsafe_code)]`.
+const RELAXING_ATTR = /#(!?)\s*\[\s*(allow|expect|warn)\s*\(([^)]*)\)\s*\]/g;
+const UNSAFE_CODE = /(^|[\s,])unsafe_code([\s,]|$)/;
+
+/**
+ * Whether the item right after `offset` (skipping the rest of that line, blank lines, comments
+ * and other outer attributes, one of which must be `#[wasm_bindgen]`) is a `pub fn`.
+ * @param {string} text
+ * @param {number} offset end of the attribute
+ */
+function isAboveExportedFn(text, offset) {
+  const lines = text.slice(offset).split('\n').slice(1);
+  let bindgen = false;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line === '' || line.startsWith('//')) continue;
+    if (line.startsWith('#[')) {
+      if (/^#\[\s*wasm_bindgen\b/.test(line)) bindgen = true;
+      continue;
+    }
+    return bindgen && /^pub\s+fn\s+\w+/.test(line);
+  }
+  return false;
+}
 
 /**
  * @param {{ file: string, text: string }[]} sources the .rs files of crates/engine-wasm/src
@@ -88,15 +112,27 @@ const ALLOW_UNSAFE = /allow\s*\(\s*unsafe_code\s*\)/g;
 export function checkWasmSources(sources) {
   /** @type {string[]} */
   const problems = [];
-  let allows = 0;
+  /** @type {string[]} */
+  const relaxing = [];
   for (const { file, text } of sources) {
     const tokens = text.match(UNSAFE_TOKEN)?.length ?? 0;
     if (tokens > 0)
       problems.push(`${file}: contains the token \`unsafe\` ${tokens} time(s) (RF19)`);
-    allows += text.match(ALLOW_UNSAFE)?.length ?? 0;
+    for (const match of text.matchAll(RELAXING_ATTR)) {
+      const [attr, inner, , list] = match;
+      if (!UNSAFE_CODE.test(list)) continue;
+      relaxing.push(`${file}: ${attr}`);
+      if (inner === '!') {
+        problems.push(`${file}: crate-level ${attr} (RF19: only on the exported function)`);
+      } else if (!isAboveExportedFn(text, (match.index ?? 0) + attr.length)) {
+        problems.push(`${file}: ${attr} is not right above the #[wasm_bindgen] pub fn (RF19)`);
+      }
+    }
   }
-  if (allows > 1) {
-    problems.push(`crates/engine-wasm/src: ${allows} allow(unsafe_code), at most 1 (RF19)`);
+  if (relaxing.length > 1) {
+    problems.push(
+      `crates/engine-wasm/src: ${relaxing.length} attributes relax unsafe_code, at most 1 (RF19): ${relaxing.join('; ')}`,
+    );
   }
   return problems;
 }

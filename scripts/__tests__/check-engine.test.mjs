@@ -104,14 +104,54 @@ describe('checkWasmSources (RF19)', () => {
   });
   it('fails with two allow(unsafe_code), also across files', () => {
     expect(checkWasmSources([{ file: 'lib.rs', text: allowed + allowed }])).toEqual([
-      'crates/engine-wasm/src: 2 allow(unsafe_code), at most 1 (RF19)',
+      'crates/engine-wasm/src: 2 attributes relax unsafe_code, at most 1 (RF19): lib.rs: #[allow(unsafe_code)]; lib.rs: #[allow(unsafe_code)]',
     ]);
     expect(
       checkWasmSources([
         { file: 'a.rs', text: allowed },
-        { file: 'b.rs', text: '#[allow( unsafe_code )]\n' },
+        { file: 'b.rs', text: '#[allow( unsafe_code )]\n#[wasm_bindgen]\npub fn other() {}\n' },
       ]),
-    ).toHaveLength(1);
+    ).toEqual([expect.stringMatching(/^crates\/engine-wasm\/src: 2 attributes relax unsafe_code/)]);
+  });
+  it('fails with an extra allow that lists unsafe_code among other lints', () => {
+    const text = `${allowed}#[allow(dead_code, unsafe_code)]\n#[wasm_bindgen]\npub fn other() {}\n`;
+    expect(checkWasmSources([{ file: 'lib.rs', text }])).toEqual([
+      expect.stringMatching(/2 attributes relax unsafe_code/),
+    ]);
+  });
+  it('fails with a crate-level allow instead of the one on the function', () => {
+    const text = '#![allow(unsafe_code)]\n\n#[wasm_bindgen]\npub fn simulate() {}\n';
+    expect(checkWasmSources([{ file: 'lib.rs', text }])).toEqual([
+      'lib.rs: crate-level #![allow(unsafe_code)] (RF19: only on the exported function)',
+    ]);
+  });
+  it('fails with an extra expect(unsafe_code) or warn(unsafe_code)', () => {
+    for (const lint of ['expect', 'warn']) {
+      const text = `${allowed}#[${lint}(unsafe_code)]\n#[wasm_bindgen]\npub fn other() {}\n`;
+      expect(checkWasmSources([{ file: 'lib.rs', text }])).toEqual([
+        expect.stringMatching(/2 attributes relax unsafe_code/),
+      ]);
+    }
+  });
+  it('fails if the single allow is not right above the exported function', () => {
+    const notExported = '#[allow(unsafe_code)]\nfn helper() {}\n';
+    expect(checkWasmSources([{ file: 'lib.rs', text: notExported }])).toEqual([
+      'lib.rs: #[allow(unsafe_code)] is not right above the #[wasm_bindgen] pub fn (RF19)',
+    ]);
+    const onAModule =
+      '#[allow(unsafe_code)]\nmod inner {}\n#[wasm_bindgen]\npub fn simulate() {}\n';
+    expect(checkWasmSources([{ file: 'lib.rs', text: onAModule }])).toHaveLength(1);
+    const notPub = '#[allow(unsafe_code)]\n#[wasm_bindgen]\nfn simulate() {}\n';
+    expect(checkWasmSources([{ file: 'lib.rs', text: notPub }])).toHaveLength(1);
+  });
+  it('accepts comments and other attributes between the allow and the function', () => {
+    const text =
+      '#[allow(unsafe_code)] // shim\n/// Docs.\n#[wasm_bindgen]\n#[must_use]\npub fn simulate() {}\n';
+    expect(checkWasmSources([{ file: 'lib.rs', text }])).toEqual([]);
+  });
+  it('ignores stricter levels and lints that only contain the word', () => {
+    const text = `#![deny(unsafe_code)]\n#[allow(not_unsafe_code_lint)]\n${allowed}`;
+    expect(checkWasmSources([{ file: 'lib.rs', text }])).toEqual([]);
   });
 });
 

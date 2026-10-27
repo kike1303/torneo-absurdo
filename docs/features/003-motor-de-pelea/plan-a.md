@@ -129,7 +129,7 @@ _check-wasm:
     done
     cargo clippy -p engine -p engine-wasm --target wasm32-unknown-unknown --locked -- -D warnings
     CARGO_TARGET_WASM32_WASIP1_RUNNER="node --disable-warning=ExperimentalWarning {{justfile_directory()}}/scripts/wasi-runner.mjs" \
-        cargo test -p engine --test golden --target wasm32-wasip1 --locked
+        cargo test -p engine --test golden --target wasm32-wasip1 --locked -- --nocapture
 ```
 Extensión de `_check-ts-rs-graph` (nota 1 de la revisión de architect), después de los dos chequeos existentes:
 ```just
@@ -215,6 +215,9 @@ Extensión de `_check-ts-rs-graph` (nota 1 de la revisión de architect), despu�
 9. **Hallazgo sobre `wasm-bindgen 0.2.129` (sin desviación):** el shim generado no dispara `unsafe_code` en el crate del usuario (viene de la expansión de una proc-macro externa, donde rustc no reporta el lint). Compilé `engine-wasm` para `wasm32-unknown-unknown` sin el `#[allow(unsafe_code)]` y también con `unsafe_code = "forbid"`, y los dos pasan (el `.wasm` exporta `simulate`). Se mantiene el diseño aprobado de RF19 (`deny` y un único `allow`, vigilados por `check-engine.mjs`); endurecerlo a `forbid` sería una enmienda de la spec que decide architect.
 10. **`seed_hex` acepta mayúsculas y minúsculas.** RF19 solo fija la longitud (64 caracteres); un carácter no hexadecimal, o una longitud distinta, dan `seed.invalid_hex`.
 11. **Vectores dorados elegidos con `search_golden_seeds`:** `log-ko-decisive-crit` (striker contra trickster, semilla 1), `log-ko-knockdown` (trickster contra tank, 0), `log-ko-comeback` (striker contra tank, 4), `log-ko-clutch` (trickster contra trickster, 1), `log-decision-a` (tank contra turtle, 0), `log-decision-b` (turtle contra tank, 1) y `log-draw` (turtle contra turtle, 53). Se descartó tank contra trickster con la semilla 0 para `clutch_ko`, porque es la misma pelea que el vector de knockdown con los lados intercambiados. El empate existe, así que RF9 queda cubierto por el dorado y por el test unitario.
+12. **Hallazgos bajos de QA, corregidos antes del PR:**
+    - `checkWasmSources` cuenta cualquier atributo `allow`, `expect` o `warn` cuya lista mencione `unsafe_code` (también `#[allow(dead_code, unsafe_code)]`), falla si alguno es de crate (`#![…]`) y falla si el único que hay no está justo encima de la `pub fn` con `#[wasm_bindgen]` (se admiten comentarios y otros atributos en medio). Cada caso tiene su test negativo en Vitest.
+    - `_check-wasm` pasa `-- --nocapture` a los tests de WASI: con `panic = abort` un fallo es un trap, y sin eso solo se veía `trap: unreachable`. Ahora sale el mensaje del `panic!` (lo comprobé con un dorado corrompido).
 
 ## Revisión
 

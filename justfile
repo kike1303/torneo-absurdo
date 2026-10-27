@@ -156,7 +156,8 @@ _check-gen:
 _check-engine:
     node scripts/check-engine.mjs
 
-# RF18: engine and bindings compile for the browser; the same goldens pass in WASI
+# RF18: engine and bindings compile for the browser; the same goldens pass in WASI.
+# --nocapture: under panic = abort a failure is a trap, so the panic message must not be captured.
 _check-wasm:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -168,7 +169,7 @@ _check-wasm:
     done
     cargo clippy -p engine -p engine-wasm --target wasm32-unknown-unknown --locked -- -D warnings
     CARGO_TARGET_WASM32_WASIP1_RUNNER="node --disable-warning=ExperimentalWarning {{justfile_directory()}}/scripts/wasi-runner.mjs" \
-        cargo test -p engine --test golden --target wasm32-wasip1 --locked
+        cargo test -p engine --test golden --target wasm32-wasip1 --locked -- --nocapture
 
 # RF-B3: ts-rs never in the server's normal graph; protocol without features has no ts-rs nor tokio.
 # 003: neither in engine nor engine-wasm (they depend on protocol without `ts`).
