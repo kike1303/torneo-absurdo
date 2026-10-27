@@ -5,6 +5,7 @@ import {
   classifyPackages,
   isTooYoung,
   parseCargoLock,
+  WORKSPACE_MEMBERS,
 } from '../check-crate-age.mjs';
 
 const fixture = (name) =>
@@ -118,4 +119,20 @@ describe('checkCrateAge fails closed (PR #3 review)', () => {
       ]);
     },
   );
+});
+
+describe('WORKSPACE_MEMBERS (003 plan-a)', () => {
+  it('is exactly the package names of the [workspace].members of Cargo.toml', () => {
+    const root = new URL('../../', import.meta.url);
+    const cargo = readFileSync(new URL('Cargo.toml', root), 'utf8');
+    const members = /^members\s*=\s*\[([^\]]*)\]/m.exec(cargo)?.[1];
+    expect(members).toBeDefined();
+    const names = [...(members ?? '').matchAll(/"([^"]+)"/g)].map(([, dir]) => {
+      const manifest = readFileSync(new URL(`${dir}/Cargo.toml`, root), 'utf8');
+      const name = /^\[package\]\s*\nname\s*=\s*"([^"]+)"/m.exec(manifest)?.[1];
+      if (!name) throw new Error(`${dir}/Cargo.toml has no [package] name`);
+      return name;
+    });
+    expect([...WORKSPACE_MEMBERS].sort()).toEqual(names.sort());
+  });
 });
