@@ -147,7 +147,13 @@ Todos los comandos, con `PATH="$HOME/.nvm/versions/node/v22.23.4/bin:$PATH"` y d
 No hay workflows nuevos ni cambiados. `web` suma unos segundos de Vitest. `e2e` suma unos 12 tests de Chromium, 24 capturas (3 logs × 2 tamaños × 2 idiomas × 2 temas) y 1 test de WebKit: estimo de +1 a +2 min por corrida de `e2e`.
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+1. **Timelines dorados en `packages/renderer/test/fixtures/golden/`**, no en `packages/renderer/fixtures/golden/` (decisión 4). El `package.json` del renderer exporta `./fixtures/*`, así que en `fixtures/` quedaban al alcance del `exports` del paquete, y la condición (a) del architect pide que no. Dentro de `test/` solo las lee `test/support/scenes.ts`. El test de frescura (`apps/web/tests/golden-timelines.test.ts`) y `.prettierignore` apuntan ahí. El test falla si un archivo difiere y también si falta (condición b): guarda si el archivo existía antes de correr y solo lo deja pasar con `vitest -u`. Lo comprobé a mano con `CI=true`: un archivo alterado falla, y uno borrado falla y no se escribe.
+2. **Orden de los códigos (nota del architect sobre la decisión 3).** Un segundo cierre de otro tipo después de `time_up` (un `draw` tras el `win` de una decisión, o al revés) da **solo** `ending_conflict`, porque esa comprobación va antes que `cue_after_win` y `cue_after_draw`. Lo prueba `timeline-v2.test.ts` con `toEqual` sobre la lista completa de errores. Los demás casos con dos códigos (p. ej. `ko` y `time_up`, que dan `cue_after_ko` y `ending_conflict`) se comprueban con `toContainEqual`, como permite la spec.
+3. **Caracterización de la v1 (decisión 1).** Cuando el resultado es `ok`, el snapshot guarda `timeline_version`, `duration_ms` y el número de cues, no la timeline entera (sería del tamaño del guion). La igualdad completa del `Timeline` entre v1 y v2 la prueba RF4 en `timeline-v2.test.ts` y en `fight-log-goldens.test.ts`.
+4. **Capturas extra.** Además de las 24 `arena-time-*` en t = 88 500, `screenshots.spec.ts` toma 6 capturas `arena-time-end-*` en `finished`, a 375 px y en es y en. Sirven para ver que el texto del resultado ("Gana Muñeco A por decisión", "Dummy B wins by decision", "Empate") cabe sin scroll horizontal, porque en t = 88 500 todavía no aparece.
+5. **Fixtures de v2 adicionales.** Además de un fixture por código nuevo, hay cuatro variantes de códigos reutilizados en v2: `ending_conflict.ko`, `win_gap.time_up`, `duration_too_short.draw` y `cue_after_ko.draw`.
+
+Nota sin desviación: `closing_during_knockdown` se aplica también en KO, como pide RF3.5. Comprobé que una v1 válida siempre la cumple, así que RF4 se mantiene. Ningún golpe cae dentro de un `knockdown` (`strike_during_knockdown`), el golpe que deja HP 0 va seguido del `ko` (`hp_zero_without_ko`) y no puede haber un `knockdown` después del `ko` (`cue_after_ko`).
 
 ## Revisión
 ### architect — 2026-10-27 — APPROVE
