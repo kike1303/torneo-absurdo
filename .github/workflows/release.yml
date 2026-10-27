@@ -225,9 +225,11 @@ jobs:
             echo "vars.PUBLIC_HOST is missing or is not a host name" >&2
             exit 1
           fi
-          # Every 10 s for 5 min.
-          for _ in $(seq 1 30); do
-            version="$(curl -fsS --proto '=https' --max-time 10 "https://$PUBLIC_HOST/api/health" \
+          # Every 10 s for at most 5 min (300 s of wall clock, whatever curl takes), so the job ends
+          # with its own message well before timeout-minutes.
+          deadline=$((SECONDS + 300))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            version="$(curl -fsS --proto '=https' --max-time 5 "https://$PUBLIC_HOST/api/health" \
               | jq -r .version 2>/dev/null || true)"
             if [ "$version" = "$TAG" ]; then
               echo "https://$PUBLIC_HOST/api/health reports $TAG"

@@ -56,6 +56,13 @@ runs:
           pnpm install --frozen-lockfile
         fi
 
+    # Without it the store grows forever: restore-keys bring back the previous store on every lock
+    # change (review of PR #5).
+    - name: Prune the pnpm store before saving it (push to main only)
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      run: pnpm store prune
+
     - name: Save the pnpm store (push to main only)
       if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore.outputs.cache-hit != 'true'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

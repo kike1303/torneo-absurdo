@@ -369,17 +369,24 @@ jobs:
           done
           curl -fsS -o /dev/null -w '/healthz %{http_code}\n' http://127.0.0.1:3001/healthz
           curl -fsS -o /dev/null -w '/en/ %{http_code}\n' http://127.0.0.1:3001/en/
-          # Without PUBLIC_ORIGIN the guard of RF-A23 exits before listening.
+          # Without PUBLIC_ORIGIN the guard of RF-A23 exits before listening, and for that reason:
+          # Kit's env_invalid with the validator's message, not any other crash.
           set +e
-          timeout 60 docker run --rm --name web-no-origin "$REPO/web:ci"
+          out="$(timeout 60 docker run --rm --name web-no-origin "$REPO/web:ci" 2>&1)"
           status=$?
           set -e
           docker rm -f web-no-origin >/dev/null 2>&1 || true
+          echo "$out"
           if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
             echo "web without PUBLIC_ORIGIN exited with $status, expected a startup failure" >&2
             exit 1
           fi
-          echo "web without PUBLIC_ORIGIN exits with $status"
+          if ! grep -q 'env_invalid' <<<"$out" ||
+            ! grep -qF 'PUBLIC_ORIGIN is required at runtime' <<<"$out"; then
+            echo "web without PUBLIC_ORIGIN failed for another reason" >&2
+            exit 1
+          fi
+          echo "web without PUBLIC_ORIGIN exits with $status (env_invalid, PUBLIC_ORIGIN)"
       # plan-c decision 16: the production compose plus the local Postgres, in amd64.
       - name: prod-local up
         env:
