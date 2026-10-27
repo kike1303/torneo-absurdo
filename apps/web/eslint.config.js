@@ -171,6 +171,11 @@ const absoluteUrlSelectors = [
   `MemberExpression[object.name='headers'][property.value=${FORWARDING_HEADERS}]`,
 ].map((selector) => ({ selector, message: ABSOLUTE_URL_MESSAGE }));
 
+const dynamicRendererSelectors = [
+  'ImportExpression[source.value=/^@torneo\\/renderer(\\/|$)/]',
+  'ImportExpression[source.value=/packages\\/renderer\\//]',
+].map((selector) => ({ selector, message: RENDERER_MESSAGE }));
+
 /**
  * @param {{ relativePatterns?: boolean }} [options] `relativePatterns: false` drops the relative
  *   twins so tests can prove each `#lib` regex catches its case on its own.
@@ -281,6 +286,16 @@ export function createConfig({ relativePatterns = true } = {}) {
       files: ['src/**/*.{ts,svelte}'],
       ignores: ['src/**/*.test.ts'],
       rules: { 'no-restricted-syntax': ['error', ...absoluteUrlSelectors] },
+    },
+    // `no-restricted-imports` does not see `import()` (TA-11): outside FightStage.svelte, no
+    // dynamic import of the renderer either (002 plan-a2 decision 11). Same file set plus the
+    // FightStage exception, with the URL selectors repeated because the last match wins.
+    {
+      files: ['src/**/*.{js,ts,svelte}'],
+      ignores: ['src/**/*.test.ts', FIGHT_STAGE],
+      rules: {
+        'no-restricted-syntax': ['error', ...absoluteUrlSelectors, ...dynamicRendererSelectors],
+      },
     },
   ]);
 }

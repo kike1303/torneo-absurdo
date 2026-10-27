@@ -4,12 +4,14 @@ import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vitest/config';
 import paraglideOptions from './paraglide.options.js';
+import { chunkModules } from './vite/chunk-modules.js';
 
 // Kit 3 has no svelte.config.js: all Kit options live here (plan-a, decision 17).
 // Never add `csrf.trustedOrigins`, `csrf.checkOrigin` or `paths.origin`
 // (enforced by scripts/check-kit-config.mjs).
 export default defineConfig({
   plugins: [
+    chunkModules(),
     tailwindcss(),
     paraglideVitePlugin(paraglideOptions),
     sveltekit({

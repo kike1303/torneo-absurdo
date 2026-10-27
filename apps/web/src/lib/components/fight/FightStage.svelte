@@ -1,0 +1,253 @@
+<script lang="ts" module>
+  export type FightStageState = 'loading' | 'error' | 'ready' | 'playing' | 'paused' | 'finished';
+</script>
+
+<script lang="ts">
+  // The only file that imports values from the renderer (ADR-0009 D4), and only with `import()`
+  // on mount, so Pixi never reaches another chunk (RF-A16, RF-A17).
+  import { onMount, untrack } from 'svelte';
+  import type {
+    FrameStats,
+    RendererErrorCode,
+    RendererHandle,
+    RendererSnapshot,
+    Side,
+  } from '@torneo/renderer';
+  import { Button } from '#lib/components/ui/button/index.js';
+  import { Skeleton } from '#lib/components/ui/skeleton/index.js';
+  import type { ArenaFighterId } from '#lib/features/arena/fighters.js';
+  import { formatInteger } from '#lib/i18n/format.js';
+  import { m } from '#lib/paraglide/messages.js';
+  import { getLocale } from '#lib/paraglide/runtime.js';
+  import { theme } from '#lib/theme/theme.svelte.js';
+  import { fighterName } from './fighter-name.js';
+  import { currentRendererTheme } from './renderer-theme.js';
+
+  interface Props {
+    fighters: Readonly<Record<Side, ArenaFighterId>>;
+    /** The "simulate reduced motion" switch; OR-ed with `prefers-reduced-motion`. */
+    reducedMotion?: boolean;
+    /** Where playback starts (`?t=` on /dev/arena). */
+    initialT?: number;
+    /** Exposes HP and the last cue in `data-*` for the e2e (only /dev/arena asks for it). */
+    debug?: boolean;
+    phase?: FightStageState;
+  }
+
+  let {
+    fighters,
+    reducedMotion = false,
+    initialT = 0,
+    debug = false,
+    phase = $bindable('loading'),
+  }: Props = $props();
+
+  type Loader<T> = () => Promise<{ default: T }>;
+  // Loaders by fighter id: the manifest JSON and the URL of each sheet (Vite hashes the PNG).
+  const MANIFESTS: Record<ArenaFighterId, Loader<unknown>> = {
+    dummy_a: () => import('@torneo/renderer/placeholders/dummy_a/manifest.json'),
+    dummy_b: () => import('@torneo/renderer/placeholders/dummy_b/manifest.json'),
+  };
+  const SHEETS: Record<ArenaFighterId, Record<string, Loader<string>>> = {
+    dummy_a: {
+      'sheet-0.png': () => import('@torneo/renderer/placeholders/dummy_a/sheet-0.png?url'),
+    },
+    dummy_b: {
+      'sheet-0.png': () => import('@torneo/renderer/placeholders/dummy_b/sheet-0.png?url'),
+    },
+  };
+
+  const ERROR_MESSAGES: Record<RendererErrorCode, () => string> = {
+    webgl_unavailable: m.arena_error_webgl_unavailable,
+    asset_invalid: m.arena_error_asset_invalid,
+    asset_load_failed: m.arena_error_asset_load_failed,
+    timeline_invalid: m.arena_error_timeline_invalid,
+  };
+
+  let host = $state<HTMLDivElement | null>(null);
+  let renderer: RendererHandle | null = null;
+  let errorCode = $state<RendererErrorCode | null>(null);
+  let snapshot = $state<RendererSnapshot | null>(null);
+  let rendererLoaded = $state(false);
+  let systemReduced = $state(false);
+  let mounted = $state(false);
+  let run = 0;
+
+  const names = $derived({ a: fighterName(fighters.a), b: fighterName(fighters.b) });
+  const winnerName = $derived(snapshot?.winner ? names[snapshot.winner] : null);
+  const motionReduced = $derived(systemReduced || reducedMotion);
+
+  function refresh(): void {
+    snapshot = renderer?.snapshot() ?? null;
+  }
+
+  async function start(): Promise<void> {
+    const id = ++run;
+    renderer?.destroy();
+    renderer = null;
+    phase = 'loading';
+    errorCode = null;
+    snapshot = null;
+    const container = host;
+    if (container === null) return;
+    const side = { a: fighters.a, b: fighters.b };
+    try {
+      const ids = [...new Set([side.a, side.b])];
+      const [rendererModule, timelineModule, ...manifestModules] = await Promise.all([
+        import('@torneo/renderer'),
+        import('@torneo/renderer/fixtures/spike.timeline.json'),
+        ...ids.map((fid) => MANIFESTS[fid]()),
+      ]);
+      const urls = (
+        await Promise.all(
+          ids.flatMap((fid) =>
+            Object.entries(SHEETS[fid]).map(async ([file, load]) => ({
+              fid,
+              file,
+              url: (await load()).default,
+            })),
+          ),
+        )
+      ).filter((entry) => entry.url !== '');
+      if (id !== run) return;
+      rendererLoaded = true;
+      const assets = new Map<string, unknown>(
+        ids.map((fid, i) => [fid, manifestModules[i]?.default]),
+      );
+      const timeline = {
+        ...timelineModule.default,
+        fighters: {
+          a: { ...timelineModule.default.fighters.a, asset: side.a },
+          b: { ...timelineModule.default.fighters.b, asset: side.b },
+        },
+      };
+      const start = performance.now();
+      const locale = getLocale();
+      const handle = rendererModule.createRenderer(container, {
+        theme: currentRendererTheme(),
+        reducedMotion: motionReduced,
+        clock: () => performance.now() - start,
+        labels: {
+          names,
+          banners: { fight: m.arena_banner_fight(), ko: m.arena_banner_ko() },
+        },
+        formatNumber: (n) => formatInteger(n, locale),
+        resolveAsset: (assetId, file) =>
+          urls.find((u) => u.fid === assetId && u.file === file)?.url ?? '',
+      });
+      renderer = handle;
+      await handle.load(timeline, assets);
+      if (id !== run) return;
+      handle.onState((next) => {
+        phase = next;
+        refresh();
+      });
+      if (debug) handle.onCue(refresh);
+      handle.seek(initialT);
+      handle.play();
+      refresh();
+    } catch (error) {
+      if (id !== run) return;
+      renderer?.destroy();
+      renderer = null;
+      const code = (error as { code?: unknown } | null)?.code;
+      errorCode =
+        typeof code === 'string' && code in ERROR_MESSAGES
+          ? (code as RendererErrorCode)
+          : 'asset_load_failed';
+      phase = 'error';
+    }
+  }
+
+  export function toggle(): void {
+    if (renderer === null) return;
+    if (phase === 'playing') renderer.pause();
+    else if (phase === 'finished') restart();
+    else renderer.play();
+  }
+
+  export function restart(): void {
+    if (renderer === null) return;
+    renderer.seek(0);
+    renderer.play();
+    refresh();
+  }
+
+  export function getFrameStats(): FrameStats | null {
+    return renderer?.getFrameStats() ?? null;
+  }
+
+  /** Width of the drawing surface in CSS px, for the stats JSON. */
+  export function canvasWidth(): number {
+    return host?.clientWidth ?? 0;
+  }
+
+  onMount(() => {
+    const query = matchMedia('(prefers-reduced-motion: reduce)');
+    systemReduced = query.matches;
+    const onChange = (event: MediaQueryListEvent) => (systemReduced = event.matches);
+    query.addEventListener('change', onChange);
+    mounted = true;
+    return () => {
+      query.removeEventListener('change', onChange);
+      run++;
+      renderer?.destroy();
+      renderer = null;
+    };
+  });
+
+  // A change of fighters starts over: names and assets belong to the renderer instance.
+  $effect(() => {
+    if (!mounted) return;
+    void fighters.a;
+    void fighters.b;
+    void start();
+  });
+
+  $effect(() => {
+    renderer?.setReducedMotion(motionReduced);
+  });
+
+  // ADR-0009 D7: rebuild the theme when the resolved theme changes.
+  $effect(() => {
+    void theme.resolved;
+    untrack(() => renderer?.setTheme(currentRendererTheme()));
+  });
+</script>
+
+<div class="flex flex-col gap-3">
+  <div
+    class="relative aspect-video w-full overflow-hidden rounded-md bg-arena-bg"
+    data-testid="fight-stage"
+    data-state={phase}
+    data-error={errorCode ?? undefined}
+    data-renderer-loaded={rendererLoaded ? '' : undefined}
+    data-hp-a={debug ? snapshot?.hp.a : undefined}
+    data-hp-b={debug ? snapshot?.hp.b : undefined}
+    data-last-cue={debug ? snapshot?.lastCue?.index : undefined}
+  >
+    <div
+      bind:this={host}
+      class="absolute inset-0"
+      role="img"
+      aria-label={m.arena_canvas_label({ a: names.a, b: names.b })}
+    ></div>
+    {#if phase === 'loading'}
+      <Skeleton class="absolute inset-0 rounded-md" aria-hidden="true" />
+    {/if}
+  </div>
+
+  <div aria-live="polite" class="flex flex-wrap items-center gap-3 empty:hidden">
+    {#if phase === 'loading'}
+      <p class="text-sm text-muted-foreground">{m.arena_loading()}</p>
+    {:else if phase === 'error' && errorCode !== null}
+      <p class="text-sm" data-testid="fight-error">{ERROR_MESSAGES[errorCode]()}</p>
+      <Button variant="outline" onclick={() => void start()}>{m.arena_retry()}</Button>
+    {:else if phase === 'finished' && winnerName !== null}
+      <p class="font-display text-lg font-semibold" data-testid="fight-winner">
+        {m.arena_winner({ name: winnerName })}
+      </p>
+      <Button variant="outline" onclick={restart}>{m.arena_replay()}</Button>
+    {/if}
+  </div>
+</div>

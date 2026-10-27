@@ -7,6 +7,19 @@ export function formatCoins(amount: number, locale: Locale): string {
   return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(amount);
 }
 
+/** An integer with the locale's grouping (damage numbers, frame counts). */
+export function formatInteger(n: number, locale: Locale): string {
+  return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(n);
+}
+
+/** A number with exactly `digits` decimals (frame statistics). */
+export function formatDecimal(n: number, locale: Locale, digits: number): string {
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(n);
+}
+
 export function formatDate(
   date: Date,
   locale: Locale,
