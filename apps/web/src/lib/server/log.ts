@@ -35,29 +35,46 @@ const ALLOWED_FIELDS = [
   'stack',
 ] as const satisfies readonly (keyof LogFields)[];
 
+const EVENT = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ERROR_NAME = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/;
 const OTHER_NAME = 'other';
 /** A V8 stack frame line. */
-const FRAME_LINE = /^[ \t]+at /m;
+const FRAME_LINE = /^[ \t]+at /;
 
-/** Per-field guards: the value that is written, or `undefined` to drop the field. */
-const GUARDS: Partial<Record<keyof LogFields, (value: unknown) => unknown>> = {
+/**
+ * Per-field runtime guards (ADR-0012 A3): the value that is written, or `undefined` to drop the
+ * field. They hold even when a caller casts its way past `LogFields`.
+ */
+const GUARDS: Record<(typeof ALLOWED_FIELDS)[number], (value: unknown) => unknown> = {
+  event: (value) => (typeof value === 'string' && EVENT.test(value) ? value : undefined),
+  error_id: (value) => (typeof value === 'string' && UUID.test(value) ? value : undefined),
+  route_id: (value) => (value === null || typeof value === 'string' ? value : undefined),
+  status: (value) => (Number.isInteger(value) ? value : undefined),
   error_name: (value) => (typeof value === 'string' && ERROR_NAME.test(value) ? value : OTHER_NAME),
   error_code: (value) => (isServerErrorCode(value) ? value : undefined),
-  // Defense in depth: the allowlist and ADR-0012 A5 are the guarantee, not the sanitizer.
-  stack: (value) => (typeof value === 'string' ? sanitize(value) : undefined),
+  stack: (value) => {
+    const frames = typeof value === 'string' ? frameLines(value) : undefined;
+    // Defense in depth: the allowlist and ADR-0012 A5 are the guarantee, not the sanitizer.
+    return frames === undefined ? undefined : sanitize(frames);
+  },
 };
 
 export function formatLogLine(level: LogLevel, fields: LogFields, now: Date = new Date()): string {
   const line: Record<string, unknown> = { ts: now.toISOString(), level };
   for (const key of ALLOWED_FIELDS) {
-    let value: unknown = fields[key];
-    if (value === undefined) continue;
-    const guard = GUARDS[key];
-    if (guard) value = guard(value);
+    const raw: unknown = fields[key];
+    if (raw === undefined) continue;
+    const value = GUARDS[key](raw);
     if (value !== undefined) line[key] = value;
   }
   return JSON.stringify(line);
+}
+
+/** Only the frame lines of a stack (ADR-0012 A5), or `undefined` if it has none. */
+function frameLines(stack: string): string | undefined {
+  const frames = stack.split('\n').filter((line) => FRAME_LINE.test(line));
+  return frames.length > 0 ? frames.join('\n') : undefined;
 }
 
 export type LogWriter = (stream: 'stdout' | 'stderr', line: string, done?: () => void) => void;
@@ -123,8 +140,9 @@ export function errorFields(error: unknown, options: ErrorFieldsOptions = {}): E
 }
 
 /**
- * The stack without its `Name: message` header: the exact header is removed first and then
- * anything before the first frame line. Without frames there is no stack.
+ * The stack without its `Name: message` header: the exact header is removed first (it may span
+ * lines that imitate frames) and then every line that is not a frame. Without frames there is no
+ * stack.
  */
 function stackFrames(name: unknown, message: unknown, stack: unknown): string | undefined {
   if (typeof stack !== 'string') return undefined;
@@ -133,6 +151,5 @@ function stackFrames(name: unknown, message: unknown, stack: unknown): string | 
     const header = message === '' ? name : `${name}: ${message}`;
     if (rest.startsWith(header)) rest = rest.slice(header.length);
   }
-  const frame = FRAME_LINE.exec(rest);
-  return frame ? rest.slice(frame.index) : undefined;
+  return frameLines(rest);
 }

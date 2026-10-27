@@ -1,3 +1,4 @@
+import assert from 'node:assert';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CodedError, SERVER_ERROR_CODES } from './errors.js';
 import { errorFields, formatLogLine, log, setLogWriter, type LogFields } from './log.js';
@@ -46,6 +47,41 @@ describe('formatLogLine', () => {
       stack: '    at f (http://h/a.js?t=1:1:2) 203.0.113.77',
     });
     expect(line).not.toMatch(/203\.0\.113|t=1/);
+  });
+
+  it('keeps only frame lines of a raw stack passed by a caller', () => {
+    const line = formatLogLine('error', {
+      event: 'unhandled_error',
+      stack: new Error(`raw ${CANARY}`).stack!,
+    });
+    expect(line).not.toContain(CANARY);
+    expect(JSON.parse(line).stack).toMatch(/^ +at /);
+    const frameless = formatLogLine('error', {
+      event: 'unhandled_error',
+      stack: `Error: ${CANARY}`,
+    });
+    expect(frameless).not.toContain('stack');
+  });
+
+  it('drops fields with the wrong runtime type or format', () => {
+    const fields = {
+      event: `free text ${CANARY}`,
+      error_id: `not-a-uuid-${CANARY}`,
+      route_id: { toString: () => CANARY },
+      status: 500.5,
+    } as unknown as LogFields;
+    const parsed = JSON.parse(formatLogLine('error', fields, new Date(0)));
+    expect(parsed).toEqual({ ts: '1970-01-01T00:00:00.000Z', level: 'error' });
+    const valid = JSON.parse(
+      formatLogLine('error', {
+        event: 'unhandled_error',
+        error_id: '0b9c7c1e-2f43-4c1a-9a43-7d1f3e0b2a11',
+        route_id: null,
+        status: 500,
+      }),
+    );
+    expect(valid).toMatchObject({ event: 'unhandled_error', route_id: null, status: 500 });
+    expect(valid.error_id).toBe('0b9c7c1e-2f43-4c1a-9a43-7d1f3e0b2a11');
   });
 
   it('never writes error_message, even if a caller passes it', () => {
@@ -119,12 +155,45 @@ describe('errorFields', () => {
 
   it('cuts everything before the first frame when the header does not match', () => {
     const error = new Error(`first ${CANARY}`);
+    // V8 builds the stack text on first read: read it before mutating, so the header is stale.
+    void error.stack;
     error.message = 'changed later';
     error.name = `canary-${CANARY}`;
     const fields = errorFields(error);
     expect(fields.error_name).toBe('other');
     expect(fields.stack).toMatch(/^\s+at /);
     expect(JSON.stringify(fields)).not.toContain(CANARY);
+  });
+
+  it('cuts the header of a Node internal error (`Name [ERR_X]: message`)', () => {
+    let thrown: unknown;
+    try {
+      assert.strictEqual(`value-${CANARY}`, 'other');
+    } catch (error) {
+      thrown = error;
+    }
+    const fields = errorFields(thrown);
+    expect(fields.error_name).toBe('AssertionError');
+    expect(fields.stack).toMatch(/^ +at /);
+    expect(JSON.stringify(fields)).not.toContain(CANARY);
+    const synthetic = {
+      name: 'TypeError',
+      message: 'm',
+      stack: `TypeError [ERR_X]: ${CANARY}\n    at f (a.js:1:2)`,
+    };
+    expect(errorFields(synthetic)).toEqual({
+      error_name: 'TypeError',
+      stack: '    at f (a.js:1:2)',
+    });
+  });
+
+  it('keeps only frame lines, not text after the first frame', () => {
+    const fields = errorFields({
+      name: 'Error',
+      message: 'm',
+      stack: `Error: other\n    at f (a.js:1:2)\n${CANARY} tail\n    at g (b.js:3:4)`,
+    });
+    expect(fields.stack).toBe('    at f (a.js:1:2)\n    at g (b.js:3:4)');
   });
 
   it('omits stack without any frame line', () => {
