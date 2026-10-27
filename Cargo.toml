@@ -14,7 +14,7 @@ publish = false
 [workspace.dependencies]
 protocol = { path = "crates/protocol" }
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "matched-path", "tokio", "ws"] }
-tokio = { version = "=1.53.3", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync", "io-util"] }
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync", "io-util"] }
 tokio-util = { version = "=0.7.20", features = ["rt"] }
 tower = { version = "=0.5.3", features = ["util"] }
 tower-http = { version = "=0.7.1", features = ["sensitive-headers", "set-header"] }
