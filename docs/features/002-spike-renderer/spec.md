@@ -2,7 +2,7 @@
 id: "002"
 title: Spike de renderizado de peleas
 type: spec
-status: approved
+status: done
 risk: medium
 author: architect
 reviewers: [product-owner, game-designer]
@@ -151,6 +151,8 @@ Cada requisito dice cómo se verifica (→). "check" es `just check`; "e2e" es `
 - **RF-C2. Pruebas con logs reales.** Fixtures de `FightLog` producidos por el motor de 003 (JSON commiteado por 003 o generado en el test con `engine-wasm`, según exista): su salida pasa `validateTimeline` con los manifests de los placeholders. → Vitest.
 - **RF-C3. Reproducción.** La ruta de prueba puede reproducir uno de esos logs además del guion de RF-A8. → e2e (llega a `finished`).
 - **RF-C4. Cambios de forma.** Si 003 emite algo que la `Timeline` v1 no puede expresar y hace falta, se sube `timeline_version` a 2 con una enmienda de esta spec; el adaptador nunca mete campos fuera del formato. → revisión del PR.
+  - **Fines sin KO, fuera de 002** (enmienda técnica del 2026-10-27, revisión de `plan-c.md`). `time_up` y `end` con `reason` `decision` o `draw` no son expresables en v1, y en 002 **no hace falta** expresarlos: 002 no publica peleas y el go/no-go (RF-B9) no los usa. El adaptador los rechaza con `adapter.unsupported_ending`, sin inventar cues, y RF-C2 lo comprueba con `log-decision-a`, `log-decision-b` y `log-draw`. La `timeline_version` 2 (cue `time_up`, `win` sin `ko` y cierre sin ganador, preocupación 7 de 003) pasa a un issue de Linear, "Timeline v2: fines sin KO", que bloquea la primera feature que publique peleas (trabajo derivado 6 de `docs/architecture.md`), con esos tres dorados como casos de aceptación y game-designer como revisor de su coreografía. El PR de C enlaza el issue.
+- **Trazabilidad:** RF-C1 a RF-C4 se implementan según [plan-c.md](./plan-c.md). El issue de la v2 es TA-19.
 
 ## Requisitos no funcionales
 - **Rendimiento (criterio "≥ 55 fps").**
@@ -447,3 +449,13 @@ Atendí los cuatro cambios bloqueantes de game-designer y parte de las recomenda
   4. RF-B1 y RF-B4: `test/support/elapsed.ts` es la única excepción de test a la prohibición de reloj, para medir el "< 1 s por caso". No toca código de producción ni la salida del convertidor.
   5. RF-B2 y RF-B9: el subcomando `inspect` y `?pace=<factor>` en `/dev/arena`, con `mean_strike_gap_ms` en las estadísticas copiadas.
 - No reabro la revisión de product-owner y game-designer. Ninguna precisión cambia el guion, los umbrales, el formato de assets, el vocabulario de cues ni las preguntas de RF-B9. `?pace` solo facilita algo que RF-B9 ya permitía ("probar variantes del guion"). Aviso a game-designer porque `mean_strike_gap_ms` es el dato que pidió para 003, sin pedirle una nueva aprobación.
+
+### architect — 2026-10-27 — Enmienda técnica (revisión de plan-c)
+- Al revisar `plan-c.md` admití tres precisiones:
+  1. RF-C4: los fines sin KO quedan fuera de 002, con `adapter.unsupported_ending`, y la `timeline_version` 2 pasa a un issue de Linear que bloquea la primera feature que publique peleas (ver la nota en RF-C4). RF-C4 ya condicionaba la v2 a que "haga falta", y la revisión de product-owner de la spec de 003 dejaba el dueño como "la fase C de 002 o la feature que herede RF-C1 a RF-C4".
+  2. RF-C1: el resultado tiene la forma de `TimelineResult` (`{ ok: true, timeline, ignored }` o `{ ok: false, errors }`) en lugar de un `Result` genérico, y "se cuenta" es `ignored`.
+  3. RF-C2 y RF-C3: los tests leen los dorados en su lugar, y el arena empaqueta una sola copia (`log-ko-comeback.json`) comprobada byte a byte contra su dorado, porque el contexto de Docker de `apps/web` no incluye `crates/`. Se aparta de la decisión 6 del plan-a de 003 ("única copia") solo en ese archivo.
+- No reabro la revisión de product-owner ni de game-designer: no cambia lo que ve el usuario, el guion, el vocabulario de cues ni la Timeline v1, y la puerta de publicación sigue en `docs/architecture.md`. **Aviso a game-designer**, autor de 003, porque su pedido de v2 cambia de dueño: su diseño (decisión, empate, `time_up`, más las notas de windup y KO por chip del punto 4 de `plan-c.md`) entra en el issue nuevo, donde sí revisa.
+
+### Cierre — 2026-10-27
+Fases A1 (#36), A2 (#40), B (#41) y C (#42) fusionadas: la feature pasa a `done` al fusionar C, como fija el Resumen. Quedan fuera y con su issue: el go/no-go del owner (RF-B8 y RF-B9) en **TA-20**, y la `timeline_version` 2 (fines sin KO) en **TA-19**.

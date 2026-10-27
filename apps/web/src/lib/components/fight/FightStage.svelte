@@ -36,8 +36,13 @@
     phase?: FightStageState;
     /** Loads the fighters that are not placeholders (`content/_local/sprites/`, only in dev). */
     local?: LocalAssets;
-    /** Rewrites the spike script before `load` (`?pace=` on /dev/arena). */
+    /** Rewrites the timeline before `load` (`?pace=` on /dev/arena). */
     retime?: (timeline: Timeline) => Timeline;
+    /**
+     * Where the timeline comes from, given the asset of each side (`?log=` on /dev/arena). Without
+     * it, the spike script with these assets.
+     */
+    source?: (assets: Readonly<Record<Side, string>>) => Promise<Timeline>;
   }
 
   let {
@@ -48,6 +53,7 @@
     phase = $bindable('loading'),
     local,
     retime,
+    source,
   }: Props = $props();
 
   type Loader<T> = () => Promise<{ default: T }>;
@@ -94,6 +100,19 @@
     return local.loadManifest(id);
   }
 
+  /** The spike script with the assets of each side (the default `source`). */
+  async function spikeTimeline(assets: Readonly<Record<Side, string>>): Promise<Timeline> {
+    const spike = (await import('@torneo/renderer/fixtures/spike.timeline.json'))
+      .default as unknown as Timeline;
+    return {
+      ...spike,
+      fighters: {
+        a: { ...spike.fighters.a, asset: assets.a },
+        b: { ...spike.fighters.b, asset: assets.b },
+      },
+    };
+  }
+
   const names = $derived({ a: fighterName(fighters.a), b: fighterName(fighters.b) });
   const winnerName = $derived(snapshot?.winner ? names[snapshot.winner] : null);
   const motionReduced = $derived(systemReduced || reducedMotion);
@@ -115,9 +134,9 @@
     const side = { a: fighters.a, b: fighters.b };
     try {
       const ids = [...new Set([side.a, side.b])];
-      const [rendererModule, timelineModule, ...manifestModules] = await Promise.all([
+      const [rendererModule, cast, ...manifestModules] = await Promise.all([
         import('@torneo/renderer'),
-        import('@torneo/renderer/fixtures/spike.timeline.json'),
+        (source ?? spikeTimeline)(side),
         ...ids.map((fid) => loadManifest(fid)),
       ]);
       const urls = (
@@ -136,14 +155,6 @@
       if (id !== run) return;
       rendererLoaded = true;
       const assets = new Map<string, unknown>(ids.map((fid, i) => [fid, manifestModules[i]]));
-      const spike = timelineModule.default as unknown as Timeline;
-      const cast: Timeline = {
-        ...spike,
-        fighters: {
-          a: { ...spike.fighters.a, asset: side.a },
-          b: { ...spike.fighters.b, asset: side.b },
-        },
-      };
       const timeline = retime === undefined ? cast : retime(cast);
       loadedTimeline = timeline;
       const start = performance.now();

@@ -17,6 +17,7 @@ import { createServer, type ViteDevServer } from 'vite';
 import dummyA from '@torneo/renderer/placeholders/dummy_a/manifest.json';
 import {
   createLocalSpritesHandler,
+  DEFAULT_LOCAL_SPRITES_DIR,
   localSprites,
   resolveLocalSpriteRequest,
   type LocalSpritesFs,
@@ -255,5 +256,39 @@ describe('localSprites() in a real Vite server', () => {
     expect(res.status).toBe(403);
     expect(spy).not.toHaveBeenCalled();
     expect(readdir).not.toHaveBeenCalled();
+  });
+});
+
+// plan-c decision 9 (a): the default folder comes from the module, not from `server.config.root`.
+describe('localSprites() default folder', () => {
+  const REPO = fileURLToPath(new URL('../../../', import.meta.url));
+
+  it('is <repo>/content/_local/sprites', () => {
+    expect(path.relative(REPO, DEFAULT_LOCAL_SPRITES_DIR)).toBe(
+      path.join('content', '_local', 'sprites'),
+    );
+  });
+
+  it('serves from it whatever root Vite was started with', async () => {
+    const asked: string[] = [];
+    const fs: LocalSpritesFs = {
+      realpath: async (p) => (asked.push(p), p),
+      stat: async () => ({ isFile: () => true, isDirectory: () => false, size: 2 }),
+      readFile: async () => Buffer.from('{}'),
+      readdir: async () => [],
+    };
+    let handler: ReturnType<typeof createLocalSpritesHandler> | null = null;
+    const plugin = localSprites({ fs });
+    const configure = plugin.configureServer as (server: unknown) => void;
+    configure({
+      config: { root: '/elsewhere' },
+      middlewares: { use: (h: typeof handler) => (handler = h) },
+    });
+    if (handler === null) throw new Error('no handler registered');
+    const res = await call(handler, '/__local-sprites/local_a/manifest.json');
+    expect(res.status).toBe(200);
+    expect(asked).toContain(DEFAULT_LOCAL_SPRITES_DIR);
+    expect(asked).toContain(path.join(DEFAULT_LOCAL_SPRITES_DIR, 'local_a', 'manifest.json'));
+    expect(asked.some((p) => p.startsWith('/elsewhere'))).toBe(false);
   });
 });

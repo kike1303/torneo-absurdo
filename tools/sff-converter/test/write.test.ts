@@ -12,7 +12,7 @@ import { PNG } from 'pngjs';
 import { validateManifest } from '@torneo/renderer/manifest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { convert } from '../src/convert.ts';
-import { writeOutput } from '../src/write.ts';
+import { OUTPUT_MARKER, writeOutput } from '../src/write.ts';
 import { code } from './support/expect-error.ts';
 import { fixtureAir, fixtureMap, fixtureSffV1 } from './support/fixtures.ts';
 import { tempDir, tempRepo, type TempRepo } from './support/git-repo.ts';
@@ -32,15 +32,76 @@ describe('writeOutput', () => {
   it('writes into a directory the .gitignore ignores, and replaces old output only', () => {
     const out = path.join(repo.root, 'ignored', 'sprites', 'local_test');
     mkdirSync(out, { recursive: true });
+    writeFileSync(path.join(out, OUTPUT_MARKER), '');
     writeFileSync(path.join(out, 'sheet-7.png'), 'old');
     writeFileSync(path.join(out, 'notes.txt'), 'keep');
     writeOutput(out, manifest, sheets);
-    expect(readdirSync(out).sort()).toEqual(['manifest.json', 'notes.txt', 'sheet-0.png']);
+    expect(readdirSync(out).sort()).toEqual([
+      OUTPUT_MARKER,
+      'manifest.json',
+      'notes.txt',
+      'sheet-0.png',
+    ]);
     const json = JSON.parse(readFileSync(path.join(out, 'manifest.json'), 'utf8'));
     expect(validateManifest(json, { expectedId: 'local_test' }).ok).toBe(true);
     const png = PNG.sync.read(readFileSync(path.join(out, 'sheet-0.png')));
     expect([png.width, png.height]).toEqual([sheets[0]!.width, sheets[0]!.height]);
     expect(Buffer.from(png.data).equals(Buffer.from(sheets[0]!.rgba))).toBe(true);
+  });
+
+  // plan-c decision 9 (b): old output is only deleted next to the marker.
+  it('refuses an ignored folder with a foreign manifest.json and leaves it intact', () => {
+    const out = path.join(repo.root, 'ignored', 'foreign');
+    mkdirSync(out, { recursive: true });
+    const foreign = Buffer.from('{"not":"ours"}\n');
+    writeFileSync(path.join(out, 'manifest.json'), foreign);
+    expect(code(() => writeOutput(out, manifest, sheets))).toBe('write.foreign_output');
+    expect(readdirSync(out)).toEqual(['manifest.json']);
+    expect(readFileSync(path.join(out, 'manifest.json')).equals(foreign)).toBe(true);
+  });
+
+  it('with the marker, cleans the old output and writes again', () => {
+    const out = path.join(repo.root, 'ignored', 'ours');
+    writeOutput(out, manifest, sheets);
+    writeFileSync(path.join(out, 'sheet-9.png'), 'stale');
+    writeOutput(out, manifest, sheets);
+    expect(readdirSync(out).sort()).toEqual([OUTPUT_MARKER, 'manifest.json', 'sheet-0.png']);
+  });
+
+  it('a new folder ends up with an empty marker', () => {
+    const out = path.join(repo.root, 'ignored', 'new', 'x');
+    writeOutput(out, manifest, sheets);
+    expect(readFileSync(path.join(out, OUTPUT_MARKER)).length).toBe(0);
+  });
+
+  it('a marker that is a symbolic link is write.symlink, and nothing is deleted', () => {
+    const out = path.join(repo.root, 'ignored', 'linked');
+    mkdirSync(out, { recursive: true });
+    writeFileSync(path.join(repo.root, 'ignored', 'elsewhere'), '');
+    symlinkSync(path.join(repo.root, 'ignored', 'elsewhere'), path.join(out, OUTPUT_MARKER));
+    writeFileSync(path.join(out, 'manifest.json'), 'old');
+    expect(code(() => writeOutput(out, manifest, sheets))).toBe('write.symlink');
+    expect(readFileSync(path.join(out, 'manifest.json'), 'utf8')).toBe('old');
+  });
+
+  it('a marker that is a directory is write.marker_invalid, and nothing is deleted', () => {
+    const out = path.join(repo.root, 'ignored', 'dir-marker');
+    mkdirSync(path.join(out, OUTPUT_MARKER), { recursive: true });
+    writeFileSync(path.join(out, 'manifest.json'), 'old');
+    expect(code(() => writeOutput(out, manifest, sheets))).toBe('write.marker_invalid');
+    expect(readFileSync(path.join(out, 'manifest.json'), 'utf8')).toBe('old');
+  });
+
+  it('refuses when a `!` rule brings back the marker', () => {
+    const local = tempRepo(`ignored/*\n!ignored/x/\nignored/x/*\n!ignored/x/${OUTPUT_MARKER}\n`);
+    try {
+      expect(code(() => writeOutput(path.join(local.root, 'ignored', 'x'), manifest, sheets))).toBe(
+        'write.not_ignored',
+      );
+      expect(existsSync(path.join(local.root, 'ignored', 'x', OUTPUT_MARKER))).toBe(false);
+    } finally {
+      local.cleanup();
+    }
   });
 
   it('refuses a directory git does not ignore, and leaves no directory behind', () => {

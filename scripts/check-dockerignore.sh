@@ -33,9 +33,14 @@ for file in $subjects; do
     if [ ! -e "$file" ]; then
         dir="$(dirname "$file")"
         if [ ! -d "$dir" ]; then
-            # Only one level is ever missing (tools/sff-converter/input, git-ignored).
-            mkdir "$dir"
-            created_dirs="$created_dirs $dir"
+            # Several levels can be missing (a worktree without tools/): note every missing
+            # ancestor, deepest first, so cleanup's rmdir (empty folders only) undoes just those.
+            d="$dir"
+            while [ ! -d "$d" ]; do
+                created_dirs="$created_dirs $d"
+                d="$(dirname "$d")"
+            done
+            mkdir -p "$dir"
         fi
         # noclobber: if the file appears between the test and the write, this fails instead of
         # overwriting it.

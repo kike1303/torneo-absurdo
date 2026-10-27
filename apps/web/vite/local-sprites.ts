@@ -6,10 +6,15 @@
 import { promises as fsp } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Plugin } from 'vite';
 import { validateManifest } from '@torneo/renderer/manifest';
 
 export const LOCAL_SPRITES_PREFIX = '/__local-sprites/';
+/** `<repo>/content/_local/sprites`, from this file: never from the root Vite was started with. */
+export const DEFAULT_LOCAL_SPRITES_DIR = path.resolve(
+  fileURLToPath(new URL('../../../content/_local/sprites/', import.meta.url)),
+);
 const PATTERN =
   /^\/__local-sprites\/(?:index\.json|([a-z][a-z0-9_]{0,47})\/(manifest\.json|sheet-[0-9]{1,3}\.png))$/;
 const ID = /^[a-z][a-z0-9_]{0,47}$/;
@@ -148,7 +153,7 @@ export function createLocalSpritesHandler(baseDir: string, fs: LocalSpritesFs = 
 }
 
 export interface LocalSpritesOptions {
-  /** Default: `<repo>/content/_local/sprites`, from the Vite root (apps/web). */
+  /** Default: `DEFAULT_LOCAL_SPRITES_DIR` (`<repo>/content/_local/sprites`, from this file). */
   readonly baseDir?: string;
   readonly fs?: LocalSpritesFs;
 }
@@ -158,9 +163,7 @@ export function localSprites(options: LocalSpritesOptions = {}): Plugin {
     name: 'torneo:local-sprites',
     apply: 'serve',
     configureServer(server) {
-      const baseDir =
-        options.baseDir ??
-        path.resolve(server.config.root, '..', '..', 'content', '_local', 'sprites');
+      const baseDir = options.baseDir ?? DEFAULT_LOCAL_SPRITES_DIR;
       server.middlewares.use(createLocalSpritesHandler(baseDir, options.fs));
     },
   };

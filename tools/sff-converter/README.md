@@ -21,6 +21,7 @@ pnpm -s --filter @torneo/sff-converter convert -- \
 ```
 - Las rutas relativas se resuelven contra el directorio desde el que llamas a `pnpm` (`INIT_CWD`). `--out <dir>` cambia la salida, que también tiene que estar ignorada.
 - stdout es un JSON. Un error sale en stderr como `{ "error": "<código>", "data": { … } }` con código de salida 1 (2 si es `internal.unexpected`). Si el manifest resultante no pasa `validateManifest`, stdout trae el reporte con `manifest_errors` y no se escribe nada.
+- La salida queda marcada con un archivo vacío, `.sff-converter-output`. Al volver a convertir, el convertidor borra `manifest.json` y `sheet-N.png` **solo** en una carpeta con ese marcador. Si la carpeta tiene esos archivos y no tiene el marcador (por ejemplo, una salida de antes de que existiera), falla con `write.foreign_output` sin borrar nada: borra tú esa carpeta y vuelve a convertir. Un marcador que es un enlace simbólico da `write.symlink`, y uno que no es un archivo regular (una carpeta, por ejemplo) da `write.marker_invalid`.
 - `inspect` cuenta los sprites por compresión (`<nombre>_unsupported` si no se puede decodificar) y, con el mapa, las acciones que faltan en el AIR y los sprites no soportados que usarían las animaciones mapeadas.
 
 ## El mapa
