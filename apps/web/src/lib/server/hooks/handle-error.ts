@@ -1,5 +1,5 @@
 import type { HandleServerError } from '@sveltejs/kit/hooks';
-import { log, type LogFields } from '#lib/server/log.js';
+import { errorFields, log } from '#lib/server/log.js';
 
 /** Closed list of messages sent to the client (plan-a decision 4). Never `error.message`. */
 export type ErrorCode = 'not_found' | 'internal';
@@ -17,17 +17,6 @@ function statusOf(input: HandleErrorInput): number {
   return typeof status === 'number' ? status : 500;
 }
 
-/** Reads the error's fields. Any throwing getter propagates to the caller's `catch`. */
-function readError(error: unknown): Pick<LogFields, 'error_name' | 'error_message' | 'stack'> {
-  if (typeof error !== 'object' || error === null) return { error_name: typeof error };
-  const { name, message, stack } = error as { name?: unknown; message?: unknown; stack?: unknown };
-  return {
-    ...(typeof name === 'string' ? { error_name: name } : {}),
-    ...(typeof message === 'string' ? { error_message: message } : {}),
-    ...(typeof stack === 'string' ? { stack } : {}),
-  };
-}
-
 /**
  * Server `handleError` (RF-A19, plan-a decision 4). Synchronous and never throws:
  * - only `kind: 'unknown'` is logged, with a fresh `error_id` that is also returned as `errorId`;
@@ -39,7 +28,8 @@ export function handleError(input: HandleErrorInput): HandledError {
     const status = statusOf(input);
     const message: ErrorCode = status === 404 ? 'not_found' : 'internal';
     if (input.kind !== 'unknown') return { message };
-    const fields = readError(input.error);
+    // A throwing getter propagates to the `catch`: nothing is logged.
+    const fields = errorFields(input.error, { propagate: true });
     const errorId = crypto.randomUUID();
     log('error', {
       event: 'unhandled_error',
