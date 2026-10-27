@@ -6,7 +6,10 @@ status: in-review
 risk: high
 author: architect
 reviewers: [product-owner, security-reviewer, game-designer]
-approvals: []
+approvals:
+  - {by: product-owner, date: 2026-10-26}
+  - {by: security-reviewer, date: 2026-10-26}
+  - {by: game-designer, date: 2026-10-26}
 linear: TA-3
 depends_on: ["001"]
 created: 2026-10-26
@@ -533,3 +536,15 @@ Seed (32 B, server or sim) ──▶ engine::simulate(seed, a, b, Ruleset::for_v
 - **game-designer 8:** se definen `P = C(n, 2)`; los espejos quedan fuera de `N` y del win rate; el sesgo del lado `a` se agrega sobre todos los espejos; se reporta el % de victorias tras ir ≥ 250 ‰ abajo.
 - **game-designer 10:** RF14 fija `abilities: { <id>: <nombre> }` en el frontmatter de `lore.<locale>.md`.
 - **Datos de 002 sin pedido de un revisor:** el `knockdown` lo emite el motor (1500 ms en un crítico que aplica ≥ 100 ‰ del `max_hp` y no noquea, sin golpes durante la caída). Las reglas de ritmo de 002 son invariantes de RF2, y `Ruleset` las comprueba con un test. `taunt` queda como extensión futura.
+
+### product-owner — 2026-10-26 — APPROVE (ronda 2)
+- Verifiqué: cambio 1 resuelto (`time_limit_ms = 86 000`, `end_ms = 4000`, `end.t ≤ 90 000` como duración total; en KO quedan 2,5 s de pose, ≥ 2 s de 002); cambio 2 resuelto (tabla de correspondencias completa, decisión de conservar `time_up`/`decision`/`draw`, dueño de `timeline_version` 2, `adapter.unsupported_ending` y puerta de no publicar peleas reales sin v2; RF17 las limita a ≤ 10 % y < 1 %); no bloqueantes tomados (`damage` aplicado, aviso de cruces 30–70 %, `clutch_ko` separado del "favorito perdiendo"); lo cambiado por otras revisiones no mete scope creep; criterios del intent y ADRs 0004/0005/0007 siguen cubiertos.
+- No bloqueante: (1) dueño de la v2 como "la fase C de 002 o la feature que herede RF-C1 a RF-C4"; (2) registrar la puerta "sin Timeline v2 no se publican peleas reales" fuera de esta spec (prerrequisitos en `docs/architecture.md` o Linear); (3) confirmar en la fase B con el motor real que la ruta `time_up` sigue cubierta por los dorados de RF16 (a).
+
+### security-reviewer — 2026-10-26 — APPROVE (ronda 2)
+- Verifiqué: cambio 1 (RF22 duro con dueño en TA-13, enlazado en las preocupaciones 2 y 3; `CharacterSpec` canónico con `deny_unknown_fields`, dorado e ida y vuelta; el WASM acepta solo la forma motor; la concatenación del commit extendido no es ambigua); cambio 2 (lints de RF5, `roll(NonZeroU32)` en `u64`, `Result<_, EncodeError>` → `log.encode_failed`; cotas recalculadas: ≤ 68 acciones por lado, sin divisiones por cero, `damage` cabe en `u16`); cambio 3 (`clippy.toml`, `scripts/check-engine.mjs` con tests negativos; comprobé que `cargo tree -p engine` resuelve sin falsos positivos por `tungstenite`); cambio 4 (`deny` + un único `allow`, chequeo de `\bunsafe\b` y de la tabla `[lints]`); recomendaciones de la ronda 1 adoptadas; knockdown, desesperación y `clutch_ko` no consumen PRNG ni exponen la semilla.
+- Recomendaciones para el plan/PR de la fase A: definir qué hace el motor si se alcanza `max_events` (ni truncar en silencio ni pánico) y añadir la cota analítica al test de `Ruleset::v1()`; reformular RF21 ("como mucho 3 eventos por acción" no es literal; la cota ≈ 438 < 512 se sostiene); en `clippy.toml` usar rutas completas y `allow-invalid = true` si clippy no resuelve `from_os_rng`; para TA-13, fijar la codificación exacta del commit extendido y recalcular `canonical_spec_json` en el verificador.
+
+### game-designer — 2026-10-26 — APPROVE (ronda 2)
+- Verifiqué: los 10 cambios uno por uno; corrí de nuevo `arch/roster2.py` y `arch/marg2.py` (aproximación en Python): win rate marginal por stat 44–52 %, 92,8 % de las peleas en 45–90 s (p10/p50/p90 = 46/57/70 s), momentos 32,7 % (clutch_ko 20,4, decisive_crit 10,8, comeback 9,1), 100 % KO, ≥ 700 ms entre impactos, lado `a` 50,2 % en espejos. El balance por personaje (28–75 %) es de contenido y se ajusta en la fase B. `knockdown` cumple los datos de 002 y no consume PRNG; `clutch_ko` cubre la "sorpresa" del intent; el ejemplo JSON cuadra.
+- No bloqueante: nombrar como campo de `Ruleset` el "×2 si está desesperado" del peso de `special` (p. ej. `w_special_desperation_mul`); en la fase B, que ningún `kind` de momento quede muerto (p. ej. cada uno ≥ 3 %).
