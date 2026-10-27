@@ -66,6 +66,9 @@ jobs:
               # Run by _check-gen inside check-rust (review of PR #5).
               - scripts/gen-protocol-ts.mjs
               - scripts/compare-trees.mjs
+              # Run by _check-engine and _check-wasm inside check-rust (003).
+              - scripts/check-engine.mjs
+              - scripts/wasi-runner.mjs
             web:
               - *common
               - apps/web/**
