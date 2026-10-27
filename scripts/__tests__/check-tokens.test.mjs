@@ -18,7 +18,7 @@ describe('check-tokens (ADR-0009 test 1)', () => {
   });
 
   it.each(readdirSync(path.join(FIXTURES, 'pass')))('passes on %s', (name) => {
-    expect(checkTokens([load('pass', name)])).toEqual(["ci-probe-broken"]);
+    expect(checkTokens([load('pass', name)])).toEqual(['ci-probe-broken']);
   });
 
   it('exempts tokens.css and theme-color.ts', () => {
