@@ -5,3 +5,5 @@
  * Body of `GET /api/health` (RF-B10): 200 with `ok`, 503 with `db_unavailable`.
  */
 export type HealthResponse = { status: 'ok'; version: string } | { status: 'db_unavailable' };
+
+// CI probe (d), hand edit, do not merge.
