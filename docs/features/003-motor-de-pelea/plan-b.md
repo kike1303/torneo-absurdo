@@ -194,7 +194,19 @@ Un commit por paso (`feat(content): … (TA-3)`, `feat(sim): …`, `feat(engine)
 - **owner / product-owner:** quién revisa el checklist de ADR-0004, dado que el autor es el game-designer (propongo product-owner, más el OK del owner por ser tema legal).
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+Pasos 1 a 6 (backend-engineer, 2026-10-27). Ninguna cambia el formato del log, las fórmulas ni los dorados.
+1. **`Character` con campos privados** (recomendación 3 de architect): getters `spec()`, `archetype()`, `rivals()` e `into_spec()`, así que un `Character` solo sale de `load_roster` y "validado" es un invariante del tipo.
+2. **`invalid_shape` separado de `invalid_json`** (nota opcional 3 de architect), con `serde_json::Error::classify()`: un campo desconocido, uno que falta o un tipo incorrecto es `invalid_shape`; la sintaxis rota o el EOF es `invalid_json`. Los dos llevan solo `line` y `column`. Por eso los casos de campo desconocido (arriba y en `stats`) esperan `invalid_shape`, y se sumó el fixture `wrong-type`. `ContentError` suma también `path()`.
+3. **Errores deterministas:** `load_roster` recorre las entradas de la raíz en orden de bytes del nombre antes de cargar, así que con dos personajes rotos el error es siempre el mismo en cualquier sistema de archivos (test `errors_are_reported_in_name_order`). Además de los casos del plan, `tests/load.rs` cubre el `character.json` exacto de 64 KiB (carga) y de 64 KiB + 1 (`file_too_large`), un directorio llamado `character.json`, `lore.*.md` y directorio de personaje como symlink, una raíz que no existe (`io` con `NotFound`) y, solo en Linux (APFS rechaza esos nombres), `name_not_utf8`.
+4. **`checkEngineGraph(tree, { roots })`** en lugar de `{ requireEngineRoot: false }`: el segundo árbol exige que `content` y `sim` estén en la salida (si no, el `cargo tree` no revisó lo que creemos), y los mensajes nombran "the normal graph of content and sim" (nota 6 de architect). Por defecto `roots = ['engine']` y los mensajes de antes no cambian.
+5. **`sim`:**
+   - `SimError` suma `duplicate_slug` y `log_without_end` (guarda: el motor siempre escribe `end`), y los errores de uso son `ArgsError` con códigos `usage.*` (`unknown_flag`, `not_utf8`, `missing_value`, `repeated_flag`, `invalid_fights`, `invalid_seed`). `-h` es alias de `--help`.
+   - `failures`, `warnings` y `render_text` reciben `&Criteria` (el bin y el test pasan `Criteria::RF17`), para probar el paso del 3 % de fallo a aviso (`moment_kind_fails`) sin tocar la constante.
+   - La banda de 45 000–90 000 ms es `DURATION_BAND_MS`, fuera de `Criteria`, porque no es ajustable (decisión 16). `Criteria` guarda todo en ‰.
+   - Los tests de las métricas viven en `crates/sim/src/report/tests.rs`.
+   - Fixtures de `cli.rs`: `balanced` son dos copias del fixture `trickster` del motor con otro `slug` (nota 5 de architect: cada uno gana exactamente el 50 %); pasa `--check` con `--fights 400` y la semilla por defecto. `lopsided` es `trickster` contra un personaje con todos los stats en 1. `single` (un personaje) cubre `sim.roster_too_small`.
+6. **Commits:** los pasos 1 y 4 van como `build:` y el 6 como `docs(content):`. Este registro va en un commit `docs(003)` aparte, después del paso 6.
+7. **Dato para 002 (no es desviación):** con los dos `trickster` y 10 000 peleas, la separación media entre resoluciones es de 961 ms (p50 de 49 resoluciones por pelea). La densidad con el contenido real la mide el informe del paso 7.
 
 ## Revisión
 
