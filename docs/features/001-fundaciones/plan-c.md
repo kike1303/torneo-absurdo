@@ -2,7 +2,7 @@
 id: "001"
 title: Fundaciones del monorepo — fase C
 type: plan
-status: approved
+status: done
 risk: high
 author: devops-engineer
 reviewers: [architect, security-reviewer]
@@ -339,7 +339,7 @@ Lo ejecuta devops-engineer con `gh` y el token del owner, **después del merge d
     - (c) Un test roto a propósito: `ci-ok` rojo ("test roto → `ci-ok` rojo").
     - (d) Un cambio a mano en `packages/protocol-ts/src/generated/*.ts`: `rust` falla por frescura (RF-B6).
     - (e) Un cambio en `deny.toml`: corre `rust`.
-    - (f) Un cambio en `infra/compose.local.yml` (por ejemplo, un comentario): corre `images`. Es su medida **en caliente**.
+    - (f) Un cambio en `infra/compose.local.yml` y en su copia del fixture `scripts/__fixtures__/check-compose/valid/` (por ejemplo, el mismo comentario en los dos): corre `images`. Es su medida **en caliente**. Si solo se toca el archivo real, `web` falla por la sincronía del fixture.
 1. **Linear.** TA-8 ("Primer despliegue a producción") lleva la checklist de prerrequisitos de RF-C18 y queda bloqueado por la feature de auth (límites anónimos de D6 y D7, con `TRUSTED_PROXIES=10.250.0.2/32`) y por **TA-6** (preparación del VPS, variante "aparte": runbook privado, fuera del repo). Si TA-8 no existe, se crea. En TA-6 queda la constancia del owner de que cubre "durante la feature 001" de ADR-0006 (ya está en "Decisiones del owner" de la spec; se enlaza).
 2. **Actions del repo.**
    - `gh api -X PUT repos/kike1303/torneo-absurdo/actions/permissions/fork-pr-contributor-approval -f approval_policy=all_external_contributors`. Hoy vale `first_time_contributors`.
@@ -636,6 +636,43 @@ Con unos 30 PRs y 30 pushes a `main` al mes, en una mezcla típica, son unos 700
       - **Por qué sin `just fixtures-sync`:** copiar los archivos reales al fixture también movería esas versiones congeladas y rompería las mutaciones. Los cambios de estructura son raros y se resincronizan a mano, igual que antes.
       - **Test:** en `check-compose.test.mjs`, cinco casos de bump (los digests del server, los de web, Postgres con digest y minor en los dos compose, `node:` con `.node-version` y `rust:` con el toolchain) no piden resincronizar. Con la comparación estricta anterior fallaban los cinco. Cuatro cambios de estructura sí la piden.
     - **Riesgo sin verificar.** No confirmé cómo clasifica Dependabot un bump `0.x → 0.(x+1)` de cargo. Si lo trata como minor, un crate 0.x que rompa entraría en `cargo-minor-patch` y dejaría el grupo en rojo. En ese caso se saca del grupo con `@dependabot ignore <crate> minor version` en el PR del grupo.
+
+
+## Cierre (2026-10-26)
+Ejecución del checklist RF-C19. El detalle y los enlaces a cada corrida están en TA-1.
+
+- **0.** La CI de `main` sobre `3a844c6` salió en verde (run 40443123794).
+- **0b.** Se abrieron PRs de prueba en borrador, todos cerrados sin fusionar:
+  - #27, solo docs: `ci-ok` en verde en 22 s, con los jobs pesados saltados.
+  - #28: `rust` en caliente tardó 111 s (el límite de D7 es 8 min).
+  - #29, con un test roto: `ci-ok` en rojo.
+  - #30, con `generated/` editado a mano: falla `_check-gen`.
+  - #31, con un cambio en `deny.toml`: corre `rust`.
+  - #32: `images` en caliente tardó 132 s. Hubo que tocar también el fixture; el texto de (f) ya está corregido arriba.
+- **1.** TA-8 tiene la checklist de RF-C18 y está bloqueado por auth y por TA-6. La constancia del owner sobre "durante la feature 001" está en la descripción de TA-6 (decisión del 2026-10-21).
+- **2.** Se configuró `fork-pr-contributor-approval: all_external_contributors`. Los permisos de workflow quedan en lectura y sin aprobar PRs, y se activó `sha_pinning_required: true` con el OK del owner.
+- **3.** El environment `production` quedó así:
+  - reviewer `kike1303`;
+  - `prevent_self_review: false` y `can_admins_bypass: false`;
+  - despliegue permitido solo desde `main` y desde tags `v*`.
+- **4.** Se crearon dos rulesets:
+  - `main`: sin borrado ni force-push, con PR obligatorio de 0 aprobaciones y `ci-ok` requerido (`integration_id` 15368). Sin `bypass_actors`.
+  - `release-tags`: protege `v*` y solo un admin puede saltárselo.
+
+  GitHub agregó por su cuenta `require_extra_approval_for_unattributed_changes: true` al ruleset de `main`.
+- **5.** Se activaron las alertas de Dependabot y los security fixes automáticos. GitHub aceptó `dependabot.yml`: abrió PRs de los cinco ecosistemas (#7 a #21, y después de la desviación 22 los grupos #25 `docker-images` y #26 `npm-minor-patch`). El #9 (`postgres` en `/infra`) confirma que lee los compose, así que el riesgo de que no los leyera queda cerrado.
+- **6.** Se guardó la evidencia de los GET en JSON, sin tokens.
+- **7.** Se empujó el tag `v0.0.1` sobre `3a844c6` (run 40447558309).
+  - `build` salió en verde. `server` y `web` publicaron `v0.0.1` y `sha-3a844c6` sobre el mismo digest, y cada una es un solo manifiesto `application/vnd.oci.image.manifest.v1+json`.
+  - El job `build` tardó 1 min 37 s, muy por debajo del límite de 20 min (RNF de velocidad, sin contar la espera del environment).
+  - La retención de `server` y de `web` (con 10 versiones como máximo) salió en verde. `actions/delete-package-versions` avisa que apunta a Node 20 y que GitHub lo fuerza a correr en Node 24, y funciona. Es el riesgo ya anotado y no bloquea.
+  - El owner rechazó `deploy` en la UI y `verify` no corrió (criterios C5 y C6).
+- **8.** El owner puso públicos los dos paquetes. El manifiesto de `v0.0.1` responde 200 a un token anónimo de `ghcr.io`.
+- **9.** Pruebas de `workflow_dispatch`:
+  - Desde una rama que no es `main` (run 40448914407): `build` reutilizó el tag sin reconstruir, y `deploy` falló en 1 s con *"not allowed to deploy to production due to environment protection rules"*, sin pedir aprobación.
+  - Con `tag=v1$(id)` (run 40448916592): `build` falló en "Validate the tag" y no se construyó ni publicó nada.
+  - Después se borró la rama `ta-1-dispatch-probe`.
+- **10.** El intent, la spec y los tres planes de 001 quedan en `done`, y TA-1 pasa a Done.
 
 ## Revisión
 
