@@ -1,0 +1,1 @@
+{"slug":"striker","stats":{"hp":50,"attack":80,"defense":40,"speed":70,"special":60},"personality":{"aggression":80,"caution":20,"showmanship":50},"abilities":[{"id":"power_punch","kind":"heavy","power":50,"cooldown":2,"element":null},{"id":"flame_burst","kind":"special","power":80,"cooldown":4,"element":"fire"}],"weaknesses":["water"]}
