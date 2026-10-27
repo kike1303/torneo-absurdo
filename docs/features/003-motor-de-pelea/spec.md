@@ -14,7 +14,7 @@ approvals:
 linear: TA-3
 depends_on: ["001"]
 created: 2026-10-26
-updated: 2026-10-26
+updated: 2026-10-27
 ---
 
 # Spec: Motor de pelea v0
@@ -168,10 +168,11 @@ Se entrega en dos fases, con un PR y un plan cada una:
   - **Errores:** el `JsError` lleva **solo** uno de estos códigos y nunca el mensaje de `serde_json`:
     - `input.too_large`, `seed.invalid_hex`, `spec.invalid_json`, `ruleset.unknown` y `log.encode_failed`;
     - `spec.<código>` por cada variante de `SpecError` (la lista exacta sale de ese enum, y un test comprueba que cubre todos los códigos).
-  - **Lints:** la tabla `[lints]` de `engine-wasm` replica la del workspace salvo `unsafe_code = "deny"`, y lleva **un solo** `#[allow(unsafe_code)]` (`allow`, no `expect`), en la función exportada. `scripts/check-engine.mjs` falla si:
-    - `crates/engine-wasm/src` contiene el token `\bunsafe\b`;
-    - hay más de un `allow(unsafe_code)`;
-    - la tabla `[lints]` difiere de la del workspace en algo más que `unsafe_code`.
+  - **Lints:** `engine-wasm` usa `[lints] workspace = true`, así que hereda `unsafe_code = "forbid"`, y no lleva **ningún** `allow(unsafe_code)`. Bajo `forbid`, el compilador rechaza cualquier `allow` con `E0453`. `scripts/check-engine.mjs` falla si en `crates/engine-wasm`:
+    - `src/` contiene el token `\bunsafe\b`;
+    - aparece **algún** atributo que relaje `unsafe_code` (`allow`, `expect` o `warn`), ya sea directo, de crate (`#![…]`), dentro de un `cfg_attr(…)` o en el cuerpo de una macro (`macro_rules!`);
+    - `src/` contiene `include!` o un atributo `#[path`, porque meterían en el crate código que el chequeo no revisa;
+    - `Cargo.toml` no tiene `[lints] workspace = true` o tiene una tabla `[lints.*]` propia.
 
   En 003 no hay glue JS ni la usa la web: la ejecución en navegador es parte de la feature de verificación de repeticiones.
 
@@ -416,7 +417,7 @@ Seed (32 B, server or sim) ──▶ engine::simulate(seed, a, b, Ruleset::for_v
 1. **Firma de ADR-0001.** El ADR escribe `simulate(...) -> FightLog`, y aquí devuelve `Result<FightLog, SpecError>` para que `engine-wasm` reciba entradas no confiables sin pánicos (RF21). Es un refinamiento, no una contradicción: la simulación de entradas válidas sigue siendo infalible. Se refleja en `docs/architecture.md` y no hace falta otro ADR.
 2. **Commit-reveal incompleto (ADR-0002), TA-13 (Linear).** `SHA-256(seed)` solo compromete la semilla. Para re-simular hacen falta además los `CharacterSpec` exactos y la `ruleset_version`, y si el operador pudiera cambiar un spec después del commit, influiría en el resultado. El contenido puede cambiar entre temporadas, así que el slug no basta. RF22 lo convierte en un **requisito duro** que bloquea producción, y 003 entrega la forma canónica que necesita. La elección entre el snapshot (a) y el commit extendido (b) es de la spec del server o scheduler, en TA-13.
 3. **El `FightLog` completo es tan sensible como la semilla hasta `Settled`**, porque contiene el resultado. El motor no puede protegerlo: lo hace cumplir el server (ADR-0002, punto 3), y su spec debe tratar `FightLog` y `outcome()` con la misma regla de no serialización que la semilla. Está registrado en TA-13.
-4. **`wasm-bindgen` frente a `unsafe_code = "forbid"`.** Resuelto según la revisión de seguridad: `wasm-bindgen-macro-support 0.2.129` traslada los atributos al shim generado, así que basta `unsafe_code = "deny"` con un único `#[allow(unsafe_code)]` en la función exportada, vigilado por `scripts/check-engine.mjs` (RF19). El motor conserva `forbid`.
+4. **`wasm-bindgen` frente a `unsafe_code = "forbid"`.** Resuelto con `forbid` en los dos crates (enmienda del 2026-10-27). En la implementación se comprobó que el shim de `wasm-bindgen 0.2.129` sale de la expansión de una proc-macro externa, donde rustc no reporta `unsafe_code`. `engine-wasm` compila para `wasm32-unknown-unknown` con `forbid` y sin ningún `allow`, y el `.wasm` exporta `simulate`. Así que el `allow` que pedía la versión anterior no tenía efecto. Con `forbid` el diseño falla cerrado: si un bump de `wasm-bindgen` generara `unsafe` que el lint sí viera, `_check-wasm` fallaría en ese PR y habría que decidir a conciencia (con una enmienda de esta spec). `scripts/check-engine.mjs` sigue vigilando el token `unsafe` y cualquier atributo que relaje el lint (RF19).
 5. **WASI como sustituto del navegador.** El test byte a byte corre en `wasm32-wasip1`, no en el artefacto `wasm32-unknown-unknown` de `wasm-bindgen`. Es el mismo backend wasm32 y el mismo `usize` de 32 bits, y el motor no toca ninguna API de plataforma, así que la equivalencia es razonable. Aun así, la feature de verificación en navegador debe agregar un test del artefacto real. `node:wasi` está marcado como experimental en Node 22: si su API cambia, solo se rompe el runner de 30 líneas.
 6. **Imagen del server.** `apps/server/Dockerfile` copia `rust-toolchain.toml`, y `rustup toolchain install` va a descargar también los dos targets wasm (unas decenas de MB, solo en la etapa builder). Es aceptable. Si devops prefiere evitarlo, el plan de la fase A lo resuelve sin cambiar el canal (`check-compose.mjs` solo enlaza la versión).
 7. **Fin por tiempo frente a la `Timeline` v1 de 002 (decisión).** El `FightLog` **conserva** `time_up`, `decision` y `draw`. El log es el registro honesto y verificable de la pelea (ADR-0002), y un motor que "fuerce" el KO antes del tope necesitaría reglas artificiales que también cambian el balance. El motor las hace raras (RF17: como mucho un 10 % de `time_up` y menos de un 1 % de `draw`; la aproximación del game-designer da ~0 % con el tope de 86 s), pero el formato las expresa.
@@ -458,7 +459,7 @@ Seed (32 B, server or sim) ──▶ engine::simulate(seed, a, b, Ruleset::for_v
 - **Dorados (nativo y WASI):** RF16 y RF18, dentro de `just check` y del job `rust` de CI (que ya tiene Node).
 - **`engine-wasm` (nativo):** cada código de error de RF19, incluidos `input.too_large` y un JSON con un campo de más, y que ningún error contenga texto de `serde_json`.
 - **Integración (`content`):** fixtures inválidos (un campo desconocido, un slug distinto del directorio, un presupuesto excedido o un lore que falta) y el `content/` real (RF13).
-- **Scripts (Vitest):** `check-engine.mjs`, con casos negativos (`getrandom` en el grafo, `rand_core` con `os_rng`, un token `unsafe`, dos `allow(unsafe_code)` y un lint distinto en la tabla), y `wasi-runner.mjs`.
+- **Scripts (Vitest):** `check-engine.mjs`, con casos negativos (`getrandom` en el grafo, `rand_core` con `os_rng`, un token `unsafe`; un `allow`, `expect` o `warn` de `unsafe_code` directo, de crate, dentro de `cfg_attr` o en una macro; `include!`; `#[path`; y un `Cargo.toml` sin `[lints] workspace = true` o con una tabla `[lints.*]` propia), y `wasi-runner.mjs`.
 - **Balance (`sim`):** RF17 sobre el `content/` real. El tiempo de RF-NF se mide a mano con `just sim --release` y se pega en el PR de la fase B.
 - **Grafo:** `_check-engine` y `_check-ts-rs-graph`, extendido a `engine`.
 
@@ -559,3 +560,10 @@ Seed (32 B, server or sim) ──▶ engine::simulate(seed, a, b, Ruleset::for_v
 - **RF4:** `event_limit` entra en la lista de ejemplo de `SpecError`, y "la simulación no falla" queda acotado a los rulesets que pasan el test de cotas.
 - **RF2:** `hp = 0` aparece en la resolución (`hit` o `block`) que precede al `ko`. Lo implicaba RF9 (el daño de bloqueo también se aplica), y ahora el texto lo dice para que `assert_invariants` no lo interprete como "solo `hit`".
 - **Modelo de datos:** `FightLog::outcome()` devuelve `Option<…>`, porque un log deserializado puede no tener `end` y `protocol` no puede entrar en pánico.
+
+### architect — 2026-10-27 — Enmienda menor (revisión del PR #39), pendiente de security-reviewer
+- **Cambio de mecanismo en RF19 y la preocupación 4.** No cambia el comportamiento del motor ni el formato. Origen: la desviación 9 de `plan-a.md` y el Important de security-reviewer en el PR #39: `check-engine` se podía esquivar con `cfg_attr`, con macros, con `#[path]` o con `include!`.
+  - `engine-wasm` pasa a `[lints] workspace = true` (`forbid`) y no lleva ningún `allow(unsafe_code)`. Lo comprobé en una copia del árbol: con `forbid` y sin el `allow`, clippy pasa para `wasm32-unknown-unknown` con `-D warnings`, el `.wasm` de release exporta `simulate` y cualquier `allow(unsafe_code)` da `E0453`.
+  - `scripts/check-engine.mjs` exige cero atributos que relajen `unsafe_code` (directos, de crate, en `cfg_attr` o en macros), rechaza `include!` y `#[path` en `src/`, exige `[lints] workspace = true` y conserva la búsqueda del token `unsafe`.
+  - Se ajustan los casos negativos de "Estrategia de pruebas" (Scripts).
+- Las aprobaciones de las demás áreas siguen en pie. **La enmienda queda pendiente de la aprobación de security-reviewer**, que pidió el diseño anterior (`deny` y un `allow`). La implementación no se fusiona hasta que llegue esa aprobación. Yo la escribí, así que no la apruebo.
