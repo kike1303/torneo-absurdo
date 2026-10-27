@@ -567,3 +567,12 @@ Seed (32 B, server or sim) ──▶ engine::simulate(seed, a, b, Ruleset::for_v
   - `scripts/check-engine.mjs` exige cero atributos que relajen `unsafe_code` (directos, de crate, en `cfg_attr` o en macros), rechaza `include!` y `#[path` en `src/`, exige `[lints] workspace = true` y conserva la búsqueda del token `unsafe`.
   - Se ajustan los casos negativos de "Estrategia de pruebas" (Scripts).
 - Las aprobaciones de las demás áreas siguen en pie. **La enmienda queda pendiente de la aprobación de security-reviewer**, que pidió el diseño anterior (`deny` y un `allow`). La implementación no se fusiona hasta que llegue esa aprobación. Yo la escribí, así que no la apruebo.
+
+### security-reviewer — 2026-10-27 — APPROVE (enmienda de RF19 y la preocupación 4)
+- Apruebo el cambio a `forbid` sin ningún `allow` en `engine-wasm`. Es más fuerte que el diseño `deny` con un `allow` que pedí en la ronda 1, porque el control lo aplica rustc y no un script.
+- Verifiqué en `168cf26`:
+  - clippy para `wasm32-unknown-unknown` pasa con `-D warnings`;
+  - en un crate aparte con `unsafe_code = "forbid"`, un `allow(unsafe_code)` da `E0453`, también si lo genera una macro o viene de un archivo con `include!`, y un bloque `unsafe` incluido no compila;
+  - las cuatro variantes del PR #39 (`cfg_attr`, macro, `#[path]`, `include!`) ahora hacen fallar `check-engine`;
+  - `checkWasmLints` exige `[lints] workspace = true`, que es la pieza que sostiene el `forbid`.
+- `check-engine` todavía no detecta todas las formas, por ejemplo `use core::include as inc;` o pasar `unsafe_code` dentro de un `deny(...)` a una macro. Como el compilador ya las rechaza con `forbid`, queda como defensa en profundidad y no bloquea.
