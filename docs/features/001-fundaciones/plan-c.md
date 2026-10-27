@@ -544,6 +544,7 @@ Con unos 30 PRs y 30 pushes a `main` al mes, en una mezcla típica, son unos 700
       - El login usa `github.token`, no `secrets.GITHUB_TOKEN`.
     - **`images`, causa del fallo sin `PUBLIC_ORIGIN`** (nit de qa-engineer en el PR #5). Además del código de salida, la salida tiene que traer el `env_invalid` de Kit y el mensaje del validador (`PUBLIC_ORIGIN is required at runtime`). Así no pasa un crash por otro motivo.
     - **`setup-js`** corre `pnpm store prune` antes del `save` en `main` (nit del architect), para que el store que se restaura con `restore-keys` no crezca sin límite.
+      **Quitado en la desviación 21:** `pnpm store prune` decide por enlaces duros, y dentro de un contenedor borraba el store entero.
     - **`release.yml/verify`** limita la espera a 300 s de reloj (`SECONDS`) y `curl --max-time 5` (nit de qa-engineer). En el peor caso termina en unos 315 s, con su propio mensaje y no por `timeout-minutes: 10`.
     - **`check-hooks.sh`** además exige `#!/bin/sh` como primera línea y pasa `sh -n` sobre el hook. Probado en negativo, en un clon temporal: con `100644` y con `exec just test`, falla con el mensaje de cada caso.
 16. **C2-11, `actionlint` no está instalado,** y por la regla del encargo no lo instalé. En su lugar:
@@ -594,7 +595,7 @@ Con unos 30 PRs y 30 pushes a `main` al mes, en una mezcla típica, son unos 700
       - Es un índice multi-arquitectura, con el digest comprobado contra el registro (`Docker-Content-Digest`).
       - Subida el 2026-10-23 a las 00:41 UTC, según el catálogo de MCR, así que cumple los 3 días desde el 2026-10-26 a las 00:41 UTC.
       - La versión es la exacta de `@playwright/test` en el lockfile (1.64.1).
-      - Va con `options: --ipc=host`, como recomienda Playwright para Chromium.
+      - Va con `options: --shm-size=1g` (ver más abajo, revisión del PR #22).
     - **Qué cambia en el job:**
       - se quitan la versión y la caché de navegadores (`restore` y `save` de `~/.cache/ms-playwright`) y el paso de instalación con su reintento;
       - un paso nuevo falla con `::error::` si `@playwright/test` no es igual a `PLAYWRIGHT_IMAGE_VERSION` (env del job). Dependabot no actualiza las imágenes de `container:`, así que un bump de `@playwright/test` obliga a subir la imagen en el mismo PR, igual que `rust:` con `rust-toolchain.toml`;
@@ -607,7 +608,22 @@ Con unos 30 PRs y 30 pushes a `main` al mes, en una mezcla típica, son unos 700
         - **Aislado,** con `--repeat-each`: 5/5 en WebKit y 3/3 en Chromium.
         - **Segunda corrida completa:** 63/63, 10 de ellos en WebKit, en 49 s.
         - **Seguimiento para qa-engineer:** RF-A8 es intermitente en WebKit. Lo más probable, sin verificar, es que el clic llegue antes de la hidratación. Es independiente de TA-12.
-    - **Solo en CI:** la variante amd64 de la imagen y el comportamiento de las actions dentro de un `container:` (`setup-node` en el toolcache del contenedor y `HOME=/github/home`). Se ve en la primera corrida del PR. El pull de la imagen (unos 2 GB) suma alrededor de 1 min por corrida, menos que `install --with-deps` (unos 2 min cuando el mirror responde).
+    - **Primera corrida en CI (PR #22, revisión de qa-engineer y security-reviewer).**
+      - **El pull de la imagen tardó 30 s.** La estimación de "alrededor de 1 min" sobraba.
+      - **El contenedor, `setup-just` y `setup-js` funcionaron**, pero `just e2e` nunca corrió. Dentro de un `container:`, Actions ejecuta `run:` con `sh -e {0}` y no con bash, así que `set -o pipefail` salía con 2.
+        - **Arreglo:** `defaults: run: shell: bash` en el job.
+        - **Regla nueva en `check-workflows`:** todo job con `container:` exige `shell: bash` en `defaults.run` del job o del workflow (`container-shell`). Con la regla, el `ci.yml` anterior fallaba.
+      - **Endurecimiento de `container:` y `services:` (security-reviewer).**
+        - `--shm-size=1g` en lugar de `--ipc=host`, que comparte el IPC del host.
+        - `check-workflows` cierra las listas:
+          - **Opciones** (`container-options`): solo `--shm-size=<tamaño>`. Fallan `--privileged`, `-v /:/host`, `--volume`, `--cap-add`, `--ipc=host`, `--network`, `--user` y `--security-opt`.
+          - **Claves** (`container-keys`): `image` y `options` en `container:`; `image`, `env`, `ports` y `options` en un servicio. Fallan `credentials` y `volumes`.
+        - 16 casos nuevos, uno por regla, que fallaban antes del arreglo; además, se aceptan `bash` en los `defaults` del workflow y `--shm-size=1g`. En total, 98/98.
+      - **Caché del store de pnpm dentro del contenedor (nit).** Nunca acertaba: Actions versiona la caché por su ruta, y dentro del contenedor `HOME` es `/github/home`, así que la ruta del store por defecto no coincidía con la que guarda `main` en el runner.
+        - `setup-js` ahora usa una ruta absoluta fija, `/tmp/torneo-pnpm-store` (`--store-dir`), igual en el runner y en el contenedor. La imagen trae `zstd`, así que el método de compresión, que también entra en la versión de la caché, coincide.
+        - Al probarlo apareció otro fallo. `pnpm store prune` (agregado en la revisión del PR #5) decide por enlaces duros. Con el store y el workspace en sistemas de archivos distintos (el overlay del contenedor frente al bind mount) o con clones de copia en escritura, borra **todos** los paquetes: en un clon en la Mac quitó los 59. En `main`, un job dentro del contenedor habría guardado un store vacío.
+        - Se quita el `prune`. Para que el store no crezca sin límite, también se quita `restore-keys`: un cambio del lock arranca una vez desde un store vacío, `main` lo guarda, y ya no arrastra paquetes viejos. El costo es una instalación sin caché en el PR que cambia el lock.
+    - **Solo en CI:** que la caché del store acierte dentro del contenedor después del primer `push` a `main` con este cambio, y que los e2e pasen con `--shm-size=1g` en amd64.
 
 ## Revisión
 

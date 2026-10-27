@@ -48,6 +48,12 @@ const CHECKOUT = /^actions\/checkout@/i;
 // (review of PR #5): no `./`, no `./tools/x`, no `..`.
 const LOCAL_ACTION = /^\.\/\.github\/actions\/([a-z0-9-]+)$/;
 const IMAGE_DIGEST = /@sha256:[0-9a-f]{64}$/;
+// Closed lists for container: and services: (review of PR #22, security-reviewer). Anything else
+// (--privileged, -v/--volume, --cap-add, --ipc=host, --network, --user, --security-opt,
+// credentials, volumes, ...) fails.
+const CONTAINER_KEYS = ['image', 'options'];
+const SERVICE_KEYS = ['env', 'image', 'options', 'ports'];
+const CONTAINER_OPTIONS = [/^--shm-size=[0-9]+[kmg]?$/];
 const EXPRESSION = /\$\{\{([\s\S]*?)\}\}/g;
 // The secrets context in any syntax: secrets.X, secrets['X'], toJSON(secrets), ...
 // Contexts are case-insensitive in GitHub expressions.
@@ -316,7 +322,7 @@ function checkWorkflow(doc, name, file, problems, local) {
       problems.push(`${file}: continue-on-error: ${where} must not declare it`);
     }
     if (typeof job.uses === 'string') checkUses(job.uses, where, file, problems, local);
-    checkImages(job, where, file, problems);
+    checkImages(job, where, file, problems, doc.defaults);
     checkSteps(job.steps, where, file, problems, local);
   }
 
@@ -354,22 +360,48 @@ function checkWorkflow(doc, name, file, problems, local) {
 }
 
 /** `container:` and `services:` images are pinned by digest, like the actions (review of PR #5). */
-function checkImages(job, where, file, problems) {
-  /** @type {[string, unknown][]} */
+function checkImages(job, where, file, problems, workflowDefaults) {
+  /** @type {[string, unknown, unknown, string[]][]} at, image, map, allowed keys */
   const images = [];
   if ('container' in job) {
-    images.push([`${where}.container`, isMap(job.container) ? job.container.image : job.container]);
+    const map = isMap(job.container) ? job.container : null;
+    images.push([`${where}.container`, map ? map.image : job.container, map, CONTAINER_KEYS]);
+    // Inside a container, run: defaults to `sh -e {0}` instead of bash, so `set -o pipefail`
+    // exits 2 (review of PR #22, qa-engineer): the job or the workflow sets shell: bash.
+    const shell = job.defaults?.run?.shell ?? workflowDefaults?.run?.shell;
+    if (shell !== 'bash') {
+      problems.push(
+        `${file}: container-shell: ${where} runs in a container and needs defaults.run.shell: bash`,
+      );
+    }
   }
   if ('services' in job) {
     const services = isMap(job.services) ? job.services : {};
-    if (!isMap(job.services)) images.push([`${where}.services`, undefined]);
+    if (!isMap(job.services)) images.push([`${where}.services`, undefined, null, SERVICE_KEYS]);
     for (const [name, service] of Object.entries(services)) {
-      images.push([`${where}.services.${name}`, isMap(service) ? service.image : service]);
+      const map = isMap(service) ? service : null;
+      images.push([`${where}.services.${name}`, map ? map.image : service, map, SERVICE_KEYS]);
     }
   }
-  for (const [at, image] of images) {
+  for (const [at, image, map, keys] of images) {
     if (typeof image !== 'string' || !IMAGE_DIGEST.test(image)) {
       problems.push(`${file}: container-image: ${at} must pin its image by @sha256 digest`);
+    }
+    if (!map) continue;
+    for (const key of Object.keys(map)) {
+      if (!keys.includes(key))
+        problems.push(`${file}: container-keys: ${at}: ${key} is not allowed`);
+    }
+    if ('options' in map) {
+      const options =
+        typeof map.options === 'string' ? map.options.trim().split(/\s+/) : [String(map.options)];
+      for (const option of options) {
+        if (!CONTAINER_OPTIONS.some((re) => re.test(option))) {
+          problems.push(
+            `${file}: container-options: ${at}: ${option} is not allowed (only --shm-size=<size>)`,
+          );
+        }
+      }
     }
   }
 }

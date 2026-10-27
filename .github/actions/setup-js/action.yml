@@ -18,7 +18,10 @@ runs:
         node-version-file: .node-version
         package-manager-cache: false
 
-    - name: Enable corepack and locate the pnpm store
+    # The store lives at one fixed absolute path on the runner and inside a container: Actions
+    # versions a cache by its path, and inside a container HOME is /github/home, so the default
+    # store path never matched the cache saved by main on the runner (review of PR #22).
+    - name: Enable corepack and fix the pnpm store path
       id: pnpm
       shell: bash
       env:
@@ -28,7 +31,7 @@ runs:
         set -euo pipefail
         corepack enable
         pnpm --version
-        echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+        echo "store=/tmp/torneo-pnpm-store" >> "$GITHUB_OUTPUT"
         # A partial store (policy installs the root only) never shares a key with a full one.
         if [ -n "$FILTER" ]; then
           echo "scope=filter-$(printf '%s' "$FILTER" | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
@@ -36,32 +39,29 @@ runs:
           echo "scope=all" >> "$GITHUB_OUTPUT"
         fi
 
+    # No restore-keys: a lock change starts from an empty store once (and main saves it), so the
+    # store never grows with old packages. `pnpm store prune` is not an option: it decides by hard
+    # links, and with the store and the workspace on different filesystems (a container) or a
+    # copy-on-write clone it removes every package (review of PR #22).
     - name: Restore the pnpm store
       id: restore
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.pnpm.outputs.store }}
         key: pnpm-store-${{ runner.os }}-${{ steps.pnpm.outputs.scope }}-${{ hashFiles('pnpm-lock.yaml') }}
-        restore-keys: pnpm-store-${{ runner.os }}-${{ steps.pnpm.outputs.scope }}-
 
     - name: pnpm install --frozen-lockfile
       shell: bash
       env:
         FILTER: ${{ inputs.filter }}
+        STORE: ${{ steps.pnpm.outputs.store }}
       run: |
         set -euo pipefail
         if [ -n "$FILTER" ]; then
-          pnpm install --frozen-lockfile --filter "$FILTER"
+          pnpm install --frozen-lockfile --store-dir "$STORE" --filter "$FILTER"
         else
-          pnpm install --frozen-lockfile
+          pnpm install --frozen-lockfile --store-dir "$STORE"
         fi
-
-    # Without it the store grows forever: restore-keys bring back the previous store on every lock
-    # change (review of PR #5).
-    - name: Prune the pnpm store before saving it (push to main only)
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore.outputs.cache-hit != 'true'
-      shell: bash
-      run: pnpm store prune
 
     - name: Save the pnpm store (push to main only)
       if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore.outputs.cache-hit != 'true'
