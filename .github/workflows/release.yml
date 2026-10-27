@@ -1,0 +1,242 @@
+# Release (RF-C13 to RF-C15, ADR-0006 D5 and D6, plan-c decisions 20, 21 and 23).
+#   - A tag vX.Y.Z builds and publishes server and web with vX.Y.Z and sha-<7> on one digest.
+#   - workflow_dispatch with `tag` is a rollback: it never builds, it only checks the tag exists.
+#   - deploy waits for the owner's approval of the `production` environment. DEPLOY_MODE=manual
+#     (the default) only records the approved tag; `api` is not implemented and fails.
+#   - verify polls https://$PUBLIC_HOST/api/health until `version` is the tag.
+# No secret besides the job token: the tag and every input reach run: through env: only.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to deploy again (vX.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      # Before anything else, in both triggers (RF-C13): `v1$(...)` is a valid git tag name.
+      - name: Validate the tag
+        id: tag
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = workflow_dispatch ]; then
+            tag="$INPUT_TAG"
+          elif [ "$EVENT" = push ] && [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag="$REF_NAME"
+          else
+            echo "unexpected trigger $EVENT" >&2
+            exit 1
+          fi
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "the tag must match ^v[0-9]+.[0-9]+.[0-9]+\$" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "short=sha-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          # GHCR rejects upper case (ADR-0006 D5).
+          echo "IMAGE_REPO=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: On a rollback the tag must already exist (no rebuild)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for img in server web; do
+            docker buildx imagetools inspect "$IMAGE_REPO/$img:$TAG" >/dev/null
+            echo "$IMAGE_REPO/$img:$TAG exists"
+          done
+
+      # A published tag never moves (ADR-0006 D5, plan-c decision 20), also when a job is re-run.
+      - name: Neither tag is published yet
+        if: github.event_name == 'push'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          SHORT: ${{ steps.tag.outputs.short }}
+        run: |
+          set -uo pipefail
+          for img in server web; do
+            for t in "$TAG" "$SHORT"; do
+              if out="$(docker buildx imagetools inspect "$IMAGE_REPO/$img:$t" 2>&1)"; then
+                echo "$IMAGE_REPO/$img:$t already exists: published tags never move" >&2
+                exit 1
+              fi
+              if ! grep -Eqi 'not found|manifest unknown|name unknown' <<<"$out"; then
+                echo "cannot tell whether $IMAGE_REPO/$img:$t exists:" >&2
+                echo "$out" >&2
+                exit 1
+              fi
+              echo "$IMAGE_REPO/$img:$t is free"
+            done
+          done
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'push'
+        with:
+          persist-credentials: false
+
+      # Only cache-from (the cache of main): a tag run never writes cache (RF-C13).
+      - name: Build and push server
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/server/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          build-args: APP_VERSION=${{ steps.tag.outputs.tag }}
+          tags: |
+            ${{ env.IMAGE_REPO }}/server:${{ steps.tag.outputs.tag }}
+            ${{ env.IMAGE_REPO }}/server:${{ steps.tag.outputs.short }}
+          labels: org.opencontainers.image.source=https://github.com/kike1303/torneo-absurdo
+          cache-from: type=gha,scope=server
+
+      - name: Build and push web
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          tags: |
+            ${{ env.IMAGE_REPO }}/web:${{ steps.tag.outputs.tag }}
+            ${{ env.IMAGE_REPO }}/web:${{ steps.tag.outputs.short }}
+          labels: org.opencontainers.image.source=https://github.com/kike1303/torneo-absurdo
+          cache-from: type=gha,scope=web
+
+      # One image manifest per tag, never an index, before the retention (ADR-0006 D5).
+      - name: Each tag is a single image manifest, both on the same digest
+        if: github.event_name == 'push'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          SHORT: ${{ steps.tag.outputs.short }}
+        run: |
+          set -euo pipefail
+          for img in server web; do
+            digests=""
+            for t in "$TAG" "$SHORT"; do
+              raw="$(docker buildx imagetools inspect --raw "$IMAGE_REPO/$img:$t")"
+              media="$(jq -r .mediaType <<<"$raw")"
+              case "$media" in
+                application/vnd.oci.image.manifest.v1+json | application/vnd.docker.distribution.manifest.v2+json) ;;
+                *) echo "$img:$t is $media, expected an image manifest" >&2; exit 1 ;;
+              esac
+              digest="sha256:$(printf '%s' "$raw" | sha256sum | cut -d' ' -f1)"
+              echo "$img:$t $media $digest"
+              digests="$digests $digest"
+            done
+            if [ "$(tr ' ' '\n' <<<"$digests" | sed '/^$/d' | sort -u | wc -l)" != 1 ]; then
+              echo "$img: $TAG and $SHORT point to different digests" >&2
+              exit 1
+            fi
+          done
+
+      # Exactly these parameters (ADR-0006 D5). node20 action: see plan-c, Risks.
+      - name: Retention of server (keep 10)
+        if: github.event_name == 'push'
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          package-name: torneo-absurdo/server
+          package-type: container
+          min-versions-to-keep: 10
+
+      - name: Retention of web (keep 10)
+        if: github.event_name == 'push'
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          package-name: torneo-absurdo/web
+          package-type: container
+          min-versions-to-keep: 10
+
+  # Human gate (RF-C14): the owner approves `production` after deploying the tag by hand.
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions: {}
+    steps:
+      - name: Record the approved tag
+        env:
+          DEPLOY_MODE: ${{ vars.DEPLOY_MODE }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "$DEPLOY_MODE" = api ]; then
+            echo "DEPLOY_MODE=api is not implemented: it requires a new OK from the owner" >&2
+            exit 1
+          fi
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "invalid tag from build" >&2
+            exit 1
+          fi
+          echo "approved tag: $TAG (DEPLOY_MODE=manual)"
+
+  verify:
+    needs: [build, deploy]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - name: /api/health reports the tag (RF-C15)
+        env:
+          PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          set -uo pipefail
+          if [ -z "$PUBLIC_HOST" ] || ! [[ "$PUBLIC_HOST" =~ ^[a-z0-9.-]+$ ]]; then
+            echo "vars.PUBLIC_HOST is missing or is not a host name" >&2
+            exit 1
+          fi
+          # Every 10 s for at most 5 min (300 s of wall clock, whatever curl takes), so the job ends
+          # with its own message well before timeout-minutes.
+          deadline=$((SECONDS + 300))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            version="$(curl -fsS --proto '=https' --max-time 5 "https://$PUBLIC_HOST/api/health" \
+              | jq -r .version 2>/dev/null || true)"
+            if [ "$version" = "$TAG" ]; then
+              echo "https://$PUBLIC_HOST/api/health reports $TAG"
+              exit 0
+            fi
+            echo "version: ${version:-<no answer>}, waiting for $TAG"
+            sleep 10
+          done
+          echo "https://$PUBLIC_HOST/api/health never reported $TAG" >&2
+          exit 1

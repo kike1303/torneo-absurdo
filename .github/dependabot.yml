@@ -1,0 +1,50 @@
+# RF-C16 and plan-c decision 22: weekly, with a 3-day cooldown against freshly published malicious
+# versions. No groups and no auto-merge: every PR goes through the same review (RF-C12).
+# A rust: bump without rust-toolchain.toml, or a node: bump without .node-version, fails in
+# scripts/check-compose.mjs on purpose: bump both in the same PR.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    # The composite actions pin SHAs too.
+    directories: ['/', '/.github/actions/*']
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+
+  # pnpm workspace (pnpm-lock.yaml at the root).
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+
+  # Base image digests of the two Dockerfiles.
+  - package-ecosystem: docker
+    directories: ['/apps/server', '/apps/web']
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+
+  # The Postgres digest of infra/compose.dev.yml and infra/compose.local.yml (the docker
+  # ecosystem does not read compose files).
+  - package-ecosystem: docker-compose
+    directory: /infra
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5

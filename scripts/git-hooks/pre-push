@@ -1,0 +1,8 @@
+#!/bin/sh
+# RF-C17: blocks the push when `just check` fails. Installed with `just hooks`
+# (git config core.hooksPath scripts/git-hooks, shared by every worktree of the clone).
+#
+# It checks the working tree, not the commits being pushed, and needs Docker running
+# (`just check` starts Postgres since phase B). `git push --no-verify` is the exceptional way
+# out; a worktree of a branch without scripts/git-hooks/ pushes without any check.
+exec just check
