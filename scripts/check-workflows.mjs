@@ -42,7 +42,12 @@ export const JOB_PERMISSIONS = {
 const FORBIDDEN_TRIGGERS = ['pull_request_target', 'workflow_run'];
 // Data an outsider controls. Plan-c goes further: no `${{ }}` at all inside `run:` (see below).
 const SHA_REF = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\/[^@\s]+)?@[0-9a-f]{40}$/;
-const CHECKOUT = /^actions\/checkout@/;
+// Owners and repositories are case-insensitive on GitHub: `Actions/checkout` is the same action.
+const CHECKOUT = /^actions\/checkout@/i;
+// Only the composite actions under .github/actions/ are analysed, so no other local path is usable
+// (review of PR #5): no `./`, no `./tools/x`, no `..`.
+const LOCAL_ACTION = /^\.\/\.github\/actions\/([a-z0-9-]+)$/;
+const IMAGE_DIGEST = /@sha256:[0-9a-f]{64}$/;
 const EXPRESSION = /\$\{\{([\s\S]*?)\}\}/g;
 // The secrets context in any syntax: secrets.X, secrets['X'], toJSON(secrets), ...
 // Contexts are case-insensitive in GitHub expressions.
@@ -171,10 +176,16 @@ function checkSecrets(document, file, problems) {
   }
 }
 
-/** Raw-text rules (they also see comments, on purpose). */
-function checkText(text, file, problems) {
+/**
+ * Text rules on the raw text (comments included, on purpose) and on every parsed value, so a YAML
+ * escape such as `\x79` cannot hide the text from the raw check (review of PR #5).
+ */
+function checkText(text, document, file, problems) {
+  const values = document ? scalars(document).map((s) => s.value) : [];
   for (const { rule, pattern, what } of FORBIDDEN_TEXT) {
-    if (pattern.test(text)) problems.push(`${file}: ${rule}: ${what} must never appear`);
+    if (pattern.test(text) || values.some((v) => pattern.test(v))) {
+      problems.push(`${file}: ${rule}: ${what} must never appear`);
+    }
   }
 }
 
@@ -194,7 +205,7 @@ function checkPermissionShape(permissions, where, file, problems) {
  * @param {any[]} steps
  * @param {string} where
  */
-function checkSteps(steps, where, file, problems) {
+function checkSteps(steps, where, file, problems, local) {
   if (!Array.isArray(steps)) return;
   steps.forEach((step, i) => {
     if (!isMap(step)) return;
@@ -203,7 +214,7 @@ function checkSteps(steps, where, file, problems) {
       problems.push(`${file}: continue-on-error: ${at} must not declare it`);
     }
     if (typeof step.uses === 'string') {
-      checkUses(step.uses, at, file, problems);
+      checkUses(step.uses, at, file, problems, local);
       if (CHECKOUT.test(step.uses)) {
         const persist = isMap(step.with) ? step.with['persist-credentials'] : undefined;
         if (persist !== false && persist !== 'false') {
@@ -215,11 +226,32 @@ function checkSteps(steps, where, file, problems) {
       // Stricter than RF-C12 (controllable data only): every value reaches `run:` through env.
       problems.push(`${file}: run-expression: ${at} interpolates \${{ }} inside run: use env:`);
     }
+    // Actions that evaluate code (actions/github-script) are the same injection as run:.
+    if (
+      isMap(step.with) &&
+      typeof step.with.script === 'string' &&
+      step.with.script.includes('${{')
+    ) {
+      problems.push(`${file}: script-expression: ${at} interpolates \${{ }} inside with.script`);
+    }
   });
 }
 
-function checkUses(uses, at, file, problems) {
-  if (uses.startsWith('./')) return;
+/**
+ * @param {Set<string>} local names of the composite actions present under .github/actions/
+ */
+function checkUses(uses, at, file, problems, local) {
+  if (uses.startsWith('.')) {
+    const match = LOCAL_ACTION.exec(uses);
+    if (!match) {
+      problems.push(
+        `${file}: local-action: ${at} uses ${uses}: local actions must be ./.github/actions/<name>`,
+      );
+    } else if (!local.has(match[1])) {
+      problems.push(`${file}: local-action: ${at} uses ${uses}, which has no action.yml`);
+    }
+    return;
+  }
   if (!SHA_REF.test(uses)) {
     problems.push(`${file}: sha-pin: ${at} uses ${uses}: pin a third-party action by full SHA`);
   }
@@ -233,7 +265,7 @@ function triggersOf(on) {
 }
 
 /** @param {any} doc */
-function checkWorkflow(doc, name, file, problems) {
+function checkWorkflow(doc, name, file, problems, local) {
   for (const trigger of triggersOf(doc.on)) {
     if (FORBIDDEN_TRIGGERS.includes(trigger)) {
       problems.push(`${file}: forbidden-trigger: ${trigger} is not allowed`);
@@ -283,8 +315,9 @@ function checkWorkflow(doc, name, file, problems) {
     if ('continue-on-error' in job) {
       problems.push(`${file}: continue-on-error: ${where} must not declare it`);
     }
-    if (typeof job.uses === 'string') checkUses(job.uses, where, file, problems);
-    checkSteps(job.steps, where, file, problems);
+    if (typeof job.uses === 'string') checkUses(job.uses, where, file, problems, local);
+    checkImages(job, where, file, problems);
+    checkSteps(job.steps, where, file, problems, local);
   }
 
   if (name === 'release.yml') {
@@ -320,13 +353,34 @@ function checkWorkflow(doc, name, file, problems) {
   }
 }
 
+/** `container:` and `services:` images are pinned by digest, like the actions (review of PR #5). */
+function checkImages(job, where, file, problems) {
+  /** @type {[string, unknown][]} */
+  const images = [];
+  if ('container' in job) {
+    images.push([`${where}.container`, isMap(job.container) ? job.container.image : job.container]);
+  }
+  if ('services' in job) {
+    const services = isMap(job.services) ? job.services : {};
+    if (!isMap(job.services)) images.push([`${where}.services`, undefined]);
+    for (const [name, service] of Object.entries(services)) {
+      images.push([`${where}.services.${name}`, isMap(service) ? service.image : service]);
+    }
+  }
+  for (const [at, image] of images) {
+    if (typeof image !== 'string' || !IMAGE_DIGEST.test(image)) {
+      problems.push(`${file}: container-image: ${at} must pin its image by @sha256 digest`);
+    }
+  }
+}
+
 /** @param {any} doc */
-function checkAction(doc, file, problems) {
+function checkAction(doc, file, problems, local) {
   const runs = isMap(doc.runs) ? doc.runs : {};
   if (runs.using !== 'composite') {
     problems.push(`${file}: composite: local actions must be composite, got ${show(runs.using)}`);
   }
-  checkSteps(runs.steps, 'runs', file, problems);
+  checkSteps(runs.steps, 'runs', file, problems, local);
 }
 
 /**
@@ -338,6 +392,11 @@ export function checkWorkflows(tree) {
   const problems = [];
   const workflows = tree.files.filter((f) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(f));
   const actions = tree.files.filter((f) => /^\.github\/actions\/.+\/action\.ya?ml$/.test(f));
+  const local = new Set(
+    actions
+      .map((f) => /^\.github\/actions\/([^/]+)\/action\.ya?ml$/.exec(f)?.[1])
+      .filter((name) => name !== undefined),
+  );
   if (workflows.length === 0) problems.push(`${WORKFLOWS_DIR}: exists: no workflow found`);
   for (const name of Object.keys(JOB_PERMISSIONS)) {
     if (!workflows.includes(`${WORKFLOWS_DIR}/${name}`)) {
@@ -348,13 +407,13 @@ export function checkWorkflows(tree) {
   for (const file of [...workflows, ...actions]) {
     const text = tree.read(file);
     if (text === null) continue;
-    checkText(text, file, problems);
     const parsed = parseYaml(text, file, problems);
+    checkText(text, parsed?.document, file, problems);
     if (!parsed) continue;
     checkSecrets(parsed.document, file, problems);
     if (workflows.includes(file))
-      checkWorkflow(parsed.doc, path.posix.basename(file), file, problems);
-    else checkAction(parsed.doc, file, problems);
+      checkWorkflow(parsed.doc, path.posix.basename(file), file, problems, local);
+    else checkAction(parsed.doc, file, problems, local);
   }
   return problems;
 }

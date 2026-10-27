@@ -443,6 +443,103 @@ const CASES = [
   ],
 ];
 
+const LOCAL_USES = '      - uses: ./.github/actions/setup\n';
+const RUST_JOB = '  rust:\n    needs: changes\n';
+
+/**
+ * Review of PR #5 (security-reviewer, qa-engineer): each case failed to fail before the fix.
+ * @type {[string, Record<string, [string, string][]>, RegExp][]}
+ */
+const REVIEW_CASES = [
+  // Local actions outside .github/actions/ are never analysed, so they must not be usable.
+  [
+    'local action ./tools/evil',
+    { [CI]: [[LOCAL_USES, '      - uses: ./tools/evil\n']] },
+    /local-action: .*\.\/tools\/evil/,
+  ],
+  ['local action ./', { [CI]: [[LOCAL_USES, '      - uses: ./\n']] }, /local-action:/],
+  [
+    'local action with ..',
+    { [CI]: [[LOCAL_USES, '      - uses: ./.github/actions/../x\n']] },
+    /local-action:/,
+  ],
+  [
+    'local action escaping the repo',
+    { [CI]: [[LOCAL_USES, '      - uses: ./.github/actions/../../tools/x\n']] },
+    /local-action:/,
+  ],
+  [
+    'local action that does not exist',
+    { [CI]: [[LOCAL_USES, '      - uses: ./.github/actions/missing\n']] },
+    /local-action: .*missing.*has no action\.yml/,
+  ],
+  [
+    'local action in upper case',
+    { [CI]: [[LOCAL_USES, '      - uses: ./.github/actions/Setup\n']] },
+    /local-action:/,
+  ],
+  [
+    'local action used from a composite action',
+    { [ACT]: [['    - shell: bash\n', '    - uses: ./tools/evil\n    - shell: bash\n']] },
+    /action\.yml: local-action:/,
+  ],
+  // Checkout in any case
+  [
+    'Actions/checkout without persist-credentials',
+    {
+      [CI]: [
+        [
+          '      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          persist-credentials: false\n      - uses: ./.github',
+          '      - uses: Actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n      - uses: ./.github',
+        ],
+      ],
+    },
+    /persist-credentials: jobs\.policy/,
+  ],
+  // container: and services: by digest
+  [
+    'container by tag',
+    { [CI]: [[RUST_JOB, `${RUST_JOB}    container: node:latest\n`]] },
+    /container-image: jobs\.rust\.container/,
+  ],
+  [
+    'container map by tag',
+    { [CI]: [[RUST_JOB, `${RUST_JOB}    container:\n      image: node:22\n`]] },
+    /container-image: jobs\.rust\.container/,
+  ],
+  [
+    'service by tag',
+    { [CI]: [[RUST_JOB, `${RUST_JOB}    services:\n      x:\n        image: evil/img:latest\n`]] },
+    /container-image: jobs\.rust\.services\.x/,
+  ],
+  // ${{ }} inside with.script (actions that evaluate code)
+  [
+    'expression in with.script',
+    {
+      [CI]: [
+        [
+          RUN_STEP,
+          '      - uses: actions/github-script@0123456789012345678901234567890123456789\n        with:\n          script: console.log("${{ github.event.pull_request.title }}")\n',
+        ],
+      ],
+    },
+    /script-expression: jobs\.rust\.steps\[0\]/,
+  ],
+  // Text rules on parsed values: a YAML escape must not hide the text
+  [
+    'escaped deploy endpoint',
+    {
+      [REL]: [['      - run: echo verify\n', '      - run: "curl https://x/api/v1/deplo\\x79"\n']],
+    },
+    /deploy-platform: \/api\/v1\/deploy/,
+  ],
+  [
+    'escaped platform name',
+    { [REL]: [['      - run: echo verify\n', '      - run: "echo \\x43oolify"\n']] },
+    /deploy-platform: the deployment platform name/,
+  ],
+];
+
 describe('check-workflows (RF-C12, plan-c decision 23)', () => {
   it('passes on the valid fixture', () => {
     expect(checkWorkflows(valid)).toEqual([]);
@@ -474,5 +571,26 @@ describe('check-workflows (RF-C12, plan-c decision 23)', () => {
       problems.some((p) => pattern.test(p)),
       problems.join('\n') || '(no problems)',
     ).toBe(true);
+  });
+
+  it.each(REVIEW_CASES)('fails on: %s', (_name, edits, pattern) => {
+    const problems = checkWorkflows(mutated(edits));
+    expect(
+      problems.some((p) => pattern.test(p)),
+      problems.join('\n') || '(no problems)',
+    ).toBe(true);
+  });
+
+  it('accepts container: and services: pinned by digest', () => {
+    const digest = `@sha256:${'a'.repeat(64)}`;
+    const tree = mutated({
+      [CI]: [
+        [
+          RUST_JOB,
+          `${RUST_JOB}    container: node:22${digest}\n    services:\n      pg:\n        image: postgres:17${digest}\n`,
+        ],
+      ],
+    });
+    expect(checkWorkflows(tree)).toEqual([]);
   });
 });
