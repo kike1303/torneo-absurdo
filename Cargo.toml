@@ -1,5 +1,12 @@
 [workspace]
-members = ["apps/server", "crates/engine", "crates/engine-wasm", "crates/protocol"]
+members = [
+    "apps/server",
+    "crates/content",
+    "crates/engine",
+    "crates/engine-wasm",
+    "crates/protocol",
+    "crates/sim",
+]
 resolver = "3"
 
 [workspace.package]
@@ -13,6 +20,7 @@ publish = false
 [workspace.dependencies]
 protocol = { path = "crates/protocol" }
 engine = { path = "crates/engine" }
+content = { path = "crates/content" }
 # No default features: no `std`, `os_rng` nor `serde` in the engine (003 RF5, RF6).
 rand_chacha = { version = "=0.9.0", default-features = false }
 wasm-bindgen = "=0.2.129"

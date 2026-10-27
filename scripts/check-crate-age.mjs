@@ -14,7 +14,14 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 export const MIN_AGE_DAYS = 3;
-export const WORKSPACE_MEMBERS = Object.freeze(['engine', 'engine-wasm', 'protocol', 'server']);
+export const WORKSPACE_MEMBERS = Object.freeze([
+  'content',
+  'engine',
+  'engine-wasm',
+  'protocol',
+  'server',
+  'sim',
+]);
 export const CRATES_IO_SOURCES = Object.freeze([
   'registry+https://github.com/rust-lang/crates.io-index',
   'sparse+https://index.crates.io/',
