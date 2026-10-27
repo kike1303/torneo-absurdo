@@ -644,6 +644,36 @@ const CONTAINER_CASES = [
   ],
 ];
 
+const PW_IMAGE = `mcr.microsoft.com/playwright:v1.64.1-noble${DIGEST}`;
+/** The rust job inside the Playwright image, with bash, and `env` lines for the job. */
+const inPlaywright = (env) => ({
+  [CI]: [
+    [
+      RUST_JOB,
+      `${RUST_JOB}    container:\n      image: ${PW_IMAGE}\n${BASH}${env ? `    env:\n      ${env}\n` : ''}`,
+    ],
+  ],
+});
+
+/**
+ * Review of PR #22 (architect): the Playwright image tag, PLAYWRIGHT_IMAGE_VERSION and
+ * @playwright/test move together.
+ * @type {[string, Record<string, [string, string][]>, RegExp][]}
+ */
+const PLAYWRIGHT_CASES = [
+  ['PLAYWRIGHT_IMAGE_VERSION missing', inPlaywright(''), /playwright-image: jobs\.rust/],
+  [
+    'PLAYWRIGHT_IMAGE_VERSION different from the tag',
+    inPlaywright('PLAYWRIGHT_IMAGE_VERSION: 1.65.0'),
+    /playwright-image: jobs\.rust: PLAYWRIGHT_IMAGE_VERSION 1\.65\.0 .*v1\.64\.1/,
+  ],
+  [
+    'PLAYWRIGHT_IMAGE_VERSION without the Playwright image',
+    { [CI]: [[RUST_JOB, `${RUST_JOB}    env:\n      PLAYWRIGHT_IMAGE_VERSION: 1.64.1\n`]] },
+    /playwright-image: jobs\.rust/,
+  ],
+];
+
 describe('check-workflows (RF-C12, plan-c decision 23)', () => {
   it('passes on the valid fixture', () => {
     expect(checkWorkflows(valid)).toEqual([]);
@@ -690,6 +720,18 @@ describe('check-workflows (RF-C12, plan-c decision 23)', () => {
       [CI]: [[RUN_STEP, '      - run: echo rust\n        timeout-minutes: 6\n']],
     });
     expect(checkWorkflows(tree)).toEqual([]);
+  });
+
+  it.each(PLAYWRIGHT_CASES)('fails on: %s', (_name, edits, pattern) => {
+    const problems = checkWorkflows(mutated(edits));
+    expect(
+      problems.some((p) => pattern.test(p)),
+      problems.join('\n') || '(no problems)',
+    ).toBe(true);
+  });
+
+  it('accepts PLAYWRIGHT_IMAGE_VERSION equal to the image tag', () => {
+    expect(checkWorkflows(mutated(inPlaywright('PLAYWRIGHT_IMAGE_VERSION: 1.64.1')))).toEqual([]);
   });
 
   it.each(CONTAINER_CASES)('fails on: %s', (_name, edits, pattern) => {

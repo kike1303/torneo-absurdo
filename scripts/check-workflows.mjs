@@ -323,6 +323,7 @@ function checkWorkflow(doc, name, file, problems, local) {
     }
     if (typeof job.uses === 'string') checkUses(job.uses, where, file, problems, local);
     checkImages(job, where, file, problems, doc.defaults);
+    checkPlaywrightImage(job, where, file, problems);
     checkSteps(job.steps, where, file, problems, local);
   }
 
@@ -403,6 +404,30 @@ function checkImages(job, where, file, problems, workflowDefaults) {
         }
       }
     }
+  }
+}
+
+/**
+ * The Playwright image tag and PLAYWRIGHT_IMAGE_VERSION of the job are the same version (review of
+ * PR #22, architect). The job itself checks it against @playwright/test at run time, so the three
+ * move together (plan-c deviation 21, ADR-0006 note of 2026-10-26).
+ */
+function checkPlaywrightImage(job, where, file, problems) {
+  const image = isMap(job.container) ? job.container.image : job.container;
+  const tag =
+    typeof image === 'string'
+      ? /^mcr\.microsoft\.com\/playwright:v([0-9]+\.[0-9]+\.[0-9]+)-/.exec(image)?.[1]
+      : undefined;
+  const declared = isMap(job.env) ? job.env.PLAYWRIGHT_IMAGE_VERSION : undefined;
+  if (tag === undefined && declared === undefined) return;
+  if (tag === undefined) {
+    problems.push(
+      `${file}: playwright-image: ${where}: PLAYWRIGHT_IMAGE_VERSION without a mcr.microsoft.com/playwright:v<X>- container image`,
+    );
+  } else if (String(declared) !== tag) {
+    problems.push(
+      `${file}: playwright-image: ${where}: PLAYWRIGHT_IMAGE_VERSION ${declared ?? '(missing)'} must equal the image tag v${tag}`,
+    );
   }
 }
 

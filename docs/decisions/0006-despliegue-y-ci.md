@@ -13,7 +13,7 @@ supersedes: null
 linear: TA-5
 depends_on: ["0002", "0003", "0005"]
 created: 2026-10-20
-updated: 2026-10-21
+updated: 2026-10-26
 ---
 
 # ADR-0006: Despliegue en Coolify y CI con presupuesto cero
@@ -237,6 +237,27 @@ updated: 2026-10-21
 - **Qué no cambia:** la decisión de D5 (distroless `nonroot`, fijadas por digest, Dependabot). También se mantienen el entrypoint `/nodejs/bin/node` del healthcheck de D3 y el binario estático de D8.
 - **Dónde está el detalle:** spec de 001, "Enmienda 2026-10-24: distroless debian13", y `plan-c.md` (decisión 2).
 - **Estado:** esta nota no cambia el `status` ni las approvals del ADR. Con el OK del owner, el texto de D5 pasa a `-debian13`.
+
+### 2026-10-26 — devops-engineer: el job `e2e` corre en la imagen oficial de Playwright (TA-12)
+- **Qué:** D7 dice que el job `e2e` cachea los navegadores en `~/.cache/ms-playwright`, con llave de la versión de `@playwright/test`, y que pnpm se cachea con `cache: pnpm` de `actions/setup-node`. Eso cambia de dos formas.
+  - **Navegadores.** `e2e` corre dentro de `mcr.microsoft.com/playwright:v<versión>-noble`, fijada por digest y con la regla de 3 días. La imagen ya trae los navegadores y sus paquetes del sistema, así que no hay caché de navegadores ni `playwright install`.
+  - **pnpm.** Su store se cachea con `actions/cache/restore` y `actions/cache/save` en una ruta fija (`/tmp/torneo-pnpm-store`), igual en el runner y en el contenedor. Se guarda solo en `main`. Ya no se usa `cache: pnpm`, que necesita pnpm antes que `setup-node` (`plan-c.md`, decisión 14).
+- **Por qué:** el mirror de apt de Azure colgó dos veces el `apt-get` de `playwright install --with-deps`, y un run consumió los 20 min del job. Un reintento acotado no sirve: `timeout` no mata el `apt-get` lanzado con `sudo`, que conserva el lock de dpkg. Con la imagen, ninguna corrida depende de apt ni de la descarga de navegadores. El pull de la imagen tardó 30 s.
+- **Contrato de actualización conjunta.** Estos tres valores se suben juntos y en el mismo PR:
+  - `@playwright/test` en `apps/web/package.json` y el lockfile;
+  - la imagen del `container:` de `e2e` en `.github/workflows/ci.yml`, con su tag `v<versión>-noble` y su digest;
+  - `PLAYWRIGHT_IMAGE_VERSION`, en el `env` del mismo job.
+
+  Dependabot no actualiza las imágenes de `container:`, así que un bump de `@playwright/test` hace fallar `e2e` (el job compara su versión con `PLAYWRIGHT_IMAGE_VERSION`) hasta que se sube la imagen. Por su parte, `scripts/check-workflows.mjs` exige que `PLAYWRIGHT_IMAGE_VERSION` sea igual al tag `v<X>` de la imagen.
+- **Qué no cambia:** el resto de D7:
+  - los jobs, los filtros y `ci-ok` como único check requerido;
+  - Chromium para todos los tests, y WebKit para los de tema y CSP;
+  - solo `main` escribe caché;
+  - las actions de terceros fijadas por SHA;
+  - los permisos y los `timeout-minutes`.
+  El job sigue corriendo en `ubuntu-24.04`, ahora con `container:`, `defaults.run.shell: bash` y `--shm-size=1g`, que `check-workflows` exige o limita.
+- **Dónde está el detalle:** `docs/features/001-fundaciones/plan-c.md`, desviación 21.
+- **Estado:** esta nota no cambia el `status` ni las approvals del ADR, ni el texto de D7.
 
 ## Revisión
 ### devops-engineer — 2026-10-20 — REQUEST_CHANGES
