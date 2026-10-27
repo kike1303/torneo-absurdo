@@ -4,7 +4,7 @@ type: architecture
 status: draft
 author: architect
 created: 2026-10-20
-updated: 2026-10-26
+updated: 2026-10-27
 ---
 
 # Arquitectura general
@@ -74,7 +74,7 @@ Scheduled ─▶ BettingOpen ─▶ BettingClosed ─▶ Live ─▶ Settled
 
 ## Renderer de peleas
 
-> Detalle normativo en la [spec de 002](features/002-spike-renderer/spec.md) ("Formato de assets v1", "Timeline v1" y "Coreografía"). La fase A1 entrega el núcleo puro; la capa Pixi, la ruta de prueba y la carga diferida llegan en A2.
+> Detalle normativo en la [spec de 002](features/002-spike-renderer/spec.md) ("Formato de assets v1", "Timeline v1" y "Coreografía"). La fase A1 entregó el núcleo puro y A2 la capa Pixi, el reproductor, la ruta de prueba y la carga diferida.
 
 - **Paquete:** `@torneo/renderer` (`packages/renderer`) exporta el TS fuente, sin paso de build, con los subpaths `.`, `./manifest`, `./timeline`, `./placeholders/*` y `./fixtures/*`. Los imports relativos llevan extensión `.ts` para que lo carguen Vite y Node con *type stripping*.
 - **Timeline propia:** el renderer no conoce el `FightLog`. Reproduce una `Timeline` de *cues* (`intro`, `strike`, `knockdown`, `ko`, `win`) validada con `validateTimeline`. El único archivo que conoce las dos formas es el adaptador del lado del consumidor, en `apps/web` (`timelineFromFightLog`, fase C de 002). Así un cambio del protocolo cae en el adaptador o en una `timeline_version` nueva, no en el renderer.
@@ -82,6 +82,10 @@ Scheduled ─▶ BettingOpen ─▶ BettingClosed ─▶ Live ─▶ Settled
 - **Escena pura:** `prepareScene(timeline, manifests)` resuelve una vez por carga la coreografía (segmentos por luchador con las reglas de precedencia), el HP por luchador y las semillas cosméticas, y lo congela. `sceneAt(prepared, t, { reducedMotion })` es función pura de `t`: búsquedas binarias y una ventana acotada de cues (`cueWindow`, hasta 3.3 s hacia atrás y 400 ms hacia adelante por el windup). `seek`, las pestañas en segundo plano y las caídas de frames no desincronizan, porque no hay estado por frame.
 - **Azar y reloj:** los efectos usan un PRNG propio (`mulberry32`) sembrado con el índice del cue y un canal, nunca la semilla de la pelea (ADR-0002). El tiempo entra por el reloj que inyecta el host. ESLint prohíbe `Math.random`, `Date`, `performance` y `crypto` en todo el paquete, y Pixi y el DOM en el núcleo (`src/{manifest,timeline,scene,fx}`).
 - **Sin texto ni colores:** la escena describe colores por rol (`hp`, `hpLost`, `crit`, `text`) que la capa Pixi traduce con `RendererTheme` (ADR-0009 D7), y los nombres y banners llegan traducidos por el host (ADR-0007). El HUD se maqueta en px CSS del contenedor (`layoutHud`), fuera de la cámara lógica de 640×360.
+- **Tres capas:** `src/player/` (puro) implementa el `RendererHandle` sobre una interfaz `Stage`: reloj de reproducción anclado al reloj del host (`t = anclaT + (clock() − anclaReloj)`, nunca frames contados), despacho de cues con un cursor (un `seek` no dispara lo que salta; un salto del reloj dispara todo el intervalo en orden), `onState`, `snapshot()` y `RendererError` con códigos. `src/stage/` (Pixi) traduce cada `Scene` a objetos reutilizables (pools de partículas y números, barras como sprites) sin guardar estado entre frames. `createRenderer(container, options)` une las dos. Las estadísticas de frames (`src/stats/`, puro) usan `elapsedMS` del ticker, así que el paquete no lee `performance.now()`.
+- **CSP sin cambios** ([ADR-0012](decisions/0012-logs-y-cabeceras-de-seguridad.md) B4.2): la entrada del paquete importa primero `pixi.js/unsafe-eval` (shaders sin `new Function`), `Assets.setPreferences({ preferWorkers: false })` evita los workers `blob:` y ESLint prohíbe los submódulos de Pixi con workers o texturas comprimidas (`ktx2`, `basis`, `ktx`, `dds`, `webworker`, `gif`). Solo WebGL: sin WebGL, `load` rechaza con `webgl_unavailable`. `csp.spec.ts` lo prueba en Chromium y WebKit sobre `/es/dev/arena`.
+- **Carga diferida en `apps/web`:** solo `lib/components/fight/FightStage.svelte` importa valores del renderer, y lo hace con `import()` en `onMount` (ESLint cubre también los `import()` fuera de ese archivo). `scripts/check-renderer-split.mjs` corre en `just e2e` sobre el build: con el manifest de Vite y el mapa chunk → módulos que escribe `apps/web/vite/chunk-modules.ts` (en `.vite/`, que no se publica), falla si alguna entrada o nodo de ruta, también el de `dev/arena`, alcanza `pixi.js` o `packages/renderer` por imports estáticos, y exige que `dev/arena` alcance Pixi por un import dinámico. `Assets` de Pixi es global: hoy hay un solo `FightStage` por página, y `destroy` descarga sus hojas.
+- **Medición:** `just arena-bench` sirve el build de producción en `127.0.0.1:3000` con el catálogo de desarrollo; el método (375 px, calentamiento y tres corridas, "copiar JSON") está en el README del paquete.
 
 ## Despliegue
 
