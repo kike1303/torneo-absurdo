@@ -13,10 +13,10 @@
   const STATS_REFRESH_MS = 500;
   const EMPTY: FrameStats = { frames: 0, fpsMean: 0, p50: 0, p95: 0, p99: 0, over33: 0 };
 
-  /** `?t=<ms>`: a non-negative integer, otherwise ignored. */
+  /** `?t=<ms>`: any non-negative integer (the renderer clamps it to the duration), else 0. */
   function initialT(): number {
     const raw = page.url.searchParams.get('t');
-    return raw !== null && /^\d{1,7}$/.test(raw) ? Number(raw) : 0;
+    return raw !== null && /^\d+$/.test(raw) ? Number(raw) : 0;
   }
 
   let stage = $state<FightStage | null>(null);

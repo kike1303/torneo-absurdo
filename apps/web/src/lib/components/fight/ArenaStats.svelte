@@ -26,20 +26,23 @@
     { key: 'over33', label: m.arena_stats_over_33(), value: formatInteger(stats.over33, locale) },
   ]);
 
+  /** "Copied" stays this long, whatever the stats refresh does (QA F3). */
+  const COPIED_MS = 2000;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
   async function copy(): Promise<void> {
     const json = JSON.stringify({ ...stats, ...context }, null, 2);
+    clearTimeout(timer);
     try {
       await navigator.clipboard.writeText(json);
       copied = true;
+      timer = setTimeout(() => (copied = false), COPIED_MS);
     } catch {
       copied = false;
     }
   }
 
-  $effect(() => {
-    void stats;
-    copied = false;
-  });
+  $effect(() => () => clearTimeout(timer));
 </script>
 
 <section class="flex flex-col gap-3" aria-labelledby="arena-stats-title" data-testid="arena-stats">

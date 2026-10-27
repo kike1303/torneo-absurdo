@@ -2,6 +2,7 @@
 import { Assets, Rectangle, Texture } from 'pixi.js';
 import type { SpriteManifest } from '../manifest/types.ts';
 import { RendererError } from '../player/errors.ts';
+import { createSharedCache } from './shared-cache.ts';
 
 export interface FighterTextures {
   /** One texture per manifest frame. */
@@ -19,6 +20,12 @@ export const EMPTY_TEXTURES: TextureSet = { byAsset: new Map(), urls: [] };
 
 let preferencesSet = false;
 
+/** One cache for the page, like `Assets`: overlapping renderers share each sheet. */
+const sheets = createSharedCache<Texture>({
+  load: (url) => Assets.load<Texture>({ src: url, parser: 'texture' }),
+  unload: (url) => Assets.unload(url),
+});
+
 /** Workers would be created from `blob:` URLs, which the CSP blocks (ADR-0012 B4.2). */
 export function disableWorkers(): void {
   if (preferencesSet) return;
@@ -35,19 +42,19 @@ export async function loadTextures(
   const byAsset = new Map<string, FighterTextures>();
   try {
     for (const [id, manifest] of manifests) {
-      const sheets: Texture[] = [];
+      const loaded: Texture[] = [];
       for (const sheet of manifest.sheets) {
         const url = resolveAsset(id, sheet.file);
         urls.push(url);
-        const texture = await Assets.load<Texture>({ src: url, parser: 'texture' });
+        const texture = await sheets.acquire(url);
         if (texture.width !== sheet.width || texture.height !== sheet.height) {
           throw new RendererError('asset_invalid');
         }
         if (manifest.pixel_art) texture.source.scaleMode = 'nearest';
-        sheets.push(texture);
+        loaded.push(texture);
       }
       const frames = manifest.frames.map((f) => {
-        const sheet = sheets[f.sheet];
+        const sheet = loaded[f.sheet];
         if (sheet === undefined) throw new RendererError('asset_invalid');
         return new Texture({ source: sheet.source, frame: new Rectangle(f.x, f.y, f.w, f.h) });
       });
@@ -66,5 +73,5 @@ export async function unloadTextures(set: TextureSet): Promise<void> {
   for (const fighter of set.byAsset.values()) {
     for (const texture of fighter.frames) texture.destroy(false);
   }
-  await Promise.allSettled(set.urls.map((url) => Assets.unload(url)));
+  await Promise.allSettled(set.urls.map((url) => sheets.release(url)));
 }

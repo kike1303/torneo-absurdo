@@ -145,3 +145,47 @@ for (const size of SIZES) {
     }
   }
 }
+
+// QA findings of A2.
+test('F1: switching a fighter quickly many times leaves one playing arena, without errors', async ({
+  browser,
+}) => {
+  // The race is timing dependent, so it runs on several fresh pages (the unit test of
+  // shared-cache.ts is the deterministic one).
+  for (let run = 0; run < 4; run++) {
+    const page = await browser.newPage();
+    const errors = trackErrors(page);
+    await page.goto('/es/dev/arena?t=1500');
+    await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+    const select = page.getByTestId('arena-fighter-b');
+    for (let i = 0; i < 6; i++) {
+      await select.selectOption(i % 2 ? 'dummy_b' : 'dummy_a', { force: true }).catch(() => {});
+      await page.waitForTimeout(i * 40);
+    }
+    await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+    await page.waitForTimeout(1500);
+    expect(errors, `run ${run}`).toEqual([]);
+    await expect(page.locator('[data-testid="fight-stage"] canvas')).toHaveCount(1);
+    await page.close();
+  }
+});
+
+test('F3: "Copied" stays while the stats refresh', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/es/dev/arena');
+  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+  await waitForHydration(page);
+  await page.getByTestId('arena-show-stats').click();
+  await page.getByTestId('arena-copy-stats').click();
+  await expect(page.getByText('Copiado')).toBeVisible();
+  // The panel refreshes every 500 ms; the message outlives several refreshes.
+  await page.waitForTimeout(1200);
+  await expect(page.getByText('Copiado')).toBeVisible();
+  const copied = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
+  expect(copied).toMatchObject({ fighters: ['dummy_a', 'dummy_b'] });
+});
+
+test('F4: ?t= with many digits is clamped to the end', async ({ page }) => {
+  await page.goto('/es/dev/arena?t=99999999999');
+  await expect(stage(page)).toHaveAttribute('data-state', 'finished', { timeout: 15_000 });
+});

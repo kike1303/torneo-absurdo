@@ -137,7 +137,11 @@
       });
       renderer = handle;
       await handle.load(timeline, assets);
-      if (id !== run) return;
+      if (id !== run) {
+        // Superseded by a newer start (a fighter switched quickly): never leave it running.
+        handle.destroy();
+        return;
+      }
       handle.onState((next) => {
         phase = next;
         refresh();
