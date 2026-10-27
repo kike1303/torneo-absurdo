@@ -357,6 +357,60 @@ describe('timelineFromFightLog', () => {
     for (const line of imports) expect(line).toMatch(/^import type /);
   });
 
+  // QA findings of phase C.
+  it('an event without a finite t never disables adapter.unsorted', () => {
+    const unknown = withEvents((e) => {
+      e.splice(3, 0, { type: 'future_x' } as unknown as FightEvent);
+      e[at(e, 'attack', 3)] = { ...e[at(e, 'attack', 3)], t: 100 } as FightEvent;
+    });
+    expect(codes(timelineFromFightLog(unknown, ASSETS))).toEqual(['adapter.unsorted']);
+    const known = withEvents((e) => {
+      const lowHp = at(e, 'low_hp');
+      e[lowHp] = { ...e[lowHp], t: 'x' } as unknown as FightEvent;
+      e[at(e, 'attack', 4)] = { ...e[at(e, 'attack', 4)], t: 100 } as FightEvent;
+    });
+    expect(codes(timelineFromFightLog(known, ASSETS))).toEqual([
+      'adapter.invalid_t',
+      'adapter.unsorted',
+    ]);
+  });
+
+  it.each<[string, (events: FightEvent[]) => void, string[]]>([
+    [
+      'a wrong damage',
+      (e) => (e[2] = { ...e[2], damage: 11 } as FightEvent),
+      ['adapter.hp_mismatch'],
+    ],
+    ['a wrong hp', (e) => (e[2] = { ...e[2], hp: 89 } as FightEvent), ['adapter.hp_mismatch']],
+    [
+      'an orphan resolution with damage',
+      (e) =>
+        e.splice(1, 0, {
+          type: 'hit',
+          t: 2000,
+          attacker: 'a',
+          ability: 'strike',
+          damage: 5,
+          crit: false,
+          weak: false,
+          hp: 95,
+        }),
+      ['adapter.resolution_without_attack'],
+    ],
+  ])('one bad event gives one error: %s', (_name, edit, expected) => {
+    expect(codes(timelineFromFightLog(withEvents(edit), ASSETS))).toEqual(expected);
+  });
+
+  it('a dangling attack in a log without end is reported too', () => {
+    const log = withEvents((e) => {
+      e.splice(at(e, 'hit', -1));
+    });
+    expect(codes(timelineFromFightLog(log, ASSETS))).toEqual([
+      'adapter.attack_without_resolution',
+      'adapter.end_missing',
+    ]);
+  });
+
   it('same input, same output', () => {
     const one = timelineFromFightLog(koLog(), ASSETS);
     const two = timelineFromFightLog(koLog(), ASSETS);

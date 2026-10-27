@@ -252,12 +252,16 @@ Sin cambios en los workflows. El job `web` suma unos segundos de Vitest. El job 
 ## Desviaciones durante la implementación
 1. **Tipos de `engine-logs.ts` (nota 1 del architect).** El adaptador exporta `AdaptedTimeline` (`Extract<AdapterResult, { ok: true }>['timeline']`) y `AdapterLog` (alias de `FightLog`). `engine-logs.ts` solo importa del adaptador y hace el cast del JSON a `AdapterLog`, así que ningún archivo fuera del adaptador importa de `@torneo/protocol` y de `@torneo/renderer` a la vez. El test de frontera no cambia.
 2. **`WIN_DELAY_MS` se exporta** para que el test lo compare con `TIMELINE_LIMITS.winGapMs`.
-3. **La cadena de HP sigue a través de los errores.** Después de un `hit`, `block` o `dodge` con error (sin `attack`, con `attack_mismatch` o con `hp_mismatch`), el HP que lleva el adaptador pasa a `max(0, previo − damage)`. Así un solo evento incoherente da un solo error, y no uno por cada resolución posterior sobre ese luchador.
+3. **La cadena de HP sigue a través de los errores (hallazgo de QA).** Después de una resolución con error, el HP que lleva el adaptador queda con dos lecturas: la que reporta el log (`hp`) y la otra (`previo − damage` tras un `hp_mismatch`, o el previo sin contar una resolución huérfana). El siguiente `hit` o `block` sobre ese luchador acepta cualquiera de las dos y fija la que cuadra. Así un `damage` incorrecto, un `hp` incorrecto o una resolución huérfana dan **un solo** error cada uno, con tests. Si el siguiente evento no cuadra con ninguna de las dos, es otro error.
 4. **Dato de la tabla de la decisión 2 (nota 2 del architect):** el `knockdown` solo sale con `crit`, no con cualquier `hit`. No cambia nada del adaptador ni de los tests.
 5. **README del convertidor:** no tenía una tabla de errores. El código `write.foreign_output` y el marcador se documentan en una viñeta de "Uso", con qué hacer con una salida de B sin marcador.
 6. **Test existente de `write.test.ts`:** el primer caso ("reemplaza solo la salida vieja") ponía un `sheet-7.png` viejo sin marcador. Con la regla nueva eso es `write.foreign_output`, así que el caso ahora crea el marcador antes, que es el escenario que describe. Es un cambio de contrato pedido por la decisión 9 (b), no un test aflojado.
 7. **Capturas:** `arena-log-*` en `screenshots.spec.ts` a `t = 29 600` ms, justo después del primer `crit` con `knockdown` de `log-ko-comeback`.
-8. **Issue de la v2:** TA-19 ("Timeline v2: fines sin KO"), citado en `docs/architecture.md` (Timeline propia y trabajo derivado 6) y en la línea de trazabilidad de la spec.
+8. **Hallazgos de QA de la fase C:**
+   - un evento con `t` que no es un número finito sale de la cadena de orden, así que nunca apaga `adapter.unsorted` después de él. Si su `type` es conocido da `adapter.invalid_t` (código nuevo), y si no, solo suma en `ignored.unknown`;
+   - un `attack` pendiente al final de un log sin `end` también da `adapter.attack_without_resolution`;
+   - en el convertidor, un marcador que no es un archivo regular (una carpeta) da `write.marker_invalid` antes de tocar el disco, en lugar de un `EISDIR` crudo.
+9. **Issue de la v2:** TA-19 ("Timeline v2: fines sin KO"), citado en `docs/architecture.md` (Timeline propia y trabajo derivado 6) y en la línea de trazabilidad de la spec.
 
 ## Revisión
 ### architect — 2026-10-27 — APPROVE

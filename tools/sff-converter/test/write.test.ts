@@ -84,6 +84,14 @@ describe('writeOutput', () => {
     expect(readFileSync(path.join(out, 'manifest.json'), 'utf8')).toBe('old');
   });
 
+  it('a marker that is a directory is write.marker_invalid, and nothing is deleted', () => {
+    const out = path.join(repo.root, 'ignored', 'dir-marker');
+    mkdirSync(path.join(out, OUTPUT_MARKER), { recursive: true });
+    writeFileSync(path.join(out, 'manifest.json'), 'old');
+    expect(code(() => writeOutput(out, manifest, sheets))).toBe('write.marker_invalid');
+    expect(readFileSync(path.join(out, 'manifest.json'), 'utf8')).toBe('old');
+  });
+
   it('refuses when a `!` rule brings back the marker', () => {
     const local = tempRepo(`ignored/*\n!ignored/x/\nignored/x/*\n!ignored/x/${OUTPUT_MARKER}\n`);
     try {

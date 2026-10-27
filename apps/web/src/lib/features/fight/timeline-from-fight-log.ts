@@ -38,6 +38,20 @@ const MOVE_BY_KIND: Readonly<Record<AbilityKind, Move>> = {
   special: 'special',
 };
 
+const KNOWN_TYPES: ReadonlySet<string> = new Set<FightEvent['type']>([
+  'intro',
+  'attack',
+  'hit',
+  'block',
+  'dodge',
+  'knockdown',
+  'low_hp',
+  'moment',
+  'ko',
+  'time_up',
+  'end',
+]);
+
 const other = (side: Side): Side => (side === 'a' ? 'b' : 'a');
 
 interface Pending {
@@ -69,6 +83,10 @@ export function timelineFromFightLog(
     fail('adapter.intro_missing', '/events/0');
 
   const hp: Record<Side, number> = { a: log.a.max_hp, b: log.b.max_hp };
+  // After a bad resolution the HP is uncertain: `hp` follows the log and `alt` the other reading
+  // (the chain without the bad value, or without the orphan event). The next hit or block on that
+  // side accepts either and settles it, so one bad event gives one error.
+  const alt: Record<Side, number | null> = { a: null, b: null };
   const ignored = { low_hp: 0, moment: 0, unknown: 0 };
   const cues: Cue[] = [];
   const kos: { readonly side: Side; readonly t: number }[] = [];
@@ -88,8 +106,15 @@ export function timelineFromFightLog(
       fail('adapter.event_after_end', path);
       continue;
     }
-    if (event.t < previousT) fail('adapter.unsorted', path);
-    previousT = Math.max(previousT, event.t);
+    const t: unknown = event.t;
+    if (typeof t !== 'number' || !Number.isFinite(t)) {
+      // Out of the ordering chain, so it never hides an `unsorted` after it.
+      if (KNOWN_TYPES.has(event.type)) fail('adapter.invalid_t', path);
+      else ignored.unknown++;
+      continue;
+    }
+    if (t < previousT) fail('adapter.unsorted', path);
+    previousT = Math.max(previousT, t);
 
     switch (event.type) {
       case 'intro':
@@ -107,16 +132,22 @@ export function timelineFromFightLog(
       case 'hit':
       case 'block':
       case 'dodge': {
-        // The HP chain goes on through any error, so one bad event gives one error.
         const target = other(event.attacker);
-        const before = hp[target];
         const damage = event.type === 'dodge' ? 0 : event.damage;
-        const after = event.type === 'dodge' ? before : event.hp;
-        hp[target] = Math.max(0, before - damage);
+        const reported = event.type === 'dodge' ? hp[target] : event.hp;
+        const second = alt[target];
+        const before =
+          event.type !== 'dodge' && reported !== hp[target] - damage && second !== null
+            ? second
+            : hp[target];
+        const after = event.type === 'dodge' ? before : reported;
+        if (event.type !== 'dodge') alt[target] = null;
+        hp[target] = after;
         const attack: Pending | null = pending;
         pending = null;
         if (attack === null) {
           fail('adapter.resolution_without_attack', path);
+          if (event.type !== 'dodge') alt[target] = before;
           continue;
         }
         if (attack.attacker !== event.attacker || attack.ability !== event.ability) {
@@ -125,6 +156,7 @@ export function timelineFromFightLog(
         }
         if (damage > before || after !== before - damage) {
           fail('adapter.hp_mismatch', path, { expected: before - damage, actual: after });
+          alt[target] = Math.max(0, before - damage);
           continue;
         }
         const result = event.type === 'hit' ? (event.crit ? 'crit' : 'hit') : event.type;
@@ -179,6 +211,7 @@ export function timelineFromFightLog(
     }
   }
 
+  unresolved();
   if (end === null) fail('adapter.end_missing', '/events');
   if (errors.length > 0 || end === null) return { ok: false, errors };
 

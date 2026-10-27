@@ -115,6 +115,8 @@ export function writeOutput(
   if (existing === out) {
     const markerStat = lstatSync(marker, { throwIfNoEntry: false });
     if (markerStat?.isSymbolicLink() === true) fail('write.symlink');
+    if (markerStat !== undefined && !markerStat.isSymbolicLink() && !markerStat.isFile())
+      fail('write.marker_invalid');
     const marked = markerStat?.isFile() === true;
     const old = readdirSync(out).filter((name) => OLD_OUTPUT.test(name));
     if (!marked && old.length > 0) fail('write.foreign_output', { file: old[0] ?? '' });
