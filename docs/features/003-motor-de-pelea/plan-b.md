@@ -208,6 +208,15 @@ Pasos 1 a 6 (backend-engineer, 2026-10-27). Ninguna cambia el formato del log, l
 6. **Commits:** los pasos 1 y 4 van como `build:` y el 6 como `docs(content):`. Este registro va en un commit `docs(003)` aparte, después del paso 6.
 7. **Dato para 002 (no es desviación):** con los dos `trickster` y 10 000 peleas, la separación media entre resoluciones es de 961 ms (p50 de 49 resoluciones por pelea). La densidad con el contenido real la mide el informe del paso 7.
 
+Pasos 7 a 10 (game-designer y backend-engineer, 2026-10-27). Ninguna cambia el formato del log, las fórmulas, los valores de `Ruleset` ni los dorados.
+
+8. **Paso 8 omitido.** Los cuatro personajes (`fontanero-saltarin`, `guerrero-erizado`, `ogro-del-pantano`, `rata-electrica`) pasan `just sim --check` ajustando solo contenido: ni `Ruleset::v1()` ni `Criteria::RF17` cambian, así que no hay commit de ajuste ni enmienda editorial de la spec. El 3 % por `MomentKind` sigue siendo un criterio que falla.
+9. **`time_up` y `decision` son 0 % con el contenido real** (10 000 cruces con la semilla por defecto: KO 100 %). La ruta la cubren solo los dorados de los fixtures del motor (`log-decision-a/b.json` y `vectors_cover_every_event_and_moment`), como prevé la decisión 15; el criterio de RF17 es un tope (≤ 10 %), así que 0 % lo cumple.
+10. **Densidad para 002 (RF-B9 de 002):** con el contenido real, la separación media entre resoluciones es de ~1 096 ms, frente a los ~1,9 s que pidió 002; los ≥ 30 golpes sí se cumplen (p10 de 36 y p50 de 43 resoluciones por pelea). No es un criterio de la fase B: la separación buena la fija el owner en RF-B9 de 002, y si hace falta se ajusta después con los valores de ritmo del `Ruleset` (`interval_*`) (con el protocolo de la decisión 14 y su versión).
+11. **Ningún personaje del roster usa `ice`.** El motor y los fixtures lo cubren; el contenido real no lo ejercita.
+12. **Las claves de `## Frases` del lore se localizan por idioma** (por ejemplo, `victory` en `lore.en.md` y `victoria` en `lore.es.md`), y el skill `write-character` no fija que sean las mismas. Hoy nada las lee (el parseo del lore es de la feature que lo muestre, decisión 5); esa feature tendrá que fijar claves comunes en el skill o tolerarlas.
+13. **Tiempo de los tests en debug (paso 9):** `cargo test -p sim --test balance` tarda 5,66 s (6,0 s con cargo) y `cargo test -p engine` 12,0 s (`properties.rs` 10,6 s, como en la fase A). `balance` queda por debajo de los ~10 s, así que **no** se aplica `[profile.dev.package.engine] opt-level = 2`. `real_content.rs` tarda menos de 10 ms.
+
 ## Revisión
 
 ### architect — 2026-10-27 — APPROVE
