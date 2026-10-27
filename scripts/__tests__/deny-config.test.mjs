@@ -34,4 +34,10 @@ describe('deny.toml (RF-B2, plan-c deviation 22)', () => {
   it('does not drop dev-dependencies from the graph', () => {
     expect(table('graph')).not.toMatch(/^exclude-dev\s*=\s*true/m);
   });
+
+  it('checks the server target and both wasm targets of the engine (003 RF18)', () => {
+    expect(table('graph')).toMatch(
+      /^targets = \["x86_64-unknown-linux-musl", "wasm32-unknown-unknown", "wasm32-wasip1"\]$/m,
+    );
+  });
 });

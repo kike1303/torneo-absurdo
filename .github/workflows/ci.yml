@@ -66,6 +66,9 @@ jobs:
               # Run by _check-gen inside check-rust (review of PR #5).
               - scripts/gen-protocol-ts.mjs
               - scripts/compare-trees.mjs
+              # Run by _check-engine and _check-wasm inside check-rust (003).
+              - scripts/check-engine.mjs
+              - scripts/wasi-runner.mjs
             web:
               - *common
               - apps/web/**
@@ -98,6 +101,7 @@ jobs:
               - scripts/check-dockerignore.sh
               - scripts/fixtures/context.Dockerfile
               - scripts/local-networks.sh
+              - Cargo.toml
               - Cargo.lock
               - rust-toolchain.toml
               - pnpm-lock.yaml
