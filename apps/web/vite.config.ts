@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
@@ -40,6 +41,12 @@ export default defineConfig({
   // changeOrigin (the browser Origin reaches the server intact) and without xfwd. The anchored
   // regular expressions keep /apix and /wsx in web.
   server: {
+    // Kit narrows `server.fs.allow` to apps/web, so `?url` imports of the placeholder sheets in
+    // packages/renderer answered 403 in `vite dev` (found in 002 phase B, which plays them there).
+    // Only that folder is added; content/_local/ is served by localSprites(), never through fs.
+    fs: {
+      allow: [fileURLToPath(new URL('../../packages/renderer/placeholders/', import.meta.url))],
+    },
     proxy: {
       '^/api(?:/|$)': { target: 'http://127.0.0.1:8080' },
       '^/ws$': { target: 'ws://127.0.0.1:8080', ws: true },
