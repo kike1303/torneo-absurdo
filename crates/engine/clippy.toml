@@ -2,8 +2,9 @@
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 
-# 003 RF5: the engine is pure. `allow-invalid` is set on the items that do not exist when
-# rand_core is compiled without `os_rng` (the engine alone, the wasm target).
+# 003 RF5: the engine is pure. Every rand_core path has `allow-invalid`, so a future rand_core
+# that moves or drops an item does not make clippy reject the file (`OsRng`, `from_os_rng` and
+# `try_from_os_rng` do not even exist without `os_rng`: the engine alone, the wasm target).
 disallowed-types = [
     { path = "std::collections::HashMap", reason = "iteration order is not deterministic; use BTreeMap or Vec" },
     { path = "std::collections::HashSet", reason = "iteration order is not deterministic; use BTreeSet or Vec" },
@@ -14,7 +15,7 @@ disallowed-types = [
 disallowed-methods = [
     { path = "rand_core::SeedableRng::from_os_rng", reason = "seed only with Seed (ChaCha20Rng::from_seed)", allow-invalid = true },
     { path = "rand_core::SeedableRng::try_from_os_rng", reason = "seed only with Seed (ChaCha20Rng::from_seed)", allow-invalid = true },
-    { path = "rand_core::SeedableRng::from_rng", reason = "seed only with Seed (ChaCha20Rng::from_seed)" },
-    { path = "rand_core::SeedableRng::try_from_rng", reason = "seed only with Seed (ChaCha20Rng::from_seed)" },
-    { path = "rand_core::SeedableRng::seed_from_u64", reason = "seed only with Seed (ChaCha20Rng::from_seed)" },
+    { path = "rand_core::SeedableRng::from_rng", reason = "seed only with Seed (ChaCha20Rng::from_seed)", allow-invalid = true },
+    { path = "rand_core::SeedableRng::try_from_rng", reason = "seed only with Seed (ChaCha20Rng::from_seed)", allow-invalid = true },
+    { path = "rand_core::SeedableRng::seed_from_u64", reason = "seed only with Seed (ChaCha20Rng::from_seed)", allow-invalid = true },
 ]

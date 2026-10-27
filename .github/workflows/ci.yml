@@ -100,6 +100,7 @@ jobs:
               - scripts/check-dockerignore.sh
               - scripts/fixtures/context.Dockerfile
               - scripts/local-networks.sh
+              - Cargo.toml
               - Cargo.lock
               - rust-toolchain.toml
               - pnpm-lock.yaml
