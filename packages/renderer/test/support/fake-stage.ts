@@ -55,7 +55,7 @@ export function options(
     theme: THEME,
     reducedMotion: false,
     clock: clock.read,
-    labels: { names: { a: 'A', b: 'B' }, banners: { fight: 'F', ko: 'K' } },
+    labels: { names: { a: 'A', b: 'B' }, banners: { fight: 'F', ko: 'K', time: 'T' } },
     formatNumber: String,
     resolveAsset: (id, file) => `/${id}/${file}`,
     ...overrides,

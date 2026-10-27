@@ -207,7 +207,7 @@ describe('QA findings', () => {
   });
 });
 
-describe('the bound of cueWindow is 10 (plan-a2 decision 16a)', () => {
+describe('the bound of cueWindow is 11 (plan-a2 decision 16a, 005 RF9)', () => {
   it('reaches 10 with 6 strikes, 4 of them with a knockdown, on a valid timeline', () => {
     // 3 × 801 + 2 × 600 = 3 603 ms ≤ 3 700 ms, the last strike with its knockdown.
     const tl = build(['K', 'S', 'K', 'S', 'K', 'K'], false);
@@ -216,9 +216,17 @@ describe('the bound of cueWindow is 10 (plan-a2 decision 16a)', () => {
     expect(maxWindow(tl)).toBeLessThanOrEqual(K);
   });
 
-  it('no sequence of minimal gaps passes 10, and 10 is reached', () => {
+  it('reaches 11 with a time_up at the last of those strikes', () => {
+    const tl = build(['K', 'S', 'K', 'S', 'K', 'K', 'T'], false);
+    expect(tl.timeline_version).toBe(2);
+    expect(maxWindow(tl)).toBe(11);
+    expect(maxWindow(tl)).toBeLessThanOrEqual(K);
+  });
+
+  it('no sequence of minimal gaps passes 11, and 11 is reached', () => {
     // Larger gaps than the minimum can only take cues out of a window, so the minimal steps
-    // (strike alone, strike with knockdown, closing strike with ko and win) cover every case.
+    // (strike alone, strike with knockdown, closing strike with ko and win, time_up at the last
+    // strike and its closing) cover every case.
     expect(WINDOW_MS).toBe(3700);
     let max = 0;
     let count = 0;
@@ -227,13 +235,14 @@ describe('the bound of cueWindow is 10 (plan-a2 decision 16a)', () => {
         const tl = build(steps, intro);
         expect(validateTimeline(tl, MANIFESTS).ok).toBe(true);
         const m = maxWindow(tl);
-        expect(m, steps.join('')).toBeLessThanOrEqual(10);
+        expect(m, steps.join('')).toBeLessThanOrEqual(11);
         max = Math.max(max, m);
         count++;
       }
     }
     expect(count).toBeGreaterThan(100);
-    expect(max).toBe(10);
+    expect(max).toBe(11);
+    expect(max).toBeLessThanOrEqual(K);
   });
 });
 
@@ -243,5 +252,59 @@ describe('sceneAt clamps t to the duration (plan-a2 decision 16b)', () => {
       sceneAt(prepared, timeline.duration_ms, OPTS),
     );
     expect(sceneAt(prepared, timeline.duration_ms + 5000, OPTS).t).toBe(timeline.duration_ms);
+  });
+});
+
+describe('endings by time (005 RF6, RF7)', () => {
+  const byTime = (winner: Side | null) => {
+    const b = timeline_()
+      .strike(3000, 'a', 'attack_light', 'hit', 100)
+      .strike(4000, 'b', 'attack_light', 'hit', 50);
+    return prepareScene(b.finishByTime(5000, winner), MANIFESTS);
+  };
+  // time_up at 5000, closing at 6500, end at 9000.
+  const at = (p: PreparedScene, t: number, reducedMotion = false) =>
+    sceneAt(p, t, { reducedMotion });
+
+  it('reports phase, winner and ending at each closing instant of a decision', () => {
+    const p = byTime('a');
+    expect(at(p, 4999)).toMatchObject({ phase: 'fight', winner: null, ending: null });
+    expect(at(p, 5000)).toMatchObject({ phase: 'time_up', winner: null, ending: null });
+    expect(at(p, 6499)).toMatchObject({ phase: 'time_up', winner: null, ending: null });
+    expect(at(p, 6500)).toMatchObject({ phase: 'win', winner: 'a', ending: 'decision' });
+    expect(at(p, 9000)).toMatchObject({ phase: 'finished', winner: 'a', ending: 'decision' });
+  });
+
+  it('reports phase, winner and ending at each closing instant of a draw', () => {
+    const p = byTime(null);
+    expect(at(p, 5000)).toMatchObject({ phase: 'time_up', winner: null, ending: null });
+    expect(at(p, 6500)).toMatchObject({ phase: 'draw', winner: null, ending: 'draw' });
+    expect(at(p, 9000)).toMatchObject({ phase: 'finished', winner: null, ending: 'draw' });
+  });
+
+  it('reports the ko ending from the win of a KO on', () => {
+    const p = prepareScene(timeline_({ version: 2 }).finish(3000, 'b'), MANIFESTS);
+    expect(at(p, 3000)).toMatchObject({ phase: 'ko', ending: null });
+    expect(at(p, 4500)).toMatchObject({ phase: 'win', winner: 'b', ending: 'ko' });
+    expect(at(p, p.durationMs)).toMatchObject({ phase: 'finished', ending: 'ko' });
+  });
+
+  it('shows the time banner from time_up to the end, with the ko tween', () => {
+    const p = byTime('a');
+    const codes = (t: number) => at(p, t).banners.map((b) => b.code);
+    expect(codes(4999)).toEqual([]);
+    expect(codes(5000)).toEqual(['time']);
+    expect(codes(9000)).toEqual(['time']);
+    expect(at(p, 5000).banners[0]).toMatchObject({ alpha: 0, scale: 1.4 });
+    expect(at(p, 5100).banners[0]).toMatchObject({ alpha: 0.5 });
+    expect(at(p, 5200).banners[0]).toMatchObject({ alpha: 1, scale: 1 });
+    expect(at(p, 5000, true).banners[0]).toMatchObject({ alpha: 1, scale: 1 });
+  });
+
+  it('never shows the time banner in a KO', () => {
+    const p = prepareScene(timeline_({ version: 2 }).finish(3000, 'b'), MANIFESTS);
+    for (const t of times(0, p.durationMs, 50)) {
+      expect(at(p, t).banners.map((b) => b.code)).not.toContain('time');
+    }
   });
 });

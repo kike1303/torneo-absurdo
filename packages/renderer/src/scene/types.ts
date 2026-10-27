@@ -1,7 +1,7 @@
 // Pure description of the scene at an instant (RF-A9). No colors, only roles (plan-a1
 // decision 3); no text, only codes (ADR-0007).
 import type { AnimationCode } from '../manifest/types.ts';
-import type { Side } from '../timeline/types.ts';
+import type { Ending, Side } from '../timeline/types.ts';
 
 /** Logical stage (RF-A15). Fighters, effects and damage numbers live in these coordinates. */
 export const STAGE_WIDTH = 640;
@@ -55,7 +55,7 @@ export interface CameraScene {
   readonly offsetY: number;
 }
 
-export type BannerCode = 'fight' | 'ko';
+export type BannerCode = 'fight' | 'ko' | 'time';
 
 export interface BannerScene {
   readonly code: BannerCode;
@@ -94,12 +94,14 @@ export interface FlashEffect {
 
 export type EffectScene = ParticleEffect | DamageNumberEffect | FlashEffect;
 
-export type Phase = 'intro' | 'fight' | 'ko' | 'win' | 'finished';
+export type Phase = 'intro' | 'fight' | 'ko' | 'time_up' | 'win' | 'draw' | 'finished';
 
 export interface Scene {
   readonly t: number;
   readonly phase: Phase;
   readonly winner: Side | null;
+  /** How the fight ended, from the closing cue (`win` or `draw`) on; null before (005 RF7). */
+  readonly ending: Ending | null;
   readonly fighters: Readonly<Record<Side, FighterScene>>;
   readonly hud: HudScene;
   readonly camera: CameraScene;

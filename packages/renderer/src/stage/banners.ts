@@ -1,10 +1,10 @@
-// Banners `fight` and `ko` (RF-A13): host text, theme fonts, outside the camera.
+// Banners `fight`, `ko` and `time` (RF-A13, 005 RF6): host text, theme fonts, outside the camera.
 import { Container, Text } from 'pixi.js';
 import type { RendererLabels, RendererTheme } from '../player/types.ts';
 import type { HudLayout } from '../scene/hud.ts';
 import type { BannerCode, BannerScene } from '../scene/types.ts';
 
-const CODES: readonly BannerCode[] = ['fight', 'ko'];
+const CODES: readonly BannerCode[] = ['fight', 'ko', 'time'];
 
 export interface BannerLayer {
   readonly container: Container;
@@ -29,6 +29,8 @@ export function createBannerLayer(theme: RendererTheme, labels: RendererLabels):
   const paint = (current: RendererTheme): void => {
     texts.fight.style.fill = current.colors.text;
     texts.ko.style.fill = current.colors.crit;
+    // The bell is not a blow: no crit color (005 spec P1).
+    texts.time.style.fill = current.colors.text;
   };
   paint(theme);
 

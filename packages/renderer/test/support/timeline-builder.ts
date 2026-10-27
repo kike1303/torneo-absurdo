@@ -7,6 +7,7 @@ import {
   type Side,
   type StrikeResult,
   type Timeline,
+  type TimelineVersion,
 } from '../../src/timeline/index.ts';
 import { MANIFESTS } from './placeholders.ts';
 
@@ -14,6 +15,8 @@ export interface BuilderOptions {
   readonly maxHp?: number;
   readonly manifests?: ReadonlyMap<string, SpriteManifest>;
   readonly assets?: Readonly<Record<Side, string>>;
+  /** `timeline_version` of the KO timelines of `finish` (1 by default). */
+  readonly version?: TimelineVersion;
 }
 
 export class TimelineBuilder {
@@ -22,12 +25,14 @@ export class TimelineBuilder {
   private readonly maxHp: number;
   readonly manifests: ReadonlyMap<string, SpriteManifest>;
   private readonly assets: Readonly<Record<Side, string>>;
+  private readonly version: TimelineVersion;
 
   constructor(options: BuilderOptions = {}) {
     this.maxHp = options.maxHp ?? 1000;
     this.hp = { a: this.maxHp, b: this.maxHp };
     this.manifests = options.manifests ?? MANIFESTS;
     this.assets = options.assets ?? { a: 'dummy_a', b: 'dummy_b' };
+    this.version = options.version ?? 1;
   }
 
   strike(at: number, actor: Side, move: Move, result: StrikeResult, damage = 0): this {
@@ -57,9 +62,27 @@ export class TimelineBuilder {
     if (this.hp[loser] > 0) this.strike(at, winner, 'special', 'crit', this.hp[loser]);
     this.cues.push({ at_ms: at, type: 'ko', fighter: loser });
     this.cues.push({ at_ms: at + 1500, type: 'win', fighter: winner });
+    return this.validate(this.version, at + 1500 + 2000);
+  }
+
+  /**
+   * Ends by time (v2): `time_up` at `at`, then the closing 1 500 ms later, `win` of `winner` (a
+   * decision) or `draw` when it is null, and 2 500 ms of pose, like the engine goldens.
+   */
+  finishByTime(at: number, winner: Side | null): Timeline {
+    this.cues.push({ at_ms: at, type: 'time_up' });
+    this.cues.push(
+      winner === null
+        ? { at_ms: at + 1500, type: 'draw' }
+        : { at_ms: at + 1500, type: 'win', fighter: winner },
+    );
+    return this.validate(2, at + 4000);
+  }
+
+  private validate(version: TimelineVersion, duration: number): Timeline {
     const json = {
-      timeline_version: 1,
-      duration_ms: at + 1500 + 2000,
+      timeline_version: version,
+      duration_ms: duration,
       fighters: {
         a: { asset: this.assets.a, max_hp: this.maxHp },
         b: { asset: this.assets.b, max_hp: this.maxHp },

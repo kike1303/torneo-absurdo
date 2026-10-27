@@ -1,4 +1,5 @@
-// Banners `fight` (end of the intro) and `ko` (from the KO on). The text comes from the host
+// Banners `fight` (end of the intro), `ko` (from the KO on) and `time` (from `time_up` on, 005 RF6,
+// with the tween of `ko`). The text comes from the host
 // (`labels.banners`, RF-A11); here only codes and tween values. With reduced motion, no tween.
 import type { PreparedScene } from './prepare.ts';
 import type { BannerScene } from './types.ts';
@@ -35,6 +36,10 @@ export function bannersAt(
   const ko = prepared.ko;
   if (ko !== null && t >= ko.at) {
     out.push({ code: 'ko', ...tweenIn(t - ko.at, reducedMotion) });
+  }
+  const timeUp = prepared.timeUp;
+  if (timeUp !== null && t >= timeUp.at) {
+    out.push({ code: 'time', ...tweenIn(t - timeUp.at, reducedMotion) });
   }
   return out;
 }
