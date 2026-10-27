@@ -2,7 +2,7 @@
 id: "003"
 title: Motor de pelea v0
 type: spec
-status: approved
+status: done
 risk: high
 author: architect
 reviewers: [product-owner, security-reviewer, game-designer]

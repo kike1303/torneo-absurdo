@@ -2,7 +2,7 @@
 id: "003"
 title: Motor de pelea v0 — fase B
 type: plan
-status: approved
+status: done
 risk: high
 author: backend-engineer
 reviewers: [architect]
