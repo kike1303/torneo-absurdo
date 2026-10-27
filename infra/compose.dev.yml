@@ -19,6 +19,8 @@ services:
       - -c
       - log_min_duration_statement=-1
       - -c
+      - log_min_duration_sample=-1
+      - -c
       - log_connections=off
       - -c
       - log_disconnections=off

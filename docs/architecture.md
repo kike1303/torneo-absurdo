@@ -157,13 +157,14 @@ Son los cambios en el proxy compartido que el owner aprobó el 2026-10-21. Se ha
    log_min_error_statement = panic
    log_statement = none
    log_min_duration_statement = -1
+   log_min_duration_sample = -1
    log_connections = off
    log_disconnections = off
    log_transaction_sample_rate = 0
    log_statement_sample_rate = 1
    log_lock_waits = off
    ```
-   - Con los valores por defecto, Postgres escribe en su log el `DETAIL` (`Key (…)=(…)`, `Failing row contains (…)`) y la línea `STATEMENT` de cada error. `terse` y `panic` los quitan, y las líneas `ERROR` quedan solo con el mensaje primario. Los tres últimos son los valores por defecto, fijados para que nadie muestree transacciones completas al diagnosticar latencia.
+   - Con los valores por defecto, Postgres escribe en su log el `DETAIL` (`Key (…)=(…)`, `Failing row contains (…)`) y la línea `STATEMENT` de cada error. `terse` y `panic` los quitan, y las líneas `ERROR` quedan solo con el mensaje primario. Los cuatro últimos son los valores por defecto, fijados para que nadie encienda el registro muestreado de sentencias (`log_min_duration_sample`) ni de transacciones completas (`log_transaction_sample_rate`) al diagnosticar latencia.
    - `log_line_prefix` se deja en `%m [%p] ` (sin `%h` ni `%r`), `log_hostname` en `off`, y no se cargan `auto_explain` ni `pg_stat_statements` con salida a log.
    - Un valor inválido hace que Postgres no arranque, y el healthcheck de Coolify lo muestra. Nunca se queda con los valores por defecto.
    - Los `FATAL` de conexión (`no pg_hba.conf entry for host "…"`) llevan la IP en el mensaje primario, y `terse` no la quita. Se acepta **solo mientras Postgres no tenga puerto público** y solo `server` se conecte por `torneo-db` (ADR-0006). Si eso cambia, se revisa A9 antes.
@@ -197,7 +198,7 @@ Ninguno se cumple en la feature 001. Se siguen en Linear (TA-8, bloqueado por la
      ```sql
      SELECT name, setting, source FROM pg_settings WHERE name IN (
        'log_error_verbosity', 'log_min_error_statement', 'log_statement',
-       'log_min_duration_statement', 'log_connections', 'log_disconnections',
+       'log_min_duration_statement', 'log_min_duration_sample', 'log_connections', 'log_disconnections',
        'log_transaction_sample_rate', 'log_statement_sample_rate', 'log_lock_waits',
        'log_line_prefix', 'log_hostname') ORDER BY name;
      ```

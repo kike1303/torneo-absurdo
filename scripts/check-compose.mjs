@@ -111,13 +111,14 @@ const POSTGRES_KEYS = [
 const POSTGRES_TUNING = ['shared_buffers=128MB', 'max_connections=20', 'work_mem=4MB'];
 /**
  * Log parameters of ADR-0012 A9: no DETAIL, STATEMENT, statements or client hosts in the logs.
- * The last three are the defaults, fixed so that sampling never logs whole transactions.
+ * The last four are the defaults, fixed so that no sampling ever logs statements or transactions.
  */
 const POSTGRES_LOG_PARAMS = [
   'log_error_verbosity=terse',
   'log_min_error_statement=panic',
   'log_statement=none',
   'log_min_duration_statement=-1',
+  'log_min_duration_sample=-1',
   'log_connections=off',
   'log_disconnections=off',
   'log_transaction_sample_rate=0',
