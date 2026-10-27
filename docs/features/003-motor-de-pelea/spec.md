@@ -2,7 +2,7 @@
 id: "003"
 title: Motor de pelea v0
 type: spec
-status: in-review
+status: approved
 risk: high
 author: architect
 reviewers: [product-owner, security-reviewer, game-designer]
@@ -10,6 +10,7 @@ approvals:
   - {by: product-owner, date: 2026-10-26}
   - {by: security-reviewer, date: 2026-10-26}
   - {by: game-designer, date: 2026-10-26}
+  - {by: owner, date: 2026-10-26}
 linear: TA-3
 depends_on: ["001"]
 created: 2026-10-26
@@ -548,3 +549,6 @@ Seed (32 B, server or sim) ──▶ engine::simulate(seed, a, b, Ruleset::for_v
 ### game-designer — 2026-10-26 — APPROVE (ronda 2)
 - Verifiqué: los 10 cambios uno por uno; corrí de nuevo `arch/roster2.py` y `arch/marg2.py` (aproximación en Python): win rate marginal por stat 44–52 %, 92,8 % de las peleas en 45–90 s (p10/p50/p90 = 46/57/70 s), momentos 32,7 % (clutch_ko 20,4, decisive_crit 10,8, comeback 9,1), 100 % KO, ≥ 700 ms entre impactos, lado `a` 50,2 % en espejos. El balance por personaje (28–75 %) es de contenido y se ajusta en la fase B. `knockdown` cumple los datos de 002 y no consume PRNG; `clutch_ko` cubre la "sorpresa" del intent; el ejemplo JSON cuadra.
 - No bloqueante: nombrar como campo de `Ruleset` el "×2 si está desesperado" del peso de `special` (p. ej. `w_special_desperation_mul`); en la fase B, que ningún `kind` de momento quede muerto (p. ej. cada uno ≥ 3 %).
+
+### owner — 2026-10-26 — APPROVE
+- OK explícito en chat (gate de `risk: high`, `docs/process.md`).
