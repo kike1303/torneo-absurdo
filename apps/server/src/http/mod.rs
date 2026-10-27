@@ -20,6 +20,19 @@ use crate::app::AppState;
 const X_INTERNAL_SECRET: HeaderName = HeaderName::from_static("x-internal-secret");
 const X_CLIENT_IP: HeaderName = HeaderName::from_static("x-client-ip");
 const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
+const X_REAL_IP: HeaderName = HeaderName::from_static("x-real-ip");
+
+/// Request headers whose values are marked sensitive, so no `Debug` of them prints the value
+/// (ADR-0012 A4.1 and A4.3).
+const SENSITIVE_REQUEST_HEADERS: [HeaderName; 7] = [
+    header::COOKIE,
+    header::AUTHORIZATION,
+    X_INTERNAL_SECRET,
+    X_CLIENT_IP,
+    X_FORWARDED_FOR,
+    X_REAL_IP,
+    header::FORWARDED,
+];
 
 /// The router with every layer. No `CorsLayer` (ADR-0008 D4). Layers, outermost first:
 /// sensitive request headers, request log (so 405s are logged), sensitive response headers,
@@ -36,13 +49,9 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
         .layer(
             ServiceBuilder::new()
-                .layer(SetSensitiveRequestHeadersLayer::new([
-                    header::COOKIE,
-                    header::AUTHORIZATION,
-                    X_INTERNAL_SECRET,
-                    X_CLIENT_IP,
-                    X_FORWARDED_FOR,
-                ]))
+                .layer(SetSensitiveRequestHeadersLayer::new(
+                    SENSITIVE_REQUEST_HEADERS,
+                ))
                 .layer(middleware::from_fn(request_log::layer))
                 .layer(SetSensitiveResponseHeadersLayer::new([header::SET_COOKIE]))
                 .layer(SetResponseHeaderLayer::overriding(
@@ -55,4 +64,50 @@ pub fn router(state: AppState) -> Router {
                 ))
                 .layer(middleware::from_fn(read_only::layer)),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::convert::Infallible;
+
+    use axum::http::{Request, Response};
+    use tower::ServiceExt;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn sensitive_request_headers_are_marked() {
+        let names = [
+            "cookie",
+            "authorization",
+            "x-internal-secret",
+            "x-client-ip",
+            "x-forwarded-for",
+            "x-real-ip",
+            "forwarded",
+        ];
+        // The inner service answers with the names of the headers that are not sensitive.
+        let service = ServiceBuilder::new()
+            .layer(SetSensitiveRequestHeadersLayer::new(
+                SENSITIVE_REQUEST_HEADERS,
+            ))
+            .service_fn(|request: Request<()>| async move {
+                let exposed: Vec<String> = request
+                    .headers()
+                    .iter()
+                    .filter(|(_, value)| !value.is_sensitive())
+                    .map(|(name, _)| name.to_string())
+                    .collect();
+                Ok::<_, Infallible>(Response::new(exposed))
+            });
+        let request = names
+            .iter()
+            .fold(Request::builder(), |builder, name| {
+                builder.header(*name, "canary")
+            })
+            .body(())
+            .unwrap();
+        let response = service.oneshot(request).await.unwrap();
+        assert!(response.body().is_empty(), "{:?}", response.body());
+    }
 }
