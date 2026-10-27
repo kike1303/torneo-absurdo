@@ -2,7 +2,7 @@
 id: "005"
 title: "Timeline v2: fines sin KO"
 type: intent
-status: approved
+status: done
 risk: medium
 author: product-owner
 reviewers: [architect]

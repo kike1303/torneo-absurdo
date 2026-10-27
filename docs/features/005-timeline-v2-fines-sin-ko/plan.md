@@ -2,7 +2,7 @@
 id: "005"
 title: "Timeline v2: fines sin KO"
 type: plan
-status: approved
+status: done
 risk: medium
 author: frontend-engineer
 reviewers: [architect]

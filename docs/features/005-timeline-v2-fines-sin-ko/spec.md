@@ -2,7 +2,7 @@
 id: "005"
 title: "Timeline v2: fines sin KO"
 type: spec
-status: approved
+status: done
 risk: medium
 author: architect
 reviewers: [product-owner, game-designer]
