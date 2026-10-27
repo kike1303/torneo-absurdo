@@ -1,0 +1,16 @@
+{
+  "ops": [
+    {
+      "op": "insert",
+      "path": "/cues/7",
+      "value": {
+        "at_ms": 8000,
+        "type": "time_up"
+      }
+    }
+  ],
+  "expect": {
+    "code": "timeline.time_up_count",
+    "path": "/cues/7"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/7/at_ms",
+      "value": 9000
+    }
+  ],
+  "expect": {
+    "code": "timeline.win_gap",
+    "path": "/cues/7/at_ms"
+  }
+}

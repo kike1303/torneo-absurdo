@@ -1,0 +1,12 @@
+{
+  "ops": [
+    {
+      "op": "delete",
+      "path": "/cues/6"
+    }
+  ],
+  "expect": {
+    "code": "timeline.ending_missing",
+    "path": "/cues"
+  }
+}

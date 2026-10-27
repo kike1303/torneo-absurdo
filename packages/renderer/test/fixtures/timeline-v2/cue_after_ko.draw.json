@@ -1,0 +1,38 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/6",
+      "value": {
+        "at_ms": 8000,
+        "type": "strike",
+        "actor": "a",
+        "move": "attack_heavy",
+        "result": "hit",
+        "damage": 658,
+        "target_hp": 0
+      }
+    },
+    {
+      "op": "set",
+      "path": "/cues/7",
+      "value": {
+        "at_ms": 8000,
+        "type": "ko",
+        "fighter": "b"
+      }
+    },
+    {
+      "op": "push",
+      "path": "/cues",
+      "value": {
+        "at_ms": 9500,
+        "type": "draw"
+      }
+    }
+  ],
+  "expect": {
+    "code": "timeline.cue_after_ko",
+    "path": "/cues/8"
+  }
+}

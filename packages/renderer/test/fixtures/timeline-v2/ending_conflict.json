@@ -1,0 +1,16 @@
+{
+  "ops": [
+    {
+      "op": "push",
+      "path": "/cues",
+      "value": {
+        "at_ms": 9600,
+        "type": "draw"
+      }
+    }
+  ],
+  "expect": {
+    "code": "timeline.ending_conflict",
+    "path": "/cues/8"
+  }
+}

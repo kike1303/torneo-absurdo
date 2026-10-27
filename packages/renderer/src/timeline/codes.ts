@@ -1,4 +1,5 @@
-// Error codes of validateTimeline (RF-A7). Codes, never text (ADR-0007).
+// Error codes of validateTimeline (RF-A7; the v2 ones, 005 spec "Códigos de error nuevos").
+// Codes, never text (ADR-0007).
 export const TIMELINE_CODES = Object.freeze({
   notObject: 'timeline.not_object',
   invalidType: 'timeline.invalid_type',
@@ -34,4 +35,15 @@ export const TIMELINE_CODES = Object.freeze({
   cueAfterWin: 'timeline.cue_after_win',
   durationTooShort: 'timeline.duration_too_short',
   unknownAsset: 'timeline.unknown_asset',
+  // v2 only.
+  endingMissing: 'timeline.ending_missing',
+  endingConflict: 'timeline.ending_conflict',
+  timeUpCount: 'timeline.time_up_count',
+  cueAfterTimeUp: 'timeline.cue_after_time_up',
+  closingMissing: 'timeline.closing_missing',
+  drawWithoutTimeUp: 'timeline.draw_without_time_up',
+  drawCount: 'timeline.draw_count',
+  drawGap: 'timeline.draw_gap',
+  cueAfterDraw: 'timeline.cue_after_draw',
+  closingDuringKnockdown: 'timeline.closing_during_knockdown',
 } as const);

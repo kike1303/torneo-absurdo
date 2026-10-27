@@ -1,0 +1,21 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/7",
+      "value": {
+        "at_ms": 9500,
+        "type": "draw"
+      }
+    },
+    {
+      "op": "set",
+      "path": "/duration_ms",
+      "value": 11000
+    }
+  ],
+  "expect": {
+    "code": "timeline.duration_too_short",
+    "path": "/duration_ms"
+  }
+}
