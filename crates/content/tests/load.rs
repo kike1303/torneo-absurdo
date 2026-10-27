@@ -156,13 +156,21 @@ fn an_empty_root_is_an_empty_roster() {
 }
 
 #[test]
-fn a_missing_root_is_an_io_error_with_its_kind() {
+fn a_missing_root_is_an_io_error_with_its_kind_and_the_root() {
+    let error = error("does-not-exist");
     assert_eq!(
-        error("does-not-exist"),
+        error,
         ContentError::Io {
-            path: PathBuf::new(),
+            path: fixture("does-not-exist"),
             kind: std::io::ErrorKind::NotFound,
         }
+    );
+    // The display names the root, not an empty path (QA of phase B).
+    assert!(
+        error
+            .to_string()
+            .ends_with(&format!("at {}", fixture("does-not-exist").display())),
+        "{error}"
     );
 }
 

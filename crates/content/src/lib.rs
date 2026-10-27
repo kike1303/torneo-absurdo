@@ -77,8 +77,9 @@ impl Character {
 /// the same on every file system). See [`ContentError`].
 pub fn load_roster(root: &Path, ruleset: &Ruleset) -> Result<Vec<Character>, ContentError> {
     let mut names = Vec::new();
-    for entry in fs::read_dir(root).map_err(|e| io_error(PathBuf::new(), &e))? {
-        let entry = entry.map_err(|e| io_error(PathBuf::new(), &e))?;
+    // The root itself cannot be named relative to itself, so its I/O errors carry `root`.
+    for entry in fs::read_dir(root).map_err(|e| io_error(root.to_path_buf(), &e))? {
+        let entry = entry.map_err(|e| io_error(root.to_path_buf(), &e))?;
         names.push(entry.file_name());
     }
     names.sort();

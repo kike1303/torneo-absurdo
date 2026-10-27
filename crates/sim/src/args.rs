@@ -91,25 +91,27 @@ impl ArgsError {
     }
 }
 
-/// Parses the arguments after the program name. `--help` anywhere wins.
+/// Parses the arguments after the program name. `--help` (or `-h`) anywhere wins over
+/// anything else on the line, including arguments that are unknown, repeated, not UTF-8 or
+/// with an invalid value.
 ///
 /// # Errors
-/// The first argument that is unknown, repeated, not UTF-8 or has an invalid value.
+/// Without `--help`, the first argument that is unknown, repeated, not UTF-8 or has an
+/// invalid value.
 pub fn parse<I>(args: I) -> Result<Command, ArgsError>
 where
     I: IntoIterator<Item = OsString>,
 {
+    let args: Vec<OsString> = args.into_iter().collect();
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        return Ok(Command::Help);
+    }
     let mut args = args.into_iter();
     let mut out = Args::default();
     let mut seen: Vec<&'static str> = Vec::new();
-    let mut help = false;
     while let Some(arg) = args.next() {
         let arg = arg.into_string().map_err(|_| ArgsError::NotUtf8)?;
         let flag: &'static str = match arg.as_str() {
-            "--help" | "-h" => {
-                help = true;
-                continue;
-            }
             "--fights" => "--fights",
             "--seed" => "--seed",
             "--content" => "--content",
@@ -135,11 +137,7 @@ where
             _ => out.check = true,
         }
     }
-    Ok(if help {
-        Command::Help
-    } else {
-        Command::Run(out)
-    })
+    Ok(Command::Run(out))
 }
 
 fn parse_fights(value: &str) -> Result<u32, ArgsError> {
@@ -242,6 +240,28 @@ mod tests {
         );
         assert_eq!(run(&["--check", "--help"]), Ok(Command::Help));
         assert_eq!(run(&["-h"]), Ok(Command::Help));
+    }
+
+    #[test]
+    fn help_wins_over_anything() {
+        for line in [
+            &["--help", "--bogus"][..],
+            &["--bogus", "--help"],
+            &["--json", "--json", "-h"],
+            &["--fights", "abc", "--help"],
+            &["--seed", "zz", "--help"],
+            &["--help", "--fights"],
+        ] {
+            assert_eq!(run(line), Ok(Command::Help), "{line:?}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn help_wins_over_an_argument_that_is_not_utf8() {
+        use std::os::unix::ffi::OsStringExt;
+        let bad = OsString::from_vec(vec![b'-', b'-', 0xff]);
+        assert_eq!(parse([bad, OsString::from("--help")]), Ok(Command::Help));
     }
 
     #[test]

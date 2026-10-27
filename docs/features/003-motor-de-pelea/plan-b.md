@@ -217,6 +217,13 @@ Pasos 7 a 10 (game-designer y backend-engineer, 2026-10-27). Ninguna cambia el f
 12. **Las claves de `## Frases` del lore se localizan por idioma** (por ejemplo, `victory` en `lore.en.md` y `victoria` en `lore.es.md`), y el skill `write-character` no fija que sean las mismas. Hoy nada las lee (el parseo del lore es de la feature que lo muestre, decisión 5); esa feature tendrá que fijar claves comunes en el skill o tolerarlas.
 13. **Tiempo de los tests en debug (paso 9):** `cargo test -p sim --test balance` tarda 5,66 s (6,0 s con cargo) y `cargo test -p engine` 12,0 s (`properties.rs` 10,6 s, como en la fase A). `balance` queda por debajo de los ~10 s, así que **no** se aplica `[profile.dev.package.engine] opt-level = 2`. `real_content.rs` tarda menos de 10 ms.
 
+Hallazgos bajos de QA de la fase B (backend-engineer, 2026-10-27). Ninguno cambia el formato del log, las fórmulas, los valores de `Ruleset`, los dorados ni los códigos de error.
+
+14. **Huecos en la prohibición de I/O del motor (decisión 13):** `crates/engine/clippy.toml` suma `std::fs::{create_dir, remove_dir, remove_dir_all, symlink_metadata, read_link, hard_link, canonicalize}`, los métodos de `Path` que tocan el sistema de archivos (`read_dir`, `exists`, `try_exists`, `metadata`, `symlink_metadata`, `canonicalize`, `read_link`, `is_file`, `is_dir`, `is_symlink`), `std::env::{temp_dir, home_dir, current_exe}` y `std::thread::scope`. Lo comprobé con un módulo de prueba temporal (sin commitear): clippy marca las 23 llamadas, también `Path::new("x").read_dir()`, y el `#[allow]` de `check_golden` sigue cubriéndolas.
+15. **`sim --help` gana siempre:** `parse` busca `--help` o `-h` antes de interpretar nada, así que `sim --help --bogus` (o con un valor inválido o un argumento que no es UTF-8) imprime la ayuda y sale con 0, como decía su doc. Test `help_wins_over_anything`.
+16. **Doc de `ContentError`:** el `slug` va desde `archetype_invalid` y es el escrito en `character.json` (igual al nombre del directorio), que puede no ser válido: `spec` con `SlugInvalid` lleva el inválido. Se corrigió la doc, no el comportamiento.
+17. **Raíz que falta o no se puede leer:** `ContentError::Io` lleva la raíz tal como se pasó (antes, una ruta vacía), así que `sim --content /nonexistent` dice `io (NotFound) at /nonexistent`.
+
 ## Revisión
 
 ### architect — 2026-10-27 — APPROVE

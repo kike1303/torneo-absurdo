@@ -1,8 +1,10 @@
 //! Why a roster cannot be loaded (plan-b decision 3).
 //!
-//! Every variant carries the path relative to the content root and, once it is known to be
-//! valid, the `slug`: this is repository content, not user data, and it says which file to
-//! fix. No variant carries the text of `serde_json` or of the operating system (ADR-0007,
+//! Every variant carries the path relative to the content root (the root itself, as given,
+//! when reading the root fails) and, from `archetype_invalid` on, the `slug` as written in
+//! `character.json`. It is the directory name (`slug_mismatch` comes first) but may still be
+//! malformed: `spec` with `SpecError::SlugInvalid` carries the invalid slug. This is
+//! repository content, not user data, and it says which file to fix. No variant carries the text of `serde_json` or of the operating system (ADR-0007,
 //! ADR-0012): only codes, positions and `io::ErrorKind`.
 use std::io;
 use std::path::PathBuf;
@@ -111,7 +113,8 @@ impl ContentError {
         }
     }
 
-    /// The path, relative to the content root, of the entry that failed.
+    /// The path, relative to the content root, of the entry that failed (the root as given
+    /// when the root itself cannot be read).
     #[must_use]
     pub fn path(&self) -> &std::path::Path {
         match self {
