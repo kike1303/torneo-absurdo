@@ -637,11 +637,20 @@ mod tests {
                     i += 1;
                 }
             } else if c == '/' && next == Some('*') {
+                // Block comments nest in Rust.
+                let mut depth = 1;
                 i += 2;
-                while i < chars.len() && !(chars[i] == '*' && chars.get(i + 1) == Some(&'/')) {
-                    i += 1;
+                while i < chars.len() && depth > 0 {
+                    if chars[i] == '/' && chars.get(i + 1) == Some(&'*') {
+                        depth += 1;
+                        i += 2;
+                    } else if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
+                        depth -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
                 }
-                i += 2;
             } else if c == 'r'
                 && matches!(next, Some('"' | '#'))
                 && (i == 0 || !ident(chars[i - 1]) || chars[i - 1] == 'b')
@@ -782,6 +791,7 @@ mod tests {
             "#[tracing::instrument(fields(skip_all = 1))] fn f() {}",
             "use tracing::instrument as traced;\n#[traced] fn f() {}",
             "#[doc = \"[\"]\n#[tracing::instrument(err)] fn f() {}",
+            "/* a /* b */ \" */\n#[tracing::instrument(err)] fn f() {}",
         ];
         for source in bad {
             assert_eq!(instrument_without_skip_all(source).len(), 1, "{source}");
@@ -791,6 +801,7 @@ mod tests {
             "#[tracing::instrument(err, skip_all)] fn f() {}",
             "// #[instrument]\n#[derive(Debug)] struct S;",
             "/* #[instrument] */ fn f() {}",
+            "/* a /* #[instrument] */ #[instrument] */ fn f() {}",
             "#[doc = \"instrumented\"] fn f() {}",
             "const A: &str = \"#[instrument]\";",
             "const A: &str = r#\"#[instrument]\"#;",
@@ -821,15 +832,15 @@ mod tests {
 
     #[test]
     fn telemetry_layer_is_the_only_output_layer() {
-        // Outside this module, nothing builds or installs a subscriber or a layer.
+        // Outside this module, nothing builds or installs a subscriber or a layer: the only
+        // use of `tracing_subscriber` is `tracing_subscriber::EnvFilter` (to validate
+        // `RUST_LOG`), and no code names a dispatcher.
         let forbidden = [
-            "tracing_subscriber::fmt",
-            "tracing_subscriber::registry",
-            "tracing_subscriber::layer",
-            "tracing_subscriber::Layer",
-            "tracing_subscriber::util",
             "set_global_default",
+            "set_default",
             "with_default",
+            "Dispatch",
+            "dispatcher",
             "SubscriberExt",
             "SubscriberInitExt",
         ];
@@ -837,8 +848,24 @@ mod tests {
             if path.ends_with("src/telemetry.rs") {
                 continue;
             }
+            let code = strip_literals_and_comments(&text);
+            for (at, _) in code.match_indices("tracing_subscriber") {
+                let rest = &code[at + "tracing_subscriber".len()..];
+                let env_filter = rest.strip_prefix("::EnvFilter").is_some_and(|after| {
+                    !after
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_alphanumeric() || c == '_')
+                });
+                assert!(
+                    env_filter,
+                    "tracing_subscriber{} in {}",
+                    &rest[..rest.len().min(40)],
+                    path.display()
+                );
+            }
             for token in forbidden {
-                assert!(!text.contains(token), "{token} in {}", path.display());
+                assert!(!code.contains(token), "{token} in {}", path.display());
             }
         }
         // Here: one output layer, one registry, and `init` installs `subscriber`.
