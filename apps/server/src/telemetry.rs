@@ -728,10 +728,11 @@ mod tests {
                     ',' if depth == 0 => top_level.push(String::new()),
                     _ => {}
                 }
-                if depth == 0 && c != ',' {
-                    if let Some(last) = top_level.last_mut() {
-                        last.push(c);
-                    }
+                if depth == 0
+                    && c != ','
+                    && let Some(last) = top_level.last_mut()
+                {
+                    last.push(c);
                 }
             }
             if !top_level.iter().any(|arg| arg.trim() == "skip_all") {
