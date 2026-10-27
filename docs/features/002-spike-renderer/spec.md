@@ -152,6 +152,7 @@ Cada requisito dice cómo se verifica (→). "check" es `just check`; "e2e" es `
 - **RF-C3. Reproducción.** La ruta de prueba puede reproducir uno de esos logs además del guion de RF-A8. → e2e (llega a `finished`).
 - **RF-C4. Cambios de forma.** Si 003 emite algo que la `Timeline` v1 no puede expresar y hace falta, se sube `timeline_version` a 2 con una enmienda de esta spec; el adaptador nunca mete campos fuera del formato. → revisión del PR.
   - **Fines sin KO, fuera de 002** (enmienda técnica del 2026-10-27, revisión de `plan-c.md`). `time_up` y `end` con `reason` `decision` o `draw` no son expresables en v1, y en 002 **no hace falta** expresarlos: 002 no publica peleas y el go/no-go (RF-B9) no los usa. El adaptador los rechaza con `adapter.unsupported_ending`, sin inventar cues, y RF-C2 lo comprueba con `log-decision-a`, `log-decision-b` y `log-draw`. La `timeline_version` 2 (cue `time_up`, `win` sin `ko` y cierre sin ganador, preocupación 7 de 003) pasa a un issue de Linear, "Timeline v2: fines sin KO", que bloquea la primera feature que publique peleas (trabajo derivado 6 de `docs/architecture.md`), con esos tres dorados como casos de aceptación y game-designer como revisor de su coreografía. El PR de C enlaza el issue.
+- **Trazabilidad:** RF-C1 a RF-C4 se implementan según [plan-c.md](./plan-c.md). El issue de la v2 es TA-19.
 
 ## Requisitos no funcionales
 - **Rendimiento (criterio "≥ 55 fps").**

@@ -1,6 +1,11 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import spike from '@torneo/renderer/fixtures/spike.timeline.json' with { type: 'json' };
+import comeback from '../src/lib/features/fight/fixtures/log-ko-comeback.json' with { type: 'json' };
+import {
+  timelineFromFightLog,
+  type AdapterLog,
+} from '../src/lib/features/fight/timeline-from-fight-log.js';
 import { waitForHydration } from './support/hydration.js';
 
 // 002 RF-A15, RF-A16 and RF-A19 (plan-a2 step 7): the test arena on the production build, with
@@ -237,4 +242,52 @@ test('?pace=1.5 scales mean_strike_gap_ms in the copied stats', async ({ page, c
   const copied = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
   expect(copied.mean_strike_gap_ms).toBeGreaterThan(base * 1.45);
   expect(copied.mean_strike_gap_ms).toBeLessThan(base * 1.55);
+});
+
+// 002 RF-C3 (plan-c step 4): ?log=<name> plays an engine log through the adapter. In the
+// ko-comeback golden `b` wins, the other way round from the spike script.
+for (const lang of ['es', 'en'] as const) {
+  const winsB = lang === 'es' ? 'Gana Muñeco B' : 'Dummy B wins';
+  const winsA = lang === 'es' ? 'Gana Muñeco A' : 'Dummy A wins';
+
+  test(`/${lang}/dev/arena?log=ko-comeback reaches playing without console errors`, async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    await page.goto(`/${lang}/dev/arena?log=ko-comeback`);
+    await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+    await page.waitForTimeout(1000);
+    expect(errors).toEqual([]);
+  });
+
+  test(`/${lang}/dev/arena?log=ko-comeback at the end: b wins with a at 0 HP`, async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto(`/${lang}/dev/arena?log=ko-comeback&t=99999999999`);
+    await expect(stage(page)).toHaveAttribute('data-state', 'finished', { timeout: 15_000 });
+    await expect(page.getByTestId('fight-winner')).toHaveText(winsB);
+    await expect(stage(page)).toHaveAttribute('data-hp-a', '0');
+    expect(errors).toEqual([]);
+  });
+
+  test(`/${lang}/dev/arena?log=<unknown> plays the spike script`, async ({ page }) => {
+    await page.goto(`/${lang}/dev/arena?log=desconocido&t=99999999999`);
+    await expect(stage(page)).toHaveAttribute('data-state', 'finished', { timeout: 15_000 });
+    await expect(page.getByTestId('fight-winner')).toHaveText(winsA);
+  });
+}
+
+test('?log=ko-comeback just after a knockdown: the last cue is that knockdown', async ({
+  page,
+}) => {
+  const result = timelineFromFightLog(comeback as unknown as AdapterLog, {
+    a: { asset: 'dummy_a' },
+    b: { asset: 'dummy_b' },
+  });
+  if (!result.ok) throw new Error('the arena copy does not adapt');
+  const index = result.timeline.cues.findIndex((c) => c.type === 'knockdown');
+  const knockdown = result.timeline.cues[index];
+  if (knockdown === undefined) throw new Error('no knockdown in ko-comeback');
+  await page.goto(`/es/dev/arena?log=ko-comeback&t=${knockdown.at_ms + 200}`);
+  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+  await expect(stage(page)).toHaveAttribute('data-last-cue', String(index));
 });

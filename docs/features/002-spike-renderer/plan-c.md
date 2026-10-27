@@ -250,7 +250,14 @@ No cambian: el `justfile` (los tests nuevos entran por los Vitest de web que ya 
 Sin cambios en los workflows. El job `web` suma unos segundos de Vitest. El job `e2e` suma unos 4 tests por motor, alrededor de 20 a 30 s por corrida.
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+1. **Tipos de `engine-logs.ts` (nota 1 del architect).** El adaptador exporta `AdaptedTimeline` (`Extract<AdapterResult, { ok: true }>['timeline']`) y `AdapterLog` (alias de `FightLog`). `engine-logs.ts` solo importa del adaptador y hace el cast del JSON a `AdapterLog`, así que ningún archivo fuera del adaptador importa de `@torneo/protocol` y de `@torneo/renderer` a la vez. El test de frontera no cambia.
+2. **`WIN_DELAY_MS` se exporta** para que el test lo compare con `TIMELINE_LIMITS.winGapMs`.
+3. **La cadena de HP sigue a través de los errores.** Después de un `hit`, `block` o `dodge` con error (sin `attack`, con `attack_mismatch` o con `hp_mismatch`), el HP que lleva el adaptador pasa a `max(0, previo − damage)`. Así un solo evento incoherente da un solo error, y no uno por cada resolución posterior sobre ese luchador.
+4. **Dato de la tabla de la decisión 2 (nota 2 del architect):** el `knockdown` solo sale con `crit`, no con cualquier `hit`. No cambia nada del adaptador ni de los tests.
+5. **README del convertidor:** no tenía una tabla de errores. El código `write.foreign_output` y el marcador se documentan en una viñeta de "Uso", con qué hacer con una salida de B sin marcador.
+6. **Test existente de `write.test.ts`:** el primer caso ("reemplaza solo la salida vieja") ponía un `sheet-7.png` viejo sin marcador. Con la regla nueva eso es `write.foreign_output`, así que el caso ahora crea el marcador antes, que es el escenario que describe. Es un cambio de contrato pedido por la decisión 9 (b), no un test aflojado.
+7. **Capturas:** `arena-log-*` en `screenshots.spec.ts` a `t = 29 600` ms, justo después del primer `crit` con `knockdown` de `log-ko-comeback`.
+8. **Issue de la v2:** TA-19 ("Timeline v2: fines sin KO"), citado en `docs/architecture.md` (Timeline propia y trabajo derivado 6) y en la línea de trazabilidad de la spec.
 
 ## Revisión
 ### architect — 2026-10-27 — APPROVE
