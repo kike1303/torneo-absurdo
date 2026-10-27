@@ -1,0 +1,37 @@
+{
+  "slug": "alpha-ox",
+  "archetype": "stubborn-ox",
+  "ruleset_version": 1,
+  "stats": {
+    "hp": 80,
+    "attack": 70,
+    "defense": 70,
+    "speed": 30,
+    "special": 50
+  },
+  "personality": {
+    "aggression": 50,
+    "caution": 30,
+    "showmanship": 40
+  },
+  "abilities": [
+    {
+      "id": "big_swing",
+      "kind": "heavy",
+      "power": 40,
+      "cooldown": 2
+    },
+    {
+      "id": "flare",
+      "kind": "special",
+      "power": 70,
+      "cooldown": 4,
+      "element": "fire"
+    }
+  ],
+  "weaknesses": [],
+  "rivals": [
+    "zeta-fox",
+    "mid-cat"
+  ]
+}

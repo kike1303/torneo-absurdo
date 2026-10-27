@@ -1,0 +1,30 @@
+{
+  "slug": "mid-cat",
+  "archetype": "test-archetype",
+  "ruleset_version": 1,
+  "stats": {
+    "hp": 60,
+    "attack": 60,
+    "defense": 60,
+    "speed": 60,
+    "special": 60
+  },
+  "personality": {
+    "aggression": 50,
+    "caution": 30,
+    "showmanship": 40
+  },
+  "abilities": [
+    {
+      "id": "pounce",
+      "kind": "heavy",
+      "power": 30,
+      "cooldown": 0,
+      "element": null
+    }
+  ],
+  "weaknesses": [
+    "water"
+  ],
+  "rivals": []
+}
