@@ -583,6 +583,13 @@ describe('check-workflows (RF-C12, plan-c decision 23)', () => {
     ).toBe(true);
   });
 
+  it('accepts timeout-minutes on a step (e2e browser install)', () => {
+    const tree = mutated({
+      [CI]: [[RUN_STEP, '      - run: echo rust\n        timeout-minutes: 6\n']],
+    });
+    expect(checkWorkflows(tree)).toEqual([]);
+  });
+
   it('accepts container: and services: pinned by digest', () => {
     const digest = `@sha256:${'a'.repeat(64)}`;
     const tree = mutated({

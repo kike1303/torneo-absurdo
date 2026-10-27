@@ -220,16 +220,32 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      # A slow Ubuntu mirror once hung apt-get here for the whole job (run 40433289185): two
+      # bounded attempts of 160 s inside a 6 min step fail fast with a clear message instead.
       - name: Install the browsers (or only their system dependencies)
+        timeout-minutes: 6
         env:
           CACHE_HIT: ${{ steps.browsers.outputs.cache-hit }}
         run: |
           set -euo pipefail
           if [ "$CACHE_HIT" = true ]; then
-            pnpm --filter web exec playwright install-deps chromium webkit
+            cmd=(install-deps chromium webkit)
           else
-            pnpm --filter web exec playwright install --with-deps chromium webkit
+            cmd=(install --with-deps chromium webkit)
           fi
+          for attempt in 1 2; do
+            if timeout --kill-after=10 160 pnpm --filter web exec playwright "${cmd[@]}"; then
+              exit 0
+            fi
+            echo "playwright ${cmd[0]}: attempt $attempt failed or took more than 160 s" >&2
+            if [ "$attempt" = 1 ]; then
+              # A killed apt-get can leave dpkg half configured.
+              sudo dpkg --configure -a || true
+              sleep 10
+            fi
+          done
+          echo "::error::playwright ${cmd[0]} failed twice (slow apt mirror or browser download): re-run the job" >&2
+          exit 1
       - name: Save the Playwright browsers (push to main only)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.browsers.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
