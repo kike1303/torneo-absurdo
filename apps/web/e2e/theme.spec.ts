@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { waitForHydration } from './support/hydration.js';
 
 const ORIGIN = 'http://localhost:4173';
 const YEAR = 31_536_000;
@@ -67,15 +68,9 @@ test('RF-A8: the switcher changes the theme live and writes the cookie', async (
 }) => {
   await page.goto('/es/');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  // `data-theme` already comes in the SSR HTML, so it says nothing about hydration. SvelteKit's
-  // client start, which can land after `load`, does `history.replaceState(…, '')` to stamp
-  // `sveltekit:metadata`, and Playwright reports that as a same-URL `framenavigated` (TA-12).
-  // Wait for it so the listener below only sees what the theme change does, and so the clicks
-  // reach a hydrated switcher.
-  await page.waitForFunction(() => {
-    const state = history.state as Record<string, unknown> | null;
-    return state !== null && 'sveltekit:metadata' in state;
-  });
+  // The client start's replaceState is reported as a same-URL `framenavigated` (TA-12): wait for
+  // it so the listener below only sees what the theme change does.
+  await waitForHydration(page);
   // A full reload would get a new window, losing the marker; no event timing involved.
   await page.evaluate(() => {
     (window as unknown as { __docId?: string }).__docId = 'rf-a8';
