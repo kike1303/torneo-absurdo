@@ -9,7 +9,7 @@ reviewers: [product-owner, security-reviewer, game-designer]
 approvals:
   - {by: product-owner, date: 2026-10-26}
   - {by: security-reviewer, date: 2026-10-26}
-  - {by: game-designer, date: 2026-10-26}
+  - {by: game-designer, date: 2026-10-27}
   - {by: owner, date: 2026-10-26}
 linear: TA-3
 depends_on: ["001"]
@@ -69,7 +69,8 @@ Se entrega en dos fases, con un PR y un plan cada una:
   - **Lints en `lib.rs`** de `engine` y de `engine-wasm`: `#![deny(clippy::float_arithmetic, clippy::indexing_slicing, clippy::panic, clippy::unreachable, clippy::todo, clippy::unimplemented)]`, además de los del workspace.
   - **`crates/engine/clippy.toml`**, que repite las dos opciones del `clippy.toml` raíz porque no se combinan:
     - `disallowed-types`: `HashMap`, `HashSet`, `Instant`, `SystemTime`, `rand_core::OsRng`;
-    - `disallowed-methods`: `SeedableRng::{from_os_rng, try_from_os_rng, from_rng, seed_from_u64}`.
+    - `disallowed-methods`: `SeedableRng::{from_os_rng, try_from_os_rng, from_rng, seed_from_u64}`;
+    - desde la fase B, también los tipos y las funciones de I/O, entorno, hilos y procesos de `std` (`fs`, `env`, `io::{stdin, stdout, stderr}`, `net`, `thread`, `process`). El único uso legítimo, la regeneración de dorados de `tests/golden.rs`, lleva un `#[allow]` local con su razón.
   - **`scripts/check-engine.mjs`**, invocado desde `check-rust` por la receta `_check-engine`. Sus funciones son puras sobre la salida de `cargo tree` y tienen tests negativos en Vitest. Falla si:
     - el grafo normal de `engine` (`cargo tree -p engine -e normal,features --target all`) contiene `getrandom`, `rand`, `tokio`, `ts-rs`, `tracing` o `log`;
     - `rand_chacha` o `rand_core` tienen activadas las features `serde`, `os_rng` o `std`.
@@ -104,7 +105,7 @@ Se entrega en dos fases, con un PR y un plan cada una:
   - comprueba que `slug` coincide con el nombre del directorio y que existen `lore.es.md` y `lore.en.md` (solo que existan; el lore no se parsea en 003);
   - entrega `engine::CharacterSpec`.
 
-  `load_roster(root)` devuelve los personajes **ordenados por `slug`**, porque `read_dir` no garantiza el orden. Las reglas de validación (rangos, presupuesto, unicidad y expresiones regulares) viven en el motor (`CharacterSpec::validate`), y `content` solo hace I/O y conversión, así que el WASM valida lo mismo.
+  `load_roster(root: &Path, ruleset: &Ruleset) -> Result<Vec<Character>, ContentError>` devuelve los personajes **ordenados por `slug`**, porque `read_dir` no garantiza el orden. `Character` lleva el `CharacterSpec` validado más `archetype` y `rivals` (para el narrador y el server), y `ruleset` es la versión contra la que se valida y con la que se compara `ruleset_version`. Las reglas de validación (rangos, presupuesto, unicidad y expresiones regulares) viven en el motor (`CharacterSpec::validate`), y `content` solo hace I/O y conversión, así que el WASM valida lo mismo. Para `archetype`, que no está en la forma motor, el motor exporta `is_valid_slug(&str) -> bool`, la misma regla que usa `validate`.
 - **RF13.** Un test de `crates/content` carga el `content/characters/` real y falla si algún personaje no es válido.
 - **RF14.** Fase B: de 2 a 4 personajes homenaje originales con `character.json`, `lore.es.md` y `lore.en.md`, y el checklist de ADR-0004. Los diseña el game-designer en la implementación. También se actualizan:
   - el skill `write-character`: pasa de YAML con pesos 0–1 a JSON con enteros 0–100, y fija que los nombres localizados de las habilidades viven en el frontmatter de `lore.<locale>.md` como `abilities: { <id>: <nombre> }`, junto a `name` y `epithet`;
@@ -122,7 +123,7 @@ Se entrega en dos fases, con un PR y un plan cada una:
   - las semillas de cada pelea salen, de 32 en 32 bytes, de un `ChaCha20Rng` sembrado con `--seed`, así que el informe es reproducible;
   - `P` es el número de pares no ordenados de personajes **distintos**, `C(n, 2)`;
   - cada par `{i, j}` usa `m = ⌊N / (2·P)⌋` semillas, y **cada semilla se juega en las dos orientaciones**, así que hay `2·P·m ≤ N` peleas de cruce;
-  - además hay `n·m` espejos (cada personaje contra sí mismo), que **no** cuentan en `N` ni en ningún win rate.
+  - además hay `n·m` espejos (cada personaje contra sí mismo), que **no** cuentan en `N` ni en ninguna métrica salvo el sesgo del lado `a`. Todas las demás cifras del informe y de RF17 ("las peleas") son sobre los cruces.
 
   Informe (texto en inglés, porque es una herramienta de desarrollo y no UI):
   - win rate global por personaje, solo con cruces: `(victorias + empates/2) / apariciones`, en ‰;
@@ -148,9 +149,10 @@ Se entrega en dos fases, con un PR y un plan cada una:
   - al menos el 15 % de las peleas tienen algún `moment`;
   - al menos el 80 % de las peleas tienen `end.t` entre 45 000 y 90 000 ms;
   - `time_up` en como mucho el 10 % de las peleas, y `draw` en menos del 1 %;
-  - el lado `a` gana entre el 47 % y el 53 % de los espejos.
+  - el lado `a` gana entre el 47 % y el 53 % de los espejos;
+  - cada `MomentKind` aparece en al menos el 3 % de las peleas, para que ningún momento quede muerto para el narrador (ADR-0010).
 
-  Los umbrales de duración, `time_up` y sesgo son valores iniciales de esta spec, y el game-designer puede ajustarlos en la fase B.
+  El game-designer puede ajustar en la fase B la fracción del 80 %, el tope de `time_up`, la banda del sesgo y el 3 % por `MomentKind`, que son valores iniciales de esta spec. La banda de 45 000–90 000 ms viene del intent y de 002 y no se ajusta en esta fase, y subir el tope de `time_up` por encima del 10 % necesita además el OK del product-owner (preocupación 7). Todo ajuste queda en `Criteria::RF17` de `sim` y en esta spec.
 - **RF18.** WASM:
   - `rust-toolchain.toml` agrega los targets `wasm32-unknown-unknown` y `wasm32-wasip1`, y `deny.toml` los agrega a `[graph] targets`;
   - `check-rust` corre `cargo clippy -p engine -p engine-wasm --target wasm32-unknown-unknown --locked -- -D warnings`, que demuestra que el motor y los bindings compilan para el navegador;
@@ -206,7 +208,7 @@ Se entrega en dos fases, con un PR y un plan cada una:
 | `crates/engine` (nuevo) | `simulate`, `Seed`, `Ruleset`, `CharacterSpec`, `SpecError`, `EncodeError`, `canonical_json` y `canonical_spec_json`. Depende de `protocol` (sin `ts`), `serde`, `serde_json` y `rand_chacha`. |
 | `crates/engine-wasm` (nuevo) | `cdylib` con `wasm-bindgen`. Depende de `engine` y `serde_json`. |
 | `crates/content` (nuevo) | Lee y valida `content/characters/`. Depende de `engine`, `serde`, `serde_json` y `thiserror`. Lo usarán `sim` y, más adelante, el server. |
-| `crates/sim` (nuevo) | Lib y bin del simulador. Depende de `engine`, `content` y `serde_json`. Va en `crates/` y no en `tools/` porque el filtro `rust` de CI cubre `crates/**`. |
+| `crates/sim` (nuevo) | Lib y bin del simulador. Depende de `engine`, `content`, `serde`, `serde_json`, `thiserror` y `rand_chacha` (sin features, para derivar las semillas). Va en `crates/` y no en `tools/` porque el filtro `rust` de CI cubre `crates/**`. |
 | `content/characters/*` | De 2 a 4 personajes (fase B). |
 | `rust-toolchain.toml`, `Cargo.toml`, `deny.toml`, `justfile`, `scripts/{wasi-runner,check-engine,check-crate-age}.mjs` (con tests en `scripts/__tests__/`) | Targets, miembros y recetas (`sim`, `_check-wasm`, `_check-engine`, conectadas a `check-rust`). |
 | Docs | Al cerrar: `docs/architecture.md` (firma `-> Result`, nuevos crates, serialización canónica y RF22 en los prerrequisitos de producción), el skill `write-character` y `content/characters/README.md`. |
@@ -576,3 +578,25 @@ Seed (32 B, server or sim) ──▶ engine::simulate(seed, a, b, Ruleset::for_v
   - las cuatro variantes del PR #39 (`cfg_attr`, macro, `#[path]`, `include!`) ahora hacen fallar `check-engine`;
   - `checkWasmLints` exige `[lints] workspace = true`, que es la pieza que sostiene el `forbid`.
 - `check-engine` todavía no detecta todas las formas, por ejemplo `use core::include as inc;` o pasar `unsafe_code` dentro de un `deny(...)` a una macro. Como el compilador ya las rechaza con `forbid`, queda como defensa en profundidad y no bloquea.
+
+### architect — 2026-10-27 — Enmienda (revisión de plan-b), en parte pendiente de game-designer
+- Origen: las preguntas de `plan-b.md` (decisiones 1, 2, 6, 8, 10, 13 y 16) y la nota no bloqueante del game-designer en la ronda 2 ("ningún `kind` de momento muerto").
+- **Editorial, sin cambio de comportamiento (no reabre aprobaciones):**
+  - RF12: firma `load_roster(root, ruleset) -> Result<Vec<Character>, ContentError>`, con `archetype` y `rivals`, y `is_valid_slug` exportado por el motor.
+  - RF15: los espejos solo cuentan para el sesgo del lado `a`; el resto de las métricas y de RF17 son sobre los cruces (lo implicaba "no cuentan en `N`").
+  - Componentes: dependencias de `sim` (`serde`, `thiserror` y `rand_chacha` sin features, todas ya en el lock).
+  - RF5: el `clippy.toml` del motor suma la prohibición de I/O, entorno, hilos y procesos (defensa en profundidad de lo que RF5 ya exige).
+- **Cambio de criterio, pendiente de la aprobación de game-designer:**
+  - RF17 suma "cada `MomentKind` en al menos el 3 % de las peleas" como criterio que falla. La aproximación en Python da 9,1 / 10,8 / 20,4 %, así que el margen es amplio.
+  - RF17 precisa qué umbrales puede ajustar el game-designer: la fracción del 80 %, el tope de `time_up`, la banda del sesgo y el 3 %. La banda de 45–90 s es del intent y de 002 y no se ajusta. Subir `time_up` por encima del 10 % necesita además el OK del product-owner, que aprobó la spec contando con ese tope (preocupación 7).
+  - Si game-designer no lo aprueba, el criterio del 3 % queda como aviso (`warnings()`), como prevé plan-b, y se revierte este punto.
+- Al cerrar la fase B haré las enmiendas editoriales que dependan de valores medidos: la tabla del ruleset y el párrafo de la aproximación en Python (con las cifras reales de `sim`), las cifras de RF21 (68 acciones, 1200 ms, 418 eventos) y de la preocupación 8 si cambian los tiempos, y los umbrales de RF17 que el game-designer haya ajustado. Yo escribí esta enmienda, así que no la apruebo.
+
+### game-designer — 2026-10-27 — APPROVE (enmienda de revisión de plan-b)
+- Verifiqué:
+  - RF17, "cada `MomentKind` ≥ 3 %" como fallo: es la nota no bloqueante de mi ronda 2 y la acepto tal cual. El universo es el de RF15 (cruces, con al menos un `moment` de ese `kind`), igual que plan-b (decisión 10 y revisión de architect, punto 1). Con unos 10 000 cruces, el 3 % son unas 300 peleas, así que el ruido de muestreo no lo vuelve frágil, y la aproximación (comeback 9,1, decisive_crit 10,8, clutch_ko 20,4 %) deja margen de unas 3 veces en el `kind` más raro. No vuelve redundante el 15 % de "algún `moment`": tres `kind` en el 3 % pueden sumar solo un 9 %.
+  - Umbrales ajustables: la fracción del 80 %, el tope de `time_up`, la banda del sesgo y el 3 %. Estoy de acuerdo en que la banda de 45–90 s no se toque (viene del intent y del ritmo de 002) y en que subir `time_up` por encima del 10 % pida el OK del product-owner. El 400–600 ‰ de win rate, el 15 % de momentos y el `draw` < 1 % quedan fijos, y está bien así: son el objetivo de balance de mi rol.
+  - RF5, RF12, RF15 y la tabla de componentes: son editoriales y no cambian gameplay. "Solo cruces" para todas las métricas evita que un personaje fuerte en espejo distorsione la duración o los momentos, y `archetype` y `rivals` en `Character` alcanzan para el narrador.
+  - Frontmatter válido. No contradice ADR-0001, 0004, 0005 ni 0010.
+- Compromiso propio, no bloqueante: si en la fase B un `kind` no llega al 3 % con contenido, no voy a bajar el 3 %. Primero ajusto valores de `Ruleset` (decisión 14 de plan-b). Si tampoco alcanza, lo escalo como cambio de forma de la fórmula del momento. Bajar el piso equivaldría a aceptar un momento muerto. Si ajusto cualquier otro umbral, lo registro con su cifra medida en esta sección y en el PR.
+- Cambios pedidos: ninguno. Actualicé mi fecha en `approvals`. `status` sigue `approved`.
