@@ -7,7 +7,7 @@
 # The rust: version must equal the channel of rust-toolchain.toml (scripts/check-compose.mjs).
 
 # rust:1.99.1-slim-bookworm, multi-arch index digest (linux/amd64 and linux/arm64).
-FROM --platform=$BUILDPLATFORM rust:1.99.1-slim-bookworm@sha256:11d39e118fbc6aba0c89511ff6810dcbad03e7c28d78e3f9d59b714f8d4e08dc AS chef
+FROM --platform=$BUILDPLATFORM rust:1.99.1-slim-bookworm@sha256:86234e857a413004348b471d11a4ebe1aa92d2eae2b6b143cac68fd1ac3c48be AS chef
 ARG BUILDARCH
 WORKDIR /app
 
@@ -63,7 +63,7 @@ COPY crates crates
 RUN cargo zigbuild --release --locked --target x86_64-unknown-linux-musl -p server
 
 # distroless/static-debian13:nonroot, index digest (uid 65532, no shell).
-FROM gcr.io/distroless/static-debian13:nonroot@sha256:516757106de35205efb70b91ba03f6f1298424a0678c603255cf2852a7000087
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99
 COPY --from=build /app/target/x86_64-unknown-linux-musl/release/server /server
 EXPOSE 8080
 # No CMD: without arguments the binary runs `serve`.
