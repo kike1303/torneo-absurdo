@@ -32,7 +32,9 @@ pub use encode::{EncodeError, canonical_json, canonical_spec_json};
 pub use protocol::{AbilityKind, EndReason, FightEvent, FightLog, FighterInfo, MomentKind, Side};
 pub use ruleset::Ruleset;
 pub use seed::Seed;
-pub use spec::{Ability, CharacterSpec, Element, MoveKind, Personality, SpecError, Stats};
+pub use spec::{
+    Ability, CharacterSpec, Element, MoveKind, Personality, SpecError, Stats, is_valid_slug,
+};
 
 /// Validates both characters against the ruleset and simulates the fight.
 ///

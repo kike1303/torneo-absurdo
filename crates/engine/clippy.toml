@@ -11,6 +11,15 @@ disallowed-types = [
     { path = "std::time::Instant", reason = "the engine has no clock" },
     { path = "std::time::SystemTime", reason = "the engine has no clock" },
     { path = "rand_core::OsRng", reason = "the only randomness is ChaCha20 seeded with the Seed", allow-invalid = true },
+    # Phase B (plan-b decision 13): no I/O, processes, network nor threads. A banned type covers
+    # all of its methods.
+    { path = "std::fs::File", reason = "the engine has no I/O" },
+    { path = "std::fs::OpenOptions", reason = "the engine has no I/O" },
+    { path = "std::process::Command", reason = "the engine spawns no processes" },
+    { path = "std::net::TcpStream", reason = "the engine has no network" },
+    { path = "std::net::TcpListener", reason = "the engine has no network" },
+    { path = "std::net::UdpSocket", reason = "the engine has no network" },
+    { path = "std::thread::Builder", reason = "the engine has no threads" },
 ]
 disallowed-methods = [
     { path = "rand_core::SeedableRng::from_os_rng", reason = "seed only with Seed (ChaCha20Rng::from_seed)", allow-invalid = true },
@@ -18,4 +27,26 @@ disallowed-methods = [
     { path = "rand_core::SeedableRng::from_rng", reason = "seed only with Seed (ChaCha20Rng::from_seed)", allow-invalid = true },
     { path = "rand_core::SeedableRng::try_from_rng", reason = "seed only with Seed (ChaCha20Rng::from_seed)", allow-invalid = true },
     { path = "rand_core::SeedableRng::seed_from_u64", reason = "seed only with Seed (ChaCha20Rng::from_seed)", allow-invalid = true },
+    # Phase B (plan-b decision 13): free functions of I/O, environment, threads and stdio. The only
+    # legitimate use, regenerating goldens in tests/golden.rs, has a local #[allow] with its reason.
+    { path = "std::fs::read", reason = "the engine has no I/O" },
+    { path = "std::fs::read_to_string", reason = "the engine has no I/O" },
+    { path = "std::fs::read_dir", reason = "the engine has no I/O" },
+    { path = "std::fs::write", reason = "the engine has no I/O" },
+    { path = "std::fs::metadata", reason = "the engine has no I/O" },
+    { path = "std::fs::create_dir_all", reason = "the engine has no I/O" },
+    { path = "std::fs::remove_file", reason = "the engine has no I/O" },
+    { path = "std::fs::copy", reason = "the engine has no I/O" },
+    { path = "std::fs::rename", reason = "the engine has no I/O" },
+    { path = "std::env::var", reason = "the engine does not read its environment" },
+    { path = "std::env::var_os", reason = "the engine does not read its environment" },
+    { path = "std::env::vars", reason = "the engine does not read its environment" },
+    { path = "std::env::vars_os", reason = "the engine does not read its environment" },
+    { path = "std::env::args", reason = "the engine does not read its environment" },
+    { path = "std::env::args_os", reason = "the engine does not read its environment" },
+    { path = "std::env::current_dir", reason = "the engine does not read its environment" },
+    { path = "std::thread::spawn", reason = "the engine has no threads" },
+    { path = "std::io::stdin", reason = "the engine has no I/O" },
+    { path = "std::io::stdout", reason = "the engine has no I/O" },
+    { path = "std::io::stderr", reason = "the engine has no I/O" },
 ]
