@@ -1,0 +1,52 @@
+{
+  "kit/entry.js": {
+    "file": "_app/immutable/entry/start.js",
+    "src": "kit/entry.js",
+    "isEntry": true,
+    "imports": [
+      "_runtime.js"
+    ]
+  },
+  ".svelte-kit/generated/build/client-optimized/nodes/0.js": {
+    "file": "_app/immutable/nodes/0.js",
+    "src": ".svelte-kit/generated/build/client-optimized/nodes/0.js",
+    "isEntry": true,
+    "imports": [
+      "_runtime.js",
+      "_layout.js"
+    ]
+  },
+  ".svelte-kit/generated/build/client-optimized/nodes/4.js": {
+    "file": "_app/immutable/nodes/4.js",
+    "src": ".svelte-kit/generated/build/client-optimized/nodes/4.js",
+    "isEntry": true,
+    "imports": [
+      "_runtime.js",
+      "_preload.js"
+    ],
+    "dynamicImports": [
+      "../../packages/renderer/src/index.ts"
+    ]
+  },
+  "_runtime.js": {
+    "file": "_app/immutable/chunks/runtime.js"
+  },
+  "_layout.js": {
+    "file": "_app/immutable/chunks/layout.js"
+  },
+  "_preload.js": {
+    "file": "_app/immutable/chunks/preload.js"
+  },
+  "../../packages/renderer/src/index.ts": {
+    "file": "_app/immutable/chunks/renderer.js",
+    "src": "../../packages/renderer/src/index.ts",
+    "isDynamicEntry": true,
+    "imports": [
+      "_preload.js",
+      "_pixi.js"
+    ]
+  },
+  "_pixi.js": {
+    "file": "_app/immutable/chunks/pixi.js"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "_app/immutable/entry/start.js": [
+    "kit/entry.js"
+  ],
+  "_app/immutable/nodes/0.js": [
+    ".svelte-kit/generated/build/client-optimized/nodes/0.js",
+    "src/routes/+layout.svelte"
+  ],
+  "_app/immutable/nodes/4.js": [
+    ".svelte-kit/generated/build/client-optimized/nodes/4.js",
+    "src/routes/dev/arena/+page.svelte",
+    "src/lib/components/fight/FightStage.svelte"
+  ],
+  "_app/immutable/chunks/runtime.js": [
+    "../../node_modules/.pnpm/svelte@5.57.2/node_modules/svelte/src/index-client.js"
+  ],
+  "_app/immutable/chunks/layout.js": [
+    "src/lib/components/layout/AppHeader.svelte"
+  ],
+  "_app/immutable/chunks/preload.js": [
+    "\u0000vite/preload-helper.js"
+  ]
+}
