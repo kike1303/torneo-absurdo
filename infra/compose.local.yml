@@ -7,9 +7,33 @@ services:
   postgres:
     # Same digest as infra/compose.dev.yml (scripts/check-compose.mjs compares them).
     image: postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
-    # Same tuning as the Coolify Postgres (ADR-0006 D4).
+    # Same tuning (ADR-0006 D4) and log parameters (ADR-0012 A9) as the Coolify Postgres.
     command:
-      ['postgres', '-c', 'shared_buffers=128MB', '-c', 'max_connections=20', '-c', 'work_mem=4MB']
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_connections=20
+      - -c
+      - work_mem=4MB
+      - -c
+      - log_error_verbosity=terse
+      - -c
+      - log_min_error_statement=panic
+      - -c
+      - log_statement=none
+      - -c
+      - log_min_duration_statement=-1
+      - -c
+      - log_connections=off
+      - -c
+      - log_disconnections=off
+      - -c
+      - log_transaction_sample_rate=0
+      - -c
+      - log_statement_sample_rate=1
+      - -c
+      - log_lock_waits=off
     environment:
       POSTGRES_USER: torneo
       POSTGRES_PASSWORD: torneo_local

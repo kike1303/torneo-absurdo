@@ -32,6 +32,7 @@ function mutated(edits, extraFiles = []) {
 
 const C = FILES.compose;
 const L = FILES.local;
+const D = FILES.dev;
 const DI = FILES.dockerignore;
 const SD = FILES.serverDockerfile;
 const WD = FILES.webDockerfile;
@@ -401,6 +402,38 @@ const CASES = [
     'local postgres on torneo-edge',
     { [L]: [['      - torneo-db\n', '      - torneo-db\n      - torneo-edge\n']] },
     /postgres must be only on torneo-db/,
+  ],
+  [
+    'local postgres without a log parameter',
+    { [L]: [['      - -c\n      - log_error_verbosity=terse\n', '']] },
+    /compose\.local\.yml: services\.postgres: command: must be/,
+  ],
+  [
+    'local postgres logs failing statements',
+    { [L]: [['log_min_error_statement=panic', 'log_min_error_statement=error']] },
+    /compose\.local\.yml: services\.postgres: command: must be/,
+  ],
+  [
+    'dev postgres without command',
+    { [D]: [['    command:\n', '    unused:\n']] },
+    /compose\.dev\.yml: services\.postgres: command: must be/,
+  ],
+  [
+    'dev postgres with default verbosity',
+    { [D]: [['log_error_verbosity=terse', 'log_error_verbosity=default']] },
+    /compose\.dev\.yml: services\.postgres: command: must be/,
+  ],
+  [
+    'dev postgres samples transactions',
+    { [D]: [['log_transaction_sample_rate=0', 'log_transaction_sample_rate=0.1']] },
+    /compose\.dev\.yml: services\.postgres: command: must be/,
+  ],
+  [
+    'dev postgres with the tuning of compose.local.yml',
+    {
+      [D]: [['      - postgres\n', '      - postgres\n      - -c\n      - shared_buffers=128MB\n']],
+    },
+    /compose\.dev\.yml: services\.postgres: command: must be/,
   ],
   [
     'local top-level networks',
