@@ -35,6 +35,9 @@ test('A5 / RF-A19: no client data in the logs or in the error page', async () =>
   expect(entry.error_id).toBe(pageErrorId);
   expect(entry.route_id).toBe('/dev/error-probe');
   expect(entry.status).toBe(500);
+  expect(entry).not.toHaveProperty('error_message');
+  expect(entry.error_name).toBe('other');
+  expect(entry.stack).toMatch(/^ +at /);
 });
 
 test('RF-A19: a 404 writes nothing and shows no error id', async () => {

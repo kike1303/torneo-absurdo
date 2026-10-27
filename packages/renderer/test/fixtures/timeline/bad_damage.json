@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/1/damage",
+      "value": -1
+    }
+  ],
+  "expect": {
+    "code": "timeline.bad_damage",
+    "path": "/cues/1/damage"
+  }
+}

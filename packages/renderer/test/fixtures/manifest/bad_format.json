@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/format",
+      "value": "torneo.other"
+    }
+  ],
+  "expect": {
+    "code": "manifest.bad_format",
+    "path": "/format"
+  }
+}

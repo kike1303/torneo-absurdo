@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/sheets/0/file",
+      "value": "../sheet-0.png"
+    }
+  ],
+  "expect": {
+    "code": "manifest.sheet_file",
+    "path": "/sheets/0/file"
+  }
+}

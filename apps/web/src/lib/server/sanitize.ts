@@ -1,4 +1,4 @@
-// Blacklist sanitizer for `error_message` and `stack` (RF-A19). Removes:
+// Blacklist sanitizer for `stack` (RF-A19, ADR-0012 A3). Removes:
 // - the value that follows a sensitive header name: a whole quoted string (with escapes), a whole
 //   array (also from a `Map`), or the rest of the line;
 // - credentials in URLs (`user:pass@`), even with an unencoded `/` or `@` in the password;

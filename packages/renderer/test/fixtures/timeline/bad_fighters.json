@@ -1,0 +1,12 @@
+{
+  "ops": [
+    {
+      "op": "delete",
+      "path": "/fighters/b"
+    }
+  ],
+  "expect": {
+    "code": "timeline.bad_fighters",
+    "path": "/fighters/b"
+  }
+}

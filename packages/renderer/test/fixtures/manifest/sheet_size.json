@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/sheets/0/width",
+      "value": 4096
+    }
+  ],
+  "expect": {
+    "code": "manifest.sheet_size",
+    "path": "/sheets/0/width"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/3/result",
+      "value": "block"
+    }
+  ],
+  "expect": {
+    "code": "timeline.knockdown_without_strike",
+    "path": "/cues/4"
+  }
+}

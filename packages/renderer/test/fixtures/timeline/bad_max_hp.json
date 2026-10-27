@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/fighters/a/max_hp",
+      "value": 0
+    }
+  ],
+  "expect": {
+    "code": "timeline.bad_max_hp",
+    "path": "/fighters/a/max_hp"
+  }
+}

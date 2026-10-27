@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/4/duration_ms",
+      "value": 2000
+    }
+  ],
+  "expect": {
+    "code": "timeline.strike_during_knockdown",
+    "path": "/cues/5/at_ms"
+  }
+}

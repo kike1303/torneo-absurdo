@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/1/at_ms",
+      "value": 1500
+    }
+  ],
+  "expect": {
+    "code": "timeline.intro_gap",
+    "path": "/cues/1/at_ms"
+  }
+}

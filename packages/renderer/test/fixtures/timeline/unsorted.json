@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/2/at_ms",
+      "value": 3000
+    }
+  ],
+  "expect": {
+    "code": "timeline.unsorted",
+    "path": "/cues/2/at_ms"
+  }
+}

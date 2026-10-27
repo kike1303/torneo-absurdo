@@ -12,7 +12,7 @@ approvals:
 linear: TA-5
 depends_on: ["0005", "0006", "0007", "0008"]
 created: 2026-10-21
-updated: 2026-10-24
+updated: 2026-10-26
 ---
 
 # Aviso de privacidad integral — Torneo Absurdo (borrador)
@@ -98,6 +98,8 @@ Algunos de estos proveedores pueden almacenar datos fuera de México.
 
 La aplicación web también guarda registros técnicos, pero **solo de errores** (no registra cada visita) y sin datos tuyos: ni IP, ni cookies, ni cabeceras, ni la dirección completa de la página. Como escribe poco, esos registros pueden durar más que los del servidor antes de sobrescribirse.
 
+La base de datos también guarda registros técnicos (arranque, mantenimiento y errores), configurados para que **no contengan datos tuyos**: ni el contenido de tus datos, ni las consultas, ni tu IP. Como escribe poco, esos registros pueden durar más de 3 semanas antes de sobrescribirse.
+
 El registro de movimientos de monedas es inmutable por diseño. Si eliminas tu cuenta, borramos en ese momento tus identificadores de Google o Discord, tus sesiones, tu alias y tu historial de eventos de seguridad. Tus movimientos de monedas, apuestas y resultados se conservan **seudonimizados**: ligados a un identificador interno, sin tu alias ni tu cuenta de Google o Discord. Además se conservan:
 - los registros de moderación que te afecten, durante su plazo;
 - tus datos en las copias de seguridad, hasta que estas caducan (máximo 30 días);
@@ -133,7 +135,7 @@ Decisiones que este aviso necesita antes de publicarse:
 5. **Cookies de preferencia:** la cookie de idioma ya quedó fijada en la spec de 001 (`locale`, 1 año, solo por elección explícita en el selector). Falta confirmar con legal si las cookies de preferencia (`locale` y `theme`) cuentan como necesarias o se declaran aparte como "de preferencia".
 6. **Revisión legal** del texto completo antes de publicarlo. Puntos concretos: la autoridad competente con la LFPDPPP de 2025, si hace falta consentimiento expreso o basta el aviso, los medios para limitar el uso y revocar el consentimiento, los plazos ARCO, los tratamientos automatizados (`farm-report`) y en qué países guardan datos Hostinger y R2.
 7. **Retención de `auth_events`:** la spec de auth debe fijar si el job de retención borra la fila completa o solo el `ip_hash`. Recomendación: la fila completa. Este aviso asume eso.
-8. **Logs de `web` y del server:** resuelto en la spec de 001. `web` no registra peticiones, solo arranque y errores saneados, nunca `getClientAddress()`, `X-Forwarded-For`, cookies ni headers (RF-A19). El server escribe una línea por petición con solo `ts`, `level`, `method`, `route` (la plantilla), `status`, `latency_ms` y `request_id` aleatorio (RF-B15), y lo prueban canarios contra el binario. **Plazo medido en la fase B** (2026-10-24, binario `--release`): la línea de `/api/health` mide 192 B, 290 B con el envoltorio de `json-file`; con 5,760 healthchecks al día son unos 1.67 MB/día, así que 3 × 10 MiB duran como máximo 18.8 días sin tráfico ni despliegues. Por la regla de `plan-b.md` (menos de 19 días), el aviso dice "menos de 3 semanas". Falta que la fase C lo confirme con `prod-local` (1 h en reposo) y que la feature de auth actualice la fila "Registros técnicos" si agrega un campo (por ejemplo `user_id`).
+8. **Logs de `web` y del server:** resuelto en la spec de 001. `web` no registra peticiones, solo arranque y errores, nunca `getClientAddress()`, `X-Forwarded-For`, cookies ni headers (RF-A19). Un error se registra por su código (`error_code`), o por su nombre (`error_name`) y los marcos del stack, y nunca por su mensaje: `error_message` ya no existe ([ADR-0012](../decisions/0012-logs-y-cabeceras-de-seguridad.md) A5). El server escribe una línea por petición con solo `ts`, `level`, `method`, `route` (la plantilla), `status`, `latency_ms` y `request_id` aleatorio (RF-B15), y lo prueban canarios contra el binario. **Plazo medido en la fase B** (2026-10-24, binario `--release`): la línea de `/api/health` mide 192 B, 290 B con el envoltorio de `json-file`; con 5,760 healthchecks al día son unos 1.67 MB/día, así que 3 × 10 MiB duran como máximo 18.8 días sin tráfico ni despliegues. Por la regla de `plan-b.md` (menos de 19 días), el aviso dice "menos de 3 semanas". Falta que la fase C lo confirme con `prod-local` (1 h en reposo) y que la feature de auth actualice la fila "Registros técnicos" si agrega un campo (por ejemplo `user_id`).
 9. **Flujo ARCO** (spec de cuentas): la verificación desde la sesión es obligatoria. La respuesta de acceso incluye solo datos propios, nunca cuentas correlacionadas, el contenido de `farm-report` sobre terceros ni `IP_HASH_KEY`.
 
 ## Revisión

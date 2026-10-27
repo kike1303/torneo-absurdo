@@ -1,0 +1,18 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/animations/idle/frames",
+      "value": []
+    },
+    {
+      "op": "set",
+      "path": "/animations/idle/frame_ms",
+      "value": []
+    }
+  ],
+  "expect": {
+    "code": "manifest.animation_frames_count",
+    "path": "/animations/idle/frames"
+  }
+}

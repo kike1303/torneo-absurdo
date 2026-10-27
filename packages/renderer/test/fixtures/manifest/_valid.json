@@ -1,0 +1,83 @@
+{
+  "format": "torneo.sprites",
+  "format_version": 1,
+  "id": "mini",
+  "pixel_art": true,
+  "sheets": [
+    {
+      "file": "sheet-0.png",
+      "width": 64,
+      "height": 64
+    }
+  ],
+  "frames": [
+    {
+      "sheet": 0,
+      "x": 0,
+      "y": 0,
+      "w": 32,
+      "h": 32,
+      "pivot_x": 16,
+      "pivot_y": 30
+    },
+    {
+      "sheet": 0,
+      "x": 32,
+      "y": 0,
+      "w": 32,
+      "h": 32,
+      "pivot_x": 16,
+      "pivot_y": 30
+    }
+  ],
+  "animations": {
+    "idle": {
+      "frames": [0],
+      "frame_ms": [100],
+      "loop": true
+    },
+    "attack_light": {
+      "frames": [0, 1],
+      "frame_ms": [100, 100],
+      "loop": false,
+      "impact_frame": 1
+    },
+    "attack_heavy": {
+      "frames": [0, 1],
+      "frame_ms": [100, 100],
+      "loop": false,
+      "impact_frame": 1
+    },
+    "special": {
+      "frames": [0, 1],
+      "frame_ms": [100, 100],
+      "loop": false,
+      "impact_frame": 1
+    },
+    "hit": {
+      "frames": [0],
+      "frame_ms": [100],
+      "loop": false
+    },
+    "block": {
+      "frames": [0],
+      "frame_ms": [100],
+      "loop": false
+    },
+    "dodge": {
+      "frames": [0],
+      "frame_ms": [100],
+      "loop": false
+    },
+    "ko": {
+      "frames": [0],
+      "frame_ms": [100],
+      "loop": false
+    },
+    "win": {
+      "frames": [0],
+      "frame_ms": [100],
+      "loop": true
+    }
+  }
+}

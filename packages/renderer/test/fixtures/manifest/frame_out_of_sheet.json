@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/frames/1/x",
+      "value": 40
+    }
+  ],
+  "expect": {
+    "code": "manifest.frame_out_of_sheet",
+    "path": "/frames/1"
+  }
+}

@@ -1,13 +1,17 @@
 //! Logs (RF-B15, plan-b decision 4): one JSON object per line on stdout, with a closed
 //! allowlist of fields.
 //!
-//! - Every line has `ts` (RFC 3339, UTC) and `level`.
+//! - Every line has `ts` (RFC 3339, UTC) and `level` (lowercase).
 //! - Events of this crate (`target == "server"` or `server::…`) add only the allowlisted
 //!   fields. Anything else, `message` included, is dropped.
 //! - Events of any other crate (sqlx, hyper, tungstenite…) write only `ts`, `level`, `target`
 //!   and `"event":"external"`, so their text (which may hold connection options, URIs or
 //!   payloads) never reaches the log.
-//! - Span fields are never written; the server does not open spans with fields.
+//! - Each field accepts one type (ADR-0012 A3): strings only through `record_str`, integers
+//!   only through `record_u64`/`record_i64`, and `request_id` only as a `%` UUID. A value of
+//!   any other type is dropped, so `error_kind = ?err` never writes the error.
+//! - Span fields are never written, and [`layer`] is the only layer with output (ADR-0012 A3).
+//!   Tracing's `instrument` attribute always goes with `skip_all` (a test walks `src/`).
 //! - Values are written with `serde_json`, so no value can break the line or inject fields.
 //! - Third-party crates are capped at `warn` whatever `RUST_LOG` says.
 //! - The panic hook logs only `event`, `file` and `line` (from `std::panic::Location`), never
@@ -18,14 +22,18 @@ use std::fmt;
 use serde_json::{Map, Value};
 use tracing::field::{Field, Visit};
 use tracing::{Event, Level, Subscriber};
-use tracing_subscriber::Layer;
-use tracing_subscriber::filter::{EnvFilter, FilterExt, LevelFilter, ParseError, Targets};
-use tracing_subscriber::fmt::format::Writer;
+use tracing_subscriber::filter::combinator::And;
+use tracing_subscriber::filter::{
+    EnvFilter, FilterExt, Filtered, LevelFilter, ParseError, Targets,
+};
+use tracing_subscriber::fmt::format::{DefaultFields, Writer};
 use tracing_subscriber::fmt::time::{FormatTime, SystemTime};
 use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields, MakeWriter};
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::layer::{Layered, SubscriberExt};
+use tracing_subscriber::registry::{LookupSpan, Registry};
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{Layer, fmt::Layer as FmtLayer};
+use uuid::{Uuid, Version};
 
 /// Fields an event of this crate may write. Closed list: adding one means updating the
 /// privacy notice (spec, "Diseño → Logs y plazo").
@@ -43,6 +51,45 @@ pub const ALLOWED_FIELDS: &[&str] = &[
     "file",
     "line",
 ];
+
+/// The type a field accepts (ADR-0012 A3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FieldKind {
+    /// Only `record_str`.
+    Str,
+    /// Only `record_u64` and `record_i64`.
+    Int,
+    /// Only `record_debug` (`%value`), and only if the value is a version 4 UUID, written in
+    /// its hyphenated form.
+    Uuid,
+}
+
+/// The type of each field of `ALLOWED_FIELDS` (a test checks both lists have the same names).
+const FIELD_KINDS: &[(&str, FieldKind)] = &[
+    ("event", FieldKind::Str),
+    ("method", FieldKind::Str),
+    ("route", FieldKind::Str),
+    ("status", FieldKind::Int),
+    ("latency_ms", FieldKind::Int),
+    ("request_id", FieldKind::Uuid),
+    ("var", FieldKind::Str),
+    ("port", FieldKind::Int),
+    ("error_kind", FieldKind::Str),
+    ("close_code", FieldKind::Int),
+    ("file", FieldKind::Str),
+    ("line", FieldKind::Int),
+];
+
+/// The type of an allowlisted field; `None` for any other name.
+fn field_kind(name: &str) -> Option<FieldKind> {
+    if !ALLOWED_FIELDS.contains(&name) {
+        return None;
+    }
+    FIELD_KINDS
+        .iter()
+        .find(|(field, _)| *field == name)
+        .map(|(_, kind)| *kind)
+}
 
 /// Third-party crates that never log below `warn`, even if `RUST_LOG` names them.
 pub const CAPPED_TARGETS: &[&str] = &[
@@ -82,7 +129,7 @@ where
         line.insert("ts".to_owned(), Value::String(ts));
         line.insert(
             "level".to_owned(),
-            Value::String(meta.level().as_str().to_owned()),
+            Value::String(level_name(*meta.level()).to_owned()),
         );
         if is_own_target(meta.target()) {
             event.record(&mut AllowlistVisitor { line: &mut line });
@@ -95,42 +142,74 @@ where
     }
 }
 
+/// The lowercase name of a level (ADR-0012 A1).
+fn level_name(level: Level) -> &'static str {
+    match level {
+        Level::ERROR => "error",
+        Level::WARN => "warn",
+        Level::INFO => "info",
+        Level::DEBUG => "debug",
+        Level::TRACE => "trace",
+    }
+}
+
 struct AllowlistVisitor<'a> {
     line: &'a mut Map<String, Value>,
 }
 
 impl AllowlistVisitor<'_> {
-    fn put(&mut self, field: &Field, value: Value) {
+    /// Writes the field if its name is allowlisted with `kind`. `ts` and `level` are always
+    /// the formatter's own, and `message` has no kind.
+    fn put(&mut self, field: &Field, kind: FieldKind, value: Value) {
         let name = field.name();
-        // `ts` and `level` are always the formatter's own; `message` is never allowlisted.
-        if ALLOWED_FIELDS.contains(&name) {
+        if field_kind(name) == Some(kind) {
             self.line.insert(name.to_owned(), value);
         }
     }
 }
 
+/// Every method is explicit: the defaults forward to `record_debug`, which would write the
+/// `Debug` (or an error's `Display`) of the value. Those that are not one of the types of
+/// `FieldKind` drop the field.
 impl Visit for AllowlistVisitor<'_> {
     fn record_str(&mut self, field: &Field, value: &str) {
-        self.put(field, Value::String(value.to_owned()));
+        self.put(field, FieldKind::Str, Value::String(value.to_owned()));
     }
 
     fn record_u64(&mut self, field: &Field, value: u64) {
-        self.put(field, Value::from(value));
+        self.put(field, FieldKind::Int, Value::from(value));
     }
 
     fn record_i64(&mut self, field: &Field, value: i64) {
-        self.put(field, Value::from(value));
-    }
-
-    fn record_bool(&mut self, field: &Field, value: bool) {
-        self.put(field, Value::Bool(value));
+        self.put(field, FieldKind::Int, Value::from(value));
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        if ALLOWED_FIELDS.contains(&field.name()) {
-            self.put(field, Value::String(format!("{value:?}")));
+        if field_kind(field.name()) == Some(FieldKind::Uuid) {
+            let text = format!("{value:?}");
+            if let Ok(id) = Uuid::try_parse(&text)
+                && id.get_version() == Some(Version::Random)
+            {
+                self.put(
+                    field,
+                    FieldKind::Uuid,
+                    Value::String(id.hyphenated().to_string()),
+                );
+            }
         }
     }
+
+    fn record_bool(&mut self, _field: &Field, _value: bool) {}
+
+    fn record_f64(&mut self, _field: &Field, _value: f64) {}
+
+    fn record_i128(&mut self, _field: &Field, _value: i128) {}
+
+    fn record_u128(&mut self, _field: &Field, _value: u128) {}
+
+    fn record_bytes(&mut self, _field: &Field, _value: &[u8]) {}
+
+    fn record_error(&mut self, _field: &Field, _value: &(dyn std::error::Error + 'static)) {}
 }
 
 /// The caps for third-party crates (always applied on top of `RUST_LOG`).
@@ -141,12 +220,20 @@ fn caps() -> Targets {
     )
 }
 
+/// The type of [`layer`]. Named, like [`Logs`], so that adding another layer does not compile
+/// without changing these types (ADR-0012 A3).
+pub type JsonLayer<S, W> =
+    Filtered<FmtLayer<S, DefaultFields, JsonLine, W>, And<EnvFilter, Targets, S>, S>;
+
+/// The subscriber: the registry with [`layer`] as its only layer.
+pub type Logs<W> = Layered<JsonLayer<Registry, W>, Registry>;
+
 /// The formatting layer with the `RUST_LOG` filter and the caps, writing to `writer`.
 ///
 /// The caps are a separate filter combined with `and`, not extra `EnvFilter` directives: a
 /// more specific directive in `RUST_LOG` (for example `sqlx::query=trace`) would otherwise win
 /// over `sqlx=warn`.
-pub fn layer<S, W>(rust_log: &str, writer: W) -> Result<impl Layer<S>, ParseError>
+pub fn layer<S, W>(rust_log: &str, writer: W) -> Result<JsonLayer<S, W>, ParseError>
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
     W: for<'w> MakeWriter<'w> + Send + Sync + 'static,
@@ -166,11 +253,18 @@ pub enum TelemetryError {
     AlreadySet,
 }
 
+/// The subscriber: the registry with [`layer`] as its only layer with output (ADR-0012 A3).
+fn subscriber<W>(rust_log: &str, writer: W) -> Result<Logs<W>, ParseError>
+where
+    W: for<'w> MakeWriter<'w> + Send + Sync + 'static,
+{
+    Ok(tracing_subscriber::registry().with(layer(rust_log, writer)?))
+}
+
 /// Installs the global subscriber (stdout) and the panic hook.
 pub fn init(rust_log: &str) -> Result<(), TelemetryError> {
-    let layer = layer(rust_log, std::io::stdout).map_err(|_| TelemetryError::Filter)?;
-    tracing_subscriber::registry()
-        .with(layer)
+    subscriber(rust_log, std::io::stdout)
+        .map_err(|_| TelemetryError::Filter)?
         .try_init()
         .map_err(|_| TelemetryError::AlreadySet)?;
     install_panic_hook();
@@ -231,8 +325,7 @@ mod tests {
 
     fn capture(rust_log: &str, emit: impl FnOnce()) -> Vec<serde_json::Map<String, Value>> {
         let out = Capture::default();
-        let subscriber = tracing_subscriber::registry().with(layer(rust_log, out.clone()).unwrap());
-        tracing::subscriber::with_default(subscriber, emit);
+        tracing::subscriber::with_default(subscriber(rust_log, out.clone()).unwrap(), emit);
         out.lines()
     }
 
@@ -259,7 +352,7 @@ mod tests {
         found.sort_unstable();
         assert_eq!(found, ["event", "level", "route", "status", "ts"]);
         assert_eq!(line["event"], "http.request");
-        assert_eq!(line["level"], "INFO");
+        assert_eq!(line["level"], "info");
         assert_eq!(line["status"], 200);
         let text = serde_json::to_string(line).unwrap();
         assert!(!text.contains("canary"));
@@ -324,7 +417,7 @@ mod tests {
         });
         assert_eq!(lines.len(), 2, "{lines:?}");
         assert_eq!(lines[0]["event"], "external");
-        assert_eq!(lines[0]["level"], "WARN");
+        assert_eq!(lines[0]["level"], "warn");
         assert_eq!(lines[1]["event"], "ws.closed");
         assert_eq!(lines[1]["close_code"], 1008);
     }
@@ -349,7 +442,7 @@ mod tests {
         let mut found = keys(&lines[0]);
         found.sort_unstable();
         assert_eq!(found, ["event", "level", "ts"]);
-        assert_eq!(lines[0]["level"], "INFO");
+        assert_eq!(lines[0]["level"], "info");
     }
 
     #[test]
@@ -364,5 +457,447 @@ mod tests {
     #[test]
     fn invalid_rust_log_is_an_error() {
         assert!(layer::<tracing_subscriber::Registry, _>("sqlx=loud", Capture::default()).is_err());
+    }
+
+    #[test]
+    fn level_is_lowercase() {
+        let lines = capture("trace", || {
+            tracing::error!(target: "server", event = "x");
+            tracing::warn!(target: "server", event = "x");
+            tracing::info!(target: "server", event = "x");
+            tracing::debug!(target: "server", event = "x");
+            tracing::trace!(target: "server", event = "x");
+            tracing::warn!(target: "sqlx::pool", "x");
+        });
+        let levels: Vec<&str> = lines.iter().map(|l| l["level"].as_str().unwrap()).collect();
+        assert_eq!(levels, ["error", "warn", "info", "debug", "trace", "warn"]);
+    }
+
+    #[derive(Debug)]
+    struct Canary;
+
+    impl fmt::Display for Canary {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("canary-display")
+        }
+    }
+
+    impl std::error::Error for Canary {}
+
+    #[test]
+    fn every_allowed_field_has_a_kind() {
+        for name in ALLOWED_FIELDS {
+            assert!(field_kind(name).is_some(), "{name}");
+        }
+        let mut kinds: Vec<&str> = FIELD_KINDS.iter().map(|(name, _)| *name).collect();
+        let mut allowed = ALLOWED_FIELDS.to_vec();
+        kinds.sort_unstable();
+        allowed.sort_unstable();
+        assert_eq!(kinds, allowed);
+        assert_eq!(field_kind("message"), None);
+        assert_eq!(field_kind("ts"), None);
+        assert_eq!(field_kind("level"), None);
+    }
+
+    #[test]
+    fn fields_accept_only_their_type() {
+        let error = Canary;
+        let lines = capture("info", || {
+            tracing::info!(
+                target: "server",
+                event = "x",
+                error_kind = ?error,
+                route = %error,
+                var = &error as &(dyn std::error::Error + 'static),
+                method = &b"canary-bytes"[..],
+                file = true,
+                status = "200",
+                latency_ms = 1.5f64,
+                port = 8080u128,
+                close_code = -1i128,
+                line = false,
+            );
+        });
+        assert_eq!(lines.len(), 1);
+        let mut found = keys(&lines[0]);
+        found.sort_unstable();
+        assert_eq!(found, ["event", "level", "ts"], "{:?}", lines[0]);
+        assert!(!serde_json::to_string(&lines[0]).unwrap().contains("canary"));
+    }
+
+    #[test]
+    fn fields_keep_their_type() {
+        let id = Uuid::new_v4();
+        let lines = capture("info", || {
+            tracing::info!(
+                target: "server",
+                event = "x",
+                method = "GET",
+                route = "/api/health",
+                error_kind = "timeout",
+                var = "PORT",
+                file = "src/x.rs",
+                status = 200u16,
+                latency_ms = 3u64,
+                port = 8080u16,
+                close_code = 1008i64,
+                line = 7u32,
+                request_id = %id,
+            );
+        });
+        let line = &lines[0];
+        assert_eq!(line.len(), ALLOWED_FIELDS.len() + 2, "{line:?}");
+        assert_eq!(line["close_code"], 1008);
+        assert_eq!(line["line"], 7);
+        assert_eq!(line["request_id"], id.hyphenated().to_string());
+    }
+
+    #[test]
+    fn request_id_must_be_a_uuid() {
+        let lines = capture("info", || {
+            tracing::info!(target: "server", event = "x", request_id = %Canary);
+            tracing::info!(target: "server", event = "x", request_id = "canary");
+            tracing::info!(target: "server", event = "x", request_id = %Uuid::nil());
+            tracing::info!(target: "server", event = "x", request_id = %Uuid::max());
+            // A 32-character hex value (say, a hash prefix) that is not a version 4 UUID.
+            tracing::info!(
+                target: "server",
+                event = "x",
+                request_id = %"0123456789abcdef0123456789abcdef"
+            );
+        });
+        assert_eq!(lines.len(), 5);
+        for line in &lines {
+            assert!(!line.contains_key("request_id"), "{line:?}");
+        }
+    }
+
+    #[test]
+    fn request_id_is_written_hyphenated() {
+        let id = Uuid::new_v4();
+        let lines = capture("info", || {
+            tracing::info!(target: "server", event = "x", request_id = %id.simple());
+            tracing::info!(target: "server", event = "x", request_id = %id.braced());
+            tracing::info!(target: "server", event = "x", request_id = %id.urn());
+        });
+        assert_eq!(lines.len(), 3);
+        for line in &lines {
+            assert_eq!(line["request_id"], id.hyphenated().to_string(), "{line:?}");
+        }
+    }
+
+    #[tracing::instrument(skip_all, target = "server", fields(route = canary, event = "span"))]
+    fn instrumented(canary: &str) {
+        tracing::Span::current().record("error_kind", canary);
+        tracing::info!(target: "server", event = "inside");
+    }
+
+    #[test]
+    fn span_fields_are_never_written() {
+        let canary = "canary-span";
+        let lines = capture("trace", || {
+            let span = tracing::info_span!(
+                target: "server",
+                "work",
+                route = canary,
+                error_kind = tracing::field::Empty,
+            );
+            let _guard = span.enter();
+            span.record("error_kind", canary);
+            tracing::info!(target: "server", event = "inside");
+            instrumented(canary);
+        });
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        for line in &lines {
+            let mut found = keys(line);
+            found.sort_unstable();
+            assert_eq!(found, ["event", "level", "ts"], "{line:?}");
+            assert_eq!(line["event"], "inside");
+        }
+    }
+
+    #[test]
+    fn the_subscriber_writes_each_event_once() {
+        let lines = capture("info", || tracing::info!(target: "server", event = "x"));
+        assert_eq!(lines.len(), 1, "{lines:?}");
+    }
+
+    /// `source` without comments and with every string and char literal emptied, so brackets
+    /// and words inside them do not count.
+    fn strip_literals_and_comments(source: &str) -> String {
+        let chars: Vec<char> = source.chars().collect();
+        let ident = |c: char| c.is_alphanumeric() || c == '_';
+        let mut out = String::new();
+        let mut i = 0;
+        while i < chars.len() {
+            let c = chars[i];
+            let next = chars.get(i + 1).copied();
+            if c == '/' && next == Some('/') {
+                while i < chars.len() && chars[i] != '\n' {
+                    i += 1;
+                }
+            } else if c == '/' && next == Some('*') {
+                // Block comments nest in Rust.
+                let mut depth = 1;
+                i += 2;
+                while i < chars.len() && depth > 0 {
+                    if chars[i] == '/' && chars.get(i + 1) == Some(&'*') {
+                        depth += 1;
+                        i += 2;
+                    } else if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
+                        depth -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+            } else if c == 'r'
+                && matches!(next, Some('"' | '#'))
+                && (i == 0 || !ident(chars[i - 1]) || chars[i - 1] == 'b')
+            {
+                let mut hashes = 0;
+                let mut j = i + 1;
+                while chars.get(j) == Some(&'#') {
+                    hashes += 1;
+                    j += 1;
+                }
+                if chars.get(j) != Some(&'"') {
+                    out.push(c);
+                    i += 1;
+                    continue;
+                }
+                j += 1;
+                while j < chars.len()
+                    && !(chars[j] == '"' && (1..=hashes).all(|k| chars.get(j + k) == Some(&'#')))
+                {
+                    j += 1;
+                }
+                out.push_str("\"\"");
+                i = j + 1 + hashes;
+            } else if c == '"' {
+                i += 1;
+                while i < chars.len() && chars[i] != '"' {
+                    i += if chars[i] == '\\' { 2 } else { 1 };
+                }
+                out.push_str("\"\"");
+                i += 1;
+            } else if c == '\'' && (next == Some('\\') || chars.get(i + 2) == Some(&'\'')) {
+                // A char literal (a lifetime has no closing quote right after one char).
+                i += if next == Some('\\') { 2 } else { 1 };
+                while i < chars.len() && chars[i] != '\'' {
+                    i += 1;
+                }
+                out.push_str("' '");
+                i += 1;
+            } else {
+                out.push(c);
+                i += 1;
+            }
+        }
+        out
+    }
+
+    /// The uses of tracing's `instrument` attribute in `source` that break A3. The word
+    /// `instrument` may only appear as `#[tracing::instrument(skip_all, …)]` (with `skip_all`
+    /// as a top-level argument) or as the `.instrument(span)` method; anything else (a bare
+    /// `#[instrument]`, a `use … as` alias, `cfg_attr`) is reported.
+    fn instrument_without_skip_all(source: &str) -> Vec<String> {
+        let code = strip_literals_and_comments(source);
+        let ident = |c: char| c.is_alphanumeric() || c == '_';
+        let mut found = Vec::new();
+        for (at, _) in code.match_indices("instrument") {
+            let before = &code[..at];
+            let after = &code[at + "instrument".len()..];
+            if before.chars().next_back().is_some_and(ident)
+                || after.chars().next().is_some_and(ident)
+            {
+                continue;
+            }
+            let compact: String = before.chars().filter(|c| !c.is_whitespace()).collect();
+            if compact.ends_with('.') {
+                continue;
+            }
+            let snippet: String = code[at.saturating_sub(40)..].chars().take(100).collect();
+            if !compact.ends_with("#[tracing::") {
+                found.push(snippet);
+                continue;
+            }
+            let args = after.trim_start();
+            let Some(args) = args.strip_prefix('(') else {
+                found.push(snippet);
+                continue;
+            };
+            let mut depth = 0usize;
+            let mut top_level = vec![String::new()];
+            for c in args.chars() {
+                match c {
+                    '(' | '[' | '{' => depth += 1,
+                    ')' | ']' | '}' if depth == 0 => break,
+                    ')' | ']' | '}' => depth -= 1,
+                    ',' if depth == 0 => top_level.push(String::new()),
+                    _ => {}
+                }
+                if depth == 0
+                    && c != ','
+                    && let Some(last) = top_level.last_mut()
+                {
+                    last.push(c);
+                }
+            }
+            if !top_level.iter().any(|arg| arg.trim() == "skip_all") {
+                found.push(snippet);
+            }
+        }
+        found
+    }
+
+    fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                rust_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    fn server_sources() -> Vec<(std::path::PathBuf, String)> {
+        let mut files = Vec::new();
+        rust_files(
+            std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src")),
+            &mut files,
+        );
+        assert!(files.len() > 5, "{files:?}");
+        files
+            .into_iter()
+            .map(|path| {
+                let text = std::fs::read_to_string(&path).unwrap();
+                (path, text)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_instrument_check_catches_a_missing_skip_all() {
+        let bad = [
+            "#[instrument]\nfn f(x: u8) {}",
+            "#[instrument(skip_all)]\nfn f(x: u8) {}",
+            "#[tracing::instrument(fields(route = \"/x\"))] fn f() {}",
+            "#[ tracing :: instrument (\n  skip(x)\n)]\nfn f(x: u8) {}",
+            "#[cfg_attr(test, tracing::instrument(err))] fn f() {}",
+            "#[tracing::instrument(name = \"skip_all\")] fn f() {}",
+            "#[tracing::instrument(skip(skip_all_x))] fn f() {}",
+            "#[tracing::instrument(fields(skip_all = 1))] fn f() {}",
+            "use tracing::instrument as traced;\n#[traced] fn f() {}",
+            "#[doc = \"[\"]\n#[tracing::instrument(err)] fn f() {}",
+            "/* a /* b */ \" */\n#[tracing::instrument(err)] fn f() {}",
+        ];
+        for source in bad {
+            assert_eq!(instrument_without_skip_all(source).len(), 1, "{source}");
+        }
+        let good = [
+            "#[tracing::instrument(skip_all, fields(route = \"/x\"))] fn f() {}",
+            "#[tracing::instrument(err, skip_all)] fn f() {}",
+            "// #[instrument]\n#[derive(Debug)] struct S;",
+            "/* #[instrument] */ fn f() {}",
+            "/* a /* #[instrument] */ #[instrument] */ fn f() {}",
+            "#[doc = \"instrumented\"] fn f() {}",
+            "const A: &str = \"#[instrument]\";",
+            "const A: &str = r#\"#[instrument]\"#;",
+            "let c = '\"'; let s = \"#[instrument]\";",
+            "fut.instrument(span).await; fn instrumented() {}",
+        ];
+        for source in good {
+            assert!(
+                instrument_without_skip_all(source).is_empty(),
+                "{source}: {:?}",
+                instrument_without_skip_all(source)
+            );
+        }
+    }
+
+    #[test]
+    fn every_instrument_in_the_server_skips_all() {
+        for (path, text) in server_sources() {
+            let found = instrument_without_skip_all(&text);
+            assert!(found.is_empty(), "{}: {found:?}", path.display());
+        }
+    }
+
+    /// The code of `text` before its test module.
+    fn non_test_code(text: &str) -> &str {
+        text.split("#[cfg(test)]").next().unwrap_or(text)
+    }
+
+    #[test]
+    fn telemetry_layer_is_the_only_output_layer() {
+        // Outside this module, nothing builds or installs a subscriber or a layer: the only
+        // use of `tracing_subscriber` is `tracing_subscriber::EnvFilter` (to validate
+        // `RUST_LOG`), and no code names a dispatcher.
+        let forbidden = [
+            "set_global_default",
+            "set_default",
+            "with_default",
+            "Dispatch",
+            "dispatcher",
+            "SubscriberExt",
+            "SubscriberInitExt",
+        ];
+        for (path, text) in server_sources() {
+            if path.ends_with("src/telemetry.rs") {
+                continue;
+            }
+            let code = strip_literals_and_comments(&text);
+            for (at, _) in code.match_indices("tracing_subscriber") {
+                let rest = &code[at + "tracing_subscriber".len()..];
+                let env_filter = rest.strip_prefix("::EnvFilter").is_some_and(|after| {
+                    !after
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_alphanumeric() || c == '_')
+                });
+                assert!(
+                    env_filter,
+                    "tracing_subscriber{} in {}",
+                    &rest[..rest.len().min(40)],
+                    path.display()
+                );
+            }
+            for token in forbidden {
+                assert!(!code.contains(token), "{token} in {}", path.display());
+            }
+        }
+        // Here: one output layer, one registry, and `init` installs `subscriber`.
+        let own = non_test_code(include_str!("telemetry.rs"));
+        assert_eq!(own.matches("fmt::layer(").count(), 1);
+        assert_eq!(own.matches("registry(").count(), 1);
+        assert_eq!(own.matches(".with(").count(), 1);
+        assert_eq!(own.matches("try_init(").count(), 1);
+        assert!(own.contains("subscriber(rust_log, std::io::stdout)"));
+        // No crate with its own output layer anywhere in the workspace's dependency graph
+        // (renames and transitive dependencies included).
+        let lock = include_str!("../../../Cargo.lock");
+        for line in lock.lines() {
+            let Some(name) = line.strip_prefix("name = \"") else {
+                continue;
+            };
+            let name = name.trim_end_matches('"');
+            if name.starts_with("tracing") {
+                assert!(
+                    [
+                        "tracing",
+                        "tracing-attributes",
+                        "tracing-core",
+                        "tracing-subscriber"
+                    ]
+                    .contains(&name),
+                    "{name}"
+                );
+            }
+            for banned in ["opentelemetry", "console-subscriber", "console-api"] {
+                assert!(!name.contains(banned), "{name}");
+            }
+        }
     }
 }

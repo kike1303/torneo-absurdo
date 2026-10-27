@@ -1,5 +1,6 @@
 import { error as kitError, isHttpError } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { CodedError, SERVER_ERROR_CODES } from '#lib/server/errors.js';
 import { setLogWriter } from '#lib/server/log.js';
 import { fakeEvent } from '../../../../tests/support/event.js';
 import { handleError } from './handle-error.js';
@@ -12,7 +13,7 @@ const ALLOWED = new Set([
   'route_id',
   'status',
   'error_name',
-  'error_message',
+  'error_code',
   'stack',
 ]);
 const CANARY = 'canary-7f3a';
@@ -64,6 +65,9 @@ describe('handleError', () => {
     expect(parsed.status).toBe(500);
     expect(lines[0]).not.toContain(CANARY);
     expect(lines[0]).not.toContain('203.0.113.77');
+    expect(lines[0]).not.toContain('boom');
+    expect(parsed).not.toHaveProperty('error_message');
+    expect(parsed.error_name).toBe('Error');
     expect(result).toEqual({ message: 'internal', errorId: expect.any(String) });
   });
 
@@ -86,6 +90,14 @@ describe('handleError', () => {
       expect(result).not.toHaveProperty('status');
       expect(JSON.stringify(result)).not.toContain(CANARY);
     }
+  });
+
+  it('logs a CodedError by its code', () => {
+    const code = SERVER_ERROR_CODES[0];
+    handleError({ kind: 'unknown', error: new CodedError(code), event } as Input);
+    const parsed = JSON.parse(lines[0]!) as Record<string, unknown>;
+    expect(parsed.error_code).toBe(code);
+    expect(parsed).not.toHaveProperty('stack');
   });
 
   it('does not throw with a throwing message getter and logs nothing', () => {

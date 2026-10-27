@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/animations/idle/loop",
+      "value": false
+    }
+  ],
+  "expect": {
+    "code": "manifest.loop_required",
+    "path": "/animations/idle/loop"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/animations/hit/impact_frame",
+      "value": 0
+    }
+  ],
+  "expect": {
+    "code": "manifest.impact_frame_forbidden",
+    "path": "/animations/hit/impact_frame"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/fighters/a/asset",
+      "value": "ghost"
+    }
+  ],
+  "expect": {
+    "code": "timeline.unknown_asset",
+    "path": "/fighters/a/asset"
+  },
+  "manifests": true
+}

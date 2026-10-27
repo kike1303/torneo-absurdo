@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/1/target_hp",
+      "value": 900
+    }
+  ],
+  "expect": {
+    "code": "timeline.hp_mismatch",
+    "path": "/cues/1/target_hp"
+  }
+}

@@ -15,12 +15,12 @@ export const ALLOWED_FIELDS = new Set([
   'route_id',
   'status',
   'error_name',
-  'error_message',
+  'error_code',
   'stack',
 ]);
 export const LISTENING = /^Listening on http:\/\/[^\s]+:\d+$/;
 
-/** Values that must never reach a log line (RF-A19, A5 of the intent). */
+/** Values that must never reach a log line (RF-A19, A5 of the intent, ADR-0012 A5). */
 export const CANARIES = {
   cookie: 'canary-cookie-5b0c',
   authorization: 'canary-auth-91fe',
@@ -30,6 +30,8 @@ export const CANARIES = {
   probeIp: '203.0.113.99',
   probeQuery: 'canary-query-7d1e',
   requestQuery: 'canary-request-query-e2c4',
+  probeMessage: 'canary-message-0a9f',
+  probeName: 'canary-name-b41e',
 } as const;
 
 export function logPath(instance: Instance): string {
