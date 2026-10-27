@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { waitForHydration } from './support/hydration.js';
 
 const ORIGIN = 'http://localhost:4173';
 
@@ -41,6 +42,7 @@ test('RF-A17: translated 404 page', async ({ page }) => {
 
 test('focus: every element reached with Tab in the catalog shows a ring', async ({ page }) => {
   await page.goto('/es/dev/components?theme=light');
+  await waitForHydration(page);
   const seen = new Set<string>();
   const missing: string[] = [];
   for (let i = 0; i < 120; i++) {
@@ -85,6 +87,7 @@ test('test 9: reduced motion zeroes transitions and animations', async ({ browse
   const context = await browser.newContext({ reducedMotion: 'reduce' });
   const page = await context.newPage();
   await page.goto('/es/dev/components?theme=light');
+  await waitForHydration(page);
   const ms = (value: string) =>
     Math.max(
       ...value
