@@ -36,3 +36,5 @@ services:
 
 volumes:
   torneo-local-pg:
+
+# CI probe (f), do not merge.
