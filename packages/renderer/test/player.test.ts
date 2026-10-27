@@ -129,6 +129,18 @@ describe('the player (RF-A11)', () => {
     expect(snap?.lastCue?.type).toBe('strike');
   });
 
+  it('snapshot() inside a cue listener already shows that cue', async () => {
+    const { player, runTo } = await setup();
+    const seen: [number, number | undefined][] = [];
+    player.onCue((_cue, index) => seen.push([index, player.snapshot()?.lastCue?.index]));
+    player.seek(0);
+    player.play();
+    runTo(20_000);
+    expect(seen.length).toBeGreaterThan(5);
+    // Several cues can share an at_ms (a strike and its knockdown): the last one of the frame.
+    for (const [index, last] of seen) expect(last).toBeGreaterThanOrEqual(index);
+  });
+
   it('live: without seek nor pause, t = clock()', async () => {
     const clock = new FakeClock();
     const stage = new FakeStage();

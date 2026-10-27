@@ -68,22 +68,22 @@ export function createPlayer(options: RendererOptions, stage: Stage): RendererHa
     const p = prepared;
     if (destroyed || p === null) return;
     const t = timeAt(playback, now(), p.durationMs);
-    if (playback.playing) {
-      const due = dueCues(p.cueTimes, cursor, t);
-      cursor = due.to;
-      for (let i = due.from; i < due.to; i++) {
-        const pc = p.cues[i];
-        if (pc === undefined) continue;
-        for (const listener of [...cueListeners]) listener(pc.cue, i);
-        // A listener may destroy the handle or load another timeline.
-        if (destroyed || prepared !== p) return;
-      }
-      const win = p.win;
-      if (p.firstStrikeAt !== null && t >= p.firstStrikeAt && (win === null || t <= win.at)) {
-        recorder.record(elapsedMs);
-      }
-    }
+    // The scene first, so `snapshot()` inside a cue listener already shows that cue.
     render(p, t);
+    if (!playback.playing) return;
+    const win = p.win;
+    if (p.firstStrikeAt !== null && t >= p.firstStrikeAt && (win === null || t <= win.at)) {
+      recorder.record(elapsedMs);
+    }
+    const due = dueCues(p.cueTimes, cursor, t);
+    cursor = due.to;
+    for (let i = due.from; i < due.to; i++) {
+      const pc = p.cues[i];
+      if (pc === undefined) continue;
+      for (const listener of [...cueListeners]) listener(pc.cue, i);
+      // A listener may pause, seek, destroy the handle or load another timeline.
+      if (destroyed || prepared !== p || cursor !== due.to) return;
+    }
     if (playback.playing && t >= p.durationMs) setState('finished');
   }
 
@@ -117,8 +117,8 @@ export function createPlayer(options: RendererOptions, stage: Stage): RendererHa
       cursor = 0;
       recorder.reset();
       state = null;
-      setState('ready');
       render(next, 0);
+      setState('ready');
     },
     play() {
       const p = prepared;
@@ -141,8 +141,8 @@ export function createPlayer(options: RendererOptions, stage: Stage): RendererHa
       const t = timeAt(playback, now(), p.durationMs);
       cursor = cursorAt(p.cueTimes, t);
       recorder.reset();
-      setState(settledState(p, t));
       render(p, t);
+      setState(settledState(p, t));
     },
     setTheme(theme: RendererTheme) {
       if (destroyed) return;
