@@ -333,7 +333,20 @@ Un solo cambio en `ci.yml`: `tools/**` en el filtro `web`. No hay jobs ni action
 
 ## Desviaciones durante la implementación
 
-_(Se llena si la implementación se aparta del plan.)_
+1. **Rama.** `ta-2-sff-converter` en lugar de `ta-2-spike-renderer-b`, a pedido de la coordinación. Mismo alcance y un solo PR.
+2. **`parseMap(json)` recibe el JSON ya parseado.** `JSON.parse` y su `catch` van en `cli.ts`, que es el único módulo con `catch` además de `png.ts` (decisión 3). El tamaño del mapa se controla ahí mismo, con `fs.stat`.
+3. **`decodeSprite` devuelve siempre RGBA.** La paleta se aplica dentro del decodificador, así que no existe el tipo intermedio `IndexedOrRgbaImage`.
+4. **Prefijo u32 en SFF v2.** En RLE8 y LZ5 se compara con `w × h` (`sff.size_mismatch`). En PNG se salta sin comparar, porque no es la cuenta de píxeles. El formato raw no lleva prefijo: sus datos tienen que medir al menos `w × h`.
+5. **Pivote con espejo.** Primero se espeja el eje (`w − eje_x` con `H`, `h − eje_y` con `V`) y después se resta el desplazamiento del AIR, que está en el espacio del personaje y no se espeja.
+6. **Ancestro existente en `write.ts`.** `lstatSync(_, { throwIfNoEntry: false })` lanza ENOTDIR cuando el camino pasa por un archivo. Por eso el recorrido baja desde la raíz y nunca hace `lstat` a través de un archivo. Un enlace simbólico intermedio se sigue con `existsSync` y `statSync`, que solo corre si `existsSync` dio `true` (macOS tiene `/var` → `/private/var`). Solo se rechaza el enlace que es el ancestro existente más cercano o la salida. Sigue sin haber `catch`.
+7. **ADR-0009 D4 en la arena.** Los componentes no hacen `fetch` ni importan valores de `features/`. Por eso `+page.svelte` le pasa a `FightStage`, por props, `local: LocalAssets` (de `createLocalAssets(fetch)`) y `retime`. `FightStage` expone `currentTimeline()`, y la página calcula `meanStrikeGapMs` con ese valor. `retime.test.ts` vive en `apps/web/tests/` porque lee valores del renderer, igual que `renderer-package.test.ts`. `ArenaFighterId` pasa a ser `string`, y `PlaceholderFighterId` guarda los dos placeholders.
+8. **`check-no-local-sprites` y los source maps.** Los `.map` del servidor copian el código original en `sourcesContent`, incluida la rama `import.meta.env.DEV` que el build eliminó. Por eso los `.map` se revisan sin ese campo, y el resto del build se revisa entero.
+9. **`retimeTimeline`.** Un `knockdown` conserva su separación del `strike` anterior (la regla de los 100 ms). `duration_ms` conserva el tramo posterior a `win`, la pose de victoria de 2 s, en lugar de escalarse. Con 0.8, 1.25 y 1.5, el guion pasa `validateTimeline`.
+10. **Arreglo de A2 en `vite dev`.** Kit limita `server.fs.allow` a `apps/web`, así que los `?url` de las hojas de los placeholders respondían 403 y `/dev/arena` terminaba en `asset_load_failed` con `just dev`. La fase B mide ahí, así que se agrega solo `packages/renderer/placeholders/`, con su test en `tests/vite-config.test.ts`. Va en un commit `fix(web)` aparte.
+11. **Códigos agregados.** Una línea mal formada del AIR se cuenta en su acción y solo es error (`air.bad_frame`) si una animación mapeada la usa. Se suman `air.empty_action`, `convert.sprite_not_found` (frame vacío con nota), `write.invalid_manifest`, `write.sheet_mismatch`, `cli.missing_argument`, `cli.bad_arguments` y `cli.unknown_command`.
+12. **Decisión 16 confirmada sin alternativa.** La imagen `web` se construye (`docker buildx build -f apps/web/Dockerfile`) sin el `package.json` del importer nuevo: `--filter 'web...'` no lo pide. `check-dockerignore.sh` crea `tools/sff-converter/input/` si no existe y lo borra al salir.
+13. **`CLAUDE.md` sin tocar.** Un agente no cambia `CLAUDE.md`. Las líneas que propone el plan (en "Comandos": `check-web` y `just test` nombran el convertidor, más `convert` e `inspect` con un enlace al README) quedan para el owner.
+14. **`pnpm -s`.** El README pide `pnpm -s …`. Sin `-s`, pnpm imprime la línea del comando con las rutas locales, y eso no puede terminar en el PR (RF-B8).
 
 ## Revisión
 ### architect — 2026-10-27 — REQUEST_CHANGES
