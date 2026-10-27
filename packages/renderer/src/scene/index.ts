@@ -41,3 +41,4 @@ export {
 export { BANNER_TWEEN_MS, FIGHT_BANNER_MS } from './banners.ts';
 export { FIXED_CAMERA } from './camera.ts';
 export { sceneAt, sceneAtTimeline } from './scene-at.ts';
+export { letterbox, logicalFontPx, type Letterbox } from './viewport.ts';

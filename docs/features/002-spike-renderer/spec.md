@@ -14,12 +14,12 @@ approvals:
 linear: TA-2
 depends_on: ["001"]
 created: 2026-10-26
-updated: 2026-10-26
+updated: 2026-10-27
 ---
 
 # Spec: Spike de renderizado de peleas
 
-> Intent: [intent.md](./intent.md) · ADRs: [0003](../../decisions/0003-stack-tecnologico.md), [0004](../../decisions/0004-personajes-homenaje.md), [0007](../../decisions/0007-i18n-desde-cero.md), [0009](../../decisions/0009-ui-design-system.md) (D4, D6 y D7) · Dependencia blanda: [003](../003-motor-de-pelea/intent.md) · La consume: [004](../004-pipeline-de-assets/intent.md)
+> Intent: [intent.md](./intent.md) · ADRs: [0003](../../decisions/0003-stack-tecnologico.md), [0004](../../decisions/0004-personajes-homenaje.md), [0007](../../decisions/0007-i18n-desde-cero.md), [0009](../../decisions/0009-ui-design-system.md) (D4, D6 y D7), [0012](../../decisions/0012-logs-y-cabeceras-de-seguridad.md) (B3, B4.2, B4.5 y B6.1) · Dependencia blanda: [003](../003-motor-de-pelea/intent.md) · La consume: [004](../004-pipeline-de-assets/intent.md)
 
 ## Resumen
 `packages/renderer` (`@torneo/renderer`) reproduce con PixiJS 8 una **línea de tiempo propia del renderer** (`Timeline`, una lista de *cues*), no el `FightLog` del protocolo. Se fija un **formato de assets versionado** (spritesheet PNG + manifest JSON), dos placeholders originales que lo usan, una ruta de prueba `/[lang]/dev/arena` cargada de forma diferida, y un convertidor **solo local** de MUGEN (`tools/sff-converter`, TS) que escribe en `content/_local/`. El owner decide go/no-go con la demo.
@@ -77,13 +77,16 @@ Cada requisito dice cómo se verifica (→). "check" es `just check`; "e2e" es `
 - **RF-A10. Aleatoriedad cosmética con semilla local.** Dispersión de números de daño, partículas y patrón del shake usan un PRNG del renderer (`src/fx/prng.ts`, p. ej. mulberry32) sembrado con `hash(índice del cue, canal)`. Nunca `Math.random` (RF-A3). Ese PRNG **no es el del motor ni recibe la semilla de la pelea** (ADR-0002): todos los espectadores y las repeticiones ven lo mismo porque derivan de la timeline. → Vitest: dos instancias producen la misma secuencia; dos cues distintos, secuencias distintas; ESLint (RF-A3).
 
 **Reproducción con Pixi**
-- **RF-A11. API y reloj.** `createRenderer(container: HTMLElement, options: RendererOptions)` devuelve un handle con `load(timeline, assets)`, `play()`, `pause()`, `seek(ms)`, `setTheme(theme)`, `setReducedMotion(flag)`, `onCue(cb)`, `getFrameStats()` y `destroy()`. `RendererOptions` extiende el de ADR-0009 D7 (`theme`, `reducedMotion`) con:
+- **RF-A11. API y reloj.** `createRenderer(container: HTMLElement, options: RendererOptions)` devuelve un handle con `load(timeline, assets)`, `play()`, `pause()`, `seek(ms)`, `setTheme(theme)`, `setReducedMotion(flag)`, `onCue(cb)`, `onState(cb)`, `snapshot()`, `getFrameStats()` y `destroy()`. `RendererOptions` extiende el de ADR-0009 D7 (`theme`, `reducedMotion`) con:
   - `clock: () => number`, la hora en ms de la base de tiempo de la timeline. El host la provee: en el spike, `performance.now()` menos el inicio; en vivo, el reloj del servidor con su offset. El renderer **nunca** avanza la timeline contando frames ni deltas del ticker;
   - `labels: { names: Record<'a' | 'b', string>; banners: Record<'fight' | 'ko', string> }`, ya traducidos por el host;
   - `formatNumber: (n: number) => string` para los números de daño (`Intl` vía `lib/i18n/format.ts`, ADR-0009 D8);
   - `resolveAsset: (assetId: string, file: string) => string`, que da la URL de cada archivo del manifest (Vite pone hash a los nombres, así que no se resuelven por ruta relativa).
 
-  `onCue` se dispara una vez por cue cuando el reloj pasa su `at_ms` durante la reproducción; un `seek` no dispara los cues que salta. Los ataques empiezan su windup `windup_ms` **antes** del `at_ms` del cue (el impacto cae en el `at_ms`), así que el renderer mira hasta 400 ms hacia adelante (ver "Áreas de preocupación" 2). → Vitest con reloj falso para `onCue` y el windup sobre `sceneAt`; e2e para el ciclo de vida.
+  - `onState(cb)` emite `'ready' | 'playing' | 'paused' | 'finished'` (`finished` cuando `t` llega a `duration_ms`); `snapshot()` devuelve `{ t, phase, winner, hp: { a, b }, lastCue }` de la última escena aplicada, con códigos y números, sin texto. El host los usa para sus estados y sus `data-*` sin recalcular HP;
+  - la inicialización y `load` rechazan con un `RendererError` cuyo `code` es `'webgl_unavailable' | 'asset_invalid' | 'asset_load_failed' | 'timeline_invalid'` (los estados de error de RF-A16); `load` valida con `validateTimeline` y `validateManifest` antes de tocar Pixi.
+
+  `onCue` se dispara una vez por cue cuando el reloj pasa su `at_ms` durante la reproducción, en orden (un salto del reloj, como volver de una pestaña oculta, dispara todos los del intervalo); un `seek` no dispara los cues que salta. Los ataques empiezan su windup `windup_ms` **antes** del `at_ms` del cue (el impacto cae en el `at_ms`), así que el renderer mira hasta 400 ms hacia adelante (ver "Áreas de preocupación" 2). → Vitest con reloj falso para `onCue` y el windup sobre `sceneAt`; e2e para el ciclo de vida.
 - **RF-A12. Efectos.** Con `reducedMotion: false`:
   - **screen shake** en `hit` (leve), `crit` y `special` (fuerte) y KO, ≤ 250 ms;
   - **números de daño** que suben y se desvanecen (≤ 900 ms), con dispersión horizontal del PRNG; en `crit`, más grandes y con `theme.colors.crit`;
@@ -104,13 +107,15 @@ Cada requisito dice cómo se verifica (→). "check" es `just check`; "e2e" es `
   - **i18n:** `src/routes/dev/**` está exento de `check-i18n` (ADR-0009 D5), así que la página **solo compone** componentes de `lib/components/fight/` y no tiene texto propio; todo texto visible vive en esos componentes, que `check-i18n` sí revisa, con mensajes `arena_*` en `messages/{es,en}.json`. El canvas lleva `role="img"` y un `aria-label` de Paraglide.
 
   → e2e: `/es/dev/arena` y `/en/dev/arena` llegan a `data-state="playing"`; con `seek` al final (parámetro `?t=<ms>`, solo en esta ruta) llegan a `finished`; la instancia sin catálogo da 404; axe sin violaciones `serious` ni `critical`; sin errores en consola. check (`check-i18n`).
-- **RF-A17. Carga diferida.** Pixi y el renderer solo entran en chunks que se cargan con `import()` desde `FightStage.svelte`. `scripts/check-renderer-split.mjs` lee el manifest del build de cliente (`build.manifest: true` o el de Kit) y falla si algún módulo de `pixi.js` o de `packages/renderer` es alcanzable por imports **estáticos** desde la entrada de la app, el layout raíz o cualquier ruta distinta de `dev/arena`. Corre en `just e2e` justo después del build (y por eso en el job `e2e` de CI). → ese script, con fixtures de manifest que pasan y fallan en Vitest de `scripts/`.
-- **RF-A18. CSP sin cambios.** La CSP de `vite.config.ts` (RF-A10 de 001) **no se modifica** en 002: ADR-0012, que 001 exige antes de ampliarla, no existe. Para eso el renderer:
-  - importa `pixi.js/unsafe-eval` (generación de shaders y sincronización de uniforms sin `new Function`);
-  - desactiva los workers de carga de texturas (`preferWorkers: false`), que Pixi crea desde URLs `blob:` y bloquearía `script-src`;
-  - carga imágenes solo del mismo origen (`img-src 'self' data: blob:` ya cubre lo que Pixi genere).
+- **RF-A17. Carga diferida.** Pixi y el renderer solo entran en chunks que se cargan con `import()` desde `FightStage.svelte`. `scripts/check-renderer-split.mjs` lee el manifest del build de cliente (`build.manifest: true` o el de Kit) y falla si algún módulo de `pixi.js` o de `packages/renderer` es alcanzable por imports **estáticos** desde cualquier entrada o nodo de ruta, **incluido el de `dev/arena`** (allí solo por `import()`, como pide RF-A16). Exige además el caso positivo: el nodo de `dev/arena` alcanza `pixi.js` por imports dinámicos; si no lo encuentra, falla (así no pasa en vacío si cambia el formato del manifest). Corre en `just e2e` justo después del build (y por eso en el job `e2e` de CI). → ese script, con fixtures de manifest que pasan y fallan (Pixi estático en el layout raíz, el renderer estático en el nodo de `dev/arena`, sin el import dinámico) en Vitest de `scripts/`.
+- **RF-A18. CSP sin cambios.** La CSP de `vite.config.ts` (RF-A10 de 001) **no se modifica** en 002 (ADR-0012 B4.2). Las condiciones de ADR-0012 (trabajo derivado 9) para el renderer:
+  - importa `pixi.js/unsafe-eval` **en la entrada de `packages/renderer`** (`src/index.ts`), antes de crear cualquier renderer (generación de shaders y sincronización de uniforms sin `new Function`);
+  - desactiva los workers de carga de texturas (`Assets.setPreferences({ preferWorkers: false })`), que Pixi crea desde URLs `blob:`;
+  - no usa texturas KTX2 ni Basis (ni ningún otro cargador de Pixi con workers);
+  - carga imágenes solo del mismo origen (`img-src 'self' data: blob:` ya cubre lo que Pixi genere);
+  - la ruta del renderer entra en `csp.spec.ts` (ADR-0012 B6.1).
 
-  Si aun así hace falta tocar la CSP, se detiene la fase, se enmienda esta spec con security-reviewer y se escribe ADR-0012 antes. → e2e en Chromium **y WebKit**: cero eventos `securitypolicyviolation` en `/es/dev/arena` durante la carga y 5 s de reproducción.
+  Si aun así hace falta tocar la CSP, se detiene la fase y el plan vuelve a revisión con security-reviewer: ninguna ampliación de B4 cubre a Pixi, así que hace falta un ADR que reemplace a ADR-0012 (B4.5) antes de tocarla. → e2e en Chromium **y WebKit**: cero eventos `securitypolicyviolation` en `/es/dev/arena` durante la carga y 5 s de reproducción.
 - **RF-A19. Medición de rendimiento.** `getFrameStats()` devuelve, desde el primer `strike` hasta el cue `win`, el número de frames, FPS medio y los percentiles 50, 95 y 99 del tiempo de frame (intervalo entre callbacks del ticker de Pixi) y cuántos frames pasan de 33 ms. Con el interruptor de estadísticas, la ruta muestra esos valores (etiquetas de Paraglide) y un botón para copiar el JSON. Método y umbrales en "Requisitos no funcionales → Rendimiento". → Vitest del cálculo de percentiles; e2e: tras `seek` a un punto intermedio y 3 s de reproducción, `frames > 0`. El umbral **no** se comprueba en CI (CI no tiene GPU); se comprueba en el dispositivo de referencia (PR).
 - **RF-A20. Docs.** El PR de A actualiza `docs/architecture.md` (renderer: timeline propia, escena pura, formato de assets, adaptador del lado del consumidor), agrega a `docs/glossary.md` *Timeline del renderer* (`Timeline`), *Cue* y *Manifest de sprites*, y si agrega comandos, la sección "Comandos" de `CLAUDE.md`. → revisión del PR.
 
@@ -150,7 +155,7 @@ Cada requisito dice cómo se verifica (→). "check" es `just check`; "e2e" es `
 ## Requisitos no funcionales
 - **Rendimiento (criterio "≥ 55 fps").**
   - **Dispositivo de referencia:** un Android de gama media de 2022–2024 (clase Galaxy A14/A24/A34, Moto G54/G84 o Redmi Note 12) con Chrome estable. El PR anota modelo, versión de Android y de Chrome. El owner confirma el modelo (ver "Preguntas abiertas").
-  - **Acceso:** con `just dev` y reenvío de puertos por USB (`chrome://inspect` → *Port forwarding* de `5173`), sin publicar puertos en la LAN (001 ata todo puerto local a `127.0.0.1`).
+  - **Acceso:** sobre el **build de producción** (`node apps/web/build` con `ENABLE_DEV_CATALOG=1` y `HOST=127.0.0.1` explícito), no sobre `just dev`: el servidor de Vite sirve Pixi sin minificar y con HMR, y la medición saldría peor que lo que verá el usuario. El plan lo deja en una receta de `just`. En Android, reenvío de puertos por USB (`chrome://inspect` → *Port forwarding* del puerto de esa receta), sin publicar puertos en la LAN (001 ata todo puerto local a `127.0.0.1`). **Excepción de la fase B:** los personajes convertidos solo existen con `just dev` (RF-B7, `apply: 'serve'`), así que su medición corre allí; para separar el costo del personaje del de Vite, el PR de B mide en la misma sesión los placeholders con `just dev` y compara.
   - **Método:** `getFrameStats()` (RF-A19) sobre el guion completo, a 375 px de ancho en vertical, sin movimiento reducido, tres corridas seguidas después de una corrida de calentamiento; con placeholders (fase A) y con un personaje convertido (fase B).
   - **Umbral:** en cada corrida, p95 del tiempo de frame ≤ 18.2 ms (≥ 55 fps) y FPS medio ≥ 58, o ≥ 0.95 × la tasa nativa si la pantalla es de 90/120 Hz y el navegador la usa. En escritorio (la Mac del owner), lo mismo como control.
 - **Memoria y peso.** Hojas de ≤ 2048×2048 y ≤ 4 por personaje (≤ 64 MiB de textura en el peor caso por personaje; el spike usa 1–2). El chunk diferido del renderer se reporta en el PR (tamaño gzip); objetivo orientativo ≤ 400 KB gzip. El resto de las rutas no crece (RF-A17).
@@ -239,7 +244,7 @@ Reglas (cada una con su código de error):
 }
 ```
 - Cues: `intro`, `strike` (`move`: `attack_light | attack_heavy | special`; `result`: `hit | crit | block | dodge`), `knockdown`, `ko`, `win`. `at_ms` de un `strike` es el **instante del impacto**.
-- Reglas: `cues` ordenados por `at_ms` (empates en orden de lista); el primero es `intro` en 0 y el primer `strike` llega ≥ 2000 ms después; `damage` entero ≥ 0, 0 si `dodge`; `target_hp` = HP anterior del objetivo − `damage`, en `[0, max_hp]`; HP 0 solo seguido de `ko` de ese luchador; dos `strike` seguidos separados por ≥ 600 ms; todo `knockdown` sigue a un `strike` con resultado `hit` o `crit` sobre ese mismo luchador, con el mismo `at_ms` o hasta 100 ms después (nadie cae sin que lo toquen); ningún `strike` durante un `knockdown` (`(at_ms, at_ms + duration_ms]`, con `duration_ms` de 800 a 3000); exactamente un `ko` y después exactamente un `win` del otro lado, ≥ 1500 ms más tarde; nada después de `win`; `duration_ms ≥ win.at_ms + 2000`; ≤ 2000 cues; `asset` existe entre los manifests cargados.
+- Reglas: `cues` ordenados por `at_ms` (empates en orden de lista); el primero es `intro` en 0 y el primer `strike` llega ≥ 2000 ms después; `damage` entero ≥ 0, 0 si `dodge`; `target_hp` = HP anterior del objetivo − `damage`, en `[0, max_hp]`; HP 0 solo seguido de `ko` de ese luchador; dos `strike` seguidos separados por ≥ 600 ms; todo `knockdown` sigue a un `strike` con resultado `hit` o `crit` sobre ese mismo luchador, con el mismo `at_ms` o hasta 100 ms después (nadie cae sin que lo toquen); ningún `strike` durante un `knockdown` (`(at_ms, at_ms + duration_ms]`, con `duration_ms` de 800 a 3000); un solo `knockdown` por `strike` (`timeline.knockdown_duplicate`); exactamente un `ko`, solo cuando el HP de ese luchador es 0 (`timeline.ko_without_zero_hp`), y después de `ko` solo puede venir exactamente un `win` del otro lado, ≥ 1500 ms más tarde (`timeline.cue_after_ko`); nada después de `win`; `duration_ms ≥ win.at_ms + 2000` y `duration_ms ≤ 3 600 000` (1 h, cota de sanidad; vale también para todo `at_ms`); ≤ 2000 cues; `asset` existe entre los manifests cargados.
 - La timeline no lleva semilla ni datos del motor. El renderer deriva todo lo cosmético del índice del cue.
 
 ### Coreografía (dentro del renderer, no de la timeline)
@@ -271,7 +276,8 @@ content/_local/ (dev)┘                                                        
 Valores iniciales que 003 puede usar como restricciones del ritmo; el go/no-go (RF-B9) los confirma o ajusta:
 - **Duración de 45 a 90 s de `duration_ms` total**, intro y pose de victoria incluidas, no solo el tramo de combate. El guion del spike dura ~64 s.
 - Densidad y ritmo de referencia: ≥ 30 golpes en el guion (una separación media de ~1.9 s en ~58 s de combate), con ráfagas de golpes a ≤ 900 ms y pausas de ≥ 2.5 s. La separación media buena la fija el owner en RF-B9.
-- Un `knockdown` siempre coincide con un golpe sobre ese luchador (o lo sigue en ≤ 100 ms).
+- Un `knockdown` siempre coincide con un golpe `hit` o `crit` sobre ese luchador (o lo sigue en ≤ 100 ms), y como mucho uno por golpe.
+- El `ko` llega solo con HP 0, justo después del golpe que lo deja en 0, y después de él solo viene el `win`. Ninguna timeline pasa de 1 h.
 - Intro ≥ 2 s antes del primer golpe; ≥ 600 ms entre impactos consecutivos; knockdown de 0.8 a 3 s; ≥ 1.5 s de KO a victoria y ≥ 2 s de pose de victoria.
 - Resultados de un golpe que el renderer sabe mostrar: `hit`, `crit`, `block`, `dodge`; movimientos: ligero, pesado y especial. Lo que 003 emita fuera de esto (por ejemplo, "HP bajo" o "remontada") el renderer lo deriva del HP o lo ignora, y el narrador lo usa por su cuenta (ADR-0010).
 - El renderer mira hasta 400 ms hacia adelante (windup), y las reglas de precedencia de "Coreografía" resuelven los solapamientos.
@@ -284,11 +290,11 @@ Valores iniciales que 003 puede usar como restricciones del ritmo; el go/no-go (
 ## Áreas de preocupación
 1. **Dependencia con 003.** Si el vocabulario de 003 no encaja con los cues, el costo cae en el adaptador (fase C) o en una `timeline_version` 2 (RF-C4), no en el renderer. Para reducirlo, "Datos para 003" se comparte con game-designer, autor de 003, y por eso game-designer revisa esta spec.
 2. **Mirar hacia adelante frente a "nunca eventos futuros".** El windup exige conocer el impacto hasta 400 ms antes. En vivo, el server ya manda cada evento "cuando le toca más un pequeño buffer" (`docs/architecture.md`); la feature del vivo tiene que fijar ese buffer en ≥ 400 ms más la latencia. No filtra nada que importe: las apuestas están cerradas durante `Live` y la semilla no sale. Lo dejo escrito para que esa spec no lo redescubra.
-3. **CSP y ADR-0012.** 001 exige ADR-0012 antes de ampliar la CSP, y no existe. RF-A18 apuesta por no tocarla (`pixi.js/unsafe-eval` y sin workers). Riesgo: que alguna ruta interna de Pixi 8 cree un worker o use `eval` que no conozco; el e2e en dos motores lo detecta, y la respuesta es parar, no ampliar a escondidas. `engine-wasm` necesitará `'wasm-unsafe-eval'` en su feature; no es de 002.
+3. **CSP y ADR-0012.** ADR-0012 (B4.2) fija que Pixi funciona sin tocar la CSP, con las condiciones de RF-A18. Riesgo: que alguna ruta interna de Pixi 8 cree un worker o use `eval` que no conozco; el e2e en dos motores lo detecta, y la respuesta es parar, no ampliar a escondidas (B4.5 exige un ADR nuevo). `engine-wasm` necesitará `'wasm-unsafe-eval'` en su feature; no es de 002.
 4. **Movimiento reducido: intent frente a ADR.** La condición 7 del intent dice "bajan las partículas"; ADR-0009 D7 dice 0. Manda el ADR (RF-A14).
-5. **Extensión de ADR-0009 D7, sin contradecirlo.** `RendererOptions` suma `clock`, `labels`, `formatNumber` y `resolveAsset`, y el handle suma `load`, `play`, `pause`, `seek`, `onCue`, `getFrameStats` y `destroy`. El test 7 del ADR habla de "eventos del `FightLog`"; aquí se aplica a los cues de la `Timeline`, que es lo que el renderer recibe. Si frontend-engineer o el owner prefieren, se registra como nota en el ADR al aprobar esta spec.
+5. **Extensión de ADR-0009 D7, sin contradecirlo.** `RendererOptions` suma `clock`, `labels`, `formatNumber` y `resolveAsset`, y el handle suma `load`, `play`, `pause`, `seek`, `onCue`, `onState`, `snapshot`, `getFrameStats` y `destroy`. El test 7 del ADR habla de "eventos del `FightLog`"; aquí se aplica a los cues de la `Timeline`, que es lo que el renderer recibe. Si frontend-engineer o el owner prefieren, se registra como nota en el ADR al aprobar esta spec.
 6. **WebGL en CI.** Chromium headless dentro de la imagen de Playwright usa SwiftShader; las versiones recientes pueden exigir `--enable-unsafe-swiftshader` (o `--use-angle=swiftshader`) en `launchOptions` para el proyecto de esta ruta. WebKit en Linux puede no tener WebGL: allí solo se corre el test de CSP de RF-A18 (que vale también si la ruta acaba en `error: webgl_unavailable`, pero el plan tiene que confirmar que en ese caso Pixi llegó a inicializar lo suficiente para que el test sea útil; si no, el test de CSP en WebKit se marca como limitado en el PR y se repite a mano en Safari).
-7. **Medición en el teléfono.** El reenvío por USB funciona en Android. Si el owner solo tiene iPhone, no hay forma equivalente sin publicar el puerto en la LAN, que 001 evita; la salida sería un `vite dev --host` temporal y explícito, que necesita su OK (ver "Preguntas abiertas").
+7. **Medición en el teléfono.** El reenvío por USB funciona en Android. Si el owner solo tiene iPhone, no hay forma equivalente sin publicar el puerto en la LAN, que 001 evita; la salida sería servir el build de producción con `HOST=<ip-de-la-LAN>` solo mientras dura la medición, de forma explícita, y eso necesita su OK (ver "Preguntas abiertas").
 8. **Licencia de los placeholders.** Los pongo en `packages/renderer/placeholders/` (AGPL) y no en `content/` (todos los derechos reservados): son figuras geométricas generadas por código, fixtures del renderer, sin lore ni marca. Los personajes reales de 004 van en `content/characters/<slug>/sprites/` bajo `LICENSE-CONTENT.md`. Si el owner prefiere que todo sprite esté bajo la licencia de contenido, se mueven a `content/placeholders/` y el renderer los importa desde ahí.
 9. **Evidencia de MUGEN en un repo público.** Las capturas o los nombres de personajes de terceros en un PR o en Linear también son "commitear" a efectos de ADR-0004. RF-B8 exige evidencia solo textual.
 10. **Dockerfile y el nuevo importer del lockfile.** Con `tools/*` en el workspace, `pnpm install --frozen-lockfile --filter 'web...'` en el Dockerfile puede exigir el `package.json` de `tools/sff-converter` aunque `web` no lo use. El plan de B lo prueba en el job `images` y, si hace falta, copia solo ese `package.json`; el código de `tools/` nunca entra en el contexto que se copia.
@@ -301,7 +307,7 @@ Valores iniciales que 003 puede usar como restricciones del ritmo; el go/no-go (
 - **P: ¿Convertidor en Rust o en TS?** → R: **TS (Node)**, paquete del workspace de pnpm en `tools/sff-converter`, con type stripping de Node y solo `pngjs` (RF-B1). En Rust entraría al workspace de Cargo con `crate-age`, `deny` y clippy en `just check` sin beneficio, y reutiliza el validador de manifests del renderer.
 
 ## Preguntas abiertas
-1. **Dispositivo de referencia.** ¿El owner tiene un Android de gama media de la clase de RNF "Rendimiento"? Si solo tiene iPhone, ¿qué modelo, y autoriza un `vite dev --host` temporal en la LAN para medir ("Áreas de preocupación" 7)?
+1. **Dispositivo de referencia.** ¿El owner tiene un Android de gama media de la clase de RNF "Rendimiento"? Si solo tiene iPhone, ¿qué modelo, y autoriza un bind temporal del build de producción a la IP de la LAN para medir ("Áreas de preocupación" 7)?
 2. **Fase C dentro de 002.** *Resuelta (coordinación, 2026-10-26): C se queda en 002*, bloqueada por 003. El product-owner recomendaba sacarla para no dejar 002 abierta por algo ajeno; lo mitiga que el go/no-go (RF-B9) no espera a C y que el resultado del spike queda registrado antes.
 3. **Placeholders bajo AGPL** ("Áreas de preocupación" 8). Recomendación: sí.
 
@@ -333,7 +339,7 @@ Además: axe en `/es/dev/arena` (0 `serious` o `critical`) y capturas a 375×812
 - **Placeholders dibujados en runtime con `Graphics` de Pixi.** No ejercitan el formato de assets, que es la mitad del entregable.
 - **Convertidor en Rust.** Ver "Respuestas".
 - **`sharp` o `tsx` para el convertidor.** Traen binarios o scripts de instalación que rompen `strictDepBuilds`.
-- **Ampliar la CSP (`worker-src blob:`, `'unsafe-eval'`).** Prohibido sin ADR-0012 y sin necesidad demostrada (RF-A18).
+- **Ampliar la CSP (`worker-src blob:`, `'unsafe-eval'`).** Prohibido por ADR-0012 (B3 y B4.5) y sin necesidad demostrada (RF-A18).
 - **Exponer la ruta en producción.** El spike no es para el público; queda bajo `/dev/**`.
 
 ## Revisión
@@ -423,3 +429,12 @@ Atendí los cuatro cambios bloqueantes de game-designer y parte de las recomenda
 
 ### architect — 2026-10-26 — Enmienda técnica (revisión de plan-a1)
 - Al revisar `plan-a1.md` admití cuatro precisiones que no cambian el comportamiento del producto ni el arco del guion, por eso no reabro la revisión de product-owner y game-designer: el subpath `./fixtures/*` (RF-A1); la partición `prepareScene` + `sceneAt` (RF-A9); el HUD en px CSS del contenedor, fuera de la cámara (RF-A13); y la fase A1 con la parte pura de RF-A12 a RF-A14 y su parte de RF-A20 (Resumen).
+
+### architect — 2026-10-27 — Enmienda técnica (revisión de plan-a2)
+- Al revisar `plan-a2.md` admití cinco precisiones:
+  1. RF-A18, "Áreas de preocupación" 3 y "Alternativas" ya citan ADR-0012 (aprobado): las condiciones de B4.2 y del trabajo derivado 9, y la regla de parada remite a B4.5.
+  2. "Timeline v1" y "Datos para 003" listan las reglas que A1 implementó (`timeline.cue_after_ko`, `timeline.knockdown_duplicate`, `timeline.ko_without_zero_hp` y la cota de 1 h).
+  3. RF-A11 suma `onState`, `snapshot` y `RendererError` con los códigos de RF-A16 ("Áreas de preocupación" 5).
+  4. El RNF de rendimiento se mide sobre el build de producción atado a `127.0.0.1`, no sobre `just dev`; umbrales y método sin cambios. La medición con personajes convertidos de la fase B sigue en `just dev`, porque el servido local no existe en el build (RF-B7), con los placeholders como control en el mismo modo.
+  5. RF-A17 se endurece: tampoco el nodo de `dev/arena` alcanza Pixi por imports estáticos, y se exige el caso positivo del import dinámico.
+- No reabro la revisión de product-owner y game-designer: ningún cambio altera lo que ve el usuario, el guion, los umbrales ni el vocabulario de cues. Las reglas de timeline ya estaban implícitas en lo aprobado (regla 1 de "Coreografía", "HP 0 solo seguido de `ko`" y "todo `knockdown` sigue a un `strike`"); las aviso a game-designer porque tocan "Datos para 003", sin pedirle una nueva aprobación.

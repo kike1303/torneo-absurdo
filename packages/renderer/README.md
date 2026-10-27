@@ -1,9 +1,9 @@
 # @torneo/renderer
 
-Reproductor de peleas de Torneo Absurdo. Agnóstico de framework: no importa Svelte, Kit ni `@torneo/protocol`. Fase A1 de [002](../../docs/features/002-spike-renderer/spec.md): el núcleo puro. La capa Pixi (`src/stage/`, `createRenderer`) llega en A2.
+Reproductor de peleas de Torneo Absurdo. Agnóstico de framework: no importa Svelte, Kit ni `@torneo/protocol`. Fases A1 (núcleo puro) y A2 (reproductor, capa Pixi y medición) de [002](../../docs/features/002-spike-renderer/spec.md).
 
 ## Subpaths
-- `.`: tipos públicos (`RendererTheme`, `RendererOptions`, `RendererHandle`) y los módulos puros.
+- `.`: `createRenderer`, los tipos públicos (`RendererTheme`, `RendererOptions`, `RendererHandle`, `RendererError`, `FrameStats`) y los módulos puros. Es el único subpath que carga Pixi.
 - `./manifest`: formato de sprites v1, `validateManifest`, `resolveAnimation` y `windupMs`.
 - `./timeline`: `Timeline` v1 y `validateTimeline`.
 - `./placeholders/*`: `dummy_a` y `dummy_b` (`manifest.json` y `sheet-0.png`).
@@ -17,8 +17,41 @@ El formato de assets, la `Timeline` y las reglas de coreografía están en la sp
 ## Escena pura
 `prepareScene(timeline, manifests)` se llama una vez por carga y devuelve una estructura congelada. `sceneAt(prepared, t, { reducedMotion })` describe la escena en `t`: luchadores, HUD (solo valores), cámara, banners y efectos. Es función pura de `t`, así que `seek` muestra lo mismo que reproducir hasta ahí. El layout del HUD en px CSS es `layoutHud(viewport, measure, names)`.
 
+## `createRenderer` y ciclo de vida
+```ts
+const handle = createRenderer(container, { theme, reducedMotion, clock, labels, formatNumber, resolveAsset });
+await handle.load(timelineJson, new Map([['dummy_a', manifestJson], ['dummy_b', manifestJson]]));
+handle.onState((state) => …); // 'ready' | 'playing' | 'paused' | 'finished'
+handle.seek(0);
+handle.play();
+// …
+handle.destroy();
+```
+- `createRenderer` arranca Pixi en el acto; `load` espera esa inicialización, valida la timeline y los manifests (entrada no confiable) y carga las hojas. Rechaza con `RendererError` y un `code`: `webgl_unavailable`, `asset_invalid`, `asset_load_failed` o `timeline_invalid`.
+- **Reloj:** `t = anclaT + (clock() − anclaReloj)`, recortado a `[0, duration_ms]`. `play`, `pause` y `seek` solo mueven el ancla. Sin `seek` ni `pause`, `t = clock()`: así se reproduce en vivo con el reloj del servidor. El renderer nunca cuenta frames.
+- **Cues:** `onCue` dispara cada cue una vez, en orden, cuando la reproducción pasa su `at_ms`. Un `seek` no dispara lo que salta; un salto del reloj (volver de una pestaña oculta) dispara todo el intervalo. `snapshot()` da `t`, fase, ganador, HP y el último cue de la escena aplicada, sin texto.
+- **`Assets` de Pixi es global:** dos renderers en la misma página compartirían la caché de texturas. Hoy hay uno solo (`/dev/arena`), y `destroy` descarga sus hojas. La vista en vivo tiene que respetarlo.
+
+## Condiciones de CSP (ADR-0012 B4.2)
+- `src/index.ts` importa `pixi.js/unsafe-eval` en su primera línea, antes de crear cualquier renderer.
+- `Assets.setPreferences({ preferWorkers: false })` antes de la primera carga: Pixi crearía los workers desde URLs `blob:`.
+- Sin texturas KTX2, Basis, DDS ni GIF, y sin `pixi.js/webworker`: ESLint los prohíbe en todo el paquete.
+- Solo imágenes del mismo origen (`resolveAsset` devuelve las URL con hash de Vite).
+- Solo WebGL (`preference: ['webgl']`), sin respaldo silencioso a otro renderer.
+
+## Medición de fps (RNF "Rendimiento")
+`just arena-bench` construye y sirve el build de producción en `127.0.0.1:3000` con `ENABLE_DEV_CATALOG=1`. La receta fija `HOST=127.0.0.1` y no lo lee del entorno.
+1. Abre `/es/dev/arena` a 375 px en vertical, sin movimiento reducido, y activa "Mostrar estadísticas".
+2. Una corrida de calentamiento y tres corridas completas, con "Reiniciar" entre ellas (también reinicia las estadísticas).
+3. Después de cada una, "Copiar JSON" y pégalo en el PR con el modelo, el SO y la versión del navegador.
+
+Umbral por corrida: p95 ≤ 18.2 ms y FPS medio ≥ 58 (o ≥ 0.95 × la tasa nativa en pantallas de 90/120 Hz).
+- **Android:** Chrome → `chrome://inspect` → *Port forwarding* `3000 → localhost:3000` por USB. No publica nada en la LAN.
+- **iPhone:** Safari no reenvía puertos por USB. Solo con el OK previo del owner, anotado en el PR, y solo mientras dura la medición, a mano y fuera de `just`: `HOST=<ip-de-la-LAN> PORT=3000 PUBLIC_ORIGIN=http://<ip-de-la-LAN>:3000 ENABLE_DEV_CATALOG=1 node apps/web/build` (después de `just build`).
+- **Control en escritorio:** el mismo procedimiento en `localhost:3000`.
+
 ## Sin `Math.random` ni `Date`
-El tiempo lo da el reloj que inyecta el host y el azar cosmético sale de `src/fx/prng.ts` (`mulberry32`), sembrado con el índice del cue y un canal. Así todos los espectadores ven lo mismo, y la semilla de la pelea nunca llega al renderer (ADR-0002). ESLint prohíbe `Math.random`, `Date`, `performance` y `crypto` en todo el paquete, tests incluidos.
+El tiempo lo da el reloj que inyecta el host y el azar cosmético sale de `src/fx/prng.ts` (`mulberry32`), sembrado con el índice del cue y un canal. Así todos los espectadores ven lo mismo, y la semilla de la pelea nunca llega al renderer (ADR-0002). ESLint prohíbe `Math.random`, `Date`, `performance` y `crypto` en todo el paquete, tests incluidos, y Pixi y el DOM en el núcleo puro (`src/{manifest,timeline,scene,fx,player,stats}`).
 
 ## Placeholders
 ```sh

@@ -282,6 +282,45 @@ describe('other rules that fail', () => {
   });
 });
 
+describe('dynamic imports of the renderer (002 plan-a2 decision 11, TA-11)', () => {
+  it.each([
+    [
+      'import() in another component',
+      'src/lib/components/fight/ArenaControls.svelte',
+      svelte("  void import('@torneo/renderer');"),
+    ],
+    [
+      'import() of a subpath in a route',
+      'src/routes/dev/arena/+page.svelte',
+      svelte("  void import('@torneo/renderer/fixtures/spike.timeline.json');"),
+    ],
+    [
+      'import() by relative path in a .ts',
+      'src/lib/features/arena/x.ts',
+      "export const load = () => import('../../../../../packages/renderer/src/index.ts');\n",
+    ],
+  ])('%s fails', async (_name, file, code) => {
+    expect(await rules(file, code)).toContain(SYNTAX);
+  });
+
+  it('import() in FightStage.svelte passes', async () => {
+    expect(
+      await rules(
+        'src/lib/components/fight/FightStage.svelte',
+        svelte(
+          "  void import('@torneo/renderer');\n  void import('@torneo/renderer/placeholders/dummy_a/sheet-0.png?url');",
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it('a dynamic import of something else passes', async () => {
+    expect(
+      await rules('src/routes/+page.ts', "export const load = () => import('./other.js');\n"),
+    ).toEqual([]);
+  });
+});
+
 describe('cases that pass', () => {
   it.each([
     [

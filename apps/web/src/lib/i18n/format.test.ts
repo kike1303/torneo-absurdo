@@ -1,10 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { formatCoins, formatDate, formatRelative } from './format.js';
+import { formatCoins, formatDate, formatDecimal, formatInteger, formatRelative } from './format.js';
 
 describe('format', () => {
   it('formats coins with the locale grouping', () => {
     expect(formatCoins(1234567, 'en')).toBe('1,234,567');
     expect(formatCoins(1234567, 'es')).toBe('1.234.567');
+  });
+
+  it('formats integers with the locale grouping, rounding decimals', () => {
+    expect(formatInteger(12345, 'en')).toBe('12,345');
+    expect(formatInteger(12345, 'es')).toBe('12.345');
+    expect(formatInteger(41.6, 'en')).toBe('42');
+  });
+
+  it('formats decimals with a fixed number of digits', () => {
+    expect(formatDecimal(16.6667, 'en', 2)).toBe('16.67');
+    expect(formatDecimal(16.6667, 'es', 2)).toBe('16,67');
+    expect(formatDecimal(60, 'es', 1)).toBe('60,0');
   });
 
   it('formats dates per locale', () => {

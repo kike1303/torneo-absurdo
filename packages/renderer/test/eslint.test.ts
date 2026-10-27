@@ -20,8 +20,10 @@ const PROPS = 'no-restricted-properties';
 const SYNTAX = 'no-restricted-syntax';
 const IMPORTS = '@typescript-eslint/no-restricted-imports';
 
+type Case = [name: string, file: string, code: string, rule: string];
+
 describe('the renderer forbids clocks, randomness and framework imports', () => {
-  it.each([
+  it.each<Case>([
     ['Math.random()', 'src/stage/x.ts', 'export const r = Math.random();\n', PROPS],
     ['Date.now()', 'src/scene/x.ts', 'export const d = Date.now();\n', GLOBALS],
     ['new Date()', 'src/index.ts', 'export const d = new Date();\n', GLOBALS],
@@ -67,6 +69,24 @@ describe('the renderer forbids clocks, randomness and framework imports', () => 
       "import 'pixi.js/unsafe-eval';\n",
       IMPORTS,
     ],
+    ...['ktx2', 'basis', 'ktx', 'dds', 'webworker', 'gif'].map(
+      (name) =>
+        [
+          `pixi.js/${name} in stage`,
+          'src/stage/x.ts',
+          `import 'pixi.js/${name}';\n`,
+          IMPORTS,
+        ] satisfies Case,
+    ),
+    ["import 'pixi.js' in player", 'src/player/x.ts', "import 'pixi.js';\n", IMPORTS],
+    ["import 'pixi.js' in stats", 'src/stats/x.ts', "import 'pixi.js';\n", IMPORTS],
+    ['document in the player', 'src/player/x.ts', 'export const b = document.body;\n', GLOBALS],
+    [
+      'performance.now() in stats',
+      'src/stats/x.ts',
+      'export const p = performance.now();\n',
+      GLOBALS,
+    ],
     [
       'document in the pure core',
       'src/timeline/x.ts',
@@ -80,6 +100,7 @@ describe('the renderer forbids clocks, randomness and framework imports', () => 
   it.each([
     ["import 'pixi.js' in stage", 'src/stage/x.ts', "import 'pixi.js';\n"],
     ['document in stage', 'src/stage/x.ts', 'export const b = document.body;\n'],
+    ['pixi.js/unsafe-eval in the entry', 'src/index.ts', "import 'pixi.js/unsafe-eval';\n"],
     [
       'the package PRNG',
       'src/fx/x.ts',

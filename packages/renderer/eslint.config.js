@@ -13,10 +13,17 @@ import ts from 'typescript-eslint';
 
 const CLOCK_MESSAGE =
   'Time comes from the injected clock (RF-A11) and randomness from src/fx/prng.ts (RF-A10).';
-const DOM_MESSAGE = 'The pure core (manifest, timeline, scene, fx) has no DOM (RF-A3).';
+const DOM_MESSAGE =
+  'The pure core (manifest, timeline, scene, fx, player, stats) has no DOM (RF-A3).';
 const FRAMEWORK_MESSAGE =
   'The renderer is framework agnostic and decoupled from the protocol (RF-A3).';
 const PIXI_MESSAGE = 'Only src/stage/ imports pixi.js; the pure core never does (RF-A3).';
+const PIXI_WORKER_MESSAGE =
+  'No compressed textures, GIFs nor workers: they need loaders the CSP blocks (ADR-0012 B4.2, plan-a2 decision 11).';
+/** Pixi submodules that pull workers or loaders with workers; forbidden in the whole package. */
+const PIXI_FORBIDDEN = ['ktx2', 'basis', 'ktx', 'dds', 'webworker', 'gif'].map(
+  (name) => `pixi.js/${name}`,
+);
 
 /** Pure directories: no Pixi and no DOM. */
 const PURE = [
@@ -24,6 +31,8 @@ const PURE = [
   'src/timeline/**/*.ts',
   'src/scene/**/*.ts',
   'src/fx/**/*.ts',
+  'src/player/**/*.ts',
+  'src/stats/**/*.ts',
 ];
 
 const clockGlobals = ['Date', 'performance', 'crypto'].map((name) => ({
@@ -70,6 +79,7 @@ function restrictedImports(pure) {
         { name: 'svelte', message: FRAMEWORK_MESSAGE },
         { name: '@torneo/protocol', message: FRAMEWORK_MESSAGE },
         ...(pure ? [{ name: 'pixi.js', message: PIXI_MESSAGE }] : []),
+        ...PIXI_FORBIDDEN.map((name) => ({ name, message: PIXI_WORKER_MESSAGE })),
       ],
       patterns: [
         { group: ['svelte/*', '@sveltejs/*', '@torneo/protocol/*'], message: FRAMEWORK_MESSAGE },
@@ -77,6 +87,13 @@ function restrictedImports(pure) {
         // A relative path from packages/renderer never names `packages/`, so match the folder name.
         { group: ['**/protocol-ts/**', '**/apps/web/**'], message: FRAMEWORK_MESSAGE },
         ...(pure ? [{ group: ['pixi.js/*'], message: PIXI_MESSAGE }] : []),
+        {
+          group: PIXI_FORBIDDEN.flatMap((name) => [
+            `${name}/**`,
+            `**/pixi.js/lib/${name.slice(8)}/**`,
+          ]),
+          message: PIXI_WORKER_MESSAGE,
+        },
       ],
     },
   ];
