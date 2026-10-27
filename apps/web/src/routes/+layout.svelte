@@ -7,7 +7,11 @@
 
   let { data, children } = $props();
 
-  onMount(() => initTheme(data.theme));
+  onMount(() => {
+    initTheme(data.theme);
+    // Hydration signal for e2e (TA-12): set only after mount, never present in the SSR HTML.
+    document.documentElement.dataset.hydrated = '';
+  });
 </script>
 
 <a

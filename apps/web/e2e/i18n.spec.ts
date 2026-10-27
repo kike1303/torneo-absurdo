@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { waitForHydration } from './support/hydration.js';
 import { header, raw } from './support/raw-http.js';
 
 const PORT = 4173;
@@ -96,6 +97,7 @@ test.describe('locale cookie and switcher (RF-A4, RF-A5)', () => {
     context,
   }) => {
     await page.goto('/en/dev/components?theme=light');
+    await waitForHydration(page);
     await page.getByTestId('header-switchers').getByTestId('locale-switcher').click();
     await page.getByTestId('locale-option-es').click();
     await page.waitForURL('**/es/dev/components?theme=light');
@@ -125,6 +127,7 @@ test.describe('locale cookie and switcher (RF-A4, RF-A5)', () => {
     await context.addCookies([{ name: 'locale', value: 'es', url: 'http://localhost:4173' }]);
     await page.goto('/es/');
     await page.goto('/en/');
+    await waitForHydration(page);
     await page
       .getByRole('link', { name: /Absurd Tournament/ })
       .first()
