@@ -31,7 +31,7 @@ tracing-subscriber = { version = "=0.3.23", default-features = false, features =
 uuid = { version = "=1.28.0", features = ["v4"] }
 mimalloc = "=0.1.52"
 thiserror = "=2.0.21"
-tokio-tungstenite = "=0.29.0"
+tokio-tungstenite = "=0.30.0"
 # Only to recognise the capacity error behind axum::Error (WebSocket close 1009).
 tungstenite = { version = "=0.29.0", default-features = false }
 futures-util = "=0.3.34"
