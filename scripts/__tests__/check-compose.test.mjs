@@ -767,16 +767,95 @@ const REVIEW_CASES = [
   ],
 ];
 
-describe('check-compose (RF-C3, RF-C4, RF-C6)', () => {
-  it('keeps the valid fixture identical to the real files', () => {
-    const real = loadTree(fileURLToPath(new URL('../../', import.meta.url)));
-    for (const file of Object.values(FILES)) {
-      expect(valid.read(file), `${file}: resync scripts/__fixtures__/check-compose/valid/`).toBe(
-        real.read(file),
-      );
-    }
+/**
+ * What Dependabot moves on its own: image digests and the versions of the node, rust and postgres
+ * images, plus .node-version and the rust-toolchain.toml channel that check-compose ties to them.
+ * Everything else must match the real files byte for byte (plan-c deviation 22).
+ * @param {string} file
+ * @param {string | null} text
+ */
+function forSync(file, text) {
+  if (text === null) return null;
+  if (file === FILES.nodeVersion) return '<version>\n';
+  return text
+    .replace(/@sha256:[0-9a-f]{64}/g, '@sha256:<digest>')
+    .replace(/\b(node|rust|postgres):\d+(?:\.\d+)+(?=-)/g, '$1:<version>')
+    .replace(/^channel = "[^"]*"$/m, 'channel = "<version>"');
+}
+
+/**
+ * Files of FILES whose structure differs between the fixture and the real tree.
+ * @param {{ read: (rel: string) => string | null }} fixtureTree
+ * @param {{ read: (rel: string) => string | null }} realTree
+ */
+function drift(fixtureTree, realTree) {
+  return Object.values(FILES).filter(
+    (file) => forSync(file, fixtureTree.read(file)) !== forSync(file, realTree.read(file)),
+  );
+}
+
+describe('valid fixture vs the real files (plan-c deviations 12 and 22)', () => {
+  const real = loadTree(fileURLToPath(new URL('../../', import.meta.url)));
+  /** @param {Record<string, [RegExp, string][]>} edits */
+  const realWith = (edits) => ({
+    read: (rel) => {
+      let text = real.read(rel);
+      for (const [from, to] of edits[rel] ?? []) {
+        if (text === null || !from.test(text)) throw new Error(`${rel} has no ${from}`);
+        text = text.replace(from, to);
+      }
+      return text;
+    },
+  });
+  const digest = (c) => `@sha256:${c.repeat(64)}`;
+
+  it('keeps the structure of the valid fixture in sync with the real files', () => {
+    expect(drift(valid, real), 'resync scripts/__fixtures__/check-compose/valid/').toEqual([]);
   });
 
+  it.each([
+    ['server digests', { [SD]: [[/@sha256:[0-9a-f]{64}/g, digest('a')]] }],
+    ['web digests', { [WD]: [[/@sha256:[0-9a-f]{64}/g, digest('b')]] }],
+    [
+      'postgres digest and minor',
+      {
+        [FILES.dev]: [
+          [/postgres:17\.\d+-alpine@sha256:[0-9a-f]{64}/g, `postgres:17.99-alpine${digest('c')}`],
+        ],
+        [L]: [
+          [/postgres:17\.\d+-alpine@sha256:[0-9a-f]{64}/g, `postgres:17.99-alpine${digest('c')}`],
+        ],
+      },
+    ],
+    [
+      'node version with .node-version',
+      {
+        [WD]: [[/node:\d+(?:\.\d+)+-bookworm-slim/g, 'node:22.99.0-bookworm-slim']],
+        [FILES.nodeVersion]: [[/^.*$/m, '22.99.0']],
+      },
+    ],
+    [
+      'rust version with the toolchain',
+      {
+        [SD]: [[/rust:\d+(?:\.\d+)+-slim-bookworm/g, 'rust:1.999.0-slim-bookworm']],
+        [FILES.toolchain]: [[/^channel = "[^"]*"$/m, 'channel = "1.999.0"']],
+      },
+    ],
+  ])('does not ask for a resync on a Dependabot bump: %s', (_name, edits) => {
+    expect(drift(valid, realWith(edits))).toEqual([]);
+  });
+
+  it.each([
+    ['a new service line', C, [/\nservices:\n/, '\nservices:\n  extra:\n    image: x\n']],
+    ['the zig version', SD, [/0\.15\.2/g, '0.15.3']],
+    ['an image suffix', WD, [/-bookworm-slim@/, '-trixie-slim@']],
+    ['the distroless tag', SD, [/:nonroot@/, ':latest@']],
+  ])('still asks for a resync on a structural change: %s', (_name, file, edit) => {
+    expect(drift(valid, realWith({ [file]: [edit] }))).toEqual([file]);
+  });
+});
+
+describe('check-compose (RF-C3, RF-C4, RF-C6)', () => {
   it.each(REVIEW_CASES)('fails on: %s', (_name, edits, pattern) => {
     const problems = checkCompose(mutated(edits));
     expect(
