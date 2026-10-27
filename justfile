@@ -88,7 +88,6 @@ test: _web-prepare
     {{just_executable()}} db-up
     DATABASE_URL='{{test_db_url}}' cargo test --workspace --locked
 
-# Right after the build, check-renderer-split proves Pixi only loads through import() (002 RF-A17).
 # End-to-end tests against `node build` (Chromium and WebKit)
 e2e: _web-prepare
     pnpm --filter web build
@@ -96,7 +95,8 @@ e2e: _web-prepare
     pnpm --filter web exec playwright test
 
 # HOST is fixed to 127.0.0.1 (never read from the environment): adapter-node listens on 0.0.0.0 by
-# default. On Android, forward the port with chrome://inspect. Method: packages/renderer/README.md.
+# default, and SOCKET_PATH and LISTEN_FDS, which it prefers over HOST, are cleared. On Android,
+# forward the port with chrome://inspect. Method: packages/renderer/README.md.
 # The production build of /dev/arena on 127.0.0.1:3000, to measure fps (002 plan-a2 decision 12)
 arena-bench: build
     #!/usr/bin/env bash
@@ -106,8 +106,8 @@ arena-bench: build
         exit 1
     fi
     echo "arena-bench: http://localhost:3000/es/dev/arena (Ctrl-C to stop)"
-    exec env -u HOST HOST=127.0.0.1 PORT=3000 PUBLIC_ORIGIN=http://localhost:3000 \
-        ENABLE_DEV_CATALOG=1 node apps/web/build
+    exec env -u HOST -u SOCKET_PATH -u LISTEN_FDS HOST=127.0.0.1 PORT=3000 \
+        PUBLIC_ORIGIN=http://localhost:3000 ENABLE_DEV_CATALOG=1 node apps/web/build
 
 # Install the Playwright browsers used by `just e2e`
 e2e-install:
