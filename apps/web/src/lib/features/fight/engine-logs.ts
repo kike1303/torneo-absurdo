@@ -1,7 +1,7 @@
 // Engine logs that /dev/arena can play with `?log=<name>` (002 RF-C3, plan-c decision 7; the
 // endings by time in 005 RF15). Each one is a byte-exact copy of an engine golden, in its own lazy
-// chunk. Its types come from the
-// adapter, so this file never imports the log and the timeline shapes at once (decision 8).
+// chunk. Its types come from the adapter, so this file never imports the log and the timeline
+// shapes at once (decision 8).
 import {
   timelineFromFightLog,
   type AdaptedTimeline,

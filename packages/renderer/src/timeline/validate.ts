@@ -247,7 +247,7 @@ function checkEndingV1(sink: Sink, hp: HpBySide): EndingCheck {
 
 /**
  * The closing rules of v2 (005 RF3): exactly one ending, a `ko` (then the `win` of the other side)
- * or a `time_up` (then one closing, `win` or `draw`).
+ * or a `time_up` (then one closing, `win` or `draw`). After a `ko` the closing is that `win`.
  */
 function checkEndingV2(sink: Sink, hp: HpBySide): EndingCheck {
   let ko: { side: Side; at: number; i: number } | undefined;
