@@ -1,0 +1,16 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/7",
+      "value": {
+        "at_ms": 9000,
+        "type": "draw"
+      }
+    }
+  ],
+  "expect": {
+    "code": "timeline.draw_gap",
+    "path": "/cues/7/at_ms"
+  }
+}

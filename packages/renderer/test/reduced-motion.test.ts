@@ -1,20 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import { FIXED_CAMERA, GROUND_Y, sceneAt } from '../src/scene/index.ts';
-import { spikeScene, spikeTimeline, spread } from './support/scenes.ts';
+import { FIXED_CAMERA, GROUND_Y, sceneAt, type PreparedScene } from '../src/scene/index.ts';
+import type { Timeline } from '../src/timeline/index.ts';
+import {
+  goldenScene,
+  goldenTimeline,
+  spikeScene,
+  spikeTimeline,
+  spread,
+} from './support/scenes.ts';
 
-// RF-A14 (ADR-0009 D7, test 7, on the scene part): reduced motion never changes the timing.
-const timeline = spikeTimeline();
-const prepared = spikeScene();
-const SAMPLES = spread(timeline.duration_ms, 200);
+// RF-A14 (ADR-0009 D7, test 7, on the scene part): reduced motion never changes the timing. Also
+// on the goldens that end by time, with the time banner (005 RF10).
+const CASES: [string, Timeline, PreparedScene, number[]][] = [
+  ['spike', spikeTimeline(), spikeScene(), [3210, 26_050, 57_550]],
+  ['log-draw', goldenTimeline('draw'), goldenScene('draw'), []],
+  ['log-decision-a', goldenTimeline('decision-a'), goldenScene('decision-a'), []],
+];
 
-describe('reduced motion', () => {
-  it('keeps fighters and HUD identical for 200 times', () => {
+describe.each(CASES)('reduced motion (%s)', (_name, timeline, prepared, extra) => {
+  const SAMPLES = spread(timeline.duration_ms, 200);
+
+  it('keeps fighters, HUD, phase and ending identical for 200 times', () => {
     for (const t of SAMPLES) {
       const full = sceneAt(prepared, t, { reducedMotion: false });
       const reduced = sceneAt(prepared, t, { reducedMotion: true });
       expect(reduced.fighters).toEqual(full.fighters);
       expect(reduced.hud).toEqual(full.hud);
       expect(reduced.phase).toBe(full.phase);
+      expect(reduced.ending).toBe(full.ending);
+      expect(reduced.banners.map((b) => b.code)).toEqual(full.banners.map((b) => b.code));
     }
   });
 
@@ -41,7 +55,7 @@ describe('reduced motion', () => {
   });
 
   it('the full-motion scene does move the camera somewhere', () => {
-    const moved = SAMPLES.concat([3210, 26_050, 57_550]).some((t) => {
+    const moved = SAMPLES.concat(extra).some((t) => {
       const c = sceneAt(prepared, t, { reducedMotion: false }).camera;
       return c.zoom !== 1 || c.offsetX !== 0 || c.offsetY !== 0;
     });

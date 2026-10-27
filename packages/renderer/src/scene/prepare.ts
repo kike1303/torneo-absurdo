@@ -30,15 +30,19 @@ export const LOOKBACK_MS = MAX_ACTION_MS + RETURN_MS;
 export const LOOKAHEAD_MS = MAX_WINDUP_MS;
 /**
  * Upper bound of `cueWindow(prepared, t).length` for any valid timeline, with margin. The real
- * maximum over the closed window [t − 3300, t + 400] (3 700 ms) is 10 (plan-a2 decision 16a):
+ * maximum over the closed window [t − 3300, t + 400] (3 700 ms) is 11 (plan-a2 decision 16a and
+ * 005 spec "Cota de `cueWindow`"):
  * - two strikes are ≥ 600 ms apart;
  * - a knockdown (`duration_ms` ≥ 800, no strike in `(at, at + duration]`) pushes the next strike
  *   to ≥ 801 ms, and a strike has at most one knockdown;
  * - the strike that leaves HP 0 is followed by `ko` (not a knockdown) and `win` ≥ 1 500 ms later;
- * - the intro is at 0 and the first strike ≥ 2 000 ms later.
+ * - the intro is at 0 and the first strike ≥ 2 000 ms later;
+ * - v2: nothing but the closing (`win` or `draw`) follows `time_up`, ≥ 1 500 ms later.
  * The densest window is 6 strikes, 4 of them with a knockdown (3 × 801 + 2 × 600 = 3 603 ms,
- * the last strike with its knockdown): 10 cues. `test/scene.test.ts` builds that case and walks
- * every sequence of minimal gaps to prove the bound.
+ * the last strike with its knockdown): 10 cues, plus a `time_up` at the last strike: 11. With
+ * `time_up` and its closing in the window, ≤ 2 200 ms are left for strikes: ≤ 8 cues.
+ * `test/scene.test.ts` builds those cases and walks every sequence of minimal gaps to prove the
+ * bound. `time_up` and `draw` have no segments, so LOOKBACK_MS does not change.
  */
 export const K = 16;
 
@@ -87,6 +91,9 @@ export interface PreparedScene {
   readonly firstStrikeAt: number | null;
   readonly ko: { readonly at: number; readonly fighter: Side } | null;
   readonly win: { readonly at: number; readonly fighter: Side } | null;
+  /** v2 endings by time (005 RF5 to RF7): no segments, only instants. */
+  readonly timeUp: { readonly at: number } | null;
+  readonly draw: { readonly at: number } | null;
 }
 
 const ALL_ANIMATIONS: readonly AnimationCode[] = [...REQUIRED_ANIMATIONS, ...OPTIONAL_ANIMATIONS];
@@ -201,6 +208,8 @@ export function prepareScene(timeline: Timeline, manifests: ManifestsById): Prep
   let firstStrikeAt: number | null = null;
   let ko: PreparedScene['ko'] = null;
   let win: PreparedScene['win'] = null;
+  let timeUp: PreparedScene['timeUp'] = null;
+  let draw: PreparedScene['draw'] = null;
 
   const cues: PreparedCue[] = timeline.cues.map((cue, index) => {
     let strike: PreparedStrike | null = null;
@@ -234,6 +243,10 @@ export function prepareScene(timeline: Timeline, manifests: ManifestsById): Prep
       ko = { at: cue.at_ms, fighter: cue.fighter };
     } else if (cue.type === 'win' && win === null) {
       win = { at: cue.at_ms, fighter: cue.fighter };
+    } else if (cue.type === 'time_up' && timeUp === null) {
+      timeUp = { at: cue.at_ms };
+    } else if (cue.type === 'draw' && draw === null) {
+      draw = { at: cue.at_ms };
     }
     return {
       index,
@@ -262,6 +275,8 @@ export function prepareScene(timeline: Timeline, manifests: ManifestsById): Prep
     firstStrikeAt,
     ko,
     win,
+    timeUp,
+    draw,
   };
   return deepFreeze(prepared);
 }

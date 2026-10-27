@@ -5,7 +5,8 @@
 // - `S`: a strike alone; the next strike comes 600 ms later (the minimum gap);
 // - `K`: a strike with its knockdown at the same `at_ms`; the next strike comes 801 ms later
 //   (the knockdown lasts ≥ 800 ms and no strike may land in `(at, at + duration]`);
-// - `F`: the closing strike, with `ko` at the same `at_ms` and `win` 1 500 ms later.
+// - `F`: the closing strike, with `ko` at the same `at_ms` and `win` 1 500 ms later;
+// - `T` (v2, 005 RF9): `time_up` at the `at_ms` of the last strike and its closing 1 500 ms later.
 // The intro is an optional prefix: with it, the first strike comes 2 000 ms after it; without
 // it, the sequence starts far from the intro.
 //
@@ -15,19 +16,22 @@ import type { Side, Timeline } from '../../src/timeline/index.ts';
 import { MANIFESTS } from './placeholders.ts';
 import { timeline } from './timeline-builder.ts';
 
-export type Step = 'S' | 'K' | 'F';
+export type Step = 'S' | 'K' | 'F' | 'T';
 
 export const WINDOW_MS = LOOKBACK_MS + LOOKAHEAD_MS;
 const GAP: Readonly<Record<'S' | 'K', number>> = { S: 600, K: 801 };
 const INTRO_GAP = 2000;
 const FAR = 20_000;
 
-/** Every sequence of `S`/`K` steps (optionally closed by `F`) whose strikes span ≤ WINDOW_MS. */
+/**
+ * Every sequence of `S`/`K` steps (optionally closed by `F`, or by `T` after a strike) whose
+ * strikes span ≤ WINDOW_MS.
+ */
 export function sequences(): Step[][] {
   const out: Step[][] = [];
   const grow = (steps: Step[], span: number): void => {
     // `span` is the time from the first strike to the strike the next step would add.
-    if (steps.length > 0) out.push([...steps]);
+    if (steps.length > 0) out.push([...steps], [...steps, 'T']);
     if (span > WINDOW_MS) return;
     out.push([...steps, 'F']);
     for (const step of ['S', 'K'] as const) grow([...steps, step], span + GAP[step]);
@@ -40,11 +44,14 @@ export function build(steps: readonly Step[], intro: boolean): Timeline {
   const b = timeline({ maxHp: 1_000_000 });
   let at = intro ? INTRO_GAP : FAR;
   let actor: Side = 'a';
+  let lastStrike = at;
   for (const step of steps) {
     if (step === 'F') return b.finish(at, actor);
+    if (step === 'T') return b.finishByTime(lastStrike, 'a');
     const target: Side = actor === 'a' ? 'b' : 'a';
     b.strike(at, actor, 'attack_light', 'hit', 1);
     if (step === 'K') b.knockdown(at, target, 800);
+    lastStrike = at;
     at += GAP[step];
     actor = target;
   }

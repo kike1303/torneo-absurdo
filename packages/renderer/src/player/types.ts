@@ -3,7 +3,7 @@
 import type { SpriteManifest } from '../manifest/types.ts';
 import type { BannerCode, Phase, Scene } from '../scene/types.ts';
 import type { FrameStats } from '../stats/frame-stats.ts';
-import type { Cue, CueType, Side } from '../timeline/types.ts';
+import type { Cue, CueType, Ending, Side } from '../timeline/types.ts';
 
 /** Colors as 0xRRGGBB, because Pixi does not parse OKLCH colors; see ADR-0009 D7. */
 export interface RendererTheme {
@@ -20,6 +20,7 @@ export interface RendererTheme {
 export interface RendererLabels {
   /** Already translated by the host. */
   readonly names: Readonly<Record<Side, string>>;
+  /** One text per banner code (`fight`, `ko` and `time`), already translated. */
   readonly banners: Readonly<Record<BannerCode, string>>;
 }
 
@@ -44,6 +45,8 @@ export interface RendererSnapshot {
   readonly t: number;
   readonly phase: Phase;
   readonly winner: Side | null;
+  /** `ko`, `decision` or `draw` from the closing cue on; null before (005 RF7). */
+  readonly ending: Ending | null;
   readonly hp: Readonly<Record<Side, number>>;
   /** The last cue with `at_ms ≤ t`, or null before the first one. */
   readonly lastCue: { readonly index: number; readonly type: CueType } | null;

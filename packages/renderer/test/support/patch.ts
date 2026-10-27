@@ -48,13 +48,27 @@ export function applyOps(doc: unknown, ops: readonly PatchOp[]): unknown {
   return out;
 }
 
-export function loadFixtures(dir: string): { valid: unknown; rules: RuleFixture[] } {
+/** A valid variant of `_valid.json` (`_valid.<name>.json`), as operations on it. */
+export interface ValidVariant {
+  readonly name: string;
+  readonly ops: readonly PatchOp[];
+}
+
+export function loadFixtures(dir: string): {
+  valid: unknown;
+  variants: ValidVariant[];
+  rules: RuleFixture[];
+} {
   const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
   const read = (f: string): unknown => JSON.parse(readFileSync(path.join(dir, f), 'utf8'));
+  const name = (f: string) => f.replace(/\.json$/, '');
   return {
     valid: read('_valid.json'),
+    variants: files
+      .filter((f) => f.startsWith('_valid.') && f !== '_valid.json')
+      .map((f) => ({ name: name(f).slice('_valid.'.length), ...(read(f) as { ops: PatchOp[] }) })),
     rules: files
-      .filter((f) => f !== '_valid.json')
-      .map((f) => ({ name: f.replace(/\.json$/, ''), ...(read(f) as Omit<RuleFixture, 'name'>) })),
+      .filter((f) => !f.startsWith('_valid.'))
+      .map((f) => ({ name: name(f), ...(read(f) as Omit<RuleFixture, 'name'>) })),
   };
 }

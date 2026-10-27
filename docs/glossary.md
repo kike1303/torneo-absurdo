@@ -4,7 +4,7 @@ type: glossary
 status: approved
 author: owner
 created: 2026-10-20
-updated: 2026-10-26
+updated: 2026-10-27
 ---
 
 # Glosario
@@ -36,5 +36,5 @@ updated: 2026-10-26
 | Narrador | `Narrator` | Sistema de frases con plantillas que comenta la pelea según el contexto. |
 | Repetición | `Replay` | Reproducir una pelea pasada a partir de su log o su semilla. |
 | Timeline del renderer | `Timeline` | Lista de *cues* que reproduce `@torneo/renderer` (formato propio y versionado, `timeline_version`). No es el `FightLog`: un adaptador del lado de `apps/web` traduce uno a la otra (spec de 002). |
-| Cue | `Cue` | Momento de la `Timeline` (`intro`, `strike`, `knockdown`, `ko`, `win`) con su `at_ms`; en un `strike`, `at_ms` es el instante del impacto. |
+| Cue | `Cue` | Momento de la `Timeline` (`intro`, `strike`, `knockdown`, `ko`, `win` y, en la `timeline_version` 2, `time_up` y `draw`) con su `at_ms`; en un `strike`, `at_ms` es el instante del impacto. `time_up` marca el fin del tiempo, y lo cierra un `win` (decisión) o un `draw` (empate). |
 | Manifest de sprites | `SpriteManifest` | `manifest.json` de un personaje: hojas PNG, frames con pivote y las animaciones estándar (`format: "torneo.sprites"`, `format_version`). |

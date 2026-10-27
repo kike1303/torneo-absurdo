@@ -6,7 +6,7 @@ import { MAX_PARTICLES, particlesAt, type ParticleKind } from '../fx/particles.t
 import { NO_OFFSET, shakeOffset, type Offset, type ShakeKind } from '../fx/shake.ts';
 import { punchZoom } from '../fx/zoom.ts';
 import type { ManifestsById } from '../timeline/validate.ts';
-import { otherSide, type Side, type Timeline } from '../timeline/types.ts';
+import { otherSide, type Ending, type Side, type Timeline } from '../timeline/types.ts';
 import { bannersAt } from './banners.ts';
 import { cameraFrom } from './camera.ts';
 import { frameAt, xAt, type Segment } from './choreography.ts';
@@ -72,10 +72,20 @@ function fighterAt(
 
 function phaseAt(prepared: PreparedScene, t: number): Phase {
   if (t >= prepared.durationMs) return 'finished';
+  if (prepared.draw !== null && t >= prepared.draw.at) return 'draw';
   if (prepared.win !== null && t >= prepared.win.at) return 'win';
+  if (prepared.timeUp !== null && t >= prepared.timeUp.at) return 'time_up';
   if (prepared.ko !== null && t >= prepared.ko.at) return 'ko';
   if (prepared.firstStrikeAt !== null && t >= prepared.firstStrikeAt) return 'fight';
   return 'intro';
+}
+
+/** From the closing cue (`win` or `draw`) on: how the fight ended (005 RF7). */
+function endingAt(prepared: PreparedScene, t: number): Ending | null {
+  const closing = prepared.win ?? prepared.draw;
+  if (closing === null || t < closing.at) return null;
+  if (prepared.ko !== null) return 'ko';
+  return prepared.draw !== null ? 'draw' : 'decision';
 }
 
 interface Fx {
@@ -171,6 +181,7 @@ export function sceneAt(prepared: PreparedScene, time: number, options: SceneOpt
     t,
     phase: phaseAt(prepared, t),
     winner: win !== null && t >= win.at ? win.fighter : null,
+    ending: endingAt(prepared, t),
     fighters,
     hud: {
       a: hudFighterAt(prepared.fighters.a, t),

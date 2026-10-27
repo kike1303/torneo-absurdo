@@ -1,0 +1,439 @@
+{
+  "_valid": {
+    "ok": true,
+    "timeline_version": 1,
+    "duration_ms": 11500,
+    "cues": 9
+  },
+  "_valid+manifests": {
+    "ok": true,
+    "timeline_version": 1,
+    "duration_ms": 11500,
+    "cues": 9
+  },
+  "bad_damage": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.bad_damage",
+        "path": "/cues/1/damage"
+      },
+      {
+        "code": "timeline.hp_mismatch",
+        "path": "/cues/3/target_hp",
+        "data": {
+          "expected": 700
+        }
+      }
+    ]
+  },
+  "bad_duration": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.bad_duration",
+        "path": "/duration_ms"
+      }
+    ]
+  },
+  "bad_fighters": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.bad_fighters",
+        "path": "/fighters/b"
+      }
+    ]
+  },
+  "bad_max_hp": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.bad_max_hp",
+        "path": "/fighters/a/max_hp"
+      }
+    ]
+  },
+  "cue_after_ko": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.cue_after_ko",
+        "path": "/cues/8"
+      }
+    ]
+  },
+  "cue_after_win": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.cue_after_win",
+        "path": "/cues/9"
+      },
+      {
+        "code": "timeline.win_count",
+        "path": "/cues/9"
+      }
+    ]
+  },
+  "dodge_damage": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.dodge_damage",
+        "path": "/cues/2/damage"
+      },
+      {
+        "code": "timeline.hp_mismatch",
+        "path": "/cues/5/target_hp",
+        "data": {
+          "expected": 985
+        }
+      }
+    ]
+  },
+  "duration_too_short": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.duration_too_short",
+        "path": "/duration_ms"
+      }
+    ]
+  },
+  "hp_mismatch": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.hp_mismatch",
+        "path": "/cues/1/target_hp",
+        "data": {
+          "expected": 958
+        }
+      },
+      {
+        "code": "timeline.hp_mismatch",
+        "path": "/cues/3/target_hp",
+        "data": {
+          "expected": 600
+        }
+      }
+    ]
+  },
+  "hp_range": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.hp_range",
+        "path": "/cues/1/target_hp"
+      },
+      {
+        "code": "timeline.hp_mismatch",
+        "path": "/cues/3/target_hp",
+        "data": {
+          "expected": 700
+        }
+      }
+    ]
+  },
+  "hp_zero_without_ko": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.hp_zero_without_ko",
+        "path": "/cues/6/target_hp"
+      },
+      {
+        "code": "timeline.win_gap",
+        "path": "/cues/7"
+      },
+      {
+        "code": "timeline.ko_count",
+        "path": "/cues"
+      }
+    ]
+  },
+  "intro_first": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.intro_first",
+        "path": "/cues/0"
+      }
+    ]
+  },
+  "intro_gap": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.intro_gap",
+        "path": "/cues/1/at_ms"
+      }
+    ]
+  },
+  "knockdown_duplicate": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.knockdown_duplicate",
+        "path": "/cues/5"
+      }
+    ]
+  },
+  "knockdown_duration": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.knockdown_duration",
+        "path": "/cues/4/duration_ms"
+      }
+    ]
+  },
+  "knockdown_without_strike": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.knockdown_without_strike",
+        "path": "/cues/1"
+      }
+    ]
+  },
+  "knockdown_without_strike.block": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.knockdown_without_strike",
+        "path": "/cues/4"
+      }
+    ]
+  },
+  "knockdown_without_strike.late": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.knockdown_without_strike",
+        "path": "/cues/4"
+      }
+    ]
+  },
+  "knockdown_without_strike.other_fighter": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.knockdown_without_strike",
+        "path": "/cues/4"
+      }
+    ]
+  },
+  "ko_count": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.cue_after_ko",
+        "path": "/cues/8"
+      },
+      {
+        "code": "timeline.ko_count",
+        "path": "/cues/8"
+      }
+    ]
+  },
+  "ko_count.missing": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.hp_zero_without_ko",
+        "path": "/cues/6/target_hp"
+      },
+      {
+        "code": "timeline.win_gap",
+        "path": "/cues/7"
+      },
+      {
+        "code": "timeline.ko_count",
+        "path": "/cues"
+      }
+    ]
+  },
+  "ko_without_zero_hp": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.ko_without_zero_hp",
+        "path": "/cues/7"
+      }
+    ]
+  },
+  "missing version": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.missing_field",
+        "path": "/timeline_version"
+      }
+    ]
+  },
+  "not object": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.not_object",
+        "path": ""
+      }
+    ]
+  },
+  "spike": {
+    "ok": true,
+    "timeline_version": 1,
+    "duration_ms": 64000,
+    "cues": 42
+  },
+  "strike_during_knockdown": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.strike_during_knockdown",
+        "path": "/cues/5/at_ms"
+      }
+    ]
+  },
+  "strike_gap": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.strike_gap",
+        "path": "/cues/2/at_ms",
+        "data": {
+          "previous": 1
+        }
+      }
+    ]
+  },
+  "unknown_asset": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.unknown_asset",
+        "path": "/fighters/a/asset",
+        "data": {
+          "asset": "ghost"
+        }
+      }
+    ]
+  },
+  "unknown_cue_type": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.unknown_cue_type",
+        "path": "/cues/1/type"
+      },
+      {
+        "code": "timeline.hp_mismatch",
+        "path": "/cues/3/target_hp",
+        "data": {
+          "expected": 700
+        }
+      }
+    ]
+  },
+  "unknown_field": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.unknown_field",
+        "path": "/cues/1/narration"
+      }
+    ]
+  },
+  "unsorted": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.unsorted",
+        "path": "/cues/2/at_ms"
+      },
+      {
+        "code": "timeline.strike_gap",
+        "path": "/cues/2/at_ms",
+        "data": {
+          "previous": 1
+        }
+      }
+    ]
+  },
+  "unsupported_version": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.unsupported_version",
+        "path": "/timeline_version"
+      }
+    ]
+  },
+  "v1 time_up and draw": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.unknown_cue_type",
+        "path": "/cues/6/type"
+      },
+      {
+        "code": "timeline.unknown_cue_type",
+        "path": "/cues/7/type"
+      },
+      {
+        "code": "timeline.ko_count",
+        "path": "/cues"
+      },
+      {
+        "code": "timeline.win_count",
+        "path": "/cues"
+      }
+    ]
+  },
+  "v1 time_up and win": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.unknown_cue_type",
+        "path": "/cues/6/type"
+      },
+      {
+        "code": "timeline.win_gap",
+        "path": "/cues/7"
+      },
+      {
+        "code": "timeline.ko_count",
+        "path": "/cues"
+      }
+    ]
+  },
+  "win_count": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.win_count",
+        "path": "/cues"
+      }
+    ]
+  },
+  "win_gap": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.win_gap",
+        "path": "/cues/8/at_ms"
+      }
+    ]
+  },
+  "win_side": {
+    "ok": false,
+    "errors": [
+      {
+        "code": "timeline.win_side",
+        "path": "/cues/8/fighter"
+      }
+    ]
+  }
+}

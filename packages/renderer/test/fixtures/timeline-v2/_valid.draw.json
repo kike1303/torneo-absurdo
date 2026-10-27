@@ -1,0 +1,12 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/7",
+      "value": {
+        "at_ms": 9500,
+        "type": "draw"
+      }
+    }
+  ]
+}

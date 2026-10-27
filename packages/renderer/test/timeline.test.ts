@@ -8,6 +8,8 @@ import { MANIFESTS } from './support/placeholders.ts';
 const { valid, rules } = loadFixtures(
   fileURLToPath(new URL('./fixtures/timeline/', import.meta.url)),
 );
+// 005 RF3: the v2 rules have their own fixtures; together they cover every code.
+const v2 = loadFixtures(fileURLToPath(new URL('./fixtures/timeline-v2/', import.meta.url)));
 
 describe('validateTimeline', () => {
   it('accepts the completed example of the spec, with and without manifests', () => {
@@ -15,8 +17,8 @@ describe('validateTimeline', () => {
     expect(validateTimeline(valid, MANIFESTS)).toMatchObject({ ok: true });
   });
 
-  it('covers every rule code with a fixture', () => {
-    const covered = new Set(rules.map((r) => r.expect.code));
+  it('covers every rule code with a fixture of v1 or v2', () => {
+    const covered = new Set([...rules, ...v2.rules].map((r) => r.expect.code));
     const structural = new Set<string>([
       TIMELINE_CODES.notObject,
       TIMELINE_CODES.invalidType,

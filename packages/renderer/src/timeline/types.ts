@@ -1,6 +1,11 @@
-// Renderer timeline v1 (spec "Diseño → Timeline v1", RF-A7). Codes only, no text (ADR-0007).
+// Renderer timeline v1 (002 spec "Diseño → Timeline v1", RF-A7) and v2 (005 spec, RF1): v2 is a
+// strict superset that adds the endings by time (`time_up`, then `win` or `draw`). Codes only, no
+// text (ADR-0007).
 
-export const TIMELINE_VERSION = 1;
+export const TIMELINE_VERSIONS = [1, 2] as const;
+export type TimelineVersion = (typeof TIMELINE_VERSIONS)[number];
+/** The latest version, the one producers emit. */
+export const TIMELINE_VERSION = 2;
 
 export const SIDES = ['a', 'b'] as const;
 export type Side = (typeof SIDES)[number];
@@ -11,8 +16,13 @@ export type Move = (typeof MOVES)[number];
 export const STRIKE_RESULTS = ['hit', 'crit', 'block', 'dodge'] as const;
 export type StrikeResult = (typeof STRIKE_RESULTS)[number];
 
-export const CUE_TYPES = ['intro', 'strike', 'knockdown', 'ko', 'win'] as const;
+export const CUE_TYPES_V1 = ['intro', 'strike', 'knockdown', 'ko', 'win'] as const;
+export const CUE_TYPES = [...CUE_TYPES_V1, 'time_up', 'draw'] as const;
 export type CueType = (typeof CUE_TYPES)[number];
+
+/** How a fight ended: knockout, decision after the time limit, or draw. */
+export const ENDINGS = ['ko', 'decision', 'draw'] as const;
+export type Ending = (typeof ENDINGS)[number];
 
 export const TIMELINE_LIMITS = Object.freeze({
   maxCues: 2000,
@@ -64,7 +74,19 @@ export interface WinCue {
   readonly fighter: Side;
 }
 
-export type Cue = IntroCue | StrikeCue | KnockdownCue | KoCue | WinCue;
+/** The time limit is reached (v2). The closing (`win` or `draw`) follows. */
+export interface TimeUpCue {
+  readonly at_ms: number;
+  readonly type: 'time_up';
+}
+
+/** A draw after `time_up` (v2). */
+export interface DrawCue {
+  readonly at_ms: number;
+  readonly type: 'draw';
+}
+
+export type Cue = IntroCue | StrikeCue | KnockdownCue | KoCue | WinCue | TimeUpCue | DrawCue;
 
 export interface TimelineFighter {
   readonly asset: string;
@@ -72,7 +94,7 @@ export interface TimelineFighter {
 }
 
 export interface Timeline {
-  readonly timeline_version: typeof TIMELINE_VERSION;
+  readonly timeline_version: TimelineVersion;
   readonly duration_ms: number;
   readonly fighters: Readonly<Record<Side, TimelineFighter>>;
   readonly cues: readonly Cue[];

@@ -1,5 +1,5 @@
-// `?pace=<factor>` on /dev/arena (002 RF-B9, plan-b decision 17): rescales the fight of the
-// spike script to try another mean gap between strikes. Pure; the renderer validates the result
+// `?pace=<factor>` on /dev/arena (002 RF-B9, plan-b decision 17; endings by time in 005 RF17):
+// rescales the fight to try another mean gap between strikes. Pure; the renderer validates the result
 // in `load` (a factor that breaks a rule ends in `timeline_invalid`, never forced).
 import type { Cue, Timeline } from '@torneo/renderer/timeline';
 
@@ -16,8 +16,9 @@ export function parsePace(raw: string | null): number | null {
 
 /**
  * Scales every instant from the first strike on by `factor`. A knockdown keeps its offset from
- * the strike before it and its duration; `win` keeps its gap after `ko`; the tail after `win`
- * (the victory pose) keeps its length.
+ * the strike before it and its duration. The ending (`ko` or `time_up`) is scaled; its closing
+ * (`win` or `draw`) keeps its gap after it, and the tail after the closing (the pose) keeps its
+ * length.
  */
 export function retimeTimeline(timeline: Timeline, factor: number): Timeline {
   if (factor === 1) return timeline;
@@ -25,8 +26,8 @@ export function retimeTimeline(timeline: Timeline, factor: number): Timeline {
   if (first === undefined) return timeline;
   const scale = (at: number) => (at < first ? at : Math.round(first + (at - first) * factor));
   let strike = { from: first, to: first };
-  let ko = { from: first, to: first };
-  let win: { from: number; to: number } | null = null;
+  let anchor = { from: first, to: first };
+  let closing: { from: number; to: number } | null = null;
   const cues = timeline.cues.map((cue): Cue => {
     switch (cue.type) {
       case 'strike': {
@@ -36,21 +37,23 @@ export function retimeTimeline(timeline: Timeline, factor: number): Timeline {
       }
       case 'knockdown':
         return { ...cue, at_ms: strike.to + (cue.at_ms - strike.from) };
-      case 'ko': {
+      case 'ko':
+      case 'time_up': {
         const to = scale(cue.at_ms);
-        ko = { from: cue.at_ms, to };
+        anchor = { from: cue.at_ms, to };
         return { ...cue, at_ms: to };
       }
-      case 'win': {
-        const to = ko.to + (cue.at_ms - ko.from);
-        win = { from: cue.at_ms, to };
+      case 'win':
+      case 'draw': {
+        const to = anchor.to + (cue.at_ms - anchor.from);
+        closing = { from: cue.at_ms, to };
         return { ...cue, at_ms: to };
       }
       default:
         return cue;
     }
   });
-  const end: { from: number; to: number } = win ?? ko;
+  const end: { from: number; to: number } = closing ?? anchor;
   return { ...timeline, cues, duration_ms: end.to + (timeline.duration_ms - end.from) };
 }
 

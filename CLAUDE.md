@@ -18,6 +18,8 @@ Todo cambio no trivial pasa por **intent → spec → plan → implementación �
 - `apps/server` — Rust + axum: API, WebSockets, auth, scheduler de peleas. **Fuente de verdad** de usuarios, monedas, apuestas y peleas.
 - `crates/engine` — motor de pelea determinista. Librería pura: sin I/O, sin reloj, sin aleatoriedad fuera del PRNG con semilla.
 - `crates/engine-wasm` — bindings WASM del motor para verificar peleas en el navegador.
+- `crates/content` — carga y valida `content/characters/` para el motor (`load_roster`). Hace solo I/O y conversión; la validación es del motor.
+- `crates/sim` — simulador de balance (`just sim`). Herramienta de desarrollo: el server nunca depende de él.
 - `crates/protocol` — tipos de eventos/mensajes (serde); genera `packages/protocol-ts`. **No editar `packages/protocol-ts` a mano.**
 - `packages/renderer` — reproductor PixiJS del log de eventos, agnóstico de framework.
 - `content/` — personajes (lore + stats) y frases del narrador. Son datos, no código.
@@ -36,6 +38,7 @@ Requisitos: **Node ≥ 22.17** (versión exacta en `.node-version`; `nvm` no la 
 - `just e2e`: build, `check-renderer-split` (Pixi y el renderer solo por `import()`, 002 RF-A17) y Playwright contra `node build` (Chromium y WebKit); antes, una vez, `just e2e-install` para los navegadores. Logs en `apps/web/test-results/logs/` y capturas en `apps/web/test-results/screenshots/`. El e2e opcional de `/dev/status` corre contra `just dev`: `pnpm --filter web exec playwright test -c playwright.dev.config.ts`.
 - `just arena-bench`: build de producción de `/dev/arena` en `127.0.0.1:3000` (fijo, nunca `0.0.0.0`) para medir fps; método en `packages/renderer/README.md`. Falla si el 3000 está ocupado.
 - `just gen`: regenera `packages/protocol-ts` desde `crates/protocol` (`ts-rs`). Hay que correrlo y commitear el resultado cada vez que cambia un tipo de `protocol`; `just check` falla si quedó desactualizado.
+- `just sim [--fights N] [--seed HEX] [--content DIR] [--json] [--check]`: simula peleas en masa con el motor real (release) sobre `content/characters/` y emite el informe de balance (RF15 y RF17 de 003). Por defecto, 10 000 peleas con semilla fija; `--check` sale con 1 si falla un criterio y con 2 ante un error. El mismo chequeo corre en `just check` (`crates/sim/tests/balance.rs`). Córrelo tras crear o editar un personaje. Nunca le pases la semilla de una pelea real.
 - `just db-up` / `just db-down` / `just db-reset`: Postgres de desarrollo (`infra/compose.dev.yml`, `127.0.0.1:${DEV_PG_PORT:-5432}`). `db-reset` borra el volumen y las bases `torneo_test_*` que hayan quedado.
 - `just crate-age`: comprueba en crates.io que toda versión de `Cargo.lock` tenga al menos 3 días. Usa la red; córrelo **antes de compilar** cada vez que cambie el lock y baja lo marcado con `cargo update -p <crate>@<versión> --precise <anterior>`.
 - `just deny`: `cargo deny check bans sources` (sin OpenSSL ni aws-lc, una sola versión de `tungstenite` y solo crates.io como fuente); en local solo si `cargo-deny` está instalado.
