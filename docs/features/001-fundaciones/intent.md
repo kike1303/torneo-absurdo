@@ -2,7 +2,7 @@
 id: "001"
 title: Fundaciones del monorepo
 type: intent
-status: approved
+status: done
 risk: high
 author: product-owner
 reviewers: [architect]
@@ -10,7 +10,7 @@ approvals: [{by: architect, date: 2026-10-21}]
 linear: TA-1
 depends_on: []
 created: 2026-10-20
-updated: 2026-10-21
+updated: 2026-10-26
 ---
 
 # Intent: Fundaciones del monorepo
