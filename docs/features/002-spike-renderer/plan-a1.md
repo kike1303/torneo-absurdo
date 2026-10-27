@@ -194,7 +194,17 @@ Sin cambios en los workflows. El job `web` suma unos 30–45 s (dos `tsc`, ESLin
 
 ## Desviaciones durante la implementación
 
-_(Se llena si la implementación se aparta del plan.)_
+Versiones de la tabla comprobadas de nuevo el 2026-10-26: sin cambios (`pixi.js` 8.22.0 sigue siendo `latest`). `pnpm install --frozen-lockfile` pasa, `pnpm audit --audit-level moderate` sin hallazgos, una sola versión de `@types/node` (22.20.5) y el lockfile solo agrega el importer y los 14 paquetes de la tabla. La etapa `build` de `apps/web/Dockerfile` construye con el `COPY` nuevo (`docker buildx build --target build`).
+
+1. **Coreografía resuelta en `prepareScene`.** Las reglas de precedencia se aplican una vez por carga y producen segmentos por luchador (animación, inicio de animación y movimiento lineal), cada uno asignado al cue que lo causa. Todo segmento empieza como mucho 400 ms antes de su cue y termina como mucho 3 300 ms después (3 000 ms de acción más 300 ms de regreso), así que `cueWindow(prepared, t)` devuelve los cues con `at_ms` en `[t − 3300, t + 400]`, con los 400 ms hacia adelante del windup que pidió el architect, y `sceneAt` busca el segmento activo solo ahí. `ko` y `win` sostienen su animación hasta el final, fuera de la ventana, como dato escalar de `PreparedFighter`. Un test comprueba la cota de cada segmento, y otro, `cueWindow(…).length ≤ K` (`K = 16`; el peor caso válido en 3.7 s es 13). Sin esto, una cadena de interrupciones (una reacción que empieza a mitad de un regreso) dependería de cues fuera de la ventana.
+2. **`walk` en el regreso, no en el avance.** El avance ocurre durante el windup con los frames del ataque, para que el impacto caiga en `at_ms` sin mirar más de 400 ms hacia adelante. `walk` (o `idle`, por su fallback) se usa en el regreso a la marca. El `idle` en la marca usa una fase global (`frame(t)`), así no depende de la historia.
+3. **Banners en `Scene.banners`, no dentro de `hud`.** La decisión 4 los ponía en el HUD, pero RF-A14 exige `hud` igual con y sin movimiento reducido, y los banners difieren justo en el tween. `hud` lleva solo HP y estela; los banners van aparte, como en la lista de RF-A9.
+4. **Códigos de error adicionales.** `manifest.not_object`, `manifest.invalid_type` y `manifest.missing_field`; `timeline.not_object`, `timeline.invalid_type`, `timeline.invalid_value` y `timeline.missing_field`, para la entrada malformada. Y `timeline.cue_after_ko`: solo `win` puede seguir a `ko`. La regla 1 de "Coreografía" dice que la timeline ya prohíbe golpes durante el `ko`, pero "Timeline v1" no lo listaba. Los helpers de entrada no confiable que comparten los dos validadores viven en `src/manifest/input.ts`.
+5. **Duración máxima de la timeline: 1 h** (`TIMELINE_LIMITS.maxDurationMs`). La spec no fija una; es una cota de sanidad, y deja caber la timeline sintética de 1 000 cues.
+6. **ESLint: `**/protocol-ts/**` en lugar de `**/packages/protocol-ts/**`.** Desde `packages/renderer`, una ruta relativa a `protocol-ts` nunca nombra `packages/`, así que el patrón del plan no la atrapaba. Lo cubre un caso de `eslint.test.ts`.
+7. **`tsconfig.node.json` incluye `eslint.config.js`** (`allowJs` y `checkJs`), porque `test/eslint.test.ts` importa `createConfig()`.
+8. **`scripts/__fixtures__/check-compose/valid/apps/web/Dockerfile` resincronizado** con el `COPY` nuevo: el test de `check-compose` exige que el fixture válido coincida con el Dockerfile real. No cambia ninguna regla.
+9. **Destello con movimiento reducido.** Se mantiene, porque es un tinte del sprite y no un destello de pantalla completa (RF-A14: "el impacto se comunica con el tinte").
 
 ## Revisión
 

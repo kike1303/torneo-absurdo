@@ -4,7 +4,7 @@ type: architecture
 status: draft
 author: architect
 created: 2026-10-20
-updated: 2026-10-25
+updated: 2026-10-26
 ---
 
 # Arquitectura general
@@ -71,6 +71,17 @@ Scheduled ─▶ BettingOpen ─▶ BettingClosed ─▶ Live ─▶ Settled
   - Códigos de error: `dominio.motivo` (`ws.origin_forbidden`), como enums con `#[serde(rename = "dominio.motivo")]` en cada variante, nunca `String` libre. Cada enum de códigos es dueño de un solo prefijo (`ApiErrorCode` → `http.*`, `WsErrorCode` → `ws.*`) y expone `ALL` y `as_str()`.
   - `ErrorCode` es la unión sin etiquetar de los enums de códigos y `ApiError { error: ErrorCode }` es el cuerpo de toda respuesta HTTP de error. Un dominio nuevo (por ejemplo `auth.*`) agrega su enum y su variante en `ErrorCode`; los conjuntos de cadenas no se solapan (lo comprueba un test).
   - Nada de enteros de 64 bits o más (`u64`, `i64`, `u128`, `i128`, `usize`) en tipos exportados: `just gen` falla si aparece `bigint`. Si hace falta, se serializan como cadena.
+
+## Renderer de peleas
+
+> Detalle normativo en la [spec de 002](features/002-spike-renderer/spec.md) ("Formato de assets v1", "Timeline v1" y "Coreografía"). La fase A1 entrega el núcleo puro; la capa Pixi, la ruta de prueba y la carga diferida llegan en A2.
+
+- **Paquete:** `@torneo/renderer` (`packages/renderer`) exporta el TS fuente, sin paso de build, con los subpaths `.`, `./manifest`, `./timeline`, `./placeholders/*` y `./fixtures/*`. Los imports relativos llevan extensión `.ts` para que lo carguen Vite y Node con *type stripping*.
+- **Timeline propia:** el renderer no conoce el `FightLog`. Reproduce una `Timeline` de *cues* (`intro`, `strike`, `knockdown`, `ko`, `win`) validada con `validateTimeline`. El único archivo que conoce las dos formas es el adaptador del lado del consumidor, en `apps/web` (`timelineFromFightLog`, fase C de 002). Así un cambio del protocolo cae en el adaptador o en una `timeline_version` nueva, no en el renderer.
+- **Formato de assets v1:** cada personaje es una carpeta con `manifest.json` y hojas `sheet-<n>.png`, con las nueve animaciones obligatorias y tres opcionales con fallback fijo. `validateManifest` lo valida como entrada no confiable y devuelve errores como códigos con JSON Pointer. Los placeholders `dummy_a` y `dummy_b` los genera un script determinista.
+- **Escena pura:** `prepareScene(timeline, manifests)` resuelve una vez por carga la coreografía (segmentos por luchador con las reglas de precedencia), el HP por luchador y las semillas cosméticas, y lo congela. `sceneAt(prepared, t, { reducedMotion })` es función pura de `t`: búsquedas binarias y una ventana acotada de cues (`cueWindow`, hasta 3.3 s hacia atrás y 400 ms hacia adelante por el windup). `seek`, las pestañas en segundo plano y las caídas de frames no desincronizan, porque no hay estado por frame.
+- **Azar y reloj:** los efectos usan un PRNG propio (`mulberry32`) sembrado con el índice del cue y un canal, nunca la semilla de la pelea (ADR-0002). El tiempo entra por el reloj que inyecta el host. ESLint prohíbe `Math.random`, `Date`, `performance` y `crypto` en todo el paquete, y Pixi y el DOM en el núcleo (`src/{manifest,timeline,scene,fx}`).
+- **Sin texto ni colores:** la escena describe colores por rol (`hp`, `hpLost`, `crit`, `text`) que la capa Pixi traduce con `RendererTheme` (ADR-0009 D7), y los nombres y banners llegan traducidos por el host (ADR-0007). El HUD se maqueta en px CSS del contenedor (`layoutHud`), fuera de la cámara lógica de 640×360.
 
 ## Despliegue
 
