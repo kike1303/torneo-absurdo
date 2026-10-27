@@ -1,6 +1,7 @@
 packages:
   - apps/web
   - packages/*
+  - tools/*
 
 # Supply chain (RF-A1): never install versions published less than 24 h ago.
 minimumReleaseAge: 1440

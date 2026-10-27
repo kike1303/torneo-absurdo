@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
@@ -5,12 +6,15 @@ import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vitest/config';
 import paraglideOptions from './paraglide.options.js';
 import { chunkModules } from './vite/chunk-modules.js';
+import { localSprites } from './vite/local-sprites.js';
 
 // Kit 3 has no svelte.config.js: all Kit options live here (plan-a, decision 17).
 // Never add `csrf.trustedOrigins`, `csrf.checkOrigin` or `paths.origin`
 // (enforced by scripts/check-kit-config.mjs).
 export default defineConfig({
   plugins: [
+    // First, so /__local-sprites/ is answered before Kit; only in `vite dev` (002 RF-B7).
+    localSprites(),
     chunkModules(),
     tailwindcss(),
     paraglideVitePlugin(paraglideOptions),
@@ -37,6 +41,12 @@ export default defineConfig({
   // changeOrigin (the browser Origin reaches the server intact) and without xfwd. The anchored
   // regular expressions keep /apix and /wsx in web.
   server: {
+    // Kit narrows `server.fs.allow` to apps/web, so `?url` imports of the placeholder sheets in
+    // packages/renderer answered 403 in `vite dev` (found in 002 phase B, which plays them there).
+    // Only that folder is added; content/_local/ is served by localSprites(), never through fs.
+    fs: {
+      allow: [fileURLToPath(new URL('../../packages/renderer/placeholders/', import.meta.url))],
+    },
     proxy: {
       '^/api(?:/|$)': { target: 'http://127.0.0.1:8080' },
       '^/ws$': { target: 'ws://127.0.0.1:8080', ws: true },

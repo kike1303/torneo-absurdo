@@ -143,6 +143,7 @@ const DOCKERIGNORE_REQUIRED = [
   '!**/.env.example',
   'private/',
   'content/_local/',
+  'tools/',
 ];
 
 const HOST_RULE = 'Host(`${PUBLIC_HOST:?}`)';

@@ -10,7 +10,13 @@
   interface Props {
     stats: FrameStats;
     /** Context copied with the stats: no user agent (002 plan-a2 decision 12). */
-    context: { devicePixelRatio: number; canvasWidth: number; fighters: readonly string[] };
+    context: {
+      devicePixelRatio: number;
+      canvasWidth: number;
+      fighters: readonly string[];
+      /** Mean gap between strikes of the script played (`?pace=`, 002 RF-B9); not shown. */
+      mean_strike_gap_ms?: number | null;
+    };
   }
 
   let { stats, context }: Props = $props();
