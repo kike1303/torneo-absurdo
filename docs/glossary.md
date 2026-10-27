@@ -35,3 +35,5 @@ updated: 2026-10-21
 | Rating | `Rating` | Fuerza estimada de un personaje (Glicko-2). |
 | Narrador | `Narrator` | Sistema de frases con plantillas que comenta la pelea según el contexto. |
 | Repetición | `Replay` | Reproducir una pelea pasada a partir de su log o su semilla. |
+
+<!-- CI probe (a), do not merge -->
