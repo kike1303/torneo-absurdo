@@ -22,15 +22,18 @@ use std::fmt;
 use serde_json::{Map, Value};
 use tracing::field::{Field, Visit};
 use tracing::{Event, Level, Subscriber};
-use tracing_subscriber::Layer;
-use tracing_subscriber::filter::{EnvFilter, FilterExt, LevelFilter, ParseError, Targets};
-use tracing_subscriber::fmt::format::Writer;
+use tracing_subscriber::filter::combinator::And;
+use tracing_subscriber::filter::{
+    EnvFilter, FilterExt, Filtered, LevelFilter, ParseError, Targets,
+};
+use tracing_subscriber::fmt::format::{DefaultFields, Writer};
 use tracing_subscriber::fmt::time::{FormatTime, SystemTime};
 use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields, MakeWriter};
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::layer::{Layered, SubscriberExt};
+use tracing_subscriber::registry::{LookupSpan, Registry};
 use tracing_subscriber::util::SubscriberInitExt;
-use uuid::Uuid;
+use tracing_subscriber::{Layer, fmt::Layer as FmtLayer};
+use uuid::{Uuid, Version};
 
 /// Fields an event of this crate may write. Closed list: adding one means updating the
 /// privacy notice (spec, "Diseño → Logs y plazo").
@@ -56,18 +59,36 @@ enum FieldKind {
     Str,
     /// Only `record_u64` and `record_i64`.
     Int,
-    /// Only `record_debug` (`%value`), and only if the value is a UUID.
+    /// Only `record_debug` (`%value`), and only if the value is a version 4 UUID, written in
+    /// its hyphenated form.
     Uuid,
 }
 
+/// The type of each field of `ALLOWED_FIELDS` (a test checks both lists have the same names).
+const FIELD_KINDS: &[(&str, FieldKind)] = &[
+    ("event", FieldKind::Str),
+    ("method", FieldKind::Str),
+    ("route", FieldKind::Str),
+    ("status", FieldKind::Int),
+    ("latency_ms", FieldKind::Int),
+    ("request_id", FieldKind::Uuid),
+    ("var", FieldKind::Str),
+    ("port", FieldKind::Int),
+    ("error_kind", FieldKind::Str),
+    ("close_code", FieldKind::Int),
+    ("file", FieldKind::Str),
+    ("line", FieldKind::Int),
+];
+
 /// The type of an allowlisted field; `None` for any other name.
 fn field_kind(name: &str) -> Option<FieldKind> {
-    match name {
-        "event" | "method" | "route" | "var" | "error_kind" | "file" => Some(FieldKind::Str),
-        "status" | "latency_ms" | "port" | "close_code" | "line" => Some(FieldKind::Int),
-        "request_id" => Some(FieldKind::Uuid),
-        _ => None,
+    if !ALLOWED_FIELDS.contains(&name) {
+        return None;
     }
+    FIELD_KINDS
+        .iter()
+        .find(|(field, _)| *field == name)
+        .map(|(_, kind)| *kind)
 }
 
 /// Third-party crates that never log below `warn`, even if `RUST_LOG` names them.
@@ -166,8 +187,14 @@ impl Visit for AllowlistVisitor<'_> {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         if field_kind(field.name()) == Some(FieldKind::Uuid) {
             let text = format!("{value:?}");
-            if Uuid::parse_str(&text).is_ok() {
-                self.put(field, FieldKind::Uuid, Value::String(text));
+            if let Ok(id) = Uuid::try_parse(&text)
+                && id.get_version() == Some(Version::Random)
+            {
+                self.put(
+                    field,
+                    FieldKind::Uuid,
+                    Value::String(id.hyphenated().to_string()),
+                );
             }
         }
     }
@@ -193,12 +220,20 @@ fn caps() -> Targets {
     )
 }
 
+/// The type of [`layer`]. Named, like [`Logs`], so that adding another layer does not compile
+/// without changing these types (ADR-0012 A3).
+pub type JsonLayer<S, W> =
+    Filtered<FmtLayer<S, DefaultFields, JsonLine, W>, And<EnvFilter, Targets, S>, S>;
+
+/// The subscriber: the registry with [`layer`] as its only layer.
+pub type Logs<W> = Layered<JsonLayer<Registry, W>, Registry>;
+
 /// The formatting layer with the `RUST_LOG` filter and the caps, writing to `writer`.
 ///
 /// The caps are a separate filter combined with `and`, not extra `EnvFilter` directives: a
 /// more specific directive in `RUST_LOG` (for example `sqlx::query=trace`) would otherwise win
 /// over `sqlx=warn`.
-pub fn layer<S, W>(rust_log: &str, writer: W) -> Result<impl Layer<S>, ParseError>
+pub fn layer<S, W>(rust_log: &str, writer: W) -> Result<JsonLayer<S, W>, ParseError>
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
     W: for<'w> MakeWriter<'w> + Send + Sync + 'static,
@@ -219,7 +254,7 @@ pub enum TelemetryError {
 }
 
 /// The subscriber: the registry with [`layer`] as its only layer with output (ADR-0012 A3).
-fn subscriber<W>(rust_log: &str, writer: W) -> Result<impl Subscriber + Send + Sync, ParseError>
+fn subscriber<W>(rust_log: &str, writer: W) -> Result<Logs<W>, ParseError>
 where
     W: for<'w> MakeWriter<'w> + Send + Sync + 'static,
 {
@@ -454,6 +489,11 @@ mod tests {
         for name in ALLOWED_FIELDS {
             assert!(field_kind(name).is_some(), "{name}");
         }
+        let mut kinds: Vec<&str> = FIELD_KINDS.iter().map(|(name, _)| *name).collect();
+        let mut allowed = ALLOWED_FIELDS.to_vec();
+        kinds.sort_unstable();
+        allowed.sort_unstable();
+        assert_eq!(kinds, allowed);
         assert_eq!(field_kind("message"), None);
         assert_eq!(field_kind("ts"), None);
         assert_eq!(field_kind("level"), None);
@@ -487,6 +527,7 @@ mod tests {
 
     #[test]
     fn fields_keep_their_type() {
+        let id = Uuid::new_v4();
         let lines = capture("info", || {
             tracing::info!(
                 target: "server",
@@ -501,14 +542,14 @@ mod tests {
                 port = 8080u16,
                 close_code = 1008i64,
                 line = 7u32,
-                request_id = %uuid::Uuid::nil(),
+                request_id = %id,
             );
         });
         let line = &lines[0];
         assert_eq!(line.len(), ALLOWED_FIELDS.len() + 2, "{line:?}");
         assert_eq!(line["close_code"], 1008);
         assert_eq!(line["line"], 7);
-        assert_eq!(line["request_id"], uuid::Uuid::nil().to_string());
+        assert_eq!(line["request_id"], id.hyphenated().to_string());
     }
 
     #[test]
@@ -516,9 +557,32 @@ mod tests {
         let lines = capture("info", || {
             tracing::info!(target: "server", event = "x", request_id = %Canary);
             tracing::info!(target: "server", event = "x", request_id = "canary");
+            tracing::info!(target: "server", event = "x", request_id = %Uuid::nil());
+            tracing::info!(target: "server", event = "x", request_id = %Uuid::max());
+            // A 32-character hex value (say, a hash prefix) that is not a version 4 UUID.
+            tracing::info!(
+                target: "server",
+                event = "x",
+                request_id = %"0123456789abcdef0123456789abcdef"
+            );
         });
+        assert_eq!(lines.len(), 5);
         for line in &lines {
             assert!(!line.contains_key("request_id"), "{line:?}");
+        }
+    }
+
+    #[test]
+    fn request_id_is_written_hyphenated() {
+        let id = Uuid::new_v4();
+        let lines = capture("info", || {
+            tracing::info!(target: "server", event = "x", request_id = %id.simple());
+            tracing::info!(target: "server", event = "x", request_id = %id.braced());
+            tracing::info!(target: "server", event = "x", request_id = %id.urn());
+        });
+        assert_eq!(lines.len(), 3);
+        for line in &lines {
+            assert_eq!(line["request_id"], id.hyphenated().to_string(), "{line:?}");
         }
     }
 
@@ -558,41 +622,121 @@ mod tests {
         assert_eq!(lines.len(), 1, "{lines:?}");
     }
 
-    /// The `instrument` attributes of `source` without `skip_all` (A3). Comment lines are
-    /// ignored.
+    /// `source` without comments and with every string and char literal emptied, so brackets
+    /// and words inside them do not count.
+    fn strip_literals_and_comments(source: &str) -> String {
+        let chars: Vec<char> = source.chars().collect();
+        let ident = |c: char| c.is_alphanumeric() || c == '_';
+        let mut out = String::new();
+        let mut i = 0;
+        while i < chars.len() {
+            let c = chars[i];
+            let next = chars.get(i + 1).copied();
+            if c == '/' && next == Some('/') {
+                while i < chars.len() && chars[i] != '\n' {
+                    i += 1;
+                }
+            } else if c == '/' && next == Some('*') {
+                i += 2;
+                while i < chars.len() && !(chars[i] == '*' && chars.get(i + 1) == Some(&'/')) {
+                    i += 1;
+                }
+                i += 2;
+            } else if c == 'r'
+                && matches!(next, Some('"' | '#'))
+                && (i == 0 || !ident(chars[i - 1]) || chars[i - 1] == 'b')
+            {
+                let mut hashes = 0;
+                let mut j = i + 1;
+                while chars.get(j) == Some(&'#') {
+                    hashes += 1;
+                    j += 1;
+                }
+                if chars.get(j) != Some(&'"') {
+                    out.push(c);
+                    i += 1;
+                    continue;
+                }
+                j += 1;
+                while j < chars.len()
+                    && !(chars[j] == '"' && (1..=hashes).all(|k| chars.get(j + k) == Some(&'#')))
+                {
+                    j += 1;
+                }
+                out.push_str("\"\"");
+                i = j + 1 + hashes;
+            } else if c == '"' {
+                i += 1;
+                while i < chars.len() && chars[i] != '"' {
+                    i += if chars[i] == '\\' { 2 } else { 1 };
+                }
+                out.push_str("\"\"");
+                i += 1;
+            } else if c == '\'' && (next == Some('\\') || chars.get(i + 2) == Some(&'\'')) {
+                // A char literal (a lifetime has no closing quote right after one char).
+                i += if next == Some('\\') { 2 } else { 1 };
+                while i < chars.len() && chars[i] != '\'' {
+                    i += 1;
+                }
+                out.push_str("' '");
+                i += 1;
+            } else {
+                out.push(c);
+                i += 1;
+            }
+        }
+        out
+    }
+
+    /// The uses of tracing's `instrument` attribute in `source` that break A3. The word
+    /// `instrument` may only appear as `#[tracing::instrument(skip_all, …)]` (with `skip_all`
+    /// as a top-level argument) or as the `.instrument(span)` method; anything else (a bare
+    /// `#[instrument]`, a `use … as` alias, `cfg_attr`) is reported.
     fn instrument_without_skip_all(source: &str) -> Vec<String> {
-        let code = source
-            .lines()
-            .filter(|l| !l.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let code = strip_literals_and_comments(source);
+        let ident = |c: char| c.is_alphanumeric() || c == '_';
         let mut found = Vec::new();
-        let mut rest = code.as_str();
-        while let Some(start) = rest.find("#[") {
-            let attr = &rest[start + 2..];
-            let mut depth = 1;
-            let mut end = attr.len();
-            for (i, c) in attr.char_indices() {
+        for (at, _) in code.match_indices("instrument") {
+            let before = &code[..at];
+            let after = &code[at + "instrument".len()..];
+            if before.chars().next_back().is_some_and(ident)
+                || after.chars().next().is_some_and(ident)
+            {
+                continue;
+            }
+            let compact: String = before.chars().filter(|c| !c.is_whitespace()).collect();
+            if compact.ends_with('.') {
+                continue;
+            }
+            let snippet: String = code[at.saturating_sub(40)..].chars().take(100).collect();
+            if !compact.ends_with("#[tracing::") {
+                found.push(snippet);
+                continue;
+            }
+            let args = after.trim_start();
+            let Some(args) = args.strip_prefix('(') else {
+                found.push(snippet);
+                continue;
+            };
+            let mut depth = 0usize;
+            let mut top_level = vec![String::new()];
+            for c in args.chars() {
                 match c {
-                    '[' => depth += 1,
-                    ']' => {
-                        depth -= 1;
-                        if depth == 0 {
-                            end = i;
-                            break;
-                        }
-                    }
+                    '(' | '[' | '{' => depth += 1,
+                    ')' | ']' | '}' if depth == 0 => break,
+                    ')' | ']' | '}' => depth -= 1,
+                    ',' if depth == 0 => top_level.push(String::new()),
                     _ => {}
                 }
+                if depth == 0 && c != ',' {
+                    if let Some(last) = top_level.last_mut() {
+                        last.push(c);
+                    }
+                }
             }
-            let body: String = attr[..end].chars().filter(|c| !c.is_whitespace()).collect();
-            let is_instrument = body
-                .split(|c: char| !(c.is_alphanumeric() || c == '_'))
-                .any(|word| word == "instrument");
-            if is_instrument && !body.contains("skip_all") {
-                found.push(body);
+            if !top_level.iter().any(|arg| arg.trim() == "skip_all") {
+                found.push(snippet);
             }
-            rest = &attr[end..];
         }
         found
     }
@@ -626,32 +770,38 @@ mod tests {
 
     #[test]
     fn the_instrument_check_catches_a_missing_skip_all() {
-        // Built with `concat!` so this file's text has no attribute for the check to find.
         let bad = [
-            concat!("#", "[instrument]\nfn f(x: u8) {}"),
-            concat!(
-                "#",
-                "[tracing::instrument(fields(route = \"/x\"))] fn f() {}"
-            ),
-            concat!(
-                "#",
-                "[ tracing :: instrument (\n  skip(x)\n)]\nfn f(x: u8) {}"
-            ),
-            concat!("#", "[cfg_attr(test, tracing::instrument(err))] fn f() {}"),
+            "#[instrument]\nfn f(x: u8) {}",
+            "#[instrument(skip_all)]\nfn f(x: u8) {}",
+            "#[tracing::instrument(fields(route = \"/x\"))] fn f() {}",
+            "#[ tracing :: instrument (\n  skip(x)\n)]\nfn f(x: u8) {}",
+            "#[cfg_attr(test, tracing::instrument(err))] fn f() {}",
+            "#[tracing::instrument(name = \"skip_all\")] fn f() {}",
+            "#[tracing::instrument(skip(skip_all_x))] fn f() {}",
+            "#[tracing::instrument(fields(skip_all = 1))] fn f() {}",
+            "use tracing::instrument as traced;\n#[traced] fn f() {}",
+            "#[doc = \"[\"]\n#[tracing::instrument(err)] fn f() {}",
         ];
         for source in bad {
             assert_eq!(instrument_without_skip_all(source).len(), 1, "{source}");
         }
         let good = [
-            concat!(
-                "#",
-                "[tracing::instrument(skip_all, fields(route = \"/x\"))] fn f() {}"
-            ),
-            concat!("// #", "[instrument]\n#[derive(Debug)] struct S;"),
-            concat!("#", "[doc = \"instrumented\"] fn f() {}"),
+            "#[tracing::instrument(skip_all, fields(route = \"/x\"))] fn f() {}",
+            "#[tracing::instrument(err, skip_all)] fn f() {}",
+            "// #[instrument]\n#[derive(Debug)] struct S;",
+            "/* #[instrument] */ fn f() {}",
+            "#[doc = \"instrumented\"] fn f() {}",
+            "const A: &str = \"#[instrument]\";",
+            "const A: &str = r#\"#[instrument]\"#;",
+            "let c = '\"'; let s = \"#[instrument]\";",
+            "fut.instrument(span).await; fn instrumented() {}",
         ];
         for source in good {
-            assert!(instrument_without_skip_all(source).is_empty(), "{source}");
+            assert!(
+                instrument_without_skip_all(source).is_empty(),
+                "{source}: {:?}",
+                instrument_without_skip_all(source)
+            );
         }
     }
 
@@ -697,19 +847,27 @@ mod tests {
         assert_eq!(own.matches(".with(").count(), 1);
         assert_eq!(own.matches("try_init(").count(), 1);
         assert!(own.contains("subscriber(rust_log, std::io::stdout)"));
-        // No crate with its own output layer.
-        let manifest = include_str!("../Cargo.toml");
-        for line in manifest.lines() {
-            let name = line.split(['=', '.']).next().unwrap_or("").trim();
+        // No crate with its own output layer anywhere in the workspace's dependency graph
+        // (renames and transitive dependencies included).
+        let lock = include_str!("../../../Cargo.lock");
+        for line in lock.lines() {
+            let Some(name) = line.strip_prefix("name = \"") else {
+                continue;
+            };
+            let name = name.trim_end_matches('"');
             if name.starts_with("tracing") {
-                assert!(["tracing", "tracing-subscriber"].contains(&name), "{name}");
+                assert!(
+                    [
+                        "tracing",
+                        "tracing-attributes",
+                        "tracing-core",
+                        "tracing-subscriber"
+                    ]
+                    .contains(&name),
+                    "{name}"
+                );
             }
-            for banned in [
-                "opentelemetry",
-                "console-subscriber",
-                "journald",
-                "appender",
-            ] {
+            for banned in ["opentelemetry", "console-subscriber", "console-api"] {
                 assert!(!name.contains(banned), "{name}");
             }
         }
