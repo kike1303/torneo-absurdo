@@ -224,19 +224,17 @@ test('?pace=1.25 reaches playing and, at the end, finished', async ({ page }) =>
   expect(errors).toEqual([]);
 });
 
-test('?pace= changes mean_strike_gap_ms in the copied stats', async ({ page, context }) => {
+test('?pace=1.5 scales mean_strike_gap_ms in the copied stats', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-  const gap = async (query: string) => {
-    await page.goto(`/es/dev/arena${query}`);
-    await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
-    await waitForHydration(page);
-    await page.getByTestId('arena-show-stats').click();
-    await page.getByTestId('arena-copy-stats').click();
-    await expect(page.getByText('Copiado')).toBeVisible();
-    return JSON.parse(await page.evaluate(() => navigator.clipboard.readText())).mean_strike_gap_ms;
-  };
-  const base = await gap('');
-  const slow = await gap('?pace=1.5');
-  expect(base).toBeGreaterThan(0);
-  expect(slow).toBeGreaterThan(base * 1.4);
+  const strikes = spike.cues.filter((c) => c.type === 'strike').map((c) => c.at_ms);
+  const base = ((strikes.at(-1) ?? 0) - (strikes[0] ?? 0)) / (strikes.length - 1);
+  await page.goto('/es/dev/arena?pace=1.5');
+  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+  await waitForHydration(page);
+  await page.getByTestId('arena-show-stats').click();
+  await page.getByTestId('arena-copy-stats').click();
+  await expect(page.getByText('Copiado')).toBeVisible();
+  const copied = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
+  expect(copied.mean_strike_gap_ms).toBeGreaterThan(base * 1.45);
+  expect(copied.mean_strike_gap_ms).toBeLessThan(base * 1.55);
 });
