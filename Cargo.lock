@@ -1210,7 +1210,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "tungstenite",
+ "tungstenite 0.30.0",
  "url",
  "uuid",
 ]
@@ -1652,7 +1652,7 @@ dependencies = [
  "futures-util",
  "log",
  "tokio",
- "tungstenite",
+ "tungstenite 0.29.0",
 ]
 
 [[package]]
@@ -1799,6 +1799,18 @@ dependencies = [
  "log",
  "rand 0.9.5",
  "sha1 0.10.7",
+ "thiserror",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e48ac77174b19c110a50ab2128b24215ac9cb40e0e12e093fb602d175c569d22"
+dependencies = [
+ "bytes",
+ "log",
+ "rand 0.10.3",
  "thiserror",
 ]
 
