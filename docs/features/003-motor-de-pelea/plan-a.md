@@ -2,11 +2,12 @@
 id: "003"
 title: Motor de pelea v0 — fase A
 type: plan
-status: in-review
+status: approved
 risk: high
 author: backend-engineer
 reviewers: [architect]
-approvals: []
+approvals:
+  - {by: architect, date: 2026-10-26}
 linear: TA-3
 depends_on: ["001"]
 created: 2026-10-26
@@ -192,3 +193,41 @@ _check-wasm:
 
 ## Desviaciones durante la implementación
 _(Se llena si la implementación se aparta del plan.)_
+
+## Revisión
+
+### architect — 2026-10-26 — APPROVE
+- Verifiqué:
+  - **Frontmatter:** válido según `docs/process.md`, con `reviewers: [architect]` y el autor distinto del revisor.
+  - **Cobertura de la fase A:** RF1 a RF11, RF16, RF18 a RF21, la parte de RF22 que toca a 003 y los RNF de `overflow-checks` y dependencias. Cada uno tiene archivo y prueba concreta. RF12 a RF15 y RF17 quedan explícitamente en la fase B.
+  - **ADR-0001:** motor puro y entero, sin mapas, floats, reloj ni logging, con lints, `clippy.toml` y `check-engine.mjs`. Todas las constantes de juego, rangos de validación incluidos, viven en `Ruleset` con campos privados. `-> Result` es el refinamiento ya aceptado en la preocupación 1.
+  - **ADR-0002:** `Seed` sin `Clone`, `Serialize`, `Display` ni getter, y con `Debug` redactado. Hay un test de que ningún dorado contiene la semilla, y el PRNG solo se consume por `roll` en el orden de RF7. El jitter se consume siempre (decisión 9), lo que es literal de RF7.
+  - **ADR-0007:** el log solo lleva códigos, y los de `engine-wasm` siguen el patrón `^[a-z_]+\.[a-z_]+$`.
+  - **Cotas:** recalculé `A = ⌊(84 900 − 3400) / 1200⌋ + 1 = 68` y `1 + 2·68·3 + 10 = 418 < 512`. La guarda de `max_events` (len + 3 + 9 antes de cada acción) es conservadora y no se dispara en v1. También comprobé que la recuperación y los windups dan `t` monótono y ≥ 600 ms entre resoluciones.
+  - **Orden y fórmulas:** el orden del daño (`d_nc` con desesperación y debilidad, sin el ×3/2), el knockdown, la evaluación de `comeback` con las marcas previas, el turno y el tope coinciden con la tabla de la spec.
+  - **Toolchain y CI:**
+    - `rust-toolchain.toml` y su fixture de `check-compose`, y los targets de `deny.toml` con su test.
+    - `Cargo.toml` (miembros, `rand_chacha` sin features por defecto, `overflow-checks`, `opt-level` de dev solo en dependencias, que no altera resultados enteros).
+    - `_check-wasm`: comprueba los targets, corre clippy en `wasm32-unknown-unknown` y el runner WASI vía `CARGO_TARGET_WASM32_WASIP1_RUNNER`, que cargo parte por espacios. La ruta del repo y de este worktree no tiene espacios.
+    - El orden de `check-rust` deja los chequeos sin Docker antes de `db-up`.
+    - El filtro `rust` de `ci.yml` suma los dos scripts nuevos, y el filtro `web` ya cubre `scripts/**` y `crates/engine*/**`.
+    - El `Dockerfile` del server copia `crates/` entero, así que los miembros nuevos no rompen `cargo chef`. La descarga extra de los targets wasm la acepta la preocupación 6.
+    - El test nuevo de `WORKSPACE_MEMBERS` justifica que `content` y `sim` entren en la fase B.
+  - **No bloqueantes de la `## Revisión` de la spec:**
+    - security-reviewer: `max_events` (decisión 1), cota analítica (decisión 2), RF21 (decisión 3), y rutas completas con `allow-invalid` más su verificación manual (decisión 4 y Riesgos). Lo de TA-13 queda fuera de 003.
+    - game-designer: `w_special_desperation_mul` (decisión 5). Lo de "ningún `kind` muerto" es de la fase B.
+    - product-owner: la puerta "sin `timeline_version` 2 no se publican peleas reales" va a `docs/architecture.md`. La ruta `time_up` queda cubierta por `log-decision-a/b.json`, y el pedido de v2 en Linear por el paso 11.
+- **Enmienda editorial de la spec, aplicada por mí** (autor de la spec, registrada en su `## Revisión`):
+  - RF21 con la cota de 418 y `SpecError::EventLimit`;
+  - `event_limit` en RF4, con "no falla" acotado a los rulesets que pasan el test de cotas;
+  - RF2 aclara que `hp = 0` puede venir de un `block` (lo implicaba RF9, y el plan lo trata así);
+  - `FightLog::outcome()` devuelve `Option` (decisión 7).
+  
+  El paso 9 ya no tiene que tocar la spec, solo `docs/architecture.md` y las desviaciones.
+- **`CLAUDE.md`:** es razonable y correcto no editarlo en el PR. Propón en la descripción del PR el texto exacto para el owner: `check-rust` suma `_check-engine` y `_check-wasm` (los dos antes de `db-up`, sin Docker), y en Requisitos, que `rustup toolchain install` en el repo trae los targets `wasm32-unknown-unknown` y `wasm32-wasip1`. Lo aplica el owner o lo autoriza explícitamente en chat.
+- No bloqueante (para la implementación o el PR):
+  1. Escribir en el plan o en el PR el texto exacto de la extensión de `_check-ts-rs-graph` a `engine` y `engine-wasm` (`^(ts-rs|tokio) ` en `cargo tree -p engine -e normal`), igual que las otras recetas.
+  2. Fijar en `golden.rs`, con un comentario, qué pares de fixtures y qué orientación usa el digest de 1000 peleas (por ejemplo, el par `i mod 16`), porque cambiarlo después regenera `digest-1000.txt`.
+  3. Los `deny` de `lib.rs` (`indexing_slicing`, `panic`) también alcanzan a los `#[cfg(test)]` de `src/`. Si hace falta, usar un `#[allow]` local en el módulo de tests y nunca en el código del motor. Comprobar también que `allow-unwrap-in-tests` cubre los helpers de `tests/common/mod.rs`. Si no los cubre, que devuelvan `Result` o usen `assert!`.
+  4. El reporte a 002 del KO por chip de bloqueo va junto con el pedido de la v2 (paso 11).
+- Gate humano: el plan es `risk: high`, así que según `docs/process.md` falta el OK explícito del owner en chat antes de empezar la implementación. Esta aprobación no lo reemplaza.

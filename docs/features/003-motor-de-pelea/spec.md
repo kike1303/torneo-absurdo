@@ -40,7 +40,7 @@ Se entrega en dos fases, con un PR y un plan cada una:
     - hay como máximo 512 eventos.
   - **HP:**
     - el `hp` de un evento es el `hp` anterior de ese lado menos `damage` (en el primer golpe, el anterior es `max_hp`); `damage` es el daño **aplicado**, así que nunca supera el `hp` anterior;
-    - `hp = 0` solo aparece en el golpe que precede al `ko` de ese lado.
+    - `hp = 0` solo aparece en la resolución (`hit` o `block`) que precede al `ko` de ese lado; un bloqueo cuyo daño deja `hp = 0` también es KO (RF9).
   - **Final:**
     - si `reason = ko`, hay exactamente un `ko` y `end.t ≥ ko.t + 3500`;
     - si `reason` es `decision` o `draw`, hay exactamente un `time_up` y ningún `ko`;
@@ -54,11 +54,11 @@ Se entrega en dos fases, con un PR y un plan cada una:
 
 ### Motor (`crates/engine`)
 - **RF4.** API pública:
-  - `simulate(seed: &Seed, a: &CharacterSpec, b: &CharacterSpec, ruleset: &Ruleset) -> Result<FightLog, SpecError>`. Valida los dos personajes contra el ruleset y después simula; la simulación en sí no falla.
+  - `simulate(seed: &Seed, a: &CharacterSpec, b: &CharacterSpec, ruleset: &Ruleset) -> Result<FightLog, SpecError>`. Valida los dos personajes contra el ruleset y después simula; la simulación en sí no falla con ningún ruleset que pase el test de cotas de `Ruleset` (incluida la cota de eventos de RF21).
   - `Seed` es un newtype de `[u8; 32]` que solo se construye con `Seed::from_bytes([u8; 32])`. No implementa `Serialize`, `Display` ni `LowerHex`/`UpperHex`, no expone sus bytes, y su `Debug` imprime exactamente `Seed(<redacted>)`. El server conserva su propia copia de los bytes para el commit y la base de datos.
   - `Ruleset` solo se construye con `Ruleset::for_version(u16) -> Option<Ruleset>` (en v0, solo existe `1`). Sus campos son de solo lectura y son **todas** las constantes de la [tabla del ruleset](#modelo-de-simulación-ruleset-v1); ninguna constante de juego vive fuera de `Ruleset`.
   - `CharacterSpec` implementa `Serialize` y `Deserialize` con `deny_unknown_fields` (forma motor, ver [Esquema de personaje](#esquema-de-personaje)).
-  - `SpecError` es un enum de códigos sin texto, por ejemplo `stat_out_of_range` o `budget_exceeded`.
+  - `SpecError` es un enum de códigos sin texto, por ejemplo `stat_out_of_range`, `budget_exceeded` o `event_limit` (este último es una guarda inalcanzable con un ruleset que pase el test de cotas: si se alcanzara `max_events`, `simulate` devuelve el error en lugar de truncar el log o entrar en pánico).
   - `canonical_json(&FightLog) -> Result<Vec<u8>, EncodeError>` y `canonical_spec_json(&CharacterSpec) -> Result<Vec<u8>, EncodeError>`. `EncodeError` es un código sin texto, y ninguna de las dos usa `unwrap_or_default()` ni descarta errores.
 - **RF5.** El motor es puro:
   - sin I/O, sin reloj, sin hilos y sin logging (ni `tracing` ni `log`);
@@ -180,7 +180,7 @@ Se entrega en dos fases, con un PR y un plan cada una:
 - **RF21.** `simulate` es total con entradas no confiables, porque `engine-wasm` recibe JSON del cliente:
   - la validación rechaza lo que esté fuera de rango;
   - el bucle termina, porque cada acción avanza el reloj del atacante por lo menos `interval_min + windup_strike` = 1200 ms;
-  - el log está acotado por RF2: cada lado hace como mucho 71 acciones y cada acción produce como mucho 3 eventos, así que en el peor caso hay unos 450 eventos, por debajo del tope de 512;
+  - el log está acotado por RF2: cada lado hace como mucho 68 acciones (`⌊(84 900 − 3400) / 1200⌋ + 1`), cada acción aporta como mucho 3 eventos (`attack`, la resolución y `knockdown`) y la pelea suma como mucho 10 eventos únicos (`intro`, 2 `low_hp`, 2 `comeback`, `decisive_crit`, `clutch_ko`, `ko`, `time_up` y `end`), así que la cota es 418 < 512. El test de cotas de `Ruleset` la calcula con los campos del ruleset, y si se alcanzara `max_events`, `simulate` devuelve `SpecError::EventLimit`;
   - no hay pánicos, por los lints de RF5 y los del workspace.
 
   Un test alimenta `simulate` con specs inválidas y con extremos válidos (todos los stats en 1, en 100 o en el presupuesto exacto) y espera `Err` o un log que cumpla RF2.
@@ -262,7 +262,7 @@ pub enum FightEvent {
 Más algunos detalles:
 - `ability` es `"strike"` (el golpe básico, que no aparece en el contenido) o el `id` de una habilidad del personaje.
 - El `t` de `attack` es el inicio de la acción, y el de `hit`, `block` y `dodge` es el instante del impacto (la resolución).
-- `FightLog::outcome() -> (Option<Side>, EndReason)` lee el `end`; no hay un campo duplicado.
+- `FightLog::outcome() -> Option<(Option<Side>, EndReason)>` lee el `end`; no hay un campo duplicado. Devuelve `None` solo si el log (por ejemplo, uno deserializado) no tiene `end`; para un log del motor siempre es `Some`.
 - No se guarda `duration_ms`: la duración es `end.t`.
 
 Ejemplo recortado e ilustrativo. Entre 6800 y 64 200 ms se omitieron eventos, así que los tiempos y los `hp` no cuadran con las fórmulas; una pelea real tiene entre 100 y 300 eventos.
@@ -552,3 +552,10 @@ Seed (32 B, server or sim) ──▶ engine::simulate(seed, a, b, Ruleset::for_v
 
 ### owner — 2026-10-26 — APPROVE
 - OK explícito en chat (gate de `risk: high`, `docs/process.md`).
+
+### architect — 2026-10-26 — Enmienda editorial (revisión de plan-a)
+- Sin cambio de comportamiento ni de forma; no reabre las aprobaciones. Origen: decisiones 1, 3 y 7 de `plan-a.md` y la recomendación de security-reviewer (ronda 2) sobre RF21 y `max_events`.
+- **RF21:** la cota pasa a ser la exacta (68 acciones por lado, 3 eventos por acción y 10 eventos únicos: 418 < 512) y se nombra la guarda `SpecError::EventLimit`.
+- **RF4:** `event_limit` entra en la lista de ejemplo de `SpecError`, y "la simulación no falla" queda acotado a los rulesets que pasan el test de cotas.
+- **RF2:** `hp = 0` aparece en la resolución (`hit` o `block`) que precede al `ko`. Lo implicaba RF9 (el daño de bloqueo también se aplica), y ahora el texto lo dice para que `assert_invariants` no lo interprete como "solo `hit`".
+- **Modelo de datos:** `FightLog::outcome()` devuelve `Option<…>`, porque un log deserializado puede no tener `end` y `protocol` no puede entrar en pánico.
