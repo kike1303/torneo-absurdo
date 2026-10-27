@@ -328,11 +328,10 @@ function checkEndingV2(sink: Sink, hp: HpBySide): EndingCheck {
         sink.add(C.closingMissing, pointer('cues'));
       }
       if (closing === undefined) return;
-      // In a KO the v1 rules already decide this (RF4: a valid v1 stays valid as v2).
-      if (
-        ko === undefined &&
-        knockdowns.some((kd) => closing !== undefined && closing.at < kd.end)
-      ) {
+      // Nobody on the ground at the closing. A valid KO already meets it: no strike lands inside
+      // a knockdown, and the strike that leaves HP 0 is followed by `ko`, never by a knockdown.
+      const closingAt = closing.at;
+      if (knockdowns.some((kd) => closingAt < kd.end)) {
         sink.add(C.closingDuringKnockdown, at(closing.i, 'at_ms'));
       }
       if (duration !== undefined && duration < closing.at + L.winPoseMs) {
