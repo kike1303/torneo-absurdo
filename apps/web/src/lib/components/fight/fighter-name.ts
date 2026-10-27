@@ -8,5 +8,8 @@ export function fighterName(id: ArenaFighterId): string {
       return m.arena_fighter_dummy_a();
     case 'dummy_b':
       return m.arena_fighter_dummy_b();
+    default:
+      // A local fighter: the id is data the owner chose (002 plan-b decision 15).
+      return m.arena_fighter_local({ id });
   }
 }

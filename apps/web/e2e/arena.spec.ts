@@ -189,3 +189,54 @@ test('F4: ?t= with many digits is clamped to the end', async ({ page }) => {
   await page.goto('/es/dev/arena?t=99999999999');
   await expect(stage(page)).toHaveAttribute('data-state', 'finished', { timeout: 15_000 });
 });
+
+// 002 RF-B7 (phase B): the serving of content/_local/sprites/ only exists in `vite dev`.
+test('the build has no local sprites: 404 and only the placeholders in the selector', async ({
+  page,
+  request,
+}) => {
+  for (const url of ['/__local-sprites/index.json', '/__local-sprites/dummy_a/manifest.json']) {
+    expect((await request.get(url)).status(), url).toBe(404);
+  }
+  const requested: string[] = [];
+  page.on('request', (req) => requested.push(new URL(req.url()).pathname));
+  await page.goto('/es/dev/arena');
+  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+  await waitForHydration(page);
+  for (const side of ['a', 'b']) {
+    const values = await page
+      .getByTestId(`arena-fighter-${side}`)
+      .locator('option')
+      .evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value));
+    expect(values).toEqual(['dummy_a', 'dummy_b']);
+  }
+  expect(requested.filter((p) => p.startsWith('/__local-sprites'))).toEqual([]);
+});
+
+// 002 RF-B9: ?pace=<factor> rescales the script; it still validates and plays to the end.
+test('?pace=1.25 reaches playing and, at the end, finished', async ({ page }) => {
+  const errors = trackErrors(page);
+  await page.goto('/es/dev/arena?pace=1.25');
+  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+  await page.goto('/es/dev/arena?pace=1.25&t=99999999999');
+  await expect(stage(page)).toHaveAttribute('data-state', 'finished', { timeout: 15_000 });
+  await expect(page.getByTestId('fight-winner')).toHaveText('Gana Muñeco A');
+  expect(errors).toEqual([]);
+});
+
+test('?pace= changes mean_strike_gap_ms in the copied stats', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const gap = async (query: string) => {
+    await page.goto(`/es/dev/arena${query}`);
+    await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+    await waitForHydration(page);
+    await page.getByTestId('arena-show-stats').click();
+    await page.getByTestId('arena-copy-stats').click();
+    await expect(page.getByText('Copiado')).toBeVisible();
+    return JSON.parse(await page.evaluate(() => navigator.clipboard.readText())).mean_strike_gap_ms;
+  };
+  const base = await gap('');
+  const slow = await gap('?pace=1.5');
+  expect(base).toBeGreaterThan(0);
+  expect(slow).toBeGreaterThan(base * 1.4);
+});

@@ -25,6 +25,7 @@
   <ArenaControls
     phase="paused"
     options={ARENA_FIGHTERS}
+    localOptions={['local_1', 'local_2']}
     bind:fighters
     bind:reducedMotion
     bind:showStats
@@ -46,6 +47,11 @@
 <Section title="Arena stats" id="arena-stats">
   <ArenaStats
     stats={SAMPLE}
-    context={{ devicePixelRatio: 2, canvasWidth: 343, fighters: ['dummy_a', 'dummy_b'] }}
+    context={{
+      devicePixelRatio: 2,
+      canvasWidth: 343,
+      fighters: ['dummy_a', 'dummy_b'],
+      mean_strike_gap_ms: 1468,
+    }}
   />
 </Section>
