@@ -2,6 +2,9 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import spike from '@torneo/renderer/fixtures/spike.timeline.json' with { type: 'json' };
 import comeback from '../src/lib/features/fight/fixtures/log-ko-comeback.json' with { type: 'json' };
+import decisionA from '../src/lib/features/fight/fixtures/log-decision-a.json' with { type: 'json' };
+import decisionB from '../src/lib/features/fight/fixtures/log-decision-b.json' with { type: 'json' };
+import draw from '../src/lib/features/fight/fixtures/log-draw.json' with { type: 'json' };
 import {
   timelineFromFightLog,
   type AdapterLog,
@@ -291,3 +294,59 @@ test('?log=ko-comeback just after a knockdown: the last cue is that knockdown', 
   await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
   await expect(stage(page)).toHaveAttribute('data-last-cue', String(index));
 });
+
+// 005 RF18: the engine logs that end by time. `time_up` at 86 000, the closing (`win` or `draw`) at
+// 87 500 and the end at 90 000.
+const TIME_LOGS = [
+  { name: 'decision-a', log: decisionA, ending: 'decision', winner: 'a' },
+  { name: 'decision-b', log: decisionB, ending: 'decision', winner: 'b' },
+  { name: 'draw', log: draw, ending: 'draw', winner: null },
+] as const;
+
+function timeUpIndex(log: unknown): number {
+  const result = timelineFromFightLog(log as AdapterLog, {
+    a: { asset: 'dummy_a' },
+    b: { asset: 'dummy_b' },
+  });
+  if (!result.ok) throw new Error('the arena copy does not adapt');
+  const index = result.timeline.cues.findIndex((c) => c.type === 'time_up');
+  if (index < 0) throw new Error('no time_up');
+  return index;
+}
+
+for (const lang of ['es', 'en'] as const) {
+  const NAMES = {
+    a: lang === 'es' ? 'Muñeco A' : 'Dummy A',
+    b: lang === 'es' ? 'Muñeco B' : 'Dummy B',
+  };
+  const byDecision = (name: string) =>
+    lang === 'es' ? `Gana ${name} por decisión` : `${name} wins by decision`;
+
+  for (const { name, log, ending, winner } of TIME_LOGS) {
+    test(`/${lang}/dev/arena?log=${name} at the end: ${ending}`, async ({ page }) => {
+      const errors = trackErrors(page);
+      await page.goto(`/${lang}/dev/arena?log=${name}&t=99999999999`);
+      await expect(stage(page)).toHaveAttribute('data-state', 'finished', { timeout: 15_000 });
+      await expect(stage(page)).toHaveAttribute('data-ending', ending);
+      if (winner === null) {
+        await expect(page.getByTestId('fight-draw')).toHaveText(lang === 'es' ? 'Empate' : 'Draw');
+        await expect(page.getByTestId('fight-winner')).toHaveCount(0);
+      } else {
+        await expect(page.getByTestId('fight-winner')).toHaveText(byDecision(NAMES[winner]));
+        await expect(page.getByTestId('fight-draw')).toHaveCount(0);
+      }
+      await expect(
+        page.getByRole('button', { name: lang === 'es' ? 'Repetir' : 'Replay' }),
+      ).toBeVisible();
+      expect(errors).toEqual([]);
+    });
+
+    test(`/${lang}/dev/arena?log=${name} at 86 500: the last cue is time_up`, async ({ page }) => {
+      const errors = trackErrors(page);
+      await page.goto(`/${lang}/dev/arena?log=${name}&t=86500`);
+      await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+      await expect(stage(page)).toHaveAttribute('data-last-cue', String(timeUpIndex(log)));
+      expect(errors).toEqual([]);
+    });
+  }
+}

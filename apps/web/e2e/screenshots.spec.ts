@@ -79,3 +79,52 @@ for (const size of SIZES) {
     }
   }
 }
+
+// 005 RF18: the engine logs that end by time, at 88 500 ms (the time banner, and the winner's pose
+// in a decision), and at the end on mobile (the result text has to wrap, never overflow).
+const TIME_SHOT_T = 88_500;
+const TIME_LOGS = ['decision-a', 'decision-b', 'draw'] as const;
+
+for (const log of TIME_LOGS) {
+  for (const lang of ['es', 'en'] as const) {
+    for (const size of SIZES) {
+      for (const theme of THEMES) {
+        test(`arena-time ${log} ${lang} ${size.name} ${theme}`, async ({ page }) => {
+          await page
+            .context()
+            .addCookies([{ name: 'theme', value: theme, url: 'http://localhost:4173' }]);
+          await page.setViewportSize(size);
+          await page.goto(`/${lang}/dev/arena?log=${log}&t=${TIME_SHOT_T}`);
+          await expect(page.getByTestId('fight-stage')).toHaveAttribute('data-state', 'playing', {
+            timeout: 15_000,
+          });
+          await page.waitForTimeout(250);
+          await page.screenshot({
+            path: `${DIR}/arena-time-${log}-${lang}-${size.name}-${theme}.png`,
+            fullPage: true,
+          });
+          const overflow = await page.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          );
+          expect(overflow).toBeLessThanOrEqual(0);
+        });
+      }
+    }
+
+    test(`arena-time-end ${log} ${lang} mobile`, async ({ page }) => {
+      await page.setViewportSize(SIZES[0]);
+      await page.goto(`/${lang}/dev/arena?log=${log}&t=99999999999`);
+      await expect(page.getByTestId('fight-stage')).toHaveAttribute('data-state', 'finished', {
+        timeout: 15_000,
+      });
+      await page.screenshot({
+        path: `${DIR}/arena-time-end-${log}-${lang}-mobile.png`,
+        fullPage: true,
+      });
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(overflow).toBeLessThanOrEqual(0);
+    });
+  }
+}
