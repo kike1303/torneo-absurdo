@@ -67,6 +67,19 @@ test('RF-A8: the switcher changes the theme live and writes the cookie', async (
 }) => {
   await page.goto('/es/');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  // `data-theme` already comes in the SSR HTML, so it says nothing about hydration. SvelteKit's
+  // client start, which can land after `load`, does `history.replaceState(…, '')` to stamp
+  // `sveltekit:metadata`, and Playwright reports that as a same-URL `framenavigated` (TA-12).
+  // Wait for it so the listener below only sees what the theme change does, and so the clicks
+  // reach a hydrated switcher.
+  await page.waitForFunction(() => {
+    const state = history.state as Record<string, unknown> | null;
+    return state !== null && 'sveltekit:metadata' in state;
+  });
+  // A full reload would get a new window, losing the marker; no event timing involved.
+  await page.evaluate(() => {
+    (window as unknown as { __docId?: string }).__docId = 'rf-a8';
+  });
   const navigations: string[] = [];
   page.on('framenavigated', (frame) => {
     if (frame === page.mainFrame()) navigations.push(frame.url());
@@ -81,6 +94,9 @@ test('RF-A8: the switcher changes the theme live and writes the cookie', async (
   await expect(page.locator('meta[name="color-scheme"]')).toHaveAttribute('content', 'light');
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#ffffff');
   expect(navigations).toEqual([]);
+  expect(await page.evaluate(() => (window as unknown as { __docId?: string }).__docId)).toBe(
+    'rf-a8',
+  );
 
   const cookie = (await context.cookies()).find((c) => c.name === 'theme');
   expect(cookie?.value).toBe('light');
