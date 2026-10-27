@@ -1,0 +1,10 @@
+{
+  "ops": [],
+  "expect": {
+    "code": "manifest.id_mismatch",
+    "path": "/id"
+  },
+  "options": {
+    "expectedId": "other"
+  }
+}

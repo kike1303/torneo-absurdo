@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/animations/idle/frame_ms/0",
+      "value": 5
+    }
+  ],
+  "expect": {
+    "code": "manifest.frame_ms_range",
+    "path": "/animations/idle/frame_ms/0"
+  }
+}

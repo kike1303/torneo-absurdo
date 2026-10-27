@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/frames/0/w",
+      "value": 0
+    }
+  ],
+  "expect": {
+    "code": "manifest.frame_size",
+    "path": "/frames/0"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/scale",
+      "value": 5
+    }
+  ],
+  "expect": {
+    "code": "manifest.bad_scale",
+    "path": "/scale"
+  }
+}

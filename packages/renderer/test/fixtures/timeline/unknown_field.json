@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/1/narration",
+      "value": "x"
+    }
+  ],
+  "expect": {
+    "code": "timeline.unknown_field",
+    "path": "/cues/1/narration"
+  }
+}

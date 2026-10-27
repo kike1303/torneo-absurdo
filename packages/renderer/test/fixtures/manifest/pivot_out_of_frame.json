@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/frames/0/pivot_y",
+      "value": 40
+    }
+  ],
+  "expect": {
+    "code": "manifest.pivot_out_of_frame",
+    "path": "/frames/0"
+  }
+}

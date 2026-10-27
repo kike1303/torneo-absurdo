@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/frames",
+      "value": []
+    }
+  ],
+  "expect": {
+    "code": "manifest.frames_count",
+    "path": "/frames"
+  }
+}

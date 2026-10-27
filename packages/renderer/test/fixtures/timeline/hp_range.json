@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/1/target_hp",
+      "value": 2000
+    }
+  ],
+  "expect": {
+    "code": "timeline.hp_range",
+    "path": "/cues/1/target_hp"
+  }
+}

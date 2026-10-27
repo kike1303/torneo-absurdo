@@ -1,0 +1,12 @@
+{
+  "ops": [
+    {
+      "op": "delete",
+      "path": "/cues/8"
+    }
+  ],
+  "expect": {
+    "code": "timeline.win_count",
+    "path": "/cues"
+  }
+}

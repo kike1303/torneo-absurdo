@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/sheets/0/color",
+      "value": "x"
+    }
+  ],
+  "expect": {
+    "code": "manifest.unknown_field",
+    "path": "/sheets/0/color"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/id",
+      "value": "Bad-Id"
+    }
+  ],
+  "expect": {
+    "code": "manifest.bad_id",
+    "path": "/id"
+  }
+}

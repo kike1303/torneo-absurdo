@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/sheets",
+      "value": []
+    }
+  ],
+  "expect": {
+    "code": "manifest.sheets_count",
+    "path": "/sheets"
+  }
+}

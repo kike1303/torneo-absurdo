@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/animations/attack_light/impact_frame",
+      "value": 2
+    }
+  ],
+  "expect": {
+    "code": "manifest.impact_frame_range",
+    "path": "/animations/attack_light/impact_frame"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/cues/6/damage",
+      "value": 100
+    },
+    {
+      "op": "set",
+      "path": "/cues/6/target_hp",
+      "value": 558
+    }
+  ],
+  "expect": {
+    "code": "timeline.ko_without_zero_hp",
+    "path": "/cues/7"
+  }
+}

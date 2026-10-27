@@ -1,0 +1,21 @@
+{
+  "ops": [
+    {
+      "op": "insert",
+      "path": "/cues/8",
+      "value": {
+        "at_ms": 8800,
+        "type": "strike",
+        "actor": "b",
+        "move": "attack_light",
+        "result": "dodge",
+        "damage": 0,
+        "target_hp": 990
+      }
+    }
+  ],
+  "expect": {
+    "code": "timeline.cue_after_ko",
+    "path": "/cues/8"
+  }
+}

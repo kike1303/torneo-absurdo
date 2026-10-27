@@ -1,0 +1,12 @@
+{
+  "ops": [
+    {
+      "op": "delete",
+      "path": "/animations/special/impact_frame"
+    }
+  ],
+  "expect": {
+    "code": "manifest.impact_frame_missing",
+    "path": "/animations/special/impact_frame"
+  }
+}

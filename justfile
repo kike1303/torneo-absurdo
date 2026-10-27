@@ -58,6 +58,10 @@ check-web: _web-prepare
     pnpm --filter web exec eslint .
     pnpm --filter web exec svelte-check --fail-on-warnings
     pnpm --filter web exec vitest run
+    pnpm --filter @torneo/renderer exec tsc -p tsconfig.json --noEmit
+    pnpm --filter @torneo/renderer exec tsc -p tsconfig.node.json --noEmit
+    pnpm --filter @torneo/renderer exec eslint .
+    pnpm --filter @torneo/renderer exec vitest run
     pnpm exec vitest run --config scripts/vitest.config.mjs
     node scripts/check-tokens.mjs
     node scripts/check-i18n.mjs
@@ -76,9 +80,10 @@ check-rust:
     {{just_executable()}} _check-gen
     {{just_executable()}} _check-ts-rs-graph
 
-# Unit and integration tests (web, repo scripts and Rust)
+# Unit and integration tests (web, renderer, repo scripts and Rust)
 test: _web-prepare
     pnpm --filter web exec vitest run
+    pnpm --filter @torneo/renderer exec vitest run
     pnpm exec vitest run --config scripts/vitest.config.mjs
     {{just_executable()}} db-up
     DATABASE_URL='{{test_db_url}}' cargo test --workspace --locked

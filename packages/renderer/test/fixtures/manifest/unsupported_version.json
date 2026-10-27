@@ -1,0 +1,13 @@
+{
+  "ops": [
+    {
+      "op": "set",
+      "path": "/format_version",
+      "value": 2
+    }
+  ],
+  "expect": {
+    "code": "manifest.unsupported_version",
+    "path": "/format_version"
+  }
+}
