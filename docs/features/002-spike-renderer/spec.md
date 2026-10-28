@@ -143,7 +143,7 @@ Cada requisito dice cómo se verifica (→). "check" es `just check`; "e2e" es `
   5. ¿Se nota quién toma la iniciativa en cada intercambio?
   6. ¿Funcionan los dos ritmos (la ráfaga y la pausa)?
 
-  Además registra la **separación media entre golpes** que le pareció buena (en ms; puede probar variantes del guion con `?pace=<factor>` en `/[lang]/dev/arena`, del mínimo dinámico a 1.5, que reescala los tiempos del combate sin cambiar sus cues; el resultado pasa `validateTimeline` y, si no, la ruta queda en `error: timeline_invalid`. La separación media de la variante sale como `mean_strike_gap_ms` en el JSON de "copiar estadísticas", sin texto nuevo en pantalla) y confirma o ajusta los valores de "Datos para 003". → registro en la spec.
+  Además registra la **separación media entre golpes** que le pareció buena (en ms; puede probar variantes del guion con `?pace=<factor>` en `/[lang]/dev/arena`, del mínimo dinámico a 1.5, que reescala los tiempos del combate sin cambiar sus cues; un valor fuera de rango se lleva al límite válido más cercano. La separación media de la variante sale como `mean_strike_gap_ms` en el JSON de "copiar estadísticas", sin texto nuevo en pantalla) y confirma o ajusta los valores de "Datos para 003". → registro en la spec.
 
   > **Enmienda (006, TA-21).** Decía "de 0.8 a 1.5", y un factor que rompía una regla terminaba en `error: timeline_invalid`. Ahora el rango va del **mínimo dinámico** (el menor factor con el que la `Timeline` adaptada sigue pasando `validateTimeline`, con piso 0.5; 0.86 en los dorados) a 1.5, y un valor fuera de rango se lleva al límite válido más cercano, con el factor efectivo visible en las estadísticas. Ver RF15 y RF16 de la [spec de 006](../006-ritmo-rapido/spec.md).
 

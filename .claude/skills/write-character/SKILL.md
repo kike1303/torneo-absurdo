@@ -96,7 +96,7 @@ Criterios (RF17), todos sobre los cruces entre personajes distintos:
 - win rate global de cada personaje entre 40 % y 60 % (un empate cuenta medio);
 - al menos 15 % de peleas con algún `moment`, y cada `kind` (`comeback`, `decisive_crit`, `clutch_ko`) en al menos 3 %;
 - al menos 90 % de peleas con `end.t` entre 45 000 y 90 000 ms;
-- ritmo (006 RF11), sobre las separaciones entre resoluciones consecutivas: media entre 1100 y 1300 ms (pausas incluidas); al menos 25 % de separaciones en ráfaga (≤ 900 ms); mediana de al menos 2 pausas (≥ 2500 ms) por pelea; al menos 90 % de peleas con alguna pausa; y separación mínima ≥ 600 ms (`TIMELINE_CONTRACT.strike_gap_ms`);
+- ritmo (006 RF12), sobre las separaciones entre resoluciones consecutivas: media entre 1100 y 1300 ms (pausas incluidas); al menos 25 % de separaciones en ráfaga (≤ 900 ms); mediana de al menos 2 pausas (≥ 2500 ms) por pelea; al menos 90 % de peleas con alguna pausa; y separación mínima ≥ 600 ms (`TIMELINE_CONTRACT.strike_gap_ms`);
 - `time_up` como mucho en el 10 % y `draw` en menos del 1 %;
 - el lado `a` gana entre el 47 % y el 53 % de los espejos.
 
