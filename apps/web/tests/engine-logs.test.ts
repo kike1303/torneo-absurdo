@@ -5,11 +5,21 @@ import {
   loadEngineLogTimeline,
   parseEngineLog,
 } from '../src/lib/features/fight/engine-logs.js';
+import comeback from '../src/lib/features/fight/fixtures/log-ko-comeback.json';
 
-// 002 RF-C3 (plan-c decision 7) and 005 RF15: the `?log=` allow-list and its loader.
+// 002 RF-C3 (plan-c decision 7), 005 RF15 and 006 RF10: the `?log=` allow-list and its loader. The
+// figures of a log come from its copy, never from literals (006 plan, decision 9).
 describe('parseEngineLog', () => {
   it('accepts only the exact names of the allow-list', () => {
-    const names = ['ko-comeback', 'decision-a', 'decision-b', 'draw'];
+    const names = [
+      'ko-comeback',
+      'ko-clutch',
+      'ko-decisive-crit',
+      'ko-knockdown',
+      'decision-a',
+      'decision-b',
+      'draw',
+    ];
     for (const name of names) expect(parseEngineLog(name)).toBe(name);
     for (const raw of [
       null,
@@ -21,6 +31,9 @@ describe('parseEngineLog', () => {
       'Draw',
       'log-draw',
       'decision',
+      'ko-Knockdown',
+      'log-ko-clutch',
+      'ko',
     ]) {
       expect(parseEngineLog(raw), String(raw)).toBeNull();
     }
@@ -31,11 +44,15 @@ describe('parseEngineLog', () => {
 describe('loadEngineLogTimeline', () => {
   it('gives the timeline of the log with the assets of each side', async () => {
     const timeline = await loadEngineLogTimeline('ko-comeback', { a: 'dummy_b', b: 'dummy_a' });
+    const end = comeback.events.at(-1);
+    expect(end?.type).toBe('end');
     expect(timeline.fighters).toEqual({
-      a: { asset: 'dummy_b', max_hp: 700 },
-      b: { asset: 'dummy_a', max_hp: 860 },
+      a: { asset: 'dummy_b', max_hp: comeback.a.max_hp },
+      b: { asset: 'dummy_a', max_hp: comeback.b.max_hp },
     });
-    expect(timeline.cues.find((c) => c.type === 'win')).toMatchObject({ fighter: 'b' });
+    expect(timeline.cues.find((c) => c.type === 'win')).toMatchObject({
+      fighter: end && 'winner' in end ? end.winner : undefined,
+    });
     expect(validateTimeline(timeline).ok).toBe(true);
   });
 

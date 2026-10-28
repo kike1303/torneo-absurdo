@@ -36,8 +36,11 @@
     phase?: FightStageState;
     /** Loads the fighters that are not placeholders (`content/_local/sprites/`, only in dev). */
     local?: LocalAssets;
-    /** Rewrites the timeline before `load` (`?pace=` on /dev/arena). */
-    retime?: (timeline: Timeline) => Timeline;
+    /**
+     * Rewrites the timeline before `load` (`?pace=` on /dev/arena). `isValid` is the renderer's
+     * validator without manifests, so the caller never imports the renderer (006 RF15).
+     */
+    retime?: (timeline: Timeline, isValid: (timeline: Timeline) => boolean) => Timeline;
     /**
      * Where the timeline comes from, given the asset of each side (`?log=` on /dev/arena). Without
      * it, the spike script with these assets.
@@ -166,7 +169,8 @@
       if (id !== run) return;
       rendererLoaded = true;
       const assets = new Map<string, unknown>(ids.map((fid, i) => [fid, manifestModules[i]]));
-      const timeline = retime === undefined ? cast : retime(cast);
+      const timeline =
+        retime === undefined ? cast : retime(cast, (t) => rendererModule.validateTimeline(t).ok);
       loadedTimeline = timeline;
       const start = performance.now();
       const locale = getLocale();

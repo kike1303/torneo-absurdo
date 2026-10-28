@@ -5,6 +5,7 @@
   import ArenaControls from '#lib/components/fight/ArenaControls.svelte';
   import ArenaStats from '#lib/components/fight/ArenaStats.svelte';
   import { ARENA_FIGHTERS, type ArenaFighterId } from '#lib/features/arena/fighters.js';
+  import type { PaceResolution } from '#lib/features/arena/retime.js';
   import Section from './Section.svelte';
 
   const SAMPLE: FrameStats = {
@@ -15,6 +16,9 @@
     p99: 21.3,
     over33: 2,
   };
+
+  /** `?pace=0.5` on a timeline whose minimum is 0.86 (006 RF16): the row shows the clamp note. */
+  const PACE: PaceResolution = { requested: 0.5, min: 0.86, effective: 0.86, clamped: true };
 
   let fighters = $state<Record<Side, ArenaFighterId>>({ a: 'dummy_a', b: 'dummy_b' });
   let reducedMotion = $state(false);
@@ -51,7 +55,8 @@
       devicePixelRatio: 2,
       canvasWidth: 343,
       fighters: ['dummy_a', 'dummy_b'],
-      mean_strike_gap_ms: 1468,
+      mean_strike_gap_ms: 1050,
     }}
+    pace={PACE}
   />
 </Section>
