@@ -14,6 +14,9 @@ coverage/
 scripts/__fixtures__/
 # Engine goldens: exact canonical bytes plus a final newline (003 plan-a, decision 6)
 crates/engine/tests/golden/
+# Content loader fixtures: one is broken JSON on purpose (003 plan-b)
+crates/content/tests/fixtures/
+crates/sim/tests/fixtures/
 # The arena's byte-exact copies of the goldens (002 plan-c decision 5, 005 RF15)
 apps/web/src/lib/features/fight/fixtures/
 # Renderer timelines of the goldens, written by apps/web/tests/golden-timelines.test.ts (005 plan decision 4)

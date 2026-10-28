@@ -6,6 +6,15 @@
 //   serde, os_rng or std features. That is the resolution engine-wasm and the wasm target build;
 //   in `cargo build --workspace` feature unification turns rand_core/os_rng on (tungstenite), and
 //   crates/engine/clippy.toml forbids calling it.
+// - the normal graph of its non-server consumers (`cargo tree -p content -p engine-wasm -p sim
+//   ...`) breaks the same rules (003 plan-b decision 13): a `features = ["std"]` on rand_chacha,
+//   or a rand, getrandom, tokio, tracing or log pulled in by a consumer, would be unified into
+//   the engine it builds, even if the graph of the engine alone stays clean. content stays
+//   without logging for good: a caller that needs it logs itself (ADR-0012). The consumers come
+//   from `cargo metadata`: every workspace member that depends on engine, directly or through
+//   another member, except the server (so a new crate cannot be forgotten in a hand-written list).
+// - the server depends on sim in any way (normal, build or dev): sim derives its seeds from a
+//   public constant, so a fight seed derived with it would be predictable (ADR-0002).
 // - crates/engine-wasm/src contains the token `unsafe`; mentions `unsafe_code` anywhere outside
 //   comments and a `deny`/`forbid` lint list (so any allow/expect/warn, direct, crate-level,
 //   inside cfg_attr or produced by a macro, fails closed); or contains `include!` or a `path`
@@ -62,23 +71,120 @@ export function parseCargoTree(text) {
 
 /**
  * @param {{ packages: Set<string>, features: Map<string, Set<string>> }} tree
+ * @param {{ roots?: readonly string[] }} [options] the packages the `cargo tree -p` was run
+ *   for: each must be in the output, and the messages name them.
  * @returns {string[]} problems
  */
-export function checkEngineGraph(tree) {
+export function checkEngineGraph(tree, { roots = ['engine'] } = {}) {
   /** @type {string[]} */
   const problems = [];
-  if (!tree.packages.has('engine')) problems.push('engine: not in the cargo tree output');
+  const graph = roots.join(' and ');
+  for (const root of roots) {
+    if (!tree.packages.has(root)) problems.push(`${root}: not in the cargo tree output`);
+  }
   for (const name of FORBIDDEN_CRATES) {
-    if (tree.packages.has(name)) problems.push(`${name}: in the normal graph of engine (RF5)`);
+    if (tree.packages.has(name)) problems.push(`${name}: in the normal graph of ${graph} (RF5)`);
   }
   for (const name of RNG_CRATES) {
     for (const flag of FORBIDDEN_RNG_FEATURES) {
       if (tree.features.get(name)?.has(flag)) {
-        problems.push(`${name}: feature "${flag}" is enabled in the graph of engine (RF5)`);
+        problems.push(`${name}: feature "${flag}" is enabled in the graph of ${graph} (RF5)`);
       }
     }
   }
   return problems;
+}
+
+/**
+ * Workspace members that build the engine but are not checked as its consumers. The server
+ * unifies rand_core/os_rng on through tungstenite, and crates/engine/clippy.toml forbids calling
+ * it (see the header).
+ */
+export const NOT_ENGINE_CONSUMERS = Object.freeze(['server']);
+
+/**
+ * The engine's consumers outside the server (003 plan-b decision 13), from the output of
+ * `cargo metadata --format-version 1 --no-deps`: every workspace member whose normal or build
+ * dependencies reach `engine` through workspace members, sorted by name.
+ * @param {{ packages: { name: string, dependencies: { name: string, kind: string | null, path?: string }[] }[] }} metadata
+ * @returns {string[]}
+ */
+export function engineConsumers(metadata) {
+  const members = new Map(metadata.packages.map((pkg) => [pkg.name, pkg]));
+  if (!members.has('engine')) throw new Error('cargo metadata: engine is not a workspace member');
+  /** @param {string} name */
+  const deps = (name) =>
+    (members.get(name)?.dependencies ?? [])
+      .filter((dep) => dep.kind !== 'dev' && dep.path !== undefined && members.has(dep.name))
+      .map((dep) => dep.name);
+  /** @param {string} name */
+  const reachesEngine = (name) => {
+    const seen = new Set([name]);
+    const queue = [...deps(name)];
+    while (queue.length > 0) {
+      const next = queue.pop() ?? '';
+      if (next === 'engine') return true;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      queue.push(...deps(next));
+    }
+    return false;
+  };
+  return [...members.keys()]
+    .filter((name) => name !== 'engine' && !NOT_ENGINE_CONSUMERS.includes(name))
+    .filter(reachesEngine)
+    .sort();
+}
+
+/** Workspace members the server must never depend on (ADR-0002: sim seeds are public). */
+export const SERVER_FORBIDDEN_MEMBERS = Object.freeze(['sim']);
+
+/**
+ * @param {{ packages: Set<string> }} tree `cargo tree -p server -e normal,build,dev`
+ * @returns {string[]} problems
+ */
+export function checkServerGraph(tree) {
+  /** @type {string[]} */
+  const problems = [];
+  if (!tree.packages.has('server')) problems.push('server: not in the cargo tree output');
+  for (const name of SERVER_FORBIDDEN_MEMBERS) {
+    if (tree.packages.has(name)) {
+      problems.push(`${name}: in the dependency graph of server (ADR-0002: its seeds are public)`);
+    }
+  }
+  return problems;
+}
+
+function cargoMetadata() {
+  return JSON.parse(
+    execFileSync('cargo', ['metadata', '--format-version', '1', '--no-deps', '--locked'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    }),
+  );
+}
+
+/**
+ * @param {string[]} packages
+ * @param {string} [edges]
+ */
+function cargoTree(packages, edges = 'normal,features') {
+  return execFileSync(
+    'cargo',
+    [
+      'tree',
+      ...packages.flatMap((name) => ['-p', name]),
+      '-e',
+      edges,
+      '--target',
+      'all',
+      '--locked',
+      '--prefix',
+      'none',
+    ],
+    { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+  );
 }
 
 const UNSAFE_TOKEN = /\bunsafe\b/g;
@@ -261,25 +367,14 @@ function rustSources(dir) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const tree = execFileSync(
-    'cargo',
-    [
-      'tree',
-      '-p',
-      'engine',
-      '-e',
-      'normal,features',
-      '--target',
-      'all',
-      '--locked',
-      '--prefix',
-      'none',
-    ],
-    { cwd: ROOT, encoding: 'utf8' },
-  );
   const read = (file) => readFileSync(path.join(ROOT, file), 'utf8');
+  const consumers = engineConsumers(cargoMetadata());
   const problems = [
-    ...checkEngineGraph(parseCargoTree(tree)),
+    ...checkEngineGraph(parseCargoTree(cargoTree(['engine']))),
+    ...(consumers.length > 0
+      ? checkEngineGraph(parseCargoTree(cargoTree(consumers)), { roots: consumers })
+      : []),
+    ...checkServerGraph(parseCargoTree(cargoTree(['server'], 'normal,build,dev'))),
     ...checkWasmSources(rustSources(path.join(ROOT, 'crates/engine-wasm/src'))),
     ...checkWasmLints(read('Cargo.toml'), read('crates/engine-wasm/Cargo.toml')),
   ];
@@ -288,5 +383,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     for (const p of problems) console.error(`  ${p}`);
     process.exit(1);
   }
-  console.log('check-engine: ok');
+  console.log(`check-engine: ok (engine consumers: ${consumers.join(', ')})`);
 }

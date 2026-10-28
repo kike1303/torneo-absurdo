@@ -1,0 +1,52 @@
+{
+  "slug": "fontanero-saltarin",
+  "archetype": "jumping-handyman",
+  "ruleset_version": 1,
+  "stats": {
+    "hp": 65,
+    "attack": 70,
+    "defense": 60,
+    "speed": 60,
+    "special": 45
+  },
+  "personality": {
+    "aggression": 60,
+    "caution": 40,
+    "showmanship": 50
+  },
+  "abilities": [
+    {
+      "id": "boot_stomp",
+      "kind": "heavy",
+      "power": 40,
+      "cooldown": 1,
+      "element": "ground"
+    },
+    {
+      "id": "wrench_spin",
+      "kind": "heavy",
+      "power": 28,
+      "cooldown": 0
+    },
+    {
+      "id": "pipe_geyser",
+      "kind": "special",
+      "power": 60,
+      "cooldown": 3,
+      "element": "water"
+    },
+    {
+      "id": "blowtorch_oops",
+      "kind": "special",
+      "power": 50,
+      "cooldown": 4,
+      "element": "fire"
+    }
+  ],
+  "weaknesses": [
+    "electric"
+  ],
+  "rivals": [
+    "guerrero-erizado"
+  ]
+}

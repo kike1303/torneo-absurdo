@@ -1,0 +1,40 @@
+{
+  "slug": "ogro-del-pantano",
+  "archetype": "swamp-ogre",
+  "ruleset_version": 1,
+  "stats": {
+    "hp": 85,
+    "attack": 75,
+    "defense": 75,
+    "speed": 30,
+    "special": 35
+  },
+  "personality": {
+    "aggression": 55,
+    "caution": 50,
+    "showmanship": 40
+  },
+  "abilities": [
+    {
+      "id": "mud_belly_flop",
+      "kind": "heavy",
+      "power": 55,
+      "cooldown": 2,
+      "element": "ground"
+    },
+    {
+      "id": "swamp_burp",
+      "kind": "special",
+      "power": 70,
+      "cooldown": 4,
+      "element": "air"
+    }
+  ],
+  "weaknesses": [
+    "water",
+    "electric"
+  ],
+  "rivals": [
+    "rata-electrica"
+  ]
+}

@@ -121,6 +121,12 @@ arena-bench: build
 e2e-install:
     pnpm --filter web exec playwright install chromium webkit
 
+# Never pass the seed of a real fight. Defaults: 10000 fights, fixed seed, content/characters.
+# Mass fight simulation and balance report (003 RF15): just sim [--fights N] [--seed HEX] [--content DIR] [--json] [--check]
+[positional-arguments]
+sim *args:
+    cargo run -p sim --release --locked -- "$@"
+
 # Generated code the tools need (Kit types, compiled Paraglide messages). Does not touch versioned files.
 _web-prepare:
     pnpm --filter web run sync
@@ -178,7 +184,8 @@ _check-gen:
     fi
     node scripts/compare-trees.mjs "$backup" "$src"
 
-# RF5, RF19, RF20: engine graph and features, engine-wasm unsafe and lints
+# RF5, RF19, RF20: engine graph and features (alone and as built by every workspace member that
+# depends on it, except the server), server without sim (ADR-0002), engine-wasm unsafe and lints
 _check-engine:
     node scripts/check-engine.mjs
 
@@ -198,7 +205,7 @@ _check-wasm:
         cargo test -p engine --test golden --target wasm32-wasip1 --locked -- --nocapture
 
 # RF-B3: ts-rs never in the server's normal graph; protocol without features has no ts-rs nor tokio.
-# 003: neither in engine nor engine-wasm (they depend on protocol without `ts`).
+# 003: neither in engine, engine-wasm, content nor sim (they depend on protocol without `ts`).
 _check-ts-rs-graph:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -210,7 +217,7 @@ _check-ts-rs-graph:
         echo "protocol pulls ts-rs or tokio without the ts feature (RF-B3)" >&2
         exit 1
     fi
-    for crate in engine engine-wasm; do
+    for crate in engine engine-wasm content sim; do
         if cargo tree -p "$crate" -e normal --locked --prefix none | grep -qE '^(ts-rs|tokio) '; then
             echo "$crate pulls ts-rs or tokio (003 RF5)" >&2
             exit 1

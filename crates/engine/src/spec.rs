@@ -159,6 +159,16 @@ fn is_code(value: &str, extra: u8) -> bool {
             .all(|&c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == extra)
 }
 
+/// Whether `value` is a valid character code: `^[a-z][a-z0-9-]{1,31}$`.
+///
+/// A format rule, not a game rule, so it is not part of [`Ruleset`]. [`CharacterSpec::validate`]
+/// applies it to `slug`, and `crates/content` to the fields that are not in the engine shape
+/// (`archetype`), so the pattern has a single definition (003 RF12).
+#[must_use]
+pub fn is_valid_slug(value: &str) -> bool {
+    is_code(value, b'-')
+}
+
 impl CharacterSpec {
     /// Checks every rule of the character against the ruleset (ranges, budget, uniqueness and
     /// the code patterns). `content` and the WASM bindings use this same function.
@@ -166,7 +176,7 @@ impl CharacterSpec {
     /// # Errors
     /// The first rule that fails, in the order of the [`SpecError`] variants.
     pub fn validate(&self, ruleset: &Ruleset) -> Result<(), SpecError> {
-        if !is_code(&self.slug, b'-') {
+        if !is_valid_slug(&self.slug) {
             return Err(SpecError::SlugInvalid);
         }
         let s = self.stats;
@@ -289,32 +299,43 @@ mod tests {
         assert_eq!(check(|_| {}), Ok(()));
     }
 
+    fn slug_cases() -> (Vec<String>, Vec<String>) {
+        let ok = ["ab", "a-1", "rata-electrica"]
+            .map(str::to_owned)
+            .into_iter()
+            .chain([format!("a{}", "b".repeat(31))])
+            .collect();
+        let bad = ["", "a", "1a", "-a", "Ab", "a_b", "a b", "ñu"]
+            .map(str::to_owned)
+            .into_iter()
+            .chain([format!("a{}", "b".repeat(32))])
+            .collect();
+        (ok, bad)
+    }
+
     #[test]
     fn slug_pattern() {
-        for ok in [
-            "ab",
-            "a-1",
-            "rata-electrica",
-            &format!("a{}", "b".repeat(31)),
-        ] {
-            assert_eq!(check(|s| s.slug = ok.to_owned()), Ok(()), "{ok}");
+        let (ok, bad) = slug_cases();
+        for value in ok {
+            assert_eq!(check(|s| s.slug.clone_from(&value)), Ok(()), "{value}");
         }
-        for bad in [
-            "",
-            "a",
-            "1a",
-            "-a",
-            "Ab",
-            "a_b",
-            "a b",
-            "ñu",
-            &format!("a{}", "b".repeat(32)),
-        ] {
+        for value in bad {
             assert_eq!(
-                check(|s| s.slug = bad.to_owned()),
+                check(|s| s.slug.clone_from(&value)),
                 Err(SpecError::SlugInvalid),
-                "{bad}"
+                "{value}"
             );
+        }
+    }
+
+    #[test]
+    fn is_valid_slug_is_the_rule_validate_uses() {
+        let (ok, bad) = slug_cases();
+        for value in ok {
+            assert!(is_valid_slug(&value), "{value}");
+        }
+        for value in bad {
+            assert!(!is_valid_slug(&value), "{value}");
         }
     }
 

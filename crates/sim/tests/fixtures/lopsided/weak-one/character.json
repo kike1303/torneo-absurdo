@@ -1,0 +1,38 @@
+{
+  "slug": "weak-one",
+  "archetype": "test-trickster",
+  "ruleset_version": 1,
+  "stats": {
+    "hp": 1,
+    "attack": 1,
+    "defense": 1,
+    "speed": 1,
+    "special": 1
+  },
+  "personality": {
+    "aggression": 40,
+    "caution": 40,
+    "showmanship": 90
+  },
+  "abilities": [
+    {
+      "id": "tidal_spin",
+      "kind": "special",
+      "power": 70,
+      "cooldown": 3,
+      "element": "water"
+    },
+    {
+      "id": "quick_kick",
+      "kind": "heavy",
+      "power": 30,
+      "cooldown": 0,
+      "element": "air"
+    }
+  ],
+  "weaknesses": [
+    "electric",
+    "ice"
+  ],
+  "rivals": []
+}

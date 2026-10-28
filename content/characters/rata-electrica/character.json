@@ -1,0 +1,39 @@
+{
+  "slug": "rata-electrica",
+  "archetype": "electric-rodent",
+  "ruleset_version": 1,
+  "stats": {
+    "hp": 45,
+    "attack": 45,
+    "defense": 35,
+    "speed": 95,
+    "special": 80
+  },
+  "personality": {
+    "aggression": 45,
+    "caution": 25,
+    "showmanship": 90
+  },
+  "abilities": [
+    {
+      "id": "static_nibble",
+      "kind": "heavy",
+      "power": 32,
+      "cooldown": 0,
+      "element": "electric"
+    },
+    {
+      "id": "outlet_overload",
+      "kind": "special",
+      "power": 75,
+      "cooldown": 4,
+      "element": "electric"
+    }
+  ],
+  "weaknesses": [
+    "ground"
+  ],
+  "rivals": [
+    "ogro-del-pantano"
+  ]
+}

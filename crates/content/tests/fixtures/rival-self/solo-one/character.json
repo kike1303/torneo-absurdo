@@ -1,0 +1,38 @@
+{
+  "slug": "solo-one",
+  "archetype": "test-archetype",
+  "ruleset_version": 1,
+  "stats": {
+    "hp": 60,
+    "attack": 60,
+    "defense": 60,
+    "speed": 60,
+    "special": 60
+  },
+  "personality": {
+    "aggression": 50,
+    "caution": 30,
+    "showmanship": 40
+  },
+  "abilities": [
+    {
+      "id": "big_swing",
+      "kind": "heavy",
+      "power": 40,
+      "cooldown": 2
+    },
+    {
+      "id": "flare",
+      "kind": "special",
+      "power": 70,
+      "cooldown": 4,
+      "element": "fire"
+    }
+  ],
+  "weaknesses": [
+    "water"
+  ],
+  "rivals": [
+    "solo-one"
+  ]
+}

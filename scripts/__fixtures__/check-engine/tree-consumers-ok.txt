@@ -1,0 +1,162 @@
+content v0.1.0 (/repo/crates/content)
+engine feature "default"
+engine v0.1.0 (/repo/crates/engine)
+rand_chacha v0.9.0
+ppv-lite86 feature "simd"
+ppv-lite86 v0.2.21
+zerocopy feature "default"
+zerocopy v0.8.63
+zerocopy-derive feature "default"
+zerocopy-derive v0.8.63 (proc-macro)
+proc-macro2 feature "default"
+proc-macro2 v1.0.107
+unicode-ident feature "default"
+unicode-ident v1.0.27
+proc-macro2 feature "proc-macro"
+proc-macro2 v1.0.107 (*)
+quote feature "default"
+quote v1.0.47
+proc-macro2 v1.0.107 (*)
+quote feature "proc-macro"
+quote v1.0.47 (*)
+proc-macro2 feature "proc-macro" (*)
+syn feature "default"
+syn v2.0.119
+proc-macro2 v1.0.107 (*)
+quote v1.0.47 (*)
+unicode-ident feature "default" (*)
+syn feature "clone-impls"
+syn v2.0.119 (*)
+syn feature "derive"
+syn v2.0.119 (*)
+syn feature "parsing"
+syn v2.0.119 (*)
+syn feature "printing"
+syn v2.0.119 (*)
+syn feature "proc-macro"
+syn v2.0.119 (*)
+proc-macro2 feature "proc-macro" (*)
+quote feature "proc-macro" (*)
+syn feature "full"
+syn v2.0.119 (*)
+zerocopy feature "simd"
+zerocopy v0.8.63 (*)
+rand_core feature "default"
+rand_core v0.9.5
+protocol feature "default"
+protocol v0.1.0 (/repo/crates/protocol)
+serde feature "default"
+serde v1.0.229
+serde_core feature "result"
+serde_core v1.0.229
+serde_derive feature "default"
+serde_derive v1.0.229 (proc-macro)
+proc-macro2 feature "proc-macro" (*)
+quote feature "proc-macro" (*)
+syn feature "clone-impls"
+syn v3.0.9
+proc-macro2 v1.0.107 (*)
+quote v1.0.47 (*)
+unicode-ident feature "default" (*)
+syn feature "derive"
+syn v3.0.9 (*)
+syn feature "parsing"
+syn v3.0.9 (*)
+syn feature "printing"
+syn v3.0.9 (*)
+syn feature "proc-macro"
+syn v3.0.9 (*)
+proc-macro2 feature "proc-macro" (*)
+quote feature "proc-macro" (*)
+serde_derive feature "default" (*)
+serde feature "std"
+serde v1.0.229 (*)
+serde_core feature "std"
+serde_core v1.0.229 (*)
+serde feature "derive"
+serde v1.0.229 (*)
+serde feature "serde_derive"
+serde v1.0.229 (*)
+serde feature "default" (*)
+serde feature "derive" (*)
+serde_json feature "default"
+serde_json v1.0.154
+memchr v2.8.3
+serde v1.0.229 (*)
+serde_core v1.0.229 (*)
+itoa feature "default"
+itoa v1.0.18
+zmij feature "default"
+zmij v1.0.23
+serde_json feature "std"
+serde_json v1.0.154 (*)
+serde_core feature "std" (*)
+memchr feature "std"
+memchr v2.8.3
+memchr feature "alloc"
+memchr v2.8.3
+serde feature "default" (*)
+serde feature "derive" (*)
+serde_json feature "default" (*)
+libc feature "default"
+libc v0.2.191
+libc feature "std"
+libc v0.2.191
+thiserror feature "default"
+thiserror v2.0.21
+thiserror-impl feature "default"
+thiserror-impl v2.0.21 (proc-macro)
+proc-macro2 feature "default" (*)
+quote feature "default" (*)
+syn feature "default"
+syn v3.0.9 (*)
+syn feature "clone-impls" (*)
+syn feature "derive" (*)
+syn feature "parsing" (*)
+syn feature "printing" (*)
+syn feature "proc-macro" (*)
+thiserror feature "std"
+thiserror v2.0.21 (*)
+
+engine-wasm v0.1.0 (/repo/crates/engine-wasm)
+engine feature "default" (*)
+serde_json feature "default" (*)
+wasm-bindgen feature "default"
+wasm-bindgen v0.2.129
+once_cell v1.21.4
+cfg-if feature "default"
+cfg-if v1.0.5
+wasm-bindgen-macro feature "default"
+wasm-bindgen-macro v0.2.129 (proc-macro)
+quote feature "default" (*)
+wasm-bindgen-macro-support feature "default"
+wasm-bindgen-macro-support v0.2.129
+proc-macro2 feature "default" (*)
+quote feature "default" (*)
+syn feature "default" (*)
+syn feature "extra-traits"
+syn v3.0.9 (*)
+syn feature "full"
+syn v3.0.9 (*)
+syn feature "visit"
+syn v3.0.9 (*)
+syn feature "visit-mut"
+syn v3.0.9 (*)
+bumpalo feature "default"
+bumpalo v3.20.3
+wasm-bindgen-shared feature "default"
+wasm-bindgen-shared v0.2.129
+unicode-ident feature "default" (*)
+wasm-bindgen-shared feature "default" (*)
+wasm-bindgen feature "std"
+wasm-bindgen v0.2.129 (*)
+
+sim v0.1.0 (/repo/crates/sim)
+rand_chacha v0.9.0 (*)
+content feature "default" (command-line)
+content v0.1.0 (/repo/crates/content) (*)
+engine feature "default" (*)
+serde feature "default" (*)
+serde feature "derive" (*)
+serde_json feature "default" (*)
+thiserror feature "default" (*)

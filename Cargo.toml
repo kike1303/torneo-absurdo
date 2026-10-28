@@ -1,5 +1,12 @@
 [workspace]
-members = ["apps/server", "crates/engine", "crates/engine-wasm", "crates/protocol"]
+members = [
+    "apps/server",
+    "crates/content",
+    "crates/engine",
+    "crates/engine-wasm",
+    "crates/protocol",
+    "crates/sim",
+]
 resolver = "3"
 
 [workspace.package]
@@ -13,6 +20,7 @@ publish = false
 [workspace.dependencies]
 protocol = { path = "crates/protocol" }
 engine = { path = "crates/engine" }
+content = { path = "crates/content" }
 # No default features: no `std`, `os_rng` nor `serde` in the engine (003 RF5, RF6).
 rand_chacha = { version = "=0.9.0", default-features = false }
 wasm-bindgen = "=0.2.129"
@@ -38,6 +46,8 @@ tokio-tungstenite = "=0.29.0"
 # Only to recognise the capacity error behind axum::Error (WebSocket close 1009).
 tungstenite = { version = "=0.29.0", default-features = false }
 futures-util = "=0.3.34"
+# Only for the O_NOFOLLOW / O_NONBLOCK open of crates/content (already in the lock via tokio).
+libc = "=0.2.191"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -1,0 +1,45 @@
+{
+  "slug": "guerrero-erizado",
+  "archetype": "spiky-haired-shouter",
+  "ruleset_version": 1,
+  "stats": {
+    "hp": 45,
+    "attack": 65,
+    "defense": 45,
+    "speed": 60,
+    "special": 65
+  },
+  "personality": {
+    "aggression": 80,
+    "caution": 10,
+    "showmanship": 70
+  },
+  "abilities": [
+    {
+      "id": "flurry_of_maybe",
+      "kind": "heavy",
+      "power": 35,
+      "cooldown": 1
+    },
+    {
+      "id": "lunch_beam",
+      "kind": "special",
+      "power": 75,
+      "cooldown": 4,
+      "element": "fire"
+    },
+    {
+      "id": "endless_scream",
+      "kind": "special",
+      "power": 85,
+      "cooldown": 8,
+      "element": "air"
+    }
+  ],
+  "weaknesses": [
+    "ice"
+  ],
+  "rivals": [
+    "fontanero-saltarin"
+  ]
+}

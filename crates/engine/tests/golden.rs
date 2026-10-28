@@ -178,6 +178,11 @@ fn golden_bytes(canonical: Vec<u8>) -> Vec<u8> {
 }
 
 /// Compares with the golden file or, with `UPDATE_GOLDEN=1` (native only), rewrites it.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the only I/O of the engine crate: regenerating goldens (plan-b decision 13); allow, \
+              not expect, because the block is cfg'd out in wasm"
+)]
 fn check_golden(file: &str, actual: &[u8], expected: &[u8]) {
     #[cfg(not(target_family = "wasm"))]
     if std::env::var_os("UPDATE_GOLDEN").is_some() {
