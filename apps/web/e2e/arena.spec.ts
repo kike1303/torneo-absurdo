@@ -193,6 +193,47 @@ test('F3: "Copied" stays while the stats refresh', async ({ page, context }) => 
   expect(copied).toMatchObject({ fighters: ['dummy_a', 'dummy_b'] });
 });
 
+// TA-20: on the LAN URL of `vite dev` (an insecure context) a phone has no Clipboard API. The JSON
+// is shown selected for a manual copy, with a message, whether the API is missing or rejects.
+const NO_CLIPBOARD = {
+  undefined: () => {
+    Object.defineProperty(Navigator.prototype, 'clipboard', { get: () => undefined });
+  },
+  rejecting: () => {
+    Object.defineProperty(Navigator.prototype, 'clipboard', {
+      get: () => ({ writeText: () => Promise.reject(new DOMException('no', 'NotAllowedError')) }),
+    });
+  },
+} as const;
+for (const [name, script] of Object.entries(NO_CLIPBOARD)) {
+  test(`TA-20: with the clipboard ${name}, "Copy JSON" shows the JSON to copy by hand`, async ({
+    page,
+  }) => {
+    await page.addInitScript(script);
+    await page.goto('/es/dev/arena');
+    await expect(stage(page)).toHaveAttribute('data-state', /^(ready|playing)$/, {
+      timeout: 15_000,
+    });
+    await waitForHydration(page);
+    await page.getByTestId('arena-show-stats').click();
+    await expect(page.getByTestId('arena-copy-manual')).toHaveCount(0);
+    await page.getByTestId('arena-copy-stats').click();
+    const manual = page.getByTestId('arena-copy-manual');
+    await expect(manual).toBeVisible();
+    await expect(manual).toBeFocused();
+    await expect(manual).toHaveAttribute('readonly', '');
+    await expect(page.getByText('No se pudo copiar. Copia el JSON a mano.')).toBeVisible();
+    await expect(page.getByText('Copiado')).toHaveCount(0);
+    expect(JSON.parse(await manual.inputValue())).toMatchObject({
+      fighters: ['dummy_a', 'dummy_b'],
+    });
+    const selected = await manual.evaluate(
+      (el) => (el as HTMLTextAreaElement).selectionEnd - (el as HTMLTextAreaElement).selectionStart,
+    );
+    expect(selected).toBe((await manual.inputValue()).length);
+  });
+}
+
 test('F4: ?t= with many digits is clamped to the end', async ({ page }) => {
   await page.goto('/es/dev/arena?t=99999999999');
   await expect(stage(page)).toHaveAttribute('data-state', 'finished', { timeout: 15_000 });

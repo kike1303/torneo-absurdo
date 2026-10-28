@@ -69,6 +69,8 @@
   "arena_show_stats": "Show statistics",
   "arena_copy_stats": "Copy JSON",
   "arena_copied": "Copied",
+  "arena_copy_failed": "Couldn't copy. Copy the JSON by hand.",
+  "arena_copy_manual_label": "Stats JSON",
   "arena_banner_fight": "Fight!",
   "arena_banner_ko": "K.O.",
   "arena_banner_time": "Time!",
