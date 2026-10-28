@@ -2,11 +2,11 @@
 id: "006"
 title: Ritmo rápido del motor
 type: spec
-status: in-review
+status: approved
 risk: high
 author: architect
 reviewers: [product-owner, security-reviewer, game-designer]
-approvals: [{by: product-owner, date: 2026-10-27}, {by: game-designer, date: 2026-10-27}, {by: security-reviewer, date: 2026-10-27}]
+approvals: [{by: product-owner, date: 2026-10-27}, {by: game-designer, date: 2026-10-27}, {by: security-reviewer, date: 2026-10-27}, {by: owner, date: 2026-10-27}]
 linear: TA-21
 depends_on: ["002", "003", "005"]
 created: 2026-10-27
@@ -365,3 +365,11 @@ Barrido de calibración (motor prototipo fuera del repo, `content/` real, 10 000
 - Nit (no bloquea): la firma de RF15 dice `paceMin(timeline): number`; con el caso nuevo debería ser `number | null`.
 
 **🤖 security-reviewer**
+
+### owner — 2026-10-27 — OK (risk: high)
+- OK en chat para seguir con el plan y la implementación.
+
+### architect — 2026-10-27 — Enmienda técnica (revisión de plan.md)
+- Al revisar `plan.md` admití una precisión de firma en RF15 y RF16: `paceMin(timeline, isValid): number | null` y `resolvePace(requested, timeline, isValid)` reciben el validador como función `(t: Timeline) => boolean`, y la prop `retime` de `FightStage` pasa a `(timeline, isValid) => Timeline`. `FightStage`, que ya carga el renderer con `import()`, pasa `(t) => validateTimeline(t).ok` sin manifests; los Vitest pasan el validador real. Motivo: `retime.ts` no puede importar valores del renderer (`rendererRestriction` de ESLint, ADR-0009 D4, y `check-renderer-split`, 002 RF-A17). La regla sigue teniendo una sola fuente (`TIMELINE_LIMITS` y `validateTimeline`), y el algoritmo, el piso, el techo, el clamp y el caso `null` no cambian.
+- No reabro la revisión de product-owner, security-reviewer ni game-designer: no cambia lo que ve el usuario, el ritmo, los criterios ni la superficie de `?pace`.
+
