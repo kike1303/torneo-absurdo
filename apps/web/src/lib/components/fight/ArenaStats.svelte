@@ -3,6 +3,7 @@
   // PR. Only `import type` from the renderer: this component is in the catalog (ADR-0009 D4).
   import type { FrameStats } from '@torneo/renderer';
   import { Button } from '#lib/components/ui/button/index.js';
+  import { copyText } from './copy-text.js';
   import { formatDecimal, formatInteger } from '#lib/i18n/format.js';
   import { m } from '#lib/paraglide/messages.js';
   import { getLocale } from '#lib/paraglide/runtime.js';
@@ -21,6 +22,9 @@
 
   let { stats, context }: Props = $props();
   let copied = $state(false);
+  /** The JSON shown for a manual copy when the Clipboard API is missing or fails (TA-20). */
+  let manual = $state<string | null>(null);
+  let manualField = $state<HTMLTextAreaElement | null>(null);
 
   const locale = $derived(getLocale());
   const rows = $derived([
@@ -39,14 +43,24 @@
   async function copy(): Promise<void> {
     const json = JSON.stringify({ ...stats, ...context }, null, 2);
     clearTimeout(timer);
-    try {
-      await navigator.clipboard.writeText(json);
+    copied = false;
+    // `navigator.clipboard` is undefined outside a secure context (a phone on the LAN URL).
+    const outcome = await copyText(json, navigator.clipboard as Clipboard | undefined);
+    if (outcome === 'copied') {
+      manual = null;
       copied = true;
       timer = setTimeout(() => (copied = false), COPIED_MS);
-    } catch {
-      copied = false;
+    } else {
+      manual = json;
     }
   }
+
+  // Selected on reveal, so a long press (iOS) or Ctrl+C copies it all.
+  $effect(() => {
+    if (manual === null || manualField === null) return;
+    manualField.focus();
+    manualField.setSelectionRange(0, manualField.value.length);
+  });
 
   $effect(() => () => clearTimeout(timer));
 </script>
@@ -65,6 +79,21 @@
     <Button variant="outline" onclick={copy} data-testid="arena-copy-stats"
       >{m.arena_copy_stats()}</Button
     >
-    <p aria-live="polite" class="text-sm text-muted-foreground">{copied ? m.arena_copied() : ''}</p>
+    <p aria-live="polite" class="text-sm text-muted-foreground" data-testid="arena-copy-status">
+      {copied ? m.arena_copied() : manual !== null ? m.arena_copy_failed() : ''}
+    </p>
   </div>
+  {#if manual !== null}
+    <label class="flex flex-col gap-1.5 text-sm">
+      <span class="text-muted-foreground">{m.arena_copy_manual_label()}</span>
+      <textarea
+        bind:this={manualField}
+        readonly
+        rows="8"
+        value={manual}
+        onfocus={(event) => event.currentTarget.select()}
+        class="w-full rounded-lg border border-input bg-background p-3 font-mono text-base focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none sm:text-xs"
+        data-testid="arena-copy-manual"></textarea>
+    </label>
+  {/if}
 </section>

@@ -29,7 +29,7 @@
     fighters: Readonly<Record<Side, ArenaFighterId>>;
     /** The "simulate reduced motion" switch; OR-ed with `prefers-reduced-motion`. */
     reducedMotion?: boolean;
-    /** Where playback starts (`?t=` on /dev/arena). */
+    /** Where the paused stage starts (`?t=` on /dev/arena); it plays only on `toggle` (TA-20). */
     initialT?: number;
     /** Exposes HP and the last cue in `data-*` for the e2e (only /dev/arena asks for it). */
     debug?: boolean;
@@ -189,19 +189,21 @@
             : (local?.sheetUrl(assetId, file) ?? ''),
       });
       renderer = handle;
+      // Before `load`, so its `ready` reaches `phase`; a superseded handle never writes it.
+      handle.onState((next) => {
+        if (id !== run) return;
+        phase = next;
+        refresh();
+      });
       await handle.load(timeline, assets);
       if (id !== run) {
         // Superseded by a newer start (a fighter switched quickly): never leave it running.
         handle.destroy();
         return;
       }
-      handle.onState((next) => {
-        phase = next;
-        refresh();
-      });
       if (debug) handle.onCue(refresh);
+      // Paused at `initialT` (TA-20): a load, or a change of fighters, never starts playback.
       handle.seek(initialT);
-      handle.play();
       refresh();
     } catch (error) {
       if (id !== run) return;
@@ -258,7 +260,7 @@
     };
   });
 
-  // A change of fighters starts over: names and assets belong to the renderer instance.
+  // A change of fighters reloads (paused): names and assets belong to the renderer instance.
   $effect(() => {
     if (!mounted) return;
     void fighters.a;
