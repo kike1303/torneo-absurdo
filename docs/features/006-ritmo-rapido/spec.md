@@ -155,6 +155,8 @@ Ninguna banda de salida es un campo del ruleset, y ninguna regla de la `Timeline
 
   Con otras dos semillas raíz, la media sale en 1226 ms y la mediana de pausas en 3, así que es estable.
 
+  > **Medido con el motor real (B4, 2026-10-27).** `just sim` reproduce la calibración cifra por cifra: las de arriba, más 1226 ms de media, 700 ms de mínima, 28,5 % en ráfaga, pausas p10/p50/p90 de 1/3/4 y el 98,9 % de peleas con pausa. El lado `a` de los espejos da 49,40 % (1646/1686/0, que el informe muestra como 49,3 %). Con las otras dos semillas raíz, 50,26 y 50,14 %. Con 8/150/1000 sale 46,94 / 49,76 / 49,23 %, uno fuera de 47–53 %. La investigación de "Desviaciones" del plan concluye que es ruido de muestreo y no un bug: con 333 332 espejos, las dos configuraciones quedan entre 49,98 y 50,10 %. No se cambian código ni valores. Fixture `balanced`: `speed` 95 → 85 en los dos twins, con una media de 1114 ms.
+
   **Espejos:** el PR pega el % del lado `a` en espejos con los valores elegidos (9/200/800) y con 8/150/1000, cada uno con ≥ 3 semillas raíz. Si alguna medición sale fuera de 47–53 %, o todas quedan del mismo lado de 50 %, se trata como un **bug estructural** que hay que investigar (desempate de RF8, `saturating_add` cerca del tope), no como ruido. Nunca se mueven valores "hasta que pase": los valores no cambian hasta que la causa esté resuelta. **Contenido:** `content/characters/` no se toca. El fixture `crates/sim/tests/fixtures/balanced` mide 1098 ms de media (2 ms por debajo de la banda), así que el plan ajusta sus stats (es un fixture de test, no contenido) para que `a_balanced_roster_passes_the_check` siga probando un roster que pasa.
 
 ### Arena de prueba (`apps/web`, `/[lang]/dev/arena`)

@@ -95,8 +95,11 @@ La semilla de `--seed` es la del simulador: **nunca** se le pasa la semilla de u
 Criterios (RF17), todos sobre los cruces entre personajes distintos:
 - win rate global de cada personaje entre 40 % y 60 % (un empate cuenta medio);
 - al menos 15 % de peleas con algún `moment`, y cada `kind` (`comeback`, `decisive_crit`, `clutch_ko`) en al menos 3 %;
-- al menos 80 % de peleas con `end.t` entre 45 000 y 90 000 ms;
+- al menos 90 % de peleas con `end.t` entre 45 000 y 90 000 ms;
+- ritmo (006 RF11), sobre las separaciones entre resoluciones consecutivas: media entre 1100 y 1300 ms (pausas incluidas); al menos 25 % de separaciones en ráfaga (≤ 900 ms); mediana de al menos 2 pausas (≥ 2500 ms) por pelea; al menos 90 % de peleas con alguna pausa; y separación mínima ≥ 600 ms (`TIMELINE_CONTRACT.strike_gap_ms`);
 - `time_up` como mucho en el 10 % y `draw` en menos del 1 %;
 - el lado `a` gana entre el 47 % y el 53 % de los espejos.
+
+`speed` mueve la media de ritmo: un roster más rápido acorta las separaciones y uno más lento las alarga, así que un personaje nuevo, aunque esté equilibrado, tiene que pasar también los criterios de ritmo de `just sim --check`.
 
 Un cruce fuera de 30–70 % es solo un **aviso**. El mismo test corre dentro de `just check` (`crates/sim/tests/balance.rs`), así que un personaje que rompe el balance no pasa CI. Los umbrales viven en `Criteria::RF17` (`crates/sim/src/report.rs`); qué se puede ajustar y con qué OK está en RF17 y en la decisión 16 de `plan-b.md`. Primero se ajusta el contenido; solo si un criterio global no se alcanza con contenido se proponen valores de `Ruleset` (decisión 14 de `plan-b.md`).
