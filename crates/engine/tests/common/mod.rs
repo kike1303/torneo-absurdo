@@ -2,7 +2,9 @@
 //! Fixtures are embedded (`include_str!`) so the same tests run in WASI without a file system.
 #![allow(dead_code)] // each test crate uses a subset
 
-use engine::{CharacterSpec, EndReason, FightEvent, FightLog, MomentKind, Ruleset, Side};
+use engine::{
+    CharacterSpec, EndReason, FightEvent, FightLog, MomentKind, Ruleset, Side, TIMELINE_CONTRACT,
+};
 
 /// Fixture name and its JSON, in this fixed order (the digest of `golden.rs` depends on it).
 pub const FIXTURES: [(&str, &str); 4] = [
@@ -224,7 +226,11 @@ pub fn assert_invariants(log: &FightLog, r: &Ruleset) {
             assert_eq!(kos.len(), 1, "{}: exactly one ko", ctx());
             assert_eq!(time_ups, 0, "{}", ctx());
             if let Some((ko_t, side)) = kos.first() {
-                assert!(*end_t >= ko_t + 3500, "{}", ctx());
+                assert!(
+                    *end_t >= ko_t + TIMELINE_CONTRACT.win_gap_ms + TIMELINE_CONTRACT.win_pose_ms,
+                    "{}",
+                    ctx()
+                );
                 assert_eq!(*end_t, ko_t + r.end_ms(), "{}", ctx());
                 assert_eq!(*winner, Some(side.opponent()), "{}", ctx());
             }
@@ -247,19 +253,24 @@ pub fn assert_invariants(log: &FightLog, r: &Ruleset) {
         }
     }
 
-    // Pacing (data from 002).
+    // Pacing: the `Timeline` contract (002, 005; 006 RF5).
+    let c = TIMELINE_CONTRACT;
     let resolutions: Vec<u32> = events
         .iter()
         .filter(|e| is_resolution(e))
         .map(FightEvent::t)
         .collect();
     if let Some(first) = resolutions.first() {
-        assert!(*first >= 2000, "{}: first resolution at {first}", ctx());
+        assert!(
+            *first >= c.intro_gap_ms,
+            "{}: first resolution at {first}",
+            ctx()
+        );
     }
     for pair in resolutions.windows(2) {
         if let [prev, next] = pair {
             assert!(
-                next - prev >= 600,
+                next - prev >= c.strike_gap_ms,
                 "{}: resolutions {prev} and {next}",
                 ctx()
             );
@@ -272,7 +283,11 @@ pub fn assert_invariants(log: &FightLog, r: &Ruleset) {
             duration_ms,
         } = event
         {
-            assert!((800..=3000).contains(duration_ms), "{}", ctx());
+            assert!(
+                (c.knockdown_min_ms..=c.knockdown_max_ms).contains(&u32::from(*duration_ms)),
+                "{}",
+                ctx()
+            );
             assert!(
                 events.iter().any(|e| matches!(
                     e,

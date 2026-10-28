@@ -3,7 +3,9 @@
 //! - (a) fixed `(seed, a, b) -> log` vectors against `golden/log-*.json` (also the fixtures of
 //!   002's adapter, decision 6 of plan-a);
 //! - (b) an FNV-1a 64 digest of the canonical JSON of 1000 fights against `golden/digest-1000.txt`;
-//! - (c) `canonical_spec_json` of every fixture against `golden/spec-*.json`, and its round trip.
+//! - (c) `canonical_spec_json` of every fixture against `golden/spec-*.json`, and its round trip;
+//! - (d) the canonical JSON of `TIMELINE_CONTRACT` against `golden/timeline-contract.json`, which a
+//!   Vitest of `apps/web` compares with the renderer's `TIMELINE_LIMITS` (006 RF5).
 //!
 //! Every golden file is exactly the canonical bytes plus a final `\n`. Regenerate them with
 //! `UPDATE_GOLDEN=1 cargo test -p engine --test golden`, natively only (in WASI the environment
@@ -14,8 +16,8 @@ use common::{
     FIXTURES, assert_invariants, assert_only_codes, derive_seed, fixture, fixtures, hex, v1,
 };
 use engine::{
-    CharacterSpec, EndReason, FightEvent, FightLog, MomentKind, Seed, Side, canonical_json,
-    canonical_spec_json, simulate,
+    CharacterSpec, EndReason, FightEvent, FightLog, MomentKind, Seed, Side, TIMELINE_CONTRACT,
+    canonical_json, canonical_spec_json, simulate,
 };
 
 type Covers = fn(&FightLog) -> bool;
@@ -338,6 +340,17 @@ fn specs_match_their_golden_files() {
             golden,
         );
     }
+}
+
+/// (d) The engine's mirror of the `Timeline` rules (006 RF5).
+#[test]
+fn timeline_contract_matches_its_golden() {
+    let canonical = serde_json::to_vec(&TIMELINE_CONTRACT).unwrap_or_else(|e| panic!("{e}"));
+    check_golden(
+        "timeline-contract.json",
+        &golden_bytes(canonical),
+        include_bytes!("golden/timeline-contract.json"),
+    );
 }
 
 /// Finds the seeds of `VECTORS`: `cargo test -p engine --test golden -- --ignored --nocapture`.
