@@ -277,7 +277,7 @@ content/_local/ (dev)┘                                                        
 ### Datos para 003
 Valores iniciales que 003 puede usar como restricciones del ritmo; el go/no-go (RF-B9) los confirma o ajusta:
 - **Duración de 45 a 90 s de `duration_ms` total**, intro y pose de victoria incluidas, no solo el tramo de combate. El guion del spike dura ~64 s.
-- Densidad y ritmo de referencia: ≥ 30 golpes en el guion (una separación media de ~1.9 s en ~58 s de combate), con ráfagas de golpes a ≤ 900 ms y pausas de ≥ 2.5 s. La separación media buena la fija el owner en RF-B9.
+- Densidad y ritmo de referencia: ≥ 30 golpes en el guion, con ráfagas de golpes a ≤ 900 ms y pausas de ≥ 2.5 s. **Separación media entre golpes de ~1.2 s**, fijada por el owner en RF-B9 (2026-10-27, `?pace=0.8` sobre los 1468 ms que mide el guion; ver la nota del owner en `## Revisión`). Es un parámetro del ruleset, no una constante.
 - Un `knockdown` siempre coincide con un golpe `hit` o `crit` sobre ese luchador (o lo sigue en ≤ 100 ms), y como mucho uno por golpe.
 - El `ko` llega solo con HP 0, justo después del golpe que lo deja en 0, y después de él solo viene el `win`. Ninguna timeline pasa de 1 h.
 - Intro ≥ 2 s antes del primer golpe; ≥ 600 ms entre impactos consecutivos; knockdown de 0.8 a 3 s; ≥ 1.5 s de KO a victoria y ≥ 2 s de pose de victoria.
