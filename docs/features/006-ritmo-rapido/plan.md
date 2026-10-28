@@ -245,7 +245,11 @@ Entorno: el shell puede traer Node 18. Antes de cada comando de JS va `export PA
 Los workflows no cambian. El job `rust` suma unos segundos: el test de propiedad nuevo y las métricas de `sim`, compensados en parte porque las peleas tienen menos acciones. El job `e2e` suma unos 21 casos en Chromium y 6 en WebKit, alrededor de 1 a 2 minutos por corrida.
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+- **B3, dorados (decisión 6).** Semillas elegidas: `ko-decisive-crit` trickster/tank 1 (3 pausas), `ko-knockdown` striker/trickster 0 (2), `ko-comeback` trickster/trickster 3 (3), `ko-clutch` striker/tank 1 (5), `decision-a` tank/turtle 0 (5), `decision-b` tank/tank 0 (5; `turtle/tank 0` es el espejo de `decision-a`) y `draw` turtle/turtle 118 (4). En `ko-clutch`, entre los candidatos de la semilla más baja (1) se desempató por más pausas. **Dorado de RF20: `log-ko-clutch`** (5 pausas).
+- **B3, tiempo de *debug* de `--test properties` (decisión 3 del architect).** 11,05 s antes y entre 10,64 y 11,07 s después, con `breathers_happen_and_keep_the_contract` como test propio sobre los 10 000 logs. No crece más de un 20 %, así que no se movió al bucle existente.
+- **B3, helper compartido.** `resolution_times` vive en `tests/common/mod.rs` y lo usan `properties.rs` y el conteo de pausas de `golden.rs`.
+- **B5, fixture `balanced`.** `speed` 95 → 85 en los dos twins (primer intento del plan). Media de 1098 a 1114 ms. Con 400 peleas pasa todo `--check`: espejos 50,0 %, 99,0 % en 45–90 s, ráfaga 44,2 %, pausas p50 3 y 99,0 % con pausa. `lopsided` sigue fallando solo por `win_rate`.
+- **B6, espejos (RF13), escalado.** Con 9/200/800, el lado `a` da 49,40 / 50,26 / 50,14 % con `DEFAULT_SEED`, `00…01` y `a5`×32. Con 8/150/1000 da **46,94** / 49,76 / 49,23 %: uno fuera de 47–53 y los tres por debajo de 50. Es el caso de bug estructural del paso 4. Me detuve sin mover valores ni investigar, y lo escalé al orquestador con las cifras. `ruleset.rs` se restauró (`git diff --exit-code`).
 
 ## Revisión
 ### architect — 2026-10-27 — APPROVE

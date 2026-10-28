@@ -1,5 +1,5 @@
 //! Metrics over hand-built logs and every edge of [`Criteria::RF17`].
-use engine::{FighterInfo, Ruleset};
+use engine::{FighterInfo, Ruleset, TIMELINE_CONTRACT};
 
 use super::*;
 use crate::DEFAULT_SEED;
@@ -253,7 +253,7 @@ fn knockdown_and_density() {
     t.cross(0, 1, &won(Side::B, 50_000)).unwrap();
     let r = finish(t, 2);
     assert_eq!(r.knockdown, 1);
-    // Resolutions per fight: [0, 3]; gaps 2000 and 600.
+    // Resolutions per fight: [0, 3]; gaps 2000 and 600 (a burst, no pause).
     assert_eq!(
         r.density,
         Density {
@@ -263,8 +263,144 @@ fn knockdown_and_density() {
             gap_total_ms: 2600,
             gaps: 2,
             mean_gap_ms: 1300,
+            min_gap_ms: 600,
+            burst_gaps: 1,
+            pause_gaps: 0,
+            pauses_p10: 0,
+            pauses_p50: 0,
+            pauses_p90: 0,
+            fights_with_pause: 0,
         }
     );
+}
+
+fn dodge(t: u32) -> FightEvent {
+    FightEvent::Dodge {
+        t,
+        attacker: Side::A,
+        ability: "strike".to_owned(),
+    }
+}
+
+/// A KO fight whose resolutions are separated by `gaps`, starting at 3000.
+fn with_gaps(gaps: &[u32]) -> FightLog {
+    let mut t = 3000;
+    let mut events = vec![FightEvent::Intro { t: 0 }, dodge(t)];
+    for gap in gaps {
+        t += gap;
+        events.push(dodge(t));
+    }
+    events.push(end(t + 4000, Some(Side::A), EndReason::Ko));
+    log(1000, 1000, events)
+}
+
+#[test]
+fn burst_and_pause_edges() {
+    let mut t = tally(2);
+    t.cross(0, 1, &with_gaps(&[900, 901, 2500, 2499])).unwrap();
+    let d = finish(t, 2).density;
+    assert_eq!((d.gaps, d.gap_total_ms, d.mean_gap_ms), (4, 6800, 1700));
+    assert_eq!(d.min_gap_ms, 900);
+    assert_eq!((d.burst_gaps, d.pause_gaps), (1, 1));
+    assert_eq!((d.pauses_p50, d.fights_with_pause), (1, 1));
+    // A knockdown counts as a pause only by its separation; no gaps gives a min of 0.
+    let mut t = tally(2);
+    t.cross(0, 1, &won(Side::A, 50_000)).unwrap();
+    let d = finish(t, 2).density;
+    assert_eq!((d.min_gap_ms, d.gaps, d.mean_gap_ms), (0, 0, 0));
+}
+
+#[test]
+fn pauses_per_fight_are_nearest_rank_percentiles() {
+    let pause = PAUSE_GAP_MIN_MS;
+    let mut t = tally(2);
+    // Pauses per fight, out of order: 3, 0, 1, 4, 2, 0, 1, 2, 5, 2.
+    for count in [3, 0, 1, 4, 2, 0, 1, 2, 5, 2] {
+        let mut gaps = vec![1000];
+        gaps.extend(std::iter::repeat_n(pause, count));
+        t.cross(0, 1, &with_gaps(&gaps)).unwrap();
+    }
+    let d = finish(t, 2).density;
+    // Sorted: 0, 0, 1, 1, 2, 2, 2, 3, 4, 5.
+    assert_eq!((d.pauses_p10, d.pauses_p50, d.pauses_p90), (0, 2, 4));
+    assert_eq!(d.fights_with_pause, 8);
+    assert_eq!(d.pause_gaps, 20);
+    assert_eq!(d.min_gap_ms, 1000);
+}
+
+/// The pacing failures of a report built from `logs` (cross fights between `aa` and `bb`).
+fn pacing_failures_of(logs: &[FightLog]) -> Vec<Failure> {
+    let mut t = tally(2);
+    for l in logs {
+        t.cross(0, 1, l).unwrap();
+    }
+    finish(t, 2)
+        .failures(&Criteria::RF17)
+        .into_iter()
+        .filter(|f| {
+            matches!(
+                f,
+                Failure::MeanGap { .. }
+                    | Failure::BurstShare { .. }
+                    | Failure::PausesMedian { .. }
+                    | Failure::PausedFights { .. }
+                    | Failure::StrikeGap { .. }
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn every_pacing_failure_from_built_logs() {
+    // Fast and flat: mean 500, every gap a burst, no pause, below the contract.
+    assert_eq!(
+        pacing_failures_of(&[with_gaps(&[500; 20])]),
+        vec![
+            Failure::MeanGap { ms: 500 },
+            Failure::PausesMedian { count: 0 },
+            Failure::PausedFights { permille: 0 },
+            Failure::StrikeGap { ms: 500 },
+        ]
+    );
+    // Even and slow: no burst.
+    assert_eq!(
+        pacing_failures_of(&[with_gaps(&[1000; 20])]),
+        vec![
+            Failure::MeanGap { ms: 1000 },
+            Failure::BurstShare { permille: 0 },
+            Failure::PausesMedian { count: 0 },
+            Failure::PausedFights { permille: 0 },
+        ]
+    );
+    // Two rhythms: 6 bursts of 700, 10 gaps of 1000 and 4 pauses of 2500 (mean 1210).
+    let mut gaps = vec![700; 6];
+    gaps.extend([1000; 10]);
+    gaps.extend([2500; 4]);
+    assert_eq!(pacing_failures_of(&[with_gaps(&gaps)]), vec![]);
+    // Without any separation, the mean fails and the shortest one is not evaluated.
+    let failures = pacing_failures_of(&[won(Side::A, 50_000)]);
+    assert!(failures.contains(&Failure::MeanGap { ms: 0 }));
+    assert!(
+        !failures
+            .iter()
+            .any(|f| matches!(f, Failure::StrikeGap { .. }))
+    );
+}
+
+/// 006 RF12: the measure definitions of `sim` against the ruleset and the `Timeline` contract.
+#[test]
+fn every_breather_is_a_pause() {
+    assert!(v1().breather_gap_min() >= PAUSE_GAP_MIN_MS);
+}
+
+#[test]
+fn a_burst_is_reachable() {
+    assert!(v1().strike_gap_min() <= BURST_GAP_MAX_MS);
+}
+
+#[test]
+fn the_shortest_gap_respects_the_contract() {
+    assert!(v1().strike_gap_min() >= TIMELINE_CONTRACT.strike_gap_ms);
 }
 
 /// `a` falls to `a_low` while `b` is still full, then wins.
@@ -399,9 +535,16 @@ fn passing() -> Report {
             resolutions_p10: 40,
             resolutions_p50: 50,
             resolutions_p90: 60,
-            gap_total_ms: 0,
-            gaps: 0,
-            mean_gap_ms: 0,
+            gap_total_ms: 1_200_000,
+            gaps: 1000,
+            mean_gap_ms: 1200,
+            min_gap_ms: 700,
+            burst_gaps: 300,
+            pause_gaps: 30,
+            pauses_p10: 1,
+            pauses_p50: 3,
+            pauses_p90: 5,
+            fights_with_pause: 1000,
         },
     }
 }
@@ -420,8 +563,14 @@ fn the_criteria_are_the_ones_of_rf17() {
         (400, 600)
     );
     assert_eq!(c.any_moment_min_permille, 150);
-    assert_eq!(c.in_band_min_permille, 800);
+    assert_eq!(c.in_band_min_permille, 900);
     assert_eq!(DURATION_BAND_MS, (45_000, 90_000));
+    assert_eq!((c.mean_gap_min_ms, c.mean_gap_max_ms), (1100, 1300));
+    assert_eq!(c.burst_min_permille, 250);
+    assert_eq!(c.pauses_p50_min, 2);
+    assert_eq!(c.paused_fights_min_permille, 900);
+    assert_eq!((BURST_GAP_MAX_MS, PAUSE_GAP_MIN_MS), (900, 2500));
+    assert_eq!(TIMELINE_CONTRACT.strike_gap_ms, 600);
     assert_eq!(c.time_up_max_permille, 100);
     assert_eq!(c.draw_below_permille, 10);
     assert_eq!(
@@ -472,10 +621,10 @@ fn global_criteria_edges() {
         failures_with(|r| r.moments.any = 149),
         vec![Failure::AnyMoment { permille: 149 }]
     );
-    assert_eq!(failures_with(|r| r.duration.in_band = 800), vec![]);
+    assert_eq!(failures_with(|r| r.duration.in_band = 900), vec![]);
     assert_eq!(
-        failures_with(|r| r.duration.in_band = 799),
-        vec![Failure::DurationInBand { permille: 799 }]
+        failures_with(|r| r.duration.in_band = 899),
+        vec![Failure::DurationInBand { permille: 899 }]
     );
     assert_eq!(failures_with(|r| r.time_up = 100), vec![]);
     assert_eq!(
@@ -486,6 +635,48 @@ fn global_criteria_edges() {
     assert_eq!(
         failures_with(|r| r.endings.draw = 10),
         vec![Failure::Draw { permille: 10 }]
+    );
+}
+
+#[test]
+fn pacing_criteria_edges() {
+    let mean = |total: u64| failures_with(|r| r.density.gap_total_ms = total);
+    assert_eq!(mean(1_100_000), vec![]);
+    assert_eq!(mean(1_300_000), vec![]);
+    // The reported mean is informative; the band is compared by cross-multiplication.
+    assert_eq!(
+        failures_with(|r| {
+            r.density.gap_total_ms = 1_099_999;
+            r.density.mean_gap_ms = 1099;
+        }),
+        vec![Failure::MeanGap { ms: 1099 }]
+    );
+    assert_eq!(
+        failures_with(|r| {
+            r.density.gap_total_ms = 1_300_001;
+            r.density.mean_gap_ms = 1300;
+        }),
+        vec![Failure::MeanGap { ms: 1300 }]
+    );
+    assert_eq!(failures_with(|r| r.density.burst_gaps = 250), vec![]);
+    assert_eq!(
+        failures_with(|r| r.density.burst_gaps = 249),
+        vec![Failure::BurstShare { permille: 249 }]
+    );
+    assert_eq!(failures_with(|r| r.density.pauses_p50 = 2), vec![]);
+    assert_eq!(
+        failures_with(|r| r.density.pauses_p50 = 1),
+        vec![Failure::PausesMedian { count: 1 }]
+    );
+    assert_eq!(failures_with(|r| r.density.fights_with_pause = 900), vec![]);
+    assert_eq!(
+        failures_with(|r| r.density.fights_with_pause = 899),
+        vec![Failure::PausedFights { permille: 899 }]
+    );
+    assert_eq!(failures_with(|r| r.density.min_gap_ms = 600), vec![]);
+    assert_eq!(
+        failures_with(|r| r.density.min_gap_ms = 599),
+        vec![Failure::StrikeGap { ms: 599 }]
     );
 }
 
@@ -585,6 +776,41 @@ fn the_text_report_is_english_and_lists_failures_and_warnings() {
         "{text}"
     );
     assert!(text.contains(&r.seed_hex), "{text}");
+    assert!(
+        ok.contains(
+            "pacing: min gap 700 ms; burst (<= 900 ms) 30.0% of gaps; pauses (>= 2500 ms) 3.0% \
+             of gaps, per fight p10 1, p50 3, p90 5; fights with a pause 100.0%"
+        ),
+        "{ok}"
+    );
+    let mut r = passing();
+    r.density.burst_gaps = 0;
+    r.density.min_gap_ms = 500;
+    let text = r.render_text(&Criteria::RF17);
+    assert!(
+        text.contains("burst_share: 0.0% (must be >= 25.0%)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("strike_gap: 500 ms (must be >= 600 ms)"),
+        "{text}"
+    );
+    for f in [
+        Failure::MeanGap { ms: 1400 },
+        Failure::PausesMedian { count: 1 },
+        Failure::PausedFights { permille: 800 },
+    ] {
+        let line = describe_failure(&f, &Criteria::RF17);
+        assert!(
+            [
+                "mean_gap: 1400 ms (must be 1100..=1300 ms)",
+                "pauses_median: 1 (must be >= 2)",
+                "paused_fights: 80.0% (must be >= 90.0%)",
+            ]
+            .contains(&line.as_str()),
+            "{line}"
+        );
+    }
 }
 
 #[test]
