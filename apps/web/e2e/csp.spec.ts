@@ -49,11 +49,15 @@ test('RF-A18: no CSP violations on /es/dev/arena while loading and 5 s of playba
   await page.goto('/es/dev/arena');
   const stage = page.getByTestId('fight-stage');
   await expect(stage).toHaveAttribute('data-renderer-loaded', '', { timeout: 15_000 });
-  await expect(stage).toHaveAttribute('data-state', /^(playing|error)$/, { timeout: 15_000 });
+  await expect(stage).toHaveAttribute('data-state', /^(ready|error)$/, { timeout: 15_000 });
   if ((await stage.getAttribute('data-state')) === 'error') {
     await expect(stage).toHaveAttribute('data-error', 'webgl_unavailable');
     test.info().annotations.push({ type: 'limited', description: 'no WebGL in this engine' });
   } else {
+    // TA-20: the arena loads paused; playback starts with Play.
+    await waitForHydration(page);
+    await page.getByTestId('arena-toggle').click();
+    await expect(stage).toHaveAttribute('data-state', 'playing');
     await page.waitForTimeout(5000);
     await expect(stage).toHaveAttribute('data-state', 'playing');
   }

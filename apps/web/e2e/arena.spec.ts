@@ -18,6 +18,22 @@ const DIR = 'test-results/screenshots';
 const DURATION = spike.duration_ms;
 const stage = (page: Page) => page.getByTestId('fight-stage');
 
+/** TA-20: the arena loads paused (`ready`); playback only starts with Play. */
+async function play(page: Page): Promise<void> {
+  await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
+  await waitForHydration(page);
+  await page.getByTestId('arena-toggle').click();
+  await expect(stage(page)).toHaveAttribute('data-state', 'playing');
+}
+
+/** It stays paused: same state and same last cue after `ms`. */
+async function staysPaused(page: Page, ms: number): Promise<void> {
+  const cue = await stage(page).getAttribute('data-last-cue');
+  await page.waitForTimeout(ms);
+  await expect(stage(page)).toHaveAttribute('data-state', 'ready');
+  expect(await stage(page).getAttribute('data-last-cue')).toBe(cue);
+}
+
 function trackErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on('console', (message) => {
@@ -37,13 +53,20 @@ async function seriousViolations(page: Page) {
 }
 
 for (const lang of ['es', 'en'] as const) {
-  test(`/${lang}/dev/arena reaches playing without console errors`, async ({ page }) => {
+  test(`/${lang}/dev/arena loads paused, plays with Play, without console errors`, async ({
+    page,
+  }) => {
     const errors = trackErrors(page);
     await page.goto(`/${lang}/dev/arena`);
-    await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+    await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
     await expect(
       page.getByRole('img', { name: lang === 'es' ? /Muñeco A/ : /Dummy A/ }),
     ).toBeVisible();
+    await expect(page.getByTestId('arena-toggle')).toHaveText(
+      lang === 'es' ? 'Reproducir' : 'Play',
+    );
+    await staysPaused(page, 1000);
+    await play(page);
     await page.waitForTimeout(1000);
     expect(errors).toEqual([]);
   });
@@ -62,18 +85,18 @@ test('HP changes after a strike and the controls pause and resume', async ({ pag
   const strike = spike.cues.find((c) => c.type === 'strike' && (c.damage ?? 0) > 0);
   if (strike === undefined) throw new Error('no strike with damage');
   await page.goto(`/es/dev/arena?t=${strike.at_ms - 400}`);
-  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+  await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
   const before = [
     await stage(page).getAttribute('data-hp-a'),
     await stage(page).getAttribute('data-hp-b'),
   ];
+  await play(page);
   await expect
     .poll(async () => [
       await stage(page).getAttribute('data-hp-a'),
       await stage(page).getAttribute('data-hp-b'),
     ])
     .not.toEqual(before);
-  await waitForHydration(page);
   await page.getByTestId('arena-toggle').click();
   await expect(stage(page)).toHaveAttribute('data-state', 'paused');
   await page.getByTestId('arena-toggle').click();
@@ -82,8 +105,7 @@ test('HP changes after a strike and the controls pause and resume', async ({ pag
 
 test('RF-A19: after a seek to the middle and 3 s of playback, frames > 0', async ({ page }) => {
   await page.goto(`/es/dev/arena?t=${Math.round(DURATION / 2)}`);
-  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
-  await waitForHydration(page);
+  await play(page);
   await page.getByTestId('arena-show-stats').check();
   await page.waitForTimeout(3000);
   await expect
@@ -93,15 +115,16 @@ test('RF-A19: after a seek to the middle and 3 s of playback, frames > 0', async
     .toBeGreaterThan(0);
 });
 
-test('changing a fighter restarts the arena', async ({ page }) => {
+test('changing a fighter reloads the arena and leaves it paused (TA-20)', async ({ page }) => {
   await page.goto('/en/dev/arena');
-  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
-  await waitForHydration(page);
+  await play(page);
   await page.getByTestId('arena-fighter-b').selectOption('dummy_a');
   await expect(
     page.getByRole('img', { name: 'Animated fight between Dummy A and Dummy A' }),
   ).toBeAttached();
-  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+  await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
+  await staysPaused(page, 1000);
+  await play(page);
 });
 
 test('the instance without the catalog answers 404', async ({ request }) => {
@@ -113,7 +136,7 @@ for (const theme of ['light', 'dark'] as const) {
   test(`axe without serious or critical violations (theme=${theme})`, async ({ page }) => {
     await page.context().addCookies([{ name: 'theme', value: theme, url: ORIGIN }]);
     await page.goto('/es/dev/arena');
-    await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+    await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
     await waitForHydration(page);
     await page.getByTestId('arena-show-stats').check();
     // The controls fade in from `disabled:opacity-50` (transition-all); axe must see them settled.
@@ -137,7 +160,7 @@ for (const size of SIZES) {
         await page.setViewportSize(size);
         // Just after a crit: numbers, particles, flash and trail are on screen.
         await page.goto(`/${lang}/dev/arena?t=12500`);
-        await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+        await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
         await page.waitForTimeout(250);
         const box = await stage(page).boundingBox();
         expect(box?.width ?? Infinity).toBeLessThanOrEqual(size.width);
@@ -155,7 +178,7 @@ for (const size of SIZES) {
 }
 
 // QA findings of A2.
-test('F1: switching a fighter quickly many times leaves one playing arena, without errors', async ({
+test('F1: switching a fighter quickly many times leaves one paused arena, without errors', async ({
   browser,
 }) => {
   // The race is timing dependent, so it runs on several fresh pages (the unit test of
@@ -164,13 +187,13 @@ test('F1: switching a fighter quickly many times leaves one playing arena, witho
     const page = await browser.newPage();
     const errors = trackErrors(page);
     await page.goto('/es/dev/arena?t=1500');
-    await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+    await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
     const select = page.getByTestId('arena-fighter-b');
     for (let i = 0; i < 6; i++) {
       await select.selectOption(i % 2 ? 'dummy_b' : 'dummy_a', { force: true }).catch(() => {});
       await page.waitForTimeout(i * 40);
     }
-    await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+    await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
     await page.waitForTimeout(1500);
     expect(errors, `run ${run}`).toEqual([]);
     await expect(page.locator('[data-testid="fight-stage"] canvas')).toHaveCount(1);
@@ -181,7 +204,7 @@ test('F1: switching a fighter quickly many times leaves one playing arena, witho
 test('F3: "Copied" stays while the stats refresh', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto('/es/dev/arena');
-  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+  await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
   await waitForHydration(page);
   await page.getByTestId('arena-show-stats').click();
   await page.getByTestId('arena-copy-stats').click();
@@ -211,9 +234,7 @@ for (const [name, script] of Object.entries(NO_CLIPBOARD)) {
   }) => {
     await page.addInitScript(script);
     await page.goto('/es/dev/arena');
-    await expect(stage(page)).toHaveAttribute('data-state', /^(ready|playing)$/, {
-      timeout: 15_000,
-    });
+    await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
     await waitForHydration(page);
     await page.getByTestId('arena-show-stats').click();
     await expect(page.getByTestId('arena-copy-manual')).toHaveCount(0);
@@ -250,7 +271,7 @@ test('the build has no local sprites: 404 and only the placeholders in the selec
   const requested: string[] = [];
   page.on('request', (req) => requested.push(new URL(req.url()).pathname));
   await page.goto('/es/dev/arena');
-  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+  await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
   await waitForHydration(page);
   for (const side of ['a', 'b']) {
     const values = await page
@@ -263,10 +284,10 @@ test('the build has no local sprites: 404 and only the placeholders in the selec
 });
 
 // 002 RF-B9: ?pace=<factor> rescales the script; it still validates and plays to the end.
-test('?pace=1.25 reaches playing and, at the end, finished', async ({ page }) => {
+test('?pace=1.25 plays and, at the end, finished', async ({ page }) => {
   const errors = trackErrors(page);
   await page.goto('/es/dev/arena?pace=1.25');
-  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+  await play(page);
   await page.goto('/es/dev/arena?pace=1.25&t=99999999999');
   await expect(stage(page)).toHaveAttribute('data-state', 'finished', { timeout: 15_000 });
   await expect(page.getByTestId('fight-winner')).toHaveText('Gana Muñeco A');
@@ -278,7 +299,7 @@ test('?pace=1.5 scales mean_strike_gap_ms in the copied stats', async ({ page, c
   const strikes = spike.cues.filter((c) => c.type === 'strike').map((c) => c.at_ms);
   const base = ((strikes.at(-1) ?? 0) - (strikes[0] ?? 0)) / (strikes.length - 1);
   await page.goto('/es/dev/arena?pace=1.5');
-  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+  await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
   await waitForHydration(page);
   await page.getByTestId('arena-show-stats').click();
   await page.getByTestId('arena-copy-stats').click();
@@ -294,12 +315,10 @@ for (const lang of ['es', 'en'] as const) {
   const winsB = lang === 'es' ? 'Gana Muñeco B' : 'Dummy B wins';
   const winsA = lang === 'es' ? 'Gana Muñeco A' : 'Dummy A wins';
 
-  test(`/${lang}/dev/arena?log=ko-comeback reaches playing without console errors`, async ({
-    page,
-  }) => {
+  test(`/${lang}/dev/arena?log=ko-comeback plays without console errors`, async ({ page }) => {
     const errors = trackErrors(page);
     await page.goto(`/${lang}/dev/arena?log=ko-comeback`);
-    await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+    await play(page);
     await page.waitForTimeout(1000);
     expect(errors).toEqual([]);
   });
@@ -332,7 +351,7 @@ test('?log=ko-comeback just after a knockdown: the last cue is that knockdown', 
   const knockdown = result.timeline.cues[index];
   if (knockdown === undefined) throw new Error('no knockdown in ko-comeback');
   await page.goto(`/es/dev/arena?log=ko-comeback&t=${knockdown.at_ms + 200}`);
-  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+  await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
   await expect(stage(page)).toHaveAttribute('data-last-cue', String(index));
 });
 
@@ -385,7 +404,7 @@ for (const lang of ['es', 'en'] as const) {
     test(`/${lang}/dev/arena?log=${name} at 86 500: the last cue is time_up`, async ({ page }) => {
       const errors = trackErrors(page);
       await page.goto(`/${lang}/dev/arena?log=${name}&t=86500`);
-      await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+      await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
       await expect(stage(page)).toHaveAttribute('data-last-cue', String(timeUpIndex(log)));
       expect(errors).toEqual([]);
     });

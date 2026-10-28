@@ -53,7 +53,7 @@ test('header: both selectors fit in one row at 375 px', async ({ page }) => {
   expect((theme?.x ?? 0) + (theme?.width ?? 0)).toBeLessThanOrEqual(375);
 });
 
-// 002 RF-C3: the arena playing an engine log (ko-comeback), just after its first knockdown.
+// 002 RF-C3: the arena with an engine log (ko-comeback), paused just after its first knockdown.
 for (const size of SIZES) {
   for (const theme of THEMES) {
     for (const lang of ['es', 'en'] as const) {
@@ -63,7 +63,7 @@ for (const size of SIZES) {
           .addCookies([{ name: 'theme', value: theme, url: 'http://localhost:4173' }]);
         await page.setViewportSize(size);
         await page.goto(`/${lang}/dev/arena?log=ko-comeback&t=${LOG_SHOT_T}`);
-        await expect(page.getByTestId('fight-stage')).toHaveAttribute('data-state', 'playing', {
+        await expect(page.getByTestId('fight-stage')).toHaveAttribute('data-state', 'ready', {
           timeout: 15_000,
         });
         await page.waitForTimeout(250);
@@ -95,7 +95,7 @@ for (const log of TIME_LOGS) {
             .addCookies([{ name: 'theme', value: theme, url: 'http://localhost:4173' }]);
           await page.setViewportSize(size);
           await page.goto(`/${lang}/dev/arena?log=${log}&t=${TIME_SHOT_T}`);
-          await expect(page.getByTestId('fight-stage')).toHaveAttribute('data-state', 'playing', {
+          await expect(page.getByTestId('fight-stage')).toHaveAttribute('data-state', 'ready', {
             timeout: 15_000,
           });
           await page.waitForTimeout(250);
