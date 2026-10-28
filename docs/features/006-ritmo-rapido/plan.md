@@ -249,10 +249,18 @@ Los workflows no cambian. El job `rust` suma unos segundos: el test de propiedad
 - **B3, tiempo de *debug* de `--test properties` (decisión 3 del architect).** 11,05 s antes y entre 10,64 y 11,07 s después, con `breathers_happen_and_keep_the_contract` como test propio sobre los 10 000 logs. No crece más de un 20 %, así que no se movió al bucle existente.
 - **B3, helper compartido.** `resolution_times` vive en `tests/common/mod.rs` y lo usan `properties.rs` y el conteo de pausas de `golden.rs`.
 - **B5, fixture `balanced`.** `speed` 95 → 85 en los dos twins (primer intento del plan). Media de 1098 a 1114 ms. Con 400 peleas pasa todo `--check`: espejos 50,0 %, 99,0 % en 45–90 s, ráfaga 44,2 %, pausas p50 3 y 99,0 % con pausa. `lopsided` sigue fallando solo por `win_rate`.
-- **B6, espejos (RF13), escalado.** Con 9/200/800, el lado `a` da 49,40 / 50,26 / 50,14 % con `DEFAULT_SEED`, `00…01` y `a5`×32. Con 8/150/1000 da **46,94** / 49,76 / 49,23 %: uno fuera de 47–53 y los tres por debajo de 50. Es el caso de bug estructural del paso 4. Me detuve sin mover valores ni investigar, y lo escalé al orquestador con las cifras. `ruleset.rs` se restauró (`git diff --exit-code`).
-- **F3, revisión manual.** No se hizo con `just dev`: la sustituyen los e2e de F4 sobre el build (los 7 `?log=` con `pace=0` y `pace=1.5`, el JSON de `ko-knockdown&pace=0.8`) y las capturas `arena-pace-{es,en}-{mobile,desktop}.png` de `ArenaStats` con la fila de ritmo y la nota de clamp, que un test nuevo de `arena.spec.ts` toma sin scroll horizontal.
-- **F3, catálogo.** `ArenaSection` no suma un segundo `ArenaStats` (repetiría el `id` de su título): el ejemplo que ya había lleva `pace` con clamp (`0.5` → `0.86`). Sin clamp, la fila lleva `data-clamped="false"`.
-- **F4, cifras.** Los e2e no fijan cifras de ningún dorado: el mínimo de `pace=0` y del JSON de `pace=0.8` se calcula en el test con `paceMin` y `validateTimeline`, y el ganador y el lado en 0 HP de `ko-comeback` salen de su copia. `arena-webkit.spec.ts` toma los 7 nombres de `ENGINE_LOGS`.
+- **B6, espejos (RF13): ruido, no bug.** Lado `a` con `DEFAULT_SEED`, `00…01` y `a5`×32:
+  - 9/200/800: 49,40 / 50,26 / 50,14 %;
+  - 8/150/1000: **46,94** / 49,76 / 49,23 %, uno fuera de 47–53 y los tres por debajo de 50.
+
+  Investigación del paso 4, con ediciones temporales de `ruleset.rs` (restauradas con `git diff --exit-code`) y un diagnóstico que no se commitea:
+  - (a) Sin respiro (`chance` 0) y con la corrida de 3332 espejos, la iniciativa le da al lado que la gana 52,06 % (si es `a`) y 51,36 % (si es `b`). Con 333 332 espejos (`--fights 1000000`, σ ≈ 0,09 %), el lado `a` da 50,10 / 49,93 / 49,83 % con las 3 semillas.
+  - Con el mismo millón de peleas, 8/150/1000 da 50,08 / 49,98 / 50,02 % y 9/200/800 da 50,02 / 50,10 / 50,01 %. El 46,94 % no se reproduce con una muestra grande.
+  - (b) En la corrida del 46,94 %, el lado con iniciativa gana 49,67 % si es `a` y 55,83 % si es `b`. Con 333 332 espejos: 52,90 % y 52,74 % con respiro, y 52,96 % y 52,76 % sin respiro. Es la ventaja legítima y simétrica de la iniciativa, y el respiro no la cambia.
+  - (c) Tras 8803 respiros (885 148 con el millón de peleas), el mismo atacante repite justo después **0** veces, contra ~2 % de repeticiones en general. El desplazamiento conserva el orden y el desempate, como prueba `breather_moves_both_clocks_and_keeps_the_order`.
+  - (d) `saturating_add` nunca satura: el peor caso, `time_limit_ms` más todos los sumandos, cabe en `u32` (test de cotas). El respiro sube `time_up` en espejos de 0,006 % a 0,48 %, de forma simétrica: 1611 fallos de tiempo y 10 empates en 333 332 espejos.
+
+  Conclusión: es ruido de muestreo. El 46,94 % está a −3,5σ, y la configuración se volvió a medir justamente porque era la más extrema del barrido de calibración (sesgo de selección). No se cambia código ni valores.
 
 ## Revisión
 ### architect — 2026-10-27 — APPROVE
