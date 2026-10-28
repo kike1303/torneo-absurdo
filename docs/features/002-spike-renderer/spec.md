@@ -459,3 +459,30 @@ Atendí los cuatro cambios bloqueantes de game-designer y parte de las recomenda
 
 ### Cierre — 2026-10-27
 Fases A1 (#36), A2 (#40), B (#41) y C (#42) fusionadas: la feature pasa a `done` al fusionar C, como fija el Resumen. Quedan fuera y con su issue: el go/no-go del owner (RF-B8 y RF-B9) en **TA-20**, y la `timeline_version` 2 (fines sin KO) en **TA-19**.
+
+### owner — 2026-10-27 — Go con cambios (RF-B8 y RF-B9, TA-20)
+Nota del owner, transcrita por la sesión de 002 a partir de lo que dijo en el chat. Vio la demo con los placeholders y con dos personajes convertidos en local (`local_1` y `local_2`, ambos SFF v2: uno LZ5 y otro PNG8), en escritorio y en su teléfono.
+
+**Decisión: go con cambios.** El enfoque cinemático coreografiado funciona y la pelea fluye, pero hoy se ve simple. Cambios pedidos:
+1. La arena de prueba arranca en pausa y cambiar de luchador no reinicia la pelea sola (en este mismo PR).
+2. "Copiar JSON" tiene que funcionar también fuera de un contexto seguro (en este mismo PR).
+3. Más vida: más vocabulario de animaciones por personaje (más golpes, desplazamientos, combos) y más pulido de efectos y cámara. Es trabajo de las features siguientes (004 y el motor), no de 002.
+
+**Preguntas fijas:**
+1. A 375 px, ¿se entiende en todo momento quién va ganando? **Sí.**
+2. ¿Un `crit` se distingue de un `hit` sin leer números? **A medias.**
+3. ¿El tramo de HP bajo genera tensión? **No.**
+4. ¿El KO se siente como un cierre? **A medias.**
+5. ¿Se nota quién toma la iniciativa en cada intercambio? **Sí.**
+6. ¿Funcionan los dos ritmos (la ráfaga y la pausa)? **Sí** ("creo").
+
+**Ritmo.** Prefiere un poco más rápido: `?pace=0.8` le pareció bien, y pide que el ritmo siga siempre parametrizado para volver a ajustarlo. Con `pace=1` el guion mide `mean_strike_gap_ms: 1468`, así que la separación media preferida es de **~1.2 s** (1468 × 0.8 ≈ 1174 ms). Ajusta "Datos para 003": la separación media de referencia baja de ~1.9 s a ~1.2 s. Lo demás sigue igual: ráfagas a ≤ 900 ms, pausas de ≥ 2.5 s, ≥ 600 ms entre impactos y 45 a 90 s en total.
+
+**Rendimiento** (`just dev`, `local_1` contra `local_2`, guion completo):
+
+| Dispositivo | Frames | FPS medio | p50 | p95 | p99 | > 33 ms |
+|---|---|---|---|---|---|---|
+| Mac, navegador de escritorio (992 px, DPR 1) | 3377 | 60.0 | 16.7 ms | 17.5 ms | 17.7 ms | 0 |
+| iPhone 17, Safari (LAN temporal, con OK del owner) | 3410 | 60.6 | 17.0 ms | 17.0 ms | 21.0 ms | 9 |
+
+Las dos corridas cumplen el umbral (p95 ≤ 18.2 ms y FPS medio ≥ 58). El iPhone 17 es gama alta: el dispositivo de referencia de la RNF ("Rendimiento") es un Android de gama media, y esa medición sigue **pendiente**. Hay una sola corrida por dispositivo, no tres.
