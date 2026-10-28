@@ -1,11 +1,14 @@
 //! Property tests without extra crates (003 "Estrategia de pruebas"): determinism and the RF2
-//! invariants over derived seeds, the totality of RF21 and the public API of RF4.
+//! invariants over derived seeds, the totality of RF21, the public API of RF4 and the
+//! breather of 006 RF7.
 mod common;
 
-use common::{assert_invariants, assert_only_codes, derive_seed, fixture, fixtures, v1};
+use common::{
+    assert_invariants, assert_only_codes, derive_seed, fixture, fixtures, resolution_times, v1,
+};
 use engine::{
-    Ability, CharacterSpec, Element, MoveKind, Personality, Seed, SpecError, Stats, canonical_json,
-    canonical_spec_json, simulate,
+    Ability, CharacterSpec, Element, MoveKind, Personality, Seed, SpecError, Stats,
+    TIMELINE_CONTRACT, canonical_json, canonical_spec_json, simulate,
 };
 
 const SEEDS_PER_PAIR: u32 = 1000;
@@ -32,6 +35,53 @@ fn every_log_is_deterministic_and_respects_rf2() {
             }
         }
     }
+}
+
+/// 006 RF7: share (‰) of the fights with more than `breather_after_resolutions` resolutions that
+/// must show a separation of at least `breather_gap_min()`.
+const BREATHER_SEEN_MIN_PERMILLE: u64 = 900;
+
+/// 006 RF7, over the same 10 000 logs (simulated once): the shortest separation between
+/// resolutions is at least `strike_gap_min()`, and breathers do happen.
+#[test]
+fn breathers_happen_and_keep_the_contract() {
+    let r = v1();
+    assert!(r.strike_gap_min() >= TIMELINE_CONTRACT.strike_gap_ms);
+    let all = fixtures();
+    let mut min_gap = u32::MAX;
+    let (mut eligible, mut paused) = (0_u64, 0_u64);
+    for (i, (_, a)) in all.iter().enumerate() {
+        for (j, (_, b)) in all.iter().enumerate().skip(i) {
+            for k in 0..SEEDS_PER_PAIR {
+                let n = u32::try_from(i * 4 + j).unwrap() * SEEDS_PER_PAIR + k;
+                let log = simulate(&Seed::from_bytes(derive_seed(n)), a, b, &r).unwrap();
+                let times = resolution_times(&log);
+                let gaps: Vec<u32> = times
+                    .windows(2)
+                    .filter_map(|w| match w {
+                        [x, y] => Some(y - x),
+                        _ => None,
+                    })
+                    .collect();
+                min_gap = gaps.iter().copied().fold(min_gap, u32::min);
+                if times.len() > usize::try_from(r.breather_after_resolutions()).unwrap() {
+                    eligible += 1;
+                    if gaps.iter().any(|g| *g >= r.breather_gap_min()) {
+                        paused += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        min_gap >= r.strike_gap_min(),
+        "shortest separation {min_gap}"
+    );
+    assert!(eligible > 0);
+    assert!(
+        paused * 1000 >= BREATHER_SEEN_MIN_PERMILLE * eligible,
+        "{paused} of {eligible} fights with a pause"
+    );
 }
 
 fn spec(

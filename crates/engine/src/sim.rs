@@ -1,5 +1,7 @@
 //! Turn-based simulation with simulated time in integer ms (003 RF7–RF9, "Modelo de
-//! simulación"). Every roll goes through [`Rolls`], in the order of RF7.
+//! simulación"). Every roll goes through [`Rolls`], in the order of RF7: initiative, then per
+//! action choice, defense, variance, critical and jitter (steps 1–5) and, after an action
+//! without KO nor knockdown, the breather roll and its duration (steps 6–7, 006 RF2–RF3).
 use std::num::NonZeroU32;
 
 use protocol::{AbilityKind, EndReason, FightEvent, FightLog, FighterInfo, MomentKind, Side};
@@ -263,6 +265,9 @@ struct Fight<'a> {
     b: Fighter<'a>,
     events: Vec<FightEvent>,
     last: Option<Side>,
+    /// Resolutions without KO nor knockdown since the start, the last breather or the last
+    /// knockdown (006 RF2).
+    since_breather: u32,
 }
 
 /// Simulates a fight between two **already validated** characters.
@@ -283,6 +288,7 @@ pub(crate) fn run<R: Rolls>(
         b: Fighter::new(b, r)?,
         events: vec![FightEvent::Intro { t: 0 }],
         last: None,
+        since_breather: 0,
     };
     let reserve = (EVENTS_PER_ACTION_MAX + EVENTS_TAIL_MAX) as usize;
     loop {
@@ -508,7 +514,34 @@ impl Fight<'_> {
             return true;
         }
         self.last = Some(side);
+        self.breather(rolls, knockdown);
         false
+    }
+
+    /// The breather after an action without KO (006 RF2, steps 6–7 of RF7): a knockdown resets
+    /// the counter without rolling; otherwise, once the counter reaches
+    /// `breather_after_resolutions`, a roll may move both clocks by the same duration, which
+    /// keeps who acts next.
+    fn breather<R: Rolls>(&mut self, rolls: &mut R, knockdown: bool) {
+        let r = self.r;
+        if knockdown {
+            self.since_breather = 0;
+            return;
+        }
+        self.since_breather = self.since_breather.saturating_add(1);
+        if self.since_breather < r.breather_after_resolutions() {
+            return;
+        }
+        // 6. Does a breather start?
+        if rolls.roll(PERMILLE) >= r.breather_chance_permille() {
+            return;
+        }
+        // 7. Its duration.
+        let span = rolls.roll(bound(r.breather_span_ms().saturating_add(1)));
+        let d = r.breather_min_ms().saturating_add(span);
+        self.a.next_at = self.a.next_at.saturating_add(d);
+        self.b.next_at = self.b.next_at.saturating_add(d);
+        self.since_breather = 0;
     }
 }
 
@@ -586,6 +619,10 @@ mod tests {
         defense: Def,
         variance: u32,
         crit: bool,
+        /// Answer to step 6, if the engine asks for it: 0 (breather) or 999 (none).
+        breather: bool,
+        /// Answer to step 7 (`roll(801)`).
+        breather_ms: u32,
     }
 
     const DODGE: Plan = Plan {
@@ -593,6 +630,8 @@ mod tests {
         defense: Def::Dodge,
         variance: 0,
         crit: false,
+        breather: false,
+        breather_ms: 0,
     };
 
     const HIT: Plan = Plan {
@@ -608,16 +647,22 @@ mod tests {
         Variance,
         Crit,
         Jitter,
+        /// After the jitter: step 6 (bound 1000) or the choice of the next action.
+        AfterJitter,
+        BreatherSpan,
     }
 
     /// A roller that follows the RF7 order as a state machine, checks every bound it is asked
-    /// for, and answers from a per-action plan.
+    /// for, and answers from a per-action plan. After the jitter, the bound tells step 6
+    /// (`roll(1000)`) from the next choice, whose weight totals never reach 1000 in these tests.
     struct Scripted<F> {
         step: Step,
         action: usize,
         plan: Plan,
         initiative: u32,
         strategy: F,
+        /// Actions (0-based) after which step 6 was asked for.
+        breather_asks: Vec<usize>,
     }
 
     impl<F: FnMut(usize) -> Plan> Scripted<F> {
@@ -628,7 +673,15 @@ mod tests {
                 plan: DODGE,
                 initiative,
                 strategy,
+                breather_asks: vec![],
             }
+        }
+
+        fn choice(&mut self, n: u32) -> (u32, Step) {
+            assert_ne!(n, 1000, "a weight total that looks like step 6");
+            self.plan = (self.strategy)(self.action);
+            self.action += 1;
+            (if self.plan.last_option { n - 1 } else { 0 }, Step::Defense)
         }
     }
 
@@ -640,11 +693,7 @@ mod tests {
                     assert_eq!(n, 2);
                     (self.initiative, Step::Choice)
                 }
-                Step::Choice => {
-                    self.plan = (self.strategy)(self.action);
-                    self.action += 1;
-                    (if self.plan.last_option { n - 1 } else { 0 }, Step::Defense)
-                }
+                Step::Choice => self.choice(n),
                 Step::Defense => {
                     assert_eq!(n, 1000);
                     match self.plan.defense {
@@ -667,7 +716,20 @@ mod tests {
                 }
                 Step::Jitter => {
                     assert_eq!(n, 201);
-                    (0, Step::Choice)
+                    (0, Step::AfterJitter)
+                }
+                Step::AfterJitter if n == 1000 => {
+                    self.breather_asks.push(self.action - 1);
+                    if self.plan.breather {
+                        (0, Step::BreatherSpan)
+                    } else {
+                        (999, Step::Choice)
+                    }
+                }
+                Step::AfterJitter => self.choice(n),
+                Step::BreatherSpan => {
+                    assert_eq!(n, 801);
+                    (self.plan.breather_ms, Step::Choice)
                 }
             };
             self.step = next;
@@ -681,9 +743,34 @@ mod tests {
         initiative: u32,
         strategy: impl FnMut(usize) -> Plan,
     ) -> FightLog {
+        run_asked(a, b, initiative, strategy).0
+    }
+
+    /// The log and the actions after which step 6 was asked for.
+    fn run_asked(
+        a: &CharacterSpec,
+        b: &CharacterSpec,
+        initiative: u32,
+        strategy: impl FnMut(usize) -> Plan,
+    ) -> (FightLog, Vec<usize>) {
         a.validate(&r()).unwrap();
         b.validate(&r()).unwrap();
-        run(&mut Scripted::new(initiative, strategy), a, b, &r()).unwrap()
+        let mut rolls = Scripted::new(initiative, strategy);
+        let log = run(&mut rolls, a, b, &r()).unwrap();
+        (log, rolls.breather_asks)
+    }
+
+    fn resolution_times(log: &FightLog) -> Vec<u32> {
+        log.events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    FightEvent::Hit { .. } | FightEvent::Block { .. } | FightEvent::Dodge { .. }
+                )
+            })
+            .map(FightEvent::t)
+            .collect()
     }
 
     fn attacks(log: &FightLog) -> Vec<(u32, Side, String)> {
@@ -823,33 +910,86 @@ mod tests {
         struct Recorder<R> {
             inner: R,
             asked: Vec<u32>,
+            given: Vec<u32>,
         }
         impl<R: Rolls> Rolls for Recorder<R> {
             fn roll(&mut self, n: NonZeroU32) -> u32 {
+                let value = self.inner.roll(n);
                 self.asked.push(n.get());
-                self.inner.roll(n)
+                self.given.push(value);
+                value
             }
         }
+        /// One action as the log shows it: its rolls of steps 1–5, knockdown and KO.
+        struct Seen {
+            rolls: &'static [u32],
+            knockdown: bool,
+            ko: bool,
+        }
+        let r = r();
         let a = plain("one-a", [60, 60, 60, 60, 60]);
         let b = plain("one-b", [70, 70, 40, 60, 60]);
+        let mut breathers = 0;
         for byte in 0..8 {
             let mut rec = Recorder {
                 inner: Roller::from_seed(&Seed::from_bytes([byte; 32])),
                 asked: vec![],
+                given: vec![],
             };
-            let log = run(&mut rec, &a, &b, &r()).unwrap();
-            let mut expected = vec![2];
+            let log = run(&mut rec, &a, &b, &r).unwrap();
+            let mut actions: Vec<Seen> = vec![];
             for event in &log.events {
-                match event {
-                    FightEvent::Dodge { .. } => expected.extend([0, 1000, 201]),
-                    FightEvent::Block { .. } => expected.extend([0, 1000, 31, 201]),
-                    FightEvent::Hit { .. } => expected.extend([0, 1000, 31, 1000, 201]),
-                    _ => {}
+                // 0 stands for the weight total of the choice, which depends on the cooldowns.
+                let rolls: &'static [u32] = match event {
+                    FightEvent::Dodge { .. } => &[0, 1000, 201],
+                    FightEvent::Block { .. } => &[0, 1000, 31, 201],
+                    FightEvent::Hit { .. } => &[0, 1000, 31, 1000, 201],
+                    FightEvent::Knockdown { .. } => {
+                        if let Some(seen) = actions.last_mut() {
+                            seen.knockdown = true;
+                        }
+                        continue;
+                    }
+                    FightEvent::Ko { .. } => {
+                        if let Some(seen) = actions.last_mut() {
+                            seen.ko = true;
+                        }
+                        continue;
+                    }
+                    _ => continue,
+                };
+                actions.push(Seen {
+                    rolls,
+                    knockdown: false,
+                    ko: false,
+                });
+            }
+            // Steps 6–7 with the counter of RF2 replicated.
+            let mut expected = vec![2];
+            let mut since = 0;
+            for seen in &actions {
+                expected.extend(seen.rolls);
+                if seen.ko {
+                    continue;
+                }
+                if seen.knockdown {
+                    since = 0;
+                    continue;
+                }
+                since += 1;
+                if since >= r.breather_after_resolutions() {
+                    let at = expected.len();
+                    expected.push(1000);
+                    let given = rec.given.get(at).copied().unwrap();
+                    if given < r.breather_chance_permille() {
+                        expected.push(r.breather_span_ms() + 1);
+                        since = 0;
+                        breathers += 1;
+                    }
                 }
             }
             assert_eq!(rec.asked.len(), expected.len());
             for (asked, want) in rec.asked.iter().zip(&expected) {
-                // 0 stands for the weight total of the choice, which depends on the cooldowns.
                 if *want == 0 {
                     assert!(*asked >= 100, "weight total {asked}");
                 } else {
@@ -857,6 +997,75 @@ mod tests {
                 }
             }
         }
+        assert!(breathers > 0, "no breather in 8 fights");
+    }
+
+    #[test]
+    fn breather_moves_both_clocks_and_keeps_the_order() {
+        let a = plain("one-a", [60, 60, 60, 60, 60]);
+        let b = plain("one-b", [60, 60, 60, 50, 60]);
+        let r = r();
+        let nth = usize::try_from(r.breather_after_resolutions()).unwrap() - 1;
+        let (calm, asks) = run_asked(&a, &b, 0, |_| DODGE);
+        // Nothing is rolled before the 9th resolution; then after every action.
+        assert_eq!(asks.first(), Some(&nth));
+        assert_eq!(asks.get(1), Some(&(nth + 1)));
+        // A roll >= chance moves nothing.
+        assert!(
+            resolution_times(&calm)
+                .windows(2)
+                .all(|w| matches!(w, [x, y] if y - x < r.breather_gap_min()))
+        );
+        for span in [0, r.breather_span_ms()] {
+            let (paused, asks) = run_asked(&a, &b, 0, |i| Plan {
+                breather: i == nth,
+                breather_ms: span,
+                ..DODGE
+            });
+            let d = r.breather_min_ms() + span;
+            // The counter starts again after the breather.
+            assert_eq!(asks.get(1), Some(&(2 * nth + 1)));
+            let (t_res, next) = (
+                resolution_time(&paused, nth),
+                resolution_time(&paused, nth + 1),
+            );
+            assert!(next >= t_res + r.breather_gap_min(), "{t_res} -> {next}");
+            assert!(next - t_res >= d, "{t_res} -> {next}");
+            // Same attackers, every later attack exactly `d` later.
+            let (before, after) = (attacks(&calm), attacks(&paused));
+            for (i, (x, y)) in before.iter().zip(&after).enumerate() {
+                assert_eq!(x.1, y.1, "attacker {i}");
+                let shift = if i > nth { d } else { 0 };
+                assert_eq!(y.0, x.0 + shift, "attack {i}");
+            }
+        }
+    }
+
+    #[test]
+    fn knockdown_and_ko_do_not_roll_a_breather() {
+        let r = r();
+        let nth = usize::try_from(r.breather_after_resolutions()).unwrap() - 1;
+        // A knockdown at action 4 resets the counter: the first ask is 9 actions later.
+        let a = plain("puncher", [50, 100, 50, 50, 50]);
+        let b = plain("glass", [1, 50, 1, 50, 50]);
+        let crit = Plan {
+            variance: 30,
+            crit: true,
+            ..HIT
+        };
+        let (log, asks) = run_asked(&a, &b, 0, |i| if i == 4 { crit } else { DODGE });
+        assert!(
+            log.events
+                .iter()
+                .any(|e| matches!(e, FightEvent::Knockdown { .. }))
+        );
+        assert_eq!(asks.first(), Some(&(4 + nth + 1)));
+        // Plain hits until the KO: every action from the 9th is asked, except the KO.
+        let (log, asks) = run_asked(&a, &b, 0, |_| HIT);
+        assert_eq!(log.outcome().map(|o| o.1), Some(EndReason::Ko));
+        let actions = attacks(&log).len();
+        assert!(actions > nth + 1);
+        assert_eq!(asks, (nth..actions - 1).collect::<Vec<_>>());
     }
 
     #[test]

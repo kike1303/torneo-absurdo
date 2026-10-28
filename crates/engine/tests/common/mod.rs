@@ -57,6 +57,15 @@ fn is_resolution(event: &FightEvent) -> bool {
     )
 }
 
+/// Times of the resolutions (`hit`, `block`, `dodge`), in log order.
+pub fn resolution_times(log: &FightLog) -> Vec<u32> {
+    log.events
+        .iter()
+        .filter(|e| is_resolution(e))
+        .map(FightEvent::t)
+        .collect()
+}
+
 fn index(side: Side) -> usize {
     match side {
         Side::A => 0,
