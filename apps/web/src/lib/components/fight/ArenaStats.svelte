@@ -92,7 +92,7 @@
         rows="8"
         value={manual}
         onfocus={(event) => event.currentTarget.select()}
-        class="w-full rounded-lg border border-input bg-background p-3 font-mono text-base sm:text-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
+        class="w-full rounded-lg border border-input bg-background p-3 font-mono text-base focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none sm:text-xs"
         data-testid="arena-copy-manual"></textarea>
     </label>
   {/if}
