@@ -250,6 +250,9 @@ Los workflows no cambian. El job `rust` suma unos segundos: el test de propiedad
 - **B3, helper compartido.** `resolution_times` vive en `tests/common/mod.rs` y lo usan `properties.rs` y el conteo de pausas de `golden.rs`.
 - **B5, fixture `balanced`.** `speed` 95 → 85 en los dos twins (primer intento del plan). Media de 1098 a 1114 ms. Con 400 peleas pasa todo `--check`: espejos 50,0 %, 99,0 % en 45–90 s, ráfaga 44,2 %, pausas p50 3 y 99,0 % con pausa. `lopsided` sigue fallando solo por `win_rate`.
 - **B6, espejos (RF13), escalado.** Con 9/200/800, el lado `a` da 49,40 / 50,26 / 50,14 % con `DEFAULT_SEED`, `00…01` y `a5`×32. Con 8/150/1000 da **46,94** / 49,76 / 49,23 %: uno fuera de 47–53 y los tres por debajo de 50. Es el caso de bug estructural del paso 4. Me detuve sin mover valores ni investigar, y lo escalé al orquestador con las cifras. `ruleset.rs` se restauró (`git diff --exit-code`).
+- **F3, revisión manual.** No se hizo con `just dev`: la sustituyen los e2e de F4 sobre el build (los 7 `?log=` con `pace=0` y `pace=1.5`, el JSON de `ko-knockdown&pace=0.8`) y las capturas `arena-pace-{es,en}-{mobile,desktop}.png` de `ArenaStats` con la fila de ritmo y la nota de clamp, que un test nuevo de `arena.spec.ts` toma sin scroll horizontal.
+- **F3, catálogo.** `ArenaSection` no suma un segundo `ArenaStats` (repetiría el `id` de su título): el ejemplo que ya había lleva `pace` con clamp (`0.5` → `0.86`). Sin clamp, la fila lleva `data-clamped="false"`.
+- **F4, cifras.** Los e2e no fijan cifras de ningún dorado: el mínimo de `pace=0` y del JSON de `pace=0.8` se calcula en el test con `paceMin` y `validateTimeline`, y el ganador y el lado en 0 HP de `ko-comeback` salen de su copia. `arena-webkit.spec.ts` toma los 7 nombres de `ENGINE_LOGS`.
 
 ## Revisión
 ### architect — 2026-10-27 — APPROVE
