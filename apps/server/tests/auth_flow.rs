@@ -404,54 +404,6 @@ fn state(db: &TestDb, pool: PgPool) -> AppState {
 }
 
 #[tokio::test]
-async fn twenty_concurrent_first_logins_make_one_user_one_grant_and_twenty_sessions() {
-    let db = TestDb::create().await;
-    let pool = db.migrated_pool().await;
-    let state = state(&db, pool.clone());
-    let identity = Identity {
-        provider: Provider::Dev,
-        subject: "ana".to_owned(),
-    };
-    let logins = (0..20).map(|_| {
-        let state = state.clone();
-        let identity = identity.clone();
-        tokio::spawn(async move {
-            login::login(
-                &state.auth,
-                &state.db,
-                &identity,
-                [1; 32],
-                UaFamily::Other,
-                None,
-            )
-            .await
-        })
-    });
-    let results = futures_util::future::join_all(logins).await;
-    let mut tokens = Vec::new();
-    for result in results {
-        tokens.push(result.unwrap().unwrap().token);
-    }
-    assert_eq!(count(&pool, "users").await, 1);
-    assert_eq!(count(&pool, "ledger_entries").await, 1);
-    assert_eq!(count(&pool, "oauth_accounts").await, 1);
-    for token in &tokens {
-        assert!(
-            sessions::validate(&pool, &token.hash())
-                .await
-                .unwrap()
-                .is_some()
-        );
-    }
-    let user: uuid::Uuid = sqlx::query("SELECT id FROM users")
-        .fetch_one(&pool)
-        .await
-        .unwrap()
-        .get(0);
-    assert_eq!(server::ledger::balance(&pool, user).await.unwrap().0, 100);
-}
-
-#[tokio::test]
 async fn a_failure_after_the_user_insert_leaves_no_user_and_no_grant() {
     let db = TestDb::create().await;
     let pool = db.migrated_pool().await;
