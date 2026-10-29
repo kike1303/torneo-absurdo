@@ -240,3 +240,52 @@ jobs:
           done
           echo "https://$PUBLIC_HOST/api/health never reported $TAG" >&2
           exit 1
+      # ADR-0012 consequence 11: every B2 header of each response exactly once, with its value.
+      # The values are written here because a workflow cannot import security-headers.ts.
+      - name: Security headers (ADR-0012 B2)
+        env:
+          PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
+        run: |
+          set -uo pipefail
+          nosniff='x-content-type-options=nosniff'
+          hsts='strict-transport-security=max-age=31536000'
+          web=("$nosniff" "$hsts"
+            'referrer-policy=strict-origin-when-cross-origin'
+            'cross-origin-opener-policy=same-origin'
+            'permissions-policy=camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=()')
+          server=("$nosniff" "$hsts"
+            'cross-origin-resource-policy=same-origin'
+            "content-security-policy=default-src 'none'; frame-ancestors 'none'")
+          fail=0
+          # check <path> <status> <name=value>...: a value of `*` only requires the header once.
+          check() {
+            local path="$1" want="$2" url="https://$PUBLIC_HOST$1" file status pair name value got
+            shift 2
+            file="$(mktemp)"
+            status="$(curl -sS -I --proto '=https' --max-time 10 -o "$file" -w '%{http_code}' "$url")"
+            if [ "$status" != "$want" ]; then
+              echo "$path answers $status, expected $want" >&2
+              fail=1
+              return
+            fi
+            for pair in "$@"; do
+              name="${pair%%=*}"
+              value="${pair#*=}"
+              got="$(grep -i "^$name:" "$file" | sed 's/^[^:]*:[[:space:]]*//' | tr -d '\r')"
+              if [ "$(grep -ci "^$name:" "$file")" != 1 ]; then
+                echo "$path sends $name $(grep -ci "^$name:" "$file") times, expected once" >&2
+                fail=1
+              elif [ "$value" != '*' ] && [ "$got" != "$value" ]; then
+                echo "$path sends $name: $got, expected $value" >&2
+                fail=1
+              fi
+            done
+            echo "$path: $status, checked"
+          }
+          # B1 carries a nonce per request, so only its presence (once) is checked here; its
+          # directives are enforced by scripts/check-kit-config.mjs and the e2e.
+          check /es/ 200 "${web[@]}" 'content-security-policy=*'
+          check /_app/version.json 200 "${web[@]}"
+          check /healthz/ 308 "${web[@]}"
+          check /api/health 200 "${server[@]}"
+          exit "$fail"

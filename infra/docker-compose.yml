@@ -123,6 +123,8 @@ services:
       - traefik.http.middlewares.torneo-web-headers.headers.stsSeconds=31536000
       - traefik.http.middlewares.torneo-web-headers.headers.stsIncludeSubdomains=false
       - traefik.http.middlewares.torneo-web-headers.headers.stsPreload=false
+      - traefik.http.middlewares.torneo-web-headers.headers.customResponseHeaders.Cross-Origin-Opener-Policy=same-origin
+      - traefik.http.middlewares.torneo-web-headers.headers.permissionsPolicy=camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=()
 
 networks:
   # Created once on the VPS (docs/architecture.md); locally by scripts/local-networks.sh.

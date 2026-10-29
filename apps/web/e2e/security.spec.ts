@@ -9,6 +9,10 @@ function expectSecurityHeaders(res: RawResponse, label: string): void {
   expect(header(res, 'x-content-type-options'), label).toBe('nosniff');
   expect(header(res, 'referrer-policy'), label).toBe('strict-origin-when-cross-origin');
   expect(header(res, 'strict-transport-security'), label).toBe('max-age=31536000');
+  expect(header(res, 'cross-origin-opener-policy'), label).toBe('same-origin');
+  expect(header(res, 'permissions-policy'), label).toBe(
+    'camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=()',
+  );
 }
 
 test('RF-A10: security headers on 200, 307, 403 and 404, and a CSP with nonce', async () => {

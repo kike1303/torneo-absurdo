@@ -518,6 +518,53 @@ const CASES = [
     /referrerpolicy must be no-referrer/,
   ],
   [
+    'SECURITY_HEADERS COOP differs',
+    {
+      [H]: [
+        [
+          "'cross-origin-opener-policy': 'same-origin'",
+          "'cross-origin-opener-policy': 'unsafe-none'",
+        ],
+      ],
+    },
+    /security-headers: cross-origin-opener-policy must be same-origin/,
+  ],
+  [
+    'SECURITY_HEADERS Permissions-Policy relaxed',
+    { [H]: [['camera=(), microphone=()', 'camera=(self), microphone=()']] },
+    /security-headers: permissions-policy must be camera=\(\)/,
+  ],
+  [
+    'COOP label missing',
+    {
+      [C]: [
+        [`      - ${HEADERS}.customResponseHeaders.Cross-Origin-Opener-Policy=same-origin\n`, ''],
+      ],
+    },
+    /labels: missing traefik\.http\.middlewares\.torneo-web-headers\.headers\.customresponseheaders\.cross-origin-opener-policy=same-origin/,
+  ],
+  [
+    'Permissions-Policy label differs',
+    {
+      [C]: [
+        [`${HEADERS}.permissionsPolicy=camera=()`, `${HEADERS}.permissionsPolicy=camera=(self)`],
+      ],
+    },
+    /permissionspolicy must be camera=\(\), microphone/,
+  ],
+  [
+    'COOP label spelled differently',
+    {
+      [C]: [
+        [
+          `${HEADERS}.customResponseHeaders.Cross-Origin-Opener-Policy`,
+          `${HEADERS}.customresponseheaders.cross-origin-opener-policy`,
+        ],
+      ],
+    },
+    /must be spelled .*customResponseHeaders\.Cross-Origin-Opener-Policy/,
+  ],
+  [
     'SECURITY_HEADERS entry missing',
     { [H]: [["  'x-content-type-options': 'nosniff',\n", '']] },
     /security-headers: SECURITY_HEADERS must have exactly/,

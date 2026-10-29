@@ -413,19 +413,32 @@ jobs:
             exit 1
           fi
           curl -fsS -o /dev/null -w '/healthz %{http_code}\n' http://127.0.0.1:3000/healthz
-          headers="$(curl -fsS -I http://127.0.0.1:3000/es/)"
-          echo "$headers"
-          for name in x-content-type-options referrer-policy strict-transport-security; do
-            count="$(grep -ci "^$name:" <<<"$headers" || true)"
-            if [ "$count" != 1 ]; then
-              echo "/es/ sends $name $count times, expected once" >&2
-              exit 1
+          # ADR-0012 B2: each header exactly once (Traefik is absent here, so this is `handle`).
+          once() {
+            local url="$1" headers count name
+            shift
+            headers="$(curl -sS -I "$url")"
+            echo "$headers"
+            for name in "$@"; do
+              count="$(grep -ci "^$name:" <<<"$headers" || true)"
+              if [ "$count" != 1 ]; then
+                echo "$url sends $name $count times, expected once" >&2
+                return 1
+              fi
+            done
+            if grep -i '^strict-transport-security:' <<<"$headers" | grep -Eqi 'includesubdomains|preload'; then
+              echo "HSTS must not carry includeSubDomains or preload" >&2
+              return 1
             fi
-          done
-          if grep -i '^strict-transport-security:' <<<"$headers" | grep -Eqi 'includesubdomains|preload'; then
-            echo "HSTS must not carry includeSubDomains or preload" >&2
-            exit 1
-          fi
+          }
+          curl -fsS -o /dev/null http://127.0.0.1:3000/es/
+          once http://127.0.0.1:3000/es/ x-content-type-options referrer-policy \
+            strict-transport-security cross-origin-opener-policy permissions-policy
+          server_headers=(x-content-type-options strict-transport-security
+            cross-origin-resource-policy content-security-policy)
+          once http://127.0.0.1:8080/api/health "${server_headers[@]}"
+          [ "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/nada)" = 404 ]
+          once http://127.0.0.1:8080/api/nada "${server_headers[@]}"
           # Baseline without Traefik (RF-C7): printed, not asserted.
           curl -sS -I http://127.0.0.1:3000/_app/version.json
           curl -sS -I http://127.0.0.1:3000/healthz/
