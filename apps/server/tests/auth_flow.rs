@@ -111,6 +111,8 @@ async fn a_first_login_creates_the_user_the_grant_and_a_session() {
     // Iguana, Manzana, Campana…).
     let name = body["display_name"].as_str().unwrap();
     assert!(!name.to_lowercase().contains(IDENTITY), "{name}");
+    // A sanitized copy of the identity (`ana_bel-7` without separators) is not an alias either.
+    assert!(!name.to_lowercase().contains("anabel7"), "{name}");
     assert!(name.chars().all(|c| c.is_ascii_alphanumeric()), "{name}");
     assert!(server::profile::name::validate(name).is_ok());
 
