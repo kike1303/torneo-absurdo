@@ -9,6 +9,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -73,6 +74,24 @@ describe('local-secrets.sh', () => {
     const first = readFileSync(out, 'utf8');
     run(root);
     expect(readFileSync(out, 'utf8')).toBe(first);
+  });
+
+  it('regenerates an existing file that is empty or lost a secret', () => {
+    for (const content of ['', '# Generated\nINTERNAL_API_SECRET=\n', 'INTERNAL_API_SECRET=x\n']) {
+      const root = tree();
+      const out = join(root, 'infra', 'local.secrets.env');
+      writeFileSync(out, content);
+      run(root);
+      const lines = readFileSync(out, 'utf8')
+        .split('\n')
+        .filter((line) => line && !line.startsWith('#'));
+      expect(lines.map((line) => line.split('=')[0])).toEqual([
+        'INTERNAL_API_SECRET',
+        'IP_HASH_KEY',
+      ]);
+      for (const line of lines) expect(line.split('=')[1]).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(statSync(out).mode & 0o777).toBe(0o600);
+    }
   });
 
   it('is ignored by git and by the Docker build context', () => {

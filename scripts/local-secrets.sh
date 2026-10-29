@@ -3,15 +3,25 @@
 # "outside loopback", where the server refuses the public values of apps/server/.env.example, and
 # a fixed value committed to git would be accepted by the production binary too. So they are
 # generated on first use (32 bytes of /dev/urandom each, base64url without padding) into
-# infra/local.secrets.env, which git and .dockerignore ignore. An existing file is never touched.
+# infra/local.secrets.env, which git and .dockerignore ignore. An existing valid file is never
+# touched; an empty or truncated one is regenerated.
 # Prints nothing: the values never reach the terminal.
 set -eu
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 file="$root/infra/local.secrets.env"
 
+# A file with both secrets well formed is kept as it is. An empty or truncated one (compose would
+# fail with "missing a value") is replaced.
+valid() {
+    grep -Eq '^INTERNAL_API_SECRET=[A-Za-z0-9_-]{43}$' "$file" &&
+        grep -Eq '^IP_HASH_KEY=[A-Za-z0-9_-]{43}$' "$file"
+}
 if [ -e "$file" ]; then
-    exit 0
+    if valid; then
+        exit 0
+    fi
+    rm -f "$file"
 fi
 
 secret() {

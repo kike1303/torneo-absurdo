@@ -1,7 +1,8 @@
 # Production stack that Coolify deploys (RF-C4, ADR-0006 D1 to D4). Only `web` and `server`:
 # Postgres is a standalone Coolify resource, reached through the external `torneo-db` network.
-# IMAGE_TAG, PUBLIC_HOST and DATABASE_URL come from Coolify; locally, `just prod-local` exports
-# IMAGE_TAG and reads infra/local.env. No `name:` (Coolify sets its own), no `build:`, no `ports:`.
+# IMAGE_TAG, PUBLIC_HOST, DATABASE_URL, INTERNAL_API_SECRET and IP_HASH_KEY come from Coolify;
+# locally, `just prod-local` exports IMAGE_TAG and reads infra/local.env and the generated
+# infra/local.secrets.env. No `name:` (Coolify sets its own), no `build:`, no `ports:`.
 # scripts/check-compose.mjs enforces the exact shape of this file.
 
 services:

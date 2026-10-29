@@ -110,7 +110,9 @@ _test-rust:
     set -euo pipefail
     # Stale canaries of earlier runs must not count: each run of tests/pg_log.rs writes its own.
     rm -f target/tmp/pglog-canary-*.txt
-    since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    # The clock of the Postgres container, not the host's: `logs --since` filters by the daemon's
+    # clock, which drifts inside a VM (Colima, Docker Desktop).
+    since="$(docker compose -f infra/compose.dev.yml exec -T postgres date -u +%Y-%m-%dT%H:%M:%SZ)"
     DATABASE_URL='{{test_db_url}}' cargo test --workspace --locked
     DATABASE_URL='{{test_db_url}}' cargo test -p server --features dev-auth --locked
     {{just_executable()}} _check-pg-log "$since"
