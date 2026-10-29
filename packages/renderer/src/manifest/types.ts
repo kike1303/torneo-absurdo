@@ -1,4 +1,5 @@
 // Sprite manifest, format v1 (spec "Diseño → Formato de assets v1", RF-A4 and RF-A5).
+import { TIMELINE_LIMITS } from '../timeline/types.ts';
 
 export const MANIFEST_FORMAT = 'torneo.sprites';
 export const MANIFEST_FORMAT_VERSION = 1;
@@ -34,6 +35,13 @@ export type AttackAnimation = (typeof ATTACK_ANIMATIONS)[number];
 export const LOOPING_ANIMATIONS: readonly AnimationCode[] = ['idle', 'walk'];
 export const NON_LOOPING_ANIMATIONS: readonly AnimationCode[] = ['ko'];
 
+/**
+ * The choreography guarantee of 002: with impacts at least `strikeGapMs` apart and windups of at
+ * most `windupMaxMs`, a fighter's next windup starts at least this long after an impact it
+ * received, so the reaction is always seen (007 RF-A1).
+ */
+export const REACTION_WINDOW_MS = 200;
+
 export const LIMITS = Object.freeze({
   idPattern: /^[a-z][a-z0-9_]{0,47}$/,
   sheetFilePattern: /^sheet-[0-9]+\.png$/,
@@ -47,7 +55,8 @@ export const LIMITS = Object.freeze({
   frameMsMin: 16,
   frameMsMax: 2000,
   nonLoopingTotalMaxMs: 3000,
-  windupMaxMs: 400,
+  /** Derived, not chosen: the gap between impacts minus the reaction window (007 RF-A1). */
+  windupMaxMs: TIMELINE_LIMITS.strikeGapMs - REACTION_WINDOW_MS,
   scaleMin: 0.25,
   scaleMax: 4,
   maxErrors: 100,
