@@ -4,7 +4,7 @@ type: architecture
 status: draft
 author: architect
 created: 2026-10-20
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # Arquitectura general
@@ -133,7 +133,7 @@ Scheduled ─▶ BettingOpen ─▶ BettingClosed ─▶ Live ─▶ Settled
   - `torneo-*-http` redirigen a HTTPS con `torneo-https-redirect`;
   - los cuatro routers llevan `observability.accesslogs=false`.
 
-  El router `torneo-web` lleva además el middleware `torneo-web-headers` (`nosniff`, `Referrer-Policy: strict-origin-when-cross-origin` y HSTS `max-age=31536000` **sin** `includeSubDomains` ni `preload`). Así cubre las respuestas que no pasan por el `handle` de SvelteKit: los estáticos y la 308 de `/healthz/`. axum ya pone las suyas.
+  El router `torneo-web` lleva además el middleware `torneo-web-headers` (`nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, HSTS `max-age=31536000` **sin** `includeSubDomains` ni `preload`, `Cross-Origin-Opener-Policy: same-origin` y `Permissions-Policy`; valores en ADR-0012 B2). Así cubre las respuestas que no pasan por el `handle` de SvelteKit: los estáticos y la 308 de `/healthz/`. axum ya pone las suyas.
 
 ### Release con gate manual (ADR-0006 D5 y D6)
 1. El owner empuja un tag `vX.Y.Z` (un ruleset de tags se lo reserva). `release.yml/build` valida el tag con `^v[0-9]+\.[0-9]+\.[0-9]+$` antes de construir y comprueba que ni `vX.Y.Z` ni `sha-<7>` existen ya, porque una etiqueta publicada nunca se mueve. Después publica `server` y `web` con las dos etiquetas sobre el mismo digest, sin `latest`, y con un manifiesto de imagen por etiqueta (`provenance` y `sbom` apagados, comprobado con `imagetools inspect --raw`). Al final aplica la retención: conserva las 10 versiones más recientes de cada paquete.
@@ -236,7 +236,8 @@ Ninguno se cumple en la feature 001. Los puntos 1 a 4 se siguen en Linear (TA-8,
        'log_transaction_sample_rate', 'log_statement_sample_rate', 'log_lock_waits',
        'log_line_prefix', 'log_hostname') ORDER BY name;
      ```
-   - `curl -I` a `https://${PUBLIC_HOST}/es/`, `/_app/version.json` y `/healthz/` (la 308). Las tres respuestas traen `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin` y `Strict-Transport-Security: max-age=31536000`, sin `includeSubDomains` ni `preload` y cada una una sola vez (Traefik solo emite HSTS sobre TLS).
+   - `curl -I` a `https://${PUBLIC_HOST}/es/`, `/_app/version.json` y `/healthz/` (la 308). Las tres respuestas traen `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Strict-Transport-Security: max-age=31536000`, `Cross-Origin-Opener-Policy: same-origin` y `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=()`, sin `includeSubDomains` ni `preload` y cada una una sola vez (Traefik solo emite HSTS sobre TLS).
+   - `curl -I` a `https://${PUBLIC_HOST}/api/health`: `X-Content-Type-Options`, `Strict-Transport-Security`, `Cross-Origin-Resource-Policy: same-origin` y `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, cada una una sola vez (ADR-0012 B2). Desde TA-16, el job `verify` de `release.yml` repite estas comprobaciones en cada release.
 3. **La configuración de GitHub de RF-C19**, si no se hizo en el cierre de 001: rulesets de `main` (con `ci-ok` requerido) y de tags `v*`, el environment `production` con el owner como reviewer y `can_admins_bypass: false`, aprobación de workflows para todos los contribuidores externos y las alertas de Dependabot.
 4. **Preparación del VPS** (sección anterior), con la verificación 15 de ADR-0006 en verde, y la **prueba de restauración** de backups de ADR-0006 D9.
 5. **Peleas re-simulables antes de abrir apuestas (RF22 de 003, TA-13).** Ninguna pelea de producción abre apuestas si no se cumple una de estas dos condiciones: (a) se publican como snapshot inmutable, junto con el commit, los `canonical_spec_json` de los dos personajes y la `ruleset_version`; o (b) el commit se extiende a `SHA-256(seed ‖ canonical_spec_json(a) ‖ canonical_spec_json(b) ‖ ruleset_version)`, lo que enmienda ADR-0002 con el OK del owner. TA-13 también cubre que el `FightLog` completo no salga del server antes de `Settled`, igual que la semilla.

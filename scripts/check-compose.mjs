@@ -41,6 +41,9 @@ const HEALTH_TEST = {
 };
 const MEMORY = { server: '256m', web: '384m' };
 const PUBLIC_ORIGIN = 'https://${PUBLIC_HOST:?}';
+// ADR-0012 B2: SECURITY_HEADERS must carry exactly this value.
+const PERMISSIONS_POLICY =
+  'camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=()';
 const ENV = {
   // Exactly info (RF-C4): `warn` or `off` drop the /api/health line the log retention relies on,
   // and a bare target (`info,sqlx`) or a number (`server=5`) turns on TRACE.
@@ -199,7 +202,13 @@ export function parseSecurityHeaders(source) {
   const headers = {};
   for (const m of block[1].matchAll(/'([a-z-]+)'\s*:\s*'([^']*)'/g)) headers[m[1]] = m[2];
   const names = Object.keys(headers).sort();
-  const expected = ['referrer-policy', 'strict-transport-security', 'x-content-type-options'];
+  const expected = [
+    'cross-origin-opener-policy',
+    'permissions-policy',
+    'referrer-policy',
+    'strict-transport-security',
+    'x-content-type-options',
+  ];
   if (names.join(',') !== expected.join(',')) {
     return {
       headers: null,
@@ -212,7 +221,8 @@ export function parseSecurityHeaders(source) {
 }
 
 /**
- * Maps SECURITY_HEADERS to the five labels of the `torneo-web-headers` middleware (RF-C4).
+ * Maps SECURITY_HEADERS to the seven labels of the `torneo-web-headers` middleware (RF-C4,
+ * ADR-0012 B2).
  * @param {Record<string, string>} headers
  * @returns {{ labels: Record<string, string>, problems: string[] }}
  */
@@ -228,6 +238,12 @@ export function headerLabels(headers) {
   if (/includesubdomains|preload/i.test(hsts)) {
     problems.push(`${FILES.headers}: ${rule}: HSTS must not have includeSubDomains or preload`);
   }
+  if (headers['cross-origin-opener-policy'] !== 'same-origin') {
+    problems.push(`${FILES.headers}: ${rule}: cross-origin-opener-policy must be same-origin`);
+  }
+  if (headers['permissions-policy'] !== PERMISSIONS_POLICY) {
+    problems.push(`${FILES.headers}: ${rule}: permissions-policy must be ${PERMISSIONS_POLICY}`);
+  }
   const maxAge = /^max-age=(\d+)$/.exec(hsts);
   if (!maxAge) problems.push(`${FILES.headers}: ${rule}: HSTS must be exactly max-age=<seconds>`);
   return {
@@ -237,6 +253,9 @@ export function headerLabels(headers) {
       [`${m}.stsSeconds`]: maxAge ? maxAge[1] : '?',
       [`${m}.stsIncludeSubdomains`]: 'false',
       [`${m}.stsPreload`]: 'false',
+      [`${m}.customResponseHeaders.Cross-Origin-Opener-Policy`]:
+        headers['cross-origin-opener-policy'],
+      [`${m}.permissionsPolicy`]: headers['permissions-policy'],
     },
     problems,
   };

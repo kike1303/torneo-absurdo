@@ -31,4 +31,11 @@ describe('securityHeaders', () => {
   it('has no includeSubDomains or preload', () => {
     expect(SECURITY_HEADERS['strict-transport-security']).toBe('max-age=31536000');
   });
+
+  it('has the ADR-0012 B2 values for COOP and Permissions-Policy', () => {
+    expect(SECURITY_HEADERS['cross-origin-opener-policy']).toBe('same-origin');
+    expect(SECURITY_HEADERS['permissions-policy']).toBe(
+      'camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=()',
+    );
+  });
 });

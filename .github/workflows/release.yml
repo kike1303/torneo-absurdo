@@ -240,3 +240,75 @@ jobs:
           done
           echo "https://$PUBLIC_HOST/api/health never reported $TAG" >&2
           exit 1
+      # ADR-0012 consequence 11: every B2 header of each response exactly once, with its value.
+      # The values are written here because a workflow cannot import security-headers.ts.
+      - name: Security headers (ADR-0012 B2)
+        env:
+          PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
+        run: |
+          # GitHub runs bash with -e; turn it off so every path is checked and reported.
+          set +e -uo pipefail
+          nosniff='x-content-type-options=nosniff'
+          hsts='strict-transport-security=max-age=31536000'
+          web=("$nosniff" "$hsts"
+            'referrer-policy=strict-origin-when-cross-origin'
+            'cross-origin-opener-policy=same-origin'
+            'permissions-policy=camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=()')
+          server=("$nosniff" "$hsts"
+            'cross-origin-resource-policy=same-origin'
+            "content-security-policy=default-src 'none'; frame-ancestors 'none'")
+          # ADR-0012 B1 as Kit emits it; `B1` as a value compares with this (nonce normalized,
+          # directive and source order ignored). A B4 extension changes this line in its own PR.
+          b1="default-src 'self'; script-src 'self' 'nonce-*'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+          csp_norm() {
+            tr -d '\r' | sed -E "s/'nonce-[A-Za-z0-9+/_=-]+'/'nonce-*'/g" | tr ';' '\n' |
+              while read -r name rest; do
+                [ -n "$name" ] || continue
+                printf '%s %s\n' "$name" "$(tr ' ' '\n' <<<"$rest" | grep -v '^$' | sort | paste -sd ' ' -)"
+              done | sort
+          }
+          fail=0
+          headers="$(mktemp)"
+          trap 'rm -f "$headers"' EXIT
+          # check <path> <status> <name=value>...: `-` requires the header to be absent and `B1`
+          # compares it with $b1; any other value must match exactly, once.
+          check() {
+            local path="$1" want="$2" url="https://$PUBLIC_HOST$1" status pair name value got count
+            shift 2
+            status="$(curl -sS -I --proto '=https' --max-time 10 -o "$headers" -w '%{http_code}' "$url")"
+            if [ "$status" != "$want" ]; then
+              echo "$path answers $status, expected $want" >&2
+              fail=1
+              return
+            fi
+            for pair in "$@"; do
+              name="${pair%%=*}"
+              value="${pair#*=}"
+              count="$(grep -ci "^$name:" "$headers")"
+              got="$(grep -i "^$name:" "$headers" | sed 's/^[^:]*:[[:space:]]*//' | tr -d '\r')"
+              if [ "$value" = '-' ]; then
+                if [ "$count" != 0 ]; then
+                  echo "$path sends $name, expected none" >&2
+                  fail=1
+                fi
+              elif [ "$count" != 1 ]; then
+                echo "$path sends $name $count times, expected once" >&2
+                fail=1
+              elif [ "$value" = B1 ]; then
+                if ! diff <(csp_norm <<<"$b1") <(csp_norm <<<"$got") >/dev/null; then
+                  echo "$path sends $name: $got, expected ADR-0012 B1" >&2
+                  fail=1
+                fi
+              elif [ "$got" != "$value" ]; then
+                echo "$path sends $name: $got, expected $value" >&2
+                fail=1
+              fi
+            done
+            echo "$path: $status, checked"
+          }
+          check /es/ 200 "${web[@]}" 'content-security-policy=B1'
+          check /_app/version.json 200 "${web[@]}"
+          check /healthz/ 308 "${web[@]}"
+          # torneo-web-headers belongs to web only (RF-C4).
+          check /api/health 200 "${server[@]}" 'cross-origin-opener-policy=-' 'permissions-policy=-'
+          exit "$fail"

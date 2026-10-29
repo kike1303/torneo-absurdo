@@ -29,12 +29,20 @@ async fn app() -> support::app::RunningApp {
     .await
 }
 
+/// ADR-0012 B2: each header once, with its exact value.
 fn assert_security_headers(response: &Response) {
-    assert_eq!(response.header("x-content-type-options"), Some("nosniff"));
-    assert_eq!(
-        response.header("strict-transport-security"),
-        Some("max-age=31536000")
-    );
+    for (name, value) in [
+        ("x-content-type-options", "nosniff"),
+        ("strict-transport-security", "max-age=31536000"),
+        ("cross-origin-resource-policy", "same-origin"),
+        (
+            "content-security-policy",
+            "default-src 'none'; frame-ancestors 'none'",
+        ),
+    ] {
+        let values: Vec<_> = response.headers.get_all(name).iter().collect();
+        assert_eq!(values, [value], "{name}");
+    }
 }
 
 fn assert_no_cors(response: &Response) {
@@ -49,11 +57,13 @@ fn assert_no_cors(response: &Response) {
 #[tokio::test]
 async fn unknown_route_is_404_with_a_code() {
     let app = app().await;
-    let response = http::get(app.addr, "/nada?x=1").await;
-    assert_eq!(response.status, 404);
-    assert_eq!(response.text(), r#"{"error":"http.not_found"}"#);
-    assert_eq!(response.header("content-type"), Some("application/json"));
-    assert_security_headers(&response);
+    for path in ["/nada?x=1", "/api/nada"] {
+        let response = http::get(app.addr, path).await;
+        assert_eq!(response.status, 404, "{path}");
+        assert_eq!(response.text(), r#"{"error":"http.not_found"}"#);
+        assert_eq!(response.header("content-type"), Some("application/json"));
+        assert_security_headers(&response);
+    }
 }
 
 #[tokio::test]

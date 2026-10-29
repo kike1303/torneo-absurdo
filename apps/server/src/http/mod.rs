@@ -21,6 +21,11 @@ const X_INTERNAL_SECRET: HeaderName = HeaderName::from_static("x-internal-secret
 const X_CLIENT_IP: HeaderName = HeaderName::from_static("x-client-ip");
 const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
 const X_REAL_IP: HeaderName = HeaderName::from_static("x-real-ip");
+const CROSS_ORIGIN_RESOURCE_POLICY: HeaderName =
+    HeaderName::from_static("cross-origin-resource-policy");
+
+/// ADR-0012 B2 for the server: nothing to load and nothing may frame it.
+const CONTENT_SECURITY_POLICY: &str = "default-src 'none'; frame-ancestors 'none'";
 
 /// Request headers whose values are marked sensitive, so no `Debug` of them prints the value
 /// (ADR-0012 A4.1 and A4.3).
@@ -36,7 +41,7 @@ const SENSITIVE_REQUEST_HEADERS: [HeaderName; 7] = [
 
 /// The router with every layer. No `CorsLayer` (ADR-0008 D4). Layers, outermost first:
 /// sensitive request headers, request log (so 405s are logged), sensitive response headers,
-/// `nosniff` + HSTS (on every response, errors included), read-only, routes.
+/// `nosniff`, HSTS, CORP and CSP (on every response, errors included), read-only, routes.
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route(
@@ -61,6 +66,15 @@ pub fn router(state: AppState) -> Router {
                 .layer(SetResponseHeaderLayer::overriding(
                     header::STRICT_TRANSPORT_SECURITY,
                     HeaderValue::from_static("max-age=31536000"),
+                ))
+                // ADR-0012 B2: JSON responses have nothing to load or frame.
+                .layer(SetResponseHeaderLayer::overriding(
+                    CROSS_ORIGIN_RESOURCE_POLICY,
+                    HeaderValue::from_static("same-origin"),
+                ))
+                .layer(SetResponseHeaderLayer::overriding(
+                    header::CONTENT_SECURITY_POLICY,
+                    HeaderValue::from_static(CONTENT_SECURITY_POLICY),
                 ))
                 .layer(middleware::from_fn(read_only::layer)),
         )
