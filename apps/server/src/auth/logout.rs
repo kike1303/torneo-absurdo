@@ -1,6 +1,7 @@
 //! `POST /api/auth/logout` and `POST /api/auth/logout-all` (ADR-0008 D10, 008 RF-B11). Both
 //! revoke (one session, or every session of the user), expire the cookie and answer 303 to
-//! `/`, with or without a session: logging out is idempotent. "Other mutations" quota of D7.
+//! `/`, with or without a session: logging out is idempotent. If the revoke fails, a 303 to the
+//! login page with `auth.try_again` and the cookie kept. "Other mutations" quota of D7.
 
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -8,7 +9,9 @@ use axum::Extension;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use protocol::ApiErrorCode;
+use protocol::{ApiErrorCode, CallbackErrorCode};
+
+use super::callback::error_location;
 
 use crate::app::AppState;
 use crate::http::errors::too_many_requests;
@@ -71,11 +74,21 @@ async fn run(
             tx.commit().await
         };
         if revoked.await.is_err() {
-            // The session may still be alive: say so instead of pretending.
-            return crate::http::errors::error_response(
-                StatusCode::SERVICE_UNAVAILABLE,
-                protocol::AuthErrorCode::TryAgain,
-            );
+            // The session may still be alive, so never the "logged out" answer: no cookie
+            // expiry, and the login page with `auth.try_again` (a form-post navigation must not
+            // land on raw JSON, as the callback amendment says). With the session still valid,
+            // that page shows the error and a link to the account.
+            return (
+                StatusCode::SEE_OTHER,
+                [
+                    (
+                        header::LOCATION,
+                        error_location(CallbackErrorCode::TryAgain),
+                    ),
+                    (header::CACHE_CONTROL, PRIVATE_NO_STORE),
+                ],
+            )
+                .into_response();
         }
     }
     (

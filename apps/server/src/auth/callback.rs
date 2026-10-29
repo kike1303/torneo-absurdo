@@ -29,10 +29,16 @@ use crate::sessions::{Issued, TokenHash, UaFamily};
 /// The longest `sub` the server accepts from a provider.
 const MAX_SUBJECT_LEN: usize = 255;
 
-/// The error redirect: the only place that builds this `Location`, from the closed list.
-pub fn error_redirect(cookies: &CookiePolicy, code: CallbackErrorCode) -> Response {
+/// The login page with an error code from the closed list: the only place that builds this
+/// `Location` (the callback errors and a logout that could not revoke).
+pub fn error_location(code: CallbackErrorCode) -> HeaderValue {
     let location = format!("/login?error={}", code.as_str());
-    let location = HeaderValue::from_str(&location).unwrap_or(HeaderValue::from_static("/"));
+    HeaderValue::from_str(&location).unwrap_or(HeaderValue::from_static("/"))
+}
+
+/// The error redirect of the callback.
+pub fn error_redirect(cookies: &CookiePolicy, code: CallbackErrorCode) -> Response {
+    let location = error_location(code);
     (
         StatusCode::SEE_OTHER,
         [
