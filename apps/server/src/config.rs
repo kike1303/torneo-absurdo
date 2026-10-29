@@ -109,16 +109,19 @@ pub fn decide_echo(flag: Option<&str>, origin: &Url) -> EchoDecision {
     }
 }
 
-/// A base64url secret (with or without padding) of at least [`INTERNAL_SECRET_MIN_BYTES`]
-/// decoded bytes, different from the public development value outside loopback. Returns the
-/// text and the decoded bytes. The comparison is constant-time, so the pattern is safe to copy.
+/// A base64url secret (padding optional) of at least [`INTERNAL_SECRET_MIN_BYTES`] decoded
+/// bytes. Outside loopback its decoded bytes must differ from those of the public development
+/// value, whatever the padding. Returns the text and the decoded bytes. The comparison is
+/// constant-time, so the pattern is safe to copy.
 fn secret(text: &str, dev_value: &str, loopback: bool) -> Option<(String, Vec<u8>)> {
     use subtle::ConstantTimeEq;
     let bytes = BASE64URL.decode(text).ok()?;
     if bytes.len() < INTERNAL_SECRET_MIN_BYTES {
         return None;
     }
-    let is_dev_value = bool::from(text.as_bytes().ct_eq(dev_value.as_bytes()));
+    // Decoded bytes, not text: with or without padding, the same secret is the same secret.
+    let dev_bytes = BASE64URL.decode(dev_value).unwrap_or_default();
+    let is_dev_value = bool::from(bytes.as_slice().ct_eq(dev_bytes.as_slice()));
     if is_dev_value && !loopback {
         return None;
     }
@@ -503,6 +506,28 @@ mod tests {
         }
     }
 
+    /// The padded form of a development value decodes to the same bytes: refused too.
+    #[test]
+    fn padded_development_secrets_are_refused_outside_loopback() {
+        for origin in ["https://torneo.example", "https://localhost"] {
+            let internal = format!("{DEV_INTERNAL_API_SECRET}=");
+            let err = with(&[
+                ("PUBLIC_ORIGIN", origin),
+                ("INTERNAL_API_SECRET", &internal),
+            ])
+            .unwrap_err();
+            assert_eq!(err.var(), "INTERNAL_API_SECRET", "{origin}");
+            let key = format!("{DEV_IP_HASH_KEY}=");
+            let err = with(&[
+                ("PUBLIC_ORIGIN", origin),
+                ("INTERNAL_API_SECRET", OTHER_SECRET),
+                ("IP_HASH_KEY", &key),
+            ])
+            .unwrap_err();
+            assert_eq!(err.var(), "IP_HASH_KEY", "{origin}");
+        }
+    }
+
     #[test]
     fn the_env_example_carries_the_development_secrets() {
         let example = include_str!("../.env.example");
@@ -568,6 +593,29 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The Debug of the config never shows the decoded key bytes either, in any form.
+    #[test]
+    fn debug_never_shows_the_raw_key_bytes() {
+        let config = with(&[
+            ("IP_HASH_KEY", OTHER_KEY),
+            ("INTERNAL_API_SECRET", OTHER_SECRET),
+        ])
+        .unwrap();
+        let shown = format!("{config:?}");
+        for text in [OTHER_KEY, OTHER_SECRET] {
+            let bytes = BASE64URL.decode(text).unwrap();
+            let list = format!("{bytes:?}");
+            let inner = list.trim_start_matches('[').trim_end_matches(']');
+            let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+            // Both test keys decode to ASCII ("other-key-…", "other-secret-…").
+            let ascii = String::from_utf8(bytes.clone()).unwrap();
+            for raw in [inner.to_owned(), hex, ascii, inner[..12].to_owned()] {
+                assert!(!shown.contains(&raw), "{raw} in {shown}");
+            }
+        }
+        assert!(!shown.contains("other-"), "{shown}");
     }
 
     #[test]

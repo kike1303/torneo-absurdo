@@ -29,3 +29,20 @@ impl fmt::Debug for IpHashKey {
         f.write_str("IpHashKey(..)")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_never_shows_the_key_bytes() {
+        let bytes: Vec<u8> = b"raw-key-canary-raw-key-canary-12".to_vec();
+        let shown = format!("{:?}", IpHashKey::new(bytes.clone()));
+        assert_eq!(shown, "IpHashKey(..)");
+        let list = format!("{bytes:?}");
+        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        for raw in [list.as_str(), &list[1..20], hex.as_str(), "raw-key-canary"] {
+            assert!(!shown.contains(raw), "{raw}");
+        }
+    }
+}
