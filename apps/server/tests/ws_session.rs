@@ -320,6 +320,93 @@ async fn a_hung_revalidation_does_not_freeze_the_socket() {
     );
 }
 
+/// The check runs outside the socket loop (architect on #54): with a timeout longer than the
+/// echo wait, the socket still answers while the check hangs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_revalidation_runs_outside_the_socket_loop() {
+    let db = TestDb::create().await;
+    let settings = Settings {
+        ws: WsConfig {
+            revalidate_interval: Duration::from_millis(100),
+            revalidate_timeout: Duration::from_secs(10),
+            ..WsConfig::default()
+        },
+        ..Settings::default()
+    };
+    let (app, pool, _ws) = support::app::start_db_ws(&db, &[], &settings, |ws| ws).await;
+    let (_, token) = support::app::user_with_session(&pool).await;
+    let mut client = connect(app.addr, Some(&token), None).await.unwrap();
+    let mut lock = pool.begin().await.unwrap();
+    sqlx::query("LOCK TABLE users IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *lock)
+        .await
+        .unwrap();
+    // A check is now hanging on the lock (it started within the 100 ms interval).
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    ws::send_text(&mut client, r#"{"type":"echo","payload":"vivo"}"#).await;
+    let reply = ws::next_data(&mut client, Duration::from_secs(2)).await;
+    lock.rollback().await.unwrap();
+    assert_eq!(
+        reply,
+        Some(Message::Text(r#"{"type":"echo","payload":"vivo"}"#.into()))
+    );
+}
+
+/// The timeout bounds a hung check, so the next one starts: while `users` stays locked, the
+/// app's revalidation queries waiting on the lock keep growing. Without the timeout there would
+/// be exactly one, forever (and no later check could ever close the socket).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_hung_revalidation_times_out_and_the_next_one_starts() {
+    let db = TestDb::create().await;
+    let settings = Settings {
+        ws: WsConfig {
+            revalidate_interval: Duration::from_millis(50),
+            revalidate_timeout: Duration::from_millis(150),
+            ..WsConfig::default()
+        },
+        ..Settings::default()
+    };
+    let (app, pool, _ws) = support::app::start_db_ws(&db, &[], &settings, |ws| ws).await;
+    let (_, token) = support::app::user_with_session(&pool).await;
+    let _client = connect(app.addr, Some(&token), None).await.unwrap();
+    let mut lock = pool.begin().await.unwrap();
+    sqlx::query("LOCK TABLE users IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *lock)
+        .await
+        .unwrap();
+    let admin = db_admin(&db).await;
+    let waiting = || async {
+        let row: (i64,) = sqlx::query_as(
+            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() \
+             AND wait_event_type = 'Lock' AND query LIKE '%FROM sessions s JOIN users%'",
+        )
+        .fetch_one(&admin)
+        .await
+        .unwrap();
+        row.0
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut seen = 0;
+    while Instant::now() < deadline {
+        seen = waiting().await;
+        if seen >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    lock.rollback().await.unwrap();
+    assert!(seen >= 2, "only {seen} revalidation queries ever waited");
+}
+
+/// A connection outside the app's pool (the app's may be all waiting on the lock).
+async fn db_admin(db: &TestDb) -> PgPool {
+    sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(db.options())
+        .await
+        .unwrap()
+}
+
 // --- Limits (RF-B14, T18, T22) ----------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -351,3 +351,46 @@ async fn ledger_accounts_cannot_be_updated_or_deleted() {
         .unwrap_err();
     assert_eq!(sqlstate(&error).as_deref(), Some("TA001"));
 }
+
+/// The trigger, not the client, sets `created_xact`: a value the client supplies (here an old
+/// transaction id, which would reopen nothing but break its own entry) is replaced with the
+/// current top-level transaction.
+#[tokio::test]
+async fn created_xact_from_the_client_is_overwritten() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let a = user(&pool).await;
+    let b = user(&pool).await;
+    let (account_a, account_b) = (account_of(&pool, a).await, account_of(&pool, b).await);
+    let mut tx = pool.begin().await.unwrap();
+    let entry = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO ledger_entries (id, kind, user_id, created_xact) \
+         VALUES ($1, 'grant', $2, '1'::xid8)",
+    )
+    .bind(entry)
+    .bind(a)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    let current: bool =
+        sqlx::query("SELECT created_xact = pg_current_xact_id() FROM ledger_entries WHERE id = $1")
+            .bind(entry)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap()
+            .get(0);
+    assert!(current);
+    for (account, amount) in [(account_a, 3_i64), (account_b, -3)] {
+        sqlx::query(
+            "INSERT INTO ledger_postings (entry_id, account_id, amount) VALUES ($1, $2, $3)",
+        )
+        .bind(entry)
+        .bind(account)
+        .bind(amount)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+    tx.commit().await.unwrap();
+}
