@@ -110,18 +110,76 @@ const uiRestriction = (relative, allowMessages, depth) => [
 
 /** @typedef {(relative: boolean) => object[]} Restriction */
 
+const DYNAMIC_IMPORTS = 'torneo/no-restricted-dynamic-imports';
+
 /**
+ * Both import rules with the same restrictions: `no-restricted-imports` for static imports and its
+ * `import()` twin below.
  * @param {boolean} relative
  * @param {Restriction[]} extra
- * @returns {import('eslint').Linter.RuleEntry}
+ * @returns {Record<string, import('eslint').Linter.RuleEntry>}
  */
 function restrictedImports(relative, extra) {
   const base = baseRestrictions(relative);
-  return [
+  /** @type {import('eslint').Linter.RuleEntry} */
+  const entry = [
     'error',
     { paths: base.paths, patterns: [...base.patterns, ...extra.flatMap((f) => f(relative))] },
   ];
+  return { '@typescript-eslint/no-restricted-imports': entry, [DYNAMIC_IMPORTS]: entry };
 }
+
+// `ts.plugin` is typed as a loose `CompatiblePlugin`, without `rules`.
+/** @type {{ meta: import('eslint').Rule.RuleMetaData, create: import('eslint').Rule.RuleModule['create'] }} */
+const restrictedImportsRule = /** @type {any} */ (ts.plugin).rules['no-restricted-imports'];
+
+/**
+ * `no-restricted-imports` does not see `import()` (TA-11). This rule takes the same options and
+ * hands every `import()` to it as `import * as _ from '…'`, the way typescript-eslint already does
+ * for `import x = require('…')`: paths, patterns and `importNames` apply as they are, and a
+ * dynamic import is never type-only. A source that is not a string literal cannot be checked, so
+ * it is not allowed.
+ * @type {import('eslint').Rule.RuleModule}
+ */
+const dynamicImportsRule = {
+  meta: {
+    ...restrictedImportsRule.meta,
+    docs: { description: 'Apply `no-restricted-imports` to `import()` (TA-11).' },
+    messages: {
+      ...restrictedImportsRule.meta.messages,
+      nonLiteral:
+        'The source of `import()` must be a string literal so the import boundaries can check it (TA-11).',
+    },
+  },
+  create(context) {
+    const listeners = /** @type {Record<string, (node: object) => void>} */ (
+      /** @type {unknown} */ (restrictedImportsRule.create(/** @type {never} */ (context)))
+    );
+    return {
+      ImportExpression(node) {
+        const { source } = node;
+        /** @type {string | undefined} */
+        let value;
+        if (source.type === 'Literal' && typeof source.value === 'string') value = source.value;
+        else if (source.type === 'TemplateLiteral' && source.expressions.length === 0)
+          value = source.quasis[0]?.value.cooked ?? undefined;
+        if (value === undefined) {
+          context.report({ node: source, messageId: 'nonLiteral' });
+          return;
+        }
+        const specifier = { type: 'ImportNamespaceSpecifier', loc: node.loc, range: node.range };
+        listeners.ImportDeclaration?.({
+          ...node,
+          type: 'ImportDeclaration',
+          importKind: 'value',
+          attributes: [],
+          source: { ...source, type: 'Literal', value, raw: JSON.stringify(value) },
+          specifiers: [specifier],
+        });
+      },
+    };
+  },
+};
 
 const URL_PROPS = '/^(origin|host|hostname|href|port|protocol)$/';
 const FORWARDING_HEADERS = '/^(?:host|forwarded|x-forwarded-.*)$/i';
@@ -171,11 +229,6 @@ const absoluteUrlSelectors = [
   `MemberExpression[object.name='headers'][property.value=${FORWARDING_HEADERS}]`,
 ].map((selector) => ({ selector, message: ABSOLUTE_URL_MESSAGE }));
 
-const dynamicRendererSelectors = [
-  'ImportExpression[source.value=/^@torneo\\/renderer(\\/|$)/]',
-  'ImportExpression[source.value=/packages\\/renderer\\//]',
-].map((selector) => ({ selector, message: RENDERER_MESSAGE }));
-
 /**
  * @param {{ relativePatterns?: boolean }} [options] `relativePatterns: false` drops the relative
  *   twins so tests can prove each `#lib` regex catches its case on its own.
@@ -204,6 +257,7 @@ export function createConfig({ relativePatterns = true } = {}) {
     ...svelte.configs.prettier,
     {
       languageOptions: { globals: { ...globals.browser, ...globals.node } },
+      plugins: { torneo: { rules: { 'no-restricted-dynamic-imports': dynamicImportsRule } } },
       rules: {
         'no-restricted-imports': 'off',
         // Our links are locale-prefixed paths built by `localizedHref()`, not route ids, and
@@ -220,46 +274,31 @@ export function createConfig({ relativePatterns = true } = {}) {
     {
       files: [SRC],
       ignores: [COMPONENTS],
-      rules: {
-        '@typescript-eslint/no-restricted-imports': restrictedImports(r, [rendererRestriction]),
-      },
+      rules: restrictedImports(r, [rendererRestriction]),
     },
     {
       files: [COMPONENTS],
       ignores: [UI, FIGHT_STAGE],
-      rules: {
-        '@typescript-eslint/no-restricted-imports': restrictedImports(r, [
-          rendererRestriction,
-          featuresValueRestriction,
-        ]),
-      },
+      rules: restrictedImports(r, [rendererRestriction, featuresValueRestriction]),
     },
     {
       files: [FIGHT_STAGE],
-      rules: {
-        '@typescript-eslint/no-restricted-imports': restrictedImports(r, [
-          featuresValueRestriction,
-        ]),
-      },
+      rules: restrictedImports(r, [featuresValueRestriction]),
     },
     ...Array.from({ length: UI_MAX_DEPTH + 1 }, (_, depth) => ({
       files: [`src/lib/components/ui/${'*/'.repeat(depth)}*.{js,ts,svelte}`],
       ignores: [A11Y],
-      rules: {
-        '@typescript-eslint/no-restricted-imports': restrictedImports(r, [
-          rendererRestriction,
-          /** @param {boolean} rel */ (rel) => uiRestriction(rel, false, depth),
-        ]),
-      },
+      rules: restrictedImports(r, [
+        rendererRestriction,
+        /** @param {boolean} rel */ (rel) => uiRestriction(rel, false, depth),
+      ]),
     })),
     {
       files: [A11Y],
-      rules: {
-        '@typescript-eslint/no-restricted-imports': restrictedImports(r, [
-          rendererRestriction,
-          /** @param {boolean} rel */ (rel) => uiRestriction(rel, true, 0),
-        ]),
-      },
+      rules: restrictedImports(r, [
+        rendererRestriction,
+        /** @param {boolean} rel */ (rel) => uiRestriction(rel, true, 0),
+      ]),
     },
     // Components never fetch (ADR-0009 D4).
     {
@@ -283,19 +322,9 @@ export function createConfig({ relativePatterns = true } = {}) {
     // Absolute URLs only from PUBLIC_ORIGIN (plan-a decision 20). Tests read fixtures with
     // `new URL(path, import.meta.url)`, so they are exempt.
     {
-      files: ['src/**/*.{ts,svelte}'],
+      files: ['src/**/*.{js,ts,svelte}'],
       ignores: ['src/**/*.test.ts'],
       rules: { 'no-restricted-syntax': ['error', ...absoluteUrlSelectors] },
-    },
-    // `no-restricted-imports` does not see `import()` (TA-11): outside FightStage.svelte, no
-    // dynamic import of the renderer either (002 plan-a2 decision 11). Same file set plus the
-    // FightStage exception, with the URL selectors repeated because the last match wins.
-    {
-      files: ['src/**/*.{js,ts,svelte}'],
-      ignores: ['src/**/*.test.ts', FIGHT_STAGE],
-      rules: {
-        'no-restricted-syntax': ['error', ...absoluteUrlSelectors, ...dynamicRendererSelectors],
-      },
     },
   ]);
 }
