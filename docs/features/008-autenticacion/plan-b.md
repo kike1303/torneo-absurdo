@@ -336,6 +336,7 @@ Sin cambios en los workflows: el job `rust` corre `just check-rust`, que absorbe
     - `ledger_accounts` pasa a ser inmutable (`TA001` en `UPDATE`, `DELETE` y `TRUNCATE`; nota de security-reviewer): un `UPDATE` de `user_id` movería un saldo entero.
     - IT: el par compensado y el movimiento suelto sobre un asiento viejo fallan con `TA003`. Un asiento armado dentro de un `begin()` anidado, y terminado después del savepoint, hace commit. Las cuentas rechazan `UPDATE`, `DELETE` y `TRUNCATE`.
     - UT de fuente: `INSERT INTO ledger_…` solo puede aparecer en `apps/server/src/ledger/` (verificado con un mutante).
+26. **Sí cambia un workflow** (la decisión 22 decía que no; lo pidió devops-engineer en #54). En `.github/workflows/ci.yml`: el filtro `images` incluye `scripts/local-secrets.sh`, que corre `_prod-local-start` (sin eso fallaba el job `policy`), y el filtro `rust` incluye `scripts/__fixtures__/loopback-origins.json`, que `config.rs` incrusta con `include_str!`. Además, el paso "compose config without IMAGE_TAG fails" pasa valores de relleno para `INTERNAL_API_SECRET` e `IP_HASH_KEY`, así `IMAGE_TAG` vuelve a ser la única variable que falta. `node scripts/check-workflows.mjs` y los tests de `policy` pasan.
 
 ## Revisión
 ### architect — 2026-10-28 — REQUEST_CHANGES
