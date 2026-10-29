@@ -59,6 +59,19 @@ describe('docs/guides/sprites.md', () => {
   });
 });
 
+describe('the documented import command', () => {
+  // `pnpm import` is a pnpm built-in (it converts lockfiles): without `run`, pnpm never reaches
+  // the script.
+  it.each(['docs/guides/sprites.md', 'tools/sprite-importer/README.md'])(
+    '%s uses run import',
+    (file) => {
+      const text = readFileSync(path.join(REPO, ...file.split('/')), 'utf8');
+      expect(text).toContain('@torneo/sprite-importer run import --');
+      expect(text).not.toMatch(/@torneo\/sprite-importer import\b/);
+    },
+  );
+});
+
 describe('renderGuideBlock', () => {
   it('follows the data: a version with a lower heavy windup changes its row and names it', () => {
     const v1 = RULESETS[0];

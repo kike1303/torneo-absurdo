@@ -9,7 +9,7 @@ Desde la raíz del repo. `-s` evita que pnpm imprima la línea del comando, que 
 
 ```sh
 # Export → set (solo content/_local/sprites/<id> o content/sprites/<id>, con <id> igual al del export).
-pnpm -s --filter @torneo/sprite-importer import -- --in <carpeta-del-export> --out content/_local/sprites/<id>
+pnpm -s --filter @torneo/sprite-importer run import -- --in <carpeta-del-export> --out content/_local/sprites/<id>
 
 # Chequeo de todos los sets de content/sprites/, su procedencia y los vínculos de los personajes (corre en just check).
 pnpm -s --filter @torneo/sprite-importer check

@@ -137,7 +137,7 @@ Las escribe `pnpm --filter @torneo/sprite-importer gen:guide` a partir de `GUIDE
 
 ### Importador
 ```sh
-pnpm -s --filter @torneo/sprite-importer import -- --in <carpeta-del-export> --out content/_local/sprites/<id>
+pnpm -s --filter @torneo/sprite-importer run import -- --in <carpeta-del-export> --out content/_local/sprites/<id>
 ```
 - Valida el export, arma el manifest (un frame por contenido distinto, en una rejilla de hojas), corre `validateManifest` y la capa de guía contra **todas** las versiones del ruleset y, solo si todo pasa, escribe `manifest.json` y `sheet-N.png`. Si algo falla, no escribe nada.
 - `--out` solo puede ser `content/_local/sprites/<id>` (para probar) o `content/sprites/<id>` (para commitear), con `<id>` igual al del export. Nunca toca `provenance.json`.
