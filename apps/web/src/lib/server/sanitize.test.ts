@@ -338,6 +338,7 @@ describe('sanitize: IPv6 after a key that looks like hex (TA-11)', () => {
 
   it.each([
     ['x2001:db8::1', 'x[ip]'],
+    ['client_fdab::1 x', 'client_[ip] x'],
     // A key made only of hex letters may be the first group: when in doubt, redact more.
     ['bad:2001:db8::1 refused', '[ip] refused'],
     ['at x (src/a.ts:12:34) 10:20:30', 'at x (src/a.ts:12:34) 10:20:30'],

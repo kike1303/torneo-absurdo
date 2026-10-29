@@ -203,8 +203,9 @@ function ipv6End(text: string, i: number): number {
  * Replaces every IPv6 with REDACTED_IP. Each hex group and each `::` is tried as a start, and the
  * union of every address found is redacted, so a key that looks like hex (`face:::2001:db8:1`,
  * `deadbeef:2001:db8::1`) never hides the address after it: when in doubt, redact more. A group
- * of hex letters glued to a label (`id:2001:db8::1`) is left out only when the rest is an address
- * by itself; a group with digits (`x2001:db8::1`) never is. A bare `::` is not an address.
+ * of hex letters glued to a label and followed by a single `:` (`id:2001:db8::1`) is left out
+ * only when the rest is an address by itself; a group with digits (`x2001:db8::1`) or before `::`
+ * (`client_fdab::1`) never is. A bare `::` is not an address.
  * Linear: every start reads at most 8 groups.
  */
 function redactIpv6(text: string): string {
@@ -224,8 +225,7 @@ function redactIpv6(text: string): string {
     if (end < 0 || text.slice(i, end) === '::') continue;
     if (groupStart && GLUE.test(text[i - 1] ?? '') && HEX_LETTERS.test(text.slice(i, i + 5))) {
       const next = i + groupLength(text, i);
-      const rest = text.startsWith('::', next) ? next : next + 1;
-      if (text[next] === ':' && ipv6End(text, rest) >= end) continue;
+      if (text[next] === ':' && text[next + 1] !== ':' && ipv6End(text, next + 1) >= end) continue;
     }
     if (i > spanEnd) {
       flush();
