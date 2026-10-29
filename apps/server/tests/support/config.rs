@@ -21,6 +21,9 @@ pub fn base_vars() -> Vec<(&'static str, String)> {
         ("PUBLIC_ORIGIN", ORIGIN.to_owned()),
         ("ENABLE_WS_ECHO", "1".to_owned()),
         ("BIND_ADDR", "127.0.0.1".to_owned()),
+        ("INTERNAL_API_SECRET", super::app::SECRET.to_owned()),
+        ("IP_HASH_KEY", super::app::IP_HASH_KEY.to_owned()),
+        ("DAILY_GRANT", "100".to_owned()),
     ]
 }
 

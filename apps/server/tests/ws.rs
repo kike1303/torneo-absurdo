@@ -3,13 +3,11 @@
 
 mod support;
 
-use std::ffi::OsString;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
-use server::app::{AppState, Settings};
-use server::config::Config;
+use server::app::Settings;
 use server::ws::{WsConfig, WsState};
 use support::app::{ORIGIN, RunningApp};
 use support::http;
@@ -173,20 +171,16 @@ async fn echo_disabled_closes_with_1008() {
     );
 }
 
+// A non-loopback origin never starts with `dev-auth`.
+#[cfg(not(feature = "dev-auth"))]
 #[tokio::test]
 async fn echo_flag_with_an_https_origin_stays_off() {
-    let config = Config::from_lookup(|name| match name {
-        "DATABASE_URL" => Some(OsString::from("postgres://u:p@127.0.0.1/db")),
-        "PUBLIC_ORIGIN" => Some(OsString::from("https://torneo.example")),
-        "ENABLE_WS_ECHO" => Some(OsString::from("1")),
-        _ => None,
-    })
-    .unwrap();
+    let config = support::config::config(&[("PUBLIC_ORIGIN", "https://torneo.example")]);
     let settings = Settings {
         ws: SLOW,
         ..Settings::default()
     };
-    let (app, _) = start(AppState::ws_from_config(&config, &settings)).await;
+    let (app, _) = start(server::app::AppState::ws_from_config(&config, &settings)).await;
     let mut client = ws::connect(app.addr, "https://torneo.example")
         .await
         .unwrap();

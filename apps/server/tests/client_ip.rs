@@ -104,8 +104,8 @@ async fn a_wrong_secret_ignores_x_client_ip() {
         ]
     })
     .await;
-    // No secret configured: the right value is ignored too.
-    let app = start(&[]).await;
+    // Another deployment's secret: our value is ignored too.
+    let app = start(&[support::app::OTHER_SECRET]).await;
     assert_one_bucket(&app, |i| {
         vec![
             ("x-internal-secret".to_owned(), SECRET.to_owned()),

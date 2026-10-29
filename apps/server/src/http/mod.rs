@@ -1,5 +1,6 @@
 //! HTTP router and its layers (RF-B12, RF-B15; plan-b decision 6; 008 RF-A5).
 
+pub mod cookies;
 pub mod errors;
 pub mod health;
 pub mod origin;

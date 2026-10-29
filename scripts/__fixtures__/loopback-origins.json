@@ -1,0 +1,15 @@
+[
+  ["http://localhost:5173", true],
+  ["http://127.0.0.1:8080", true],
+  ["http://[::1]:5173", true],
+  ["http://localhost", true],
+  ["https://localhost:5173", false],
+  ["https://localhost", false],
+  ["http://torneo.example", false],
+  ["https://torneo.example", false],
+  ["http://127.0.0.2:8080", false],
+  ["http://LOCALHOST:5173", false],
+  ["http://[::ffff:127.0.0.1]:5173", false],
+  ["http://localhost.example", false],
+  ["http://localhost:5173/", false]
+]

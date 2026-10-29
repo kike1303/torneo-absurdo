@@ -70,8 +70,18 @@ pub const SECRET: &str = "dGVzdC1vbmx5LXNlY3JldC10ZXN0LW9ubHktc2VjcmV0";
 /// `TRUSTED_PROXIES` with the loopback, so `X-Forwarded-For` simulates other clients.
 pub const TRUST_LOOPBACK: (&str, &str) = ("TRUSTED_PROXIES", "127.0.0.1/32");
 
-/// `INTERNAL_API_SECRET` set to [`SECRET`].
+/// `INTERNAL_API_SECRET` set to [`SECRET`] (the default since phase B; kept explicit where a test
+/// is about the secret).
 pub const WITH_SECRET: (&str, &str) = ("INTERNAL_API_SECRET", SECRET);
+
+/// Another valid secret: a deployment whose secret is not [`SECRET`].
+pub const OTHER_SECRET: (&str, &str) = (
+    "INTERNAL_API_SECRET",
+    "b3RoZXItc2VjcmV0LW90aGVyLXNlY3JldC1vdGhlcis",
+);
+
+/// A valid `IP_HASH_KEY` for the tests (32 bytes, base64url). Not a real key.
+pub const IP_HASH_KEY: &str = "dGVzdC1vbmx5LWlwLWhhc2gta2V5LXRlc3Qtb25seS1rZXk";
 
 /// The state from the config of `vars`, a lazy pool and a database that is always up.
 pub fn state(vars: &[(&str, &str)], settings: &Settings) -> AppState {

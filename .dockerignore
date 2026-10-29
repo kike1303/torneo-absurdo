@@ -10,6 +10,7 @@
 !**/.env.example
 private/
 content/_local/
+infra/local.secrets.env
 
 # VCS and agent files
 .git

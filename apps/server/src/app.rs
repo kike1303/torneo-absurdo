@@ -101,7 +101,7 @@ impl AppState {
     pub fn net_from_config(config: &Config) -> NetState {
         NetState::new(
             config.trusted_proxies.clone(),
-            config.internal_secret.clone(),
+            Some(config.internal_secret.clone()),
         )
     }
 

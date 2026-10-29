@@ -11,7 +11,7 @@ set -eu
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-subjects="infra/.env apps/server/.env apps/web/.env tools/sff-converter/input/canary.sff"
+subjects="infra/.env infra/local.secrets.env apps/server/.env apps/web/.env tools/sff-converter/input/canary.sff content/_local/canary.txt"
 created=""
 created_dirs=""
 tmp=""
@@ -61,7 +61,7 @@ if [ ! -d "$ctx" ]; then
 fi
 
 failed=0
-for path in infra/.env apps/server/.env apps/web/.env private .git content/_local tools; do
+for path in infra/.env infra/local.secrets.env apps/server/.env apps/web/.env private .git content/_local tools; do
     if [ -e "$ctx/$path" ] || [ -L "$ctx/$path" ]; then
         echo "leaked into build context: $path" >&2
         failed=1

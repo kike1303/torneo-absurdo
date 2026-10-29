@@ -153,6 +153,8 @@ async fn bind_addr_must_be_an_ip() {
     assert_eq!(line["var"], "BIND_ADDR");
 }
 
+// With `dev-auth` a non-loopback BIND_ADDR never reaches the bind (see the gate test below).
+#[cfg(not(feature = "dev-auth"))]
 #[tokio::test]
 async fn a_failed_bind_exits_with_one_without_the_address() {
     let db = TestDb::create().await;
@@ -235,5 +237,67 @@ async fn a_short_internal_api_secret_is_config_invalid_without_the_value() {
     assert_eq!(line["var"], "INTERNAL_API_SECRET");
     for text in finished.stdout.iter().chain(&finished.stderr) {
         assert!(!text.contains("c2hvcnQtY2FuYXJ5"), "{text}");
+    }
+}
+
+/// 008 RF-B18: the new required variables stop the start with only their name.
+#[tokio::test]
+async fn phase_b_variables_are_config_invalid_without_the_value() {
+    let dev_secret = server::config::DEV_INTERNAL_API_SECRET;
+    for (vars, var) in [
+        (vec![("DAILY_GRANT", "10001")], "DAILY_GRANT"),
+        (vec![("DAILY_GRANT", "0")], "DAILY_GRANT"),
+        (vec![("IP_HASH_KEY", "c2hvcnQtY2FuYXJ5")], "IP_HASH_KEY"),
+        // The public development secret outside a loopback http origin.
+        (
+            vec![
+                ("PUBLIC_ORIGIN", "https://torneo.example"),
+                ("INTERNAL_API_SECRET", dev_secret),
+            ],
+            "INTERNAL_API_SECRET",
+        ),
+    ] {
+        let mut envs = vec![
+            ("DATABASE_URL", "postgres://u:p@127.0.0.1:1/x"),
+            ("PUBLIC_ORIGIN", "http://localhost:5173"),
+        ];
+        envs.extend(vars.iter().copied());
+        let finished = run_to_exit(&envs).await;
+        assert_eq!(finished.status.code(), Some(1), "{vars:?}");
+        let line = single_json_line(&finished.stdout);
+        assert_eq!(line["event"], "config.invalid");
+        assert_eq!(line["var"], var, "{vars:?}");
+        for text in finished.stdout.iter().chain(&finished.stderr) {
+            assert!(!text.contains("c2hvcnQtY2FuYXJ5") && !text.contains(dev_secret));
+        }
+    }
+}
+
+/// 008 RF-B6: with `dev-auth`, a public origin or a public BIND_ADDR stop the start.
+#[cfg(feature = "dev-auth")]
+#[tokio::test]
+async fn dev_auth_needs_a_loopback_origin_and_bind_addr() {
+    for (vars, var) in [
+        (
+            vec![
+                ("PUBLIC_ORIGIN", "https://torneo.example"),
+                ("BIND_ADDR", "127.0.0.1"),
+            ],
+            "DEV_AUTH",
+        ),
+        (
+            vec![
+                ("PUBLIC_ORIGIN", "http://localhost:5173"),
+                ("BIND_ADDR", "0.0.0.0"),
+            ],
+            "BIND_ADDR",
+        ),
+    ] {
+        let mut envs = vec![("DATABASE_URL", "postgres://u:p@127.0.0.1:1/x")];
+        envs.extend(vars.iter().copied());
+        let finished = run_to_exit(&envs).await;
+        assert_eq!(finished.status.code(), Some(1), "{vars:?}");
+        let line = single_json_line(&finished.stdout);
+        assert_eq!(line["var"], var, "{vars:?}");
     }
 }

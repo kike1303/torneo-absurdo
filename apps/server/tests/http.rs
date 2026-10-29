@@ -220,11 +220,15 @@ async fn a_wrong_or_repeated_secret_is_an_external_request() {
         let response = http::send(with_secret.addr, "POST", "/api/health", &headers).await;
         assert_csrf_403(&response, &format!("{secrets:?}"));
     }
-    // No secret configured: even the right value is ignored.
-    let without = app().await;
+    // Another secret configured: this value is ignored.
+    let other = support::app::start(support::app::state(
+        &[support::app::OTHER_SECRET],
+        &Settings::default(),
+    ))
+    .await;
     let headers = [("x-internal-secret", SECRET), ("x-client-origin", ORIGIN)];
-    let response = http::send(without.addr, "POST", "/api/health", &headers).await;
-    assert_csrf_403(&response, "no secret configured");
+    let response = http::send(other.addr, "POST", "/api/health", &headers).await;
+    assert_csrf_403(&response, "another secret configured");
 }
 
 #[tokio::test]

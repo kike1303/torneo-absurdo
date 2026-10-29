@@ -301,21 +301,27 @@ prod-local tag="": _prod-local-preflight
 _prod-local-up: _prod-local-preflight
     {{just_executable()}} _prod-local-start
 
-# DATABASE_URL and PUBLIC_HOST of the shell are dropped: only infra/local.env feeds the compose.
+# DATABASE_URL, PUBLIC_HOST and the secrets of the shell are dropped: only infra/local.env and the
+# generated infra/local.secrets.env feed the compose.
 # Networks and `compose up`, without the preflight (shared by prod-local and _prod-local-up)
 _prod-local-start:
     #!/usr/bin/env bash
     set -euo pipefail
     : "${IMAGE_TAG:?IMAGE_TAG is required}"
     bash scripts/local-networks.sh up
-    env -u DATABASE_URL -u PUBLIC_HOST IMAGE_TAG="$IMAGE_TAG" docker compose -p torneo-local \
-        --env-file infra/local.env -f infra/docker-compose.yml -f infra/compose.local.yml \
+    # The two secrets of the server, generated once into a file git ignores (008 plan-b decision 6).
+    bash scripts/local-secrets.sh
+    env -u DATABASE_URL -u PUBLIC_HOST -u INTERNAL_API_SECRET -u IP_HASH_KEY IMAGE_TAG="$IMAGE_TAG" \
+        docker compose -p torneo-local \
+        --env-file infra/local.env --env-file infra/local.secrets.env \
+        -f infra/docker-compose.yml -f infra/compose.local.yml \
         up -d --wait --wait-timeout 180
     docker compose -p torneo-local ps
 
 # Keeps the Postgres volume. Never removes a network without the torneo.local=1 label.
 # Stop `prod-local` and remove the networks it created
 prod-local-down:
-    env -u DATABASE_URL -u PUBLIC_HOST IMAGE_TAG=unused docker compose -p torneo-local \
+    env -u DATABASE_URL -u PUBLIC_HOST IMAGE_TAG=unused INTERNAL_API_SECRET=unused IP_HASH_KEY=unused \
+        docker compose -p torneo-local \
         --env-file infra/local.env -f infra/docker-compose.yml -f infra/compose.local.yml down
     bash scripts/local-networks.sh down

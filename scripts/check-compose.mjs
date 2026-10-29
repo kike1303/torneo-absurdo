@@ -54,6 +54,11 @@ const ENV = {
     PUBLIC_ORIGIN,
     RUST_LOG: 'info',
     TRUSTED_PROXIES: '10.250.0.2/32',
+    // Required secrets from Coolify, never literals in git (spec 008, RF-B18).
+    INTERNAL_API_SECRET: '${INTERNAL_API_SECRET:?}',
+    IP_HASH_KEY: '${IP_HASH_KEY:?}',
+    // Any integer from 1 to 10 000, checked below: TA-27 changes the value, not this script.
+    DAILY_GRANT: null,
   },
   web: {
     PUBLIC_ORIGIN,
@@ -471,6 +476,12 @@ function checkProduction(doc, webHeaderLabels, problems) {
       const value = normalizeInterpolation(env.get(name) ?? '');
       if (expected !== null && value !== expected) {
         problems.push(`${at}: env: ${name} must be ${expected} (found ${env.get(name)})`);
+      }
+    }
+    if (svc === 'server' && env.has('DAILY_GRANT')) {
+      const grant = String(env.get('DAILY_GRANT') ?? '');
+      if (!/^[1-9][0-9]{0,4}$/.test(grant) || Number(grant) > 10000) {
+        problems.push(`${at}: daily-grant: DAILY_GRANT must be an integer from 1 to 10000`);
       }
     }
     if (env.has('RUST_LOG') && /\b(debug|trace)\b/i.test(env.get('RUST_LOG') ?? '')) {

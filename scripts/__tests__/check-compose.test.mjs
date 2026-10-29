@@ -347,6 +347,60 @@ const CASES = [
     /services\.server: env: TRUSTED_PROXIES is required/,
   ],
   [
+    'INTERNAL_API_SECRET missing',
+    {
+      [C]: [
+        [
+          '      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required}\n',
+          '',
+        ],
+      ],
+    },
+    /services\.server: env: INTERNAL_API_SECRET is required/,
+  ],
+  [
+    'INTERNAL_API_SECRET without :?',
+    {
+      [C]: [
+        [
+          '      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required}\n',
+          '      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}\n',
+        ],
+      ],
+    },
+    /services\.server: env: INTERNAL_API_SECRET must be \$\{INTERNAL_API_SECRET:\?\}/,
+  ],
+  [
+    'IP_HASH_KEY missing',
+    { [C]: [['      IP_HASH_KEY: ${IP_HASH_KEY:?IP_HASH_KEY is required}\n', '']] },
+    /services\.server: env: IP_HASH_KEY is required/,
+  ],
+  [
+    'IP_HASH_KEY as a literal',
+    {
+      [C]: [
+        [
+          '      IP_HASH_KEY: ${IP_HASH_KEY:?IP_HASH_KEY is required}\n',
+          '      IP_HASH_KEY: mtPdFLwnW5YGomZ3cu58sF-v6WhmO0aQRTksx_Ypr90\n',
+        ],
+      ],
+    },
+    /services\.server: env: IP_HASH_KEY must be \$\{IP_HASH_KEY:\?\}/,
+  ],
+  [
+    'DAILY_GRANT missing',
+    { [C]: [["      DAILY_GRANT: '100'\n", '']] },
+    /services\.server: env: DAILY_GRANT is required/,
+  ],
+  ...['0', '10001', '1.5', '+5', '1e3', 'abc', '${DAILY_GRANT:?x}'].map(
+    (value) =>
+      /** @type {const} */ ([
+        `DAILY_GRANT ${value}`,
+        { [C]: [["      DAILY_GRANT: '100'\n", `      DAILY_GRANT: '${value}'\n`]] },
+        /services\.server: daily-grant: DAILY_GRANT must be an integer from 1 to 10000/,
+      ]),
+  ),
+  [
     'TRUSTED_PROXIES is the subnet',
     { [C]: [['      TRUSTED_PROXIES: 10.250.0.2/32\n', '      TRUSTED_PROXIES: 10.250.0.0/28\n']] },
     /services\.server: env: TRUSTED_PROXIES must be 10\.250\.0\.2\/32/,

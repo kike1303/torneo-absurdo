@@ -3,6 +3,7 @@
 
 pub mod client_ip;
 pub mod internal;
+pub mod ip_hash;
 pub mod ip_key;
 pub mod trusted;
 
@@ -16,6 +17,7 @@ use axum::response::Response;
 
 pub use client_ip::client_ip;
 pub use internal::{InternalSecret, is_internal};
+pub use ip_hash::IpHashKey;
 pub use ip_key::IpKey;
 pub use trusted::{InvalidTrustedProxies, TrustedProxies};
 
