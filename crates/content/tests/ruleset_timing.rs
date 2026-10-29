@@ -2,6 +2,8 @@
 //!
 //! Lives in `crates/content`, not in the engine: it only reads the public accessors of
 //! [`Ruleset`]. The golden is canonical JSON (sorted keys, 2 spaces, final newline).
+//! `strike_gap_min_ms` is the minimum gap between two impacts of the engine (006 RF1); the
+//! guide shows it as the recommended recovery (007 phase B).
 use engine::Ruleset;
 use serde::Serialize;
 
@@ -13,6 +15,7 @@ const FILE: &str = "ruleset-timing.json";
 struct Timing {
     knockdown_ms: u16,
     ruleset_version: u16,
+    strike_gap_min_ms: u32,
     windup_heavy_ms: u32,
     windup_special_ms: u32,
     windup_strike_ms: u32,
@@ -27,6 +30,7 @@ fn timing(r: &Ruleset) -> Timing {
     Timing {
         knockdown_ms: r.knockdown_ms(),
         ruleset_version: r.version(),
+        strike_gap_min_ms: r.strike_gap_min(),
         windup_heavy_ms: r.windup_heavy_ms(),
         windup_special_ms: r.windup_special_ms(),
         windup_strike_ms: r.windup_strike_ms(),
@@ -120,5 +124,11 @@ fn every_listed_version_exists() {
     );
     for t in &golden.versions {
         assert!(Ruleset::for_version(t.ruleset_version).is_some());
+        // Sanity of the data, not a game rule: the gap covers at least a light windup.
+        assert!(
+            t.strike_gap_min_ms >= t.windup_strike_ms,
+            "ruleset v{}: strike_gap_min_ms < windup_strike_ms",
+            t.ruleset_version
+        );
     }
 }

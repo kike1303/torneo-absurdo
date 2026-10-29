@@ -2,3 +2,5 @@
 crates/engine/tests/golden/* -text
 # The arena's copies of the goldens are compared byte by byte with them (002 plan-c decision 5, 005 RF15).
 apps/web/src/lib/features/fight/fixtures/* -text
+# The content goldens too (007 phase B): the sprite guide reads them byte by byte.
+crates/content/tests/golden/* -text

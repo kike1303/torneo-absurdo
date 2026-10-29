@@ -12,7 +12,7 @@ import {
   type SpriteFrame,
   type SpriteManifest,
 } from '../manifest/types.ts';
-import { CONTACT_PX } from '../scene/choreography.ts';
+import { CONTACT_PX } from '../scene/types.ts';
 import { GUIDE_CODES as G } from './codes.ts';
 import { GUIDE_LIMITS } from './limits.ts';
 import type { RulesetTiming } from './ruleset.ts';
@@ -143,7 +143,8 @@ function checkFrames(
   return boxes;
 }
 
-function checkTiming(sink: Sink, code: AnimationCode, anim: SpriteAnimation, row: GuideRow): void {
+/** The frame count and the range of every `frame_ms`. */
+function checkCounts(sink: Sink, code: AnimationCode, anim: SpriteAnimation, row: GuideRow): void {
   const base = ['animations', code] as const;
   const count = anim.frames.length;
   if (outside(count, row.frames.min, row.frames.max)) {
@@ -158,6 +159,16 @@ function checkTiming(sink: Sink, code: AnimationCode, anim: SpriteAnimation, row
       sink.add(G.frameMsRange, pointer(...base, 'frame_ms', k), { ms });
     }
   });
+}
+
+/** Everything about time after the counts: idle frames, cycles, durations, windup, recovery. */
+function checkDurations(
+  sink: Sink,
+  code: AnimationCode,
+  anim: SpriteAnimation,
+  row: GuideRow,
+): void {
+  const base = ['animations', code] as const;
   const frameMax = row.frame_max_ms;
   if (frameMax !== undefined) {
     anim.frame_ms.forEach((ms, k) => {
@@ -255,16 +266,23 @@ function checkReach(
   }
 }
 
+/**
+ * A pixel rule like the others, without cascade: when a frame of `idle` failed `cell_size` or
+ * `frame_empty` (it is not in `boxes`), the set already fails with a more precise error.
+ */
 function idleDistinct(
   sink: Sink,
   manifest: SpriteManifest,
   sheets: readonly RgbaImage[],
+  boxes: ReadonlyMap<number, Box>,
   row: GuideRow,
 ): void {
   const min = row.distinct_min;
   if (min === undefined) return;
+  const used = new Set(manifest.animations.idle.frames);
+  for (const f of used) if (!boxes.has(f)) return;
   const distinct: SpriteFrame[] = [];
-  for (const f of new Set(manifest.animations.idle.frames)) {
+  for (const f of used) {
     const frame = manifest.frames[f];
     if (frame !== undefined && !distinct.some((d) => samePixels(sheets, d, frame))) {
       distinct.push(frame);
@@ -313,11 +331,10 @@ export function validateGuide(
     for (const row of table) {
       const anim: SpriteAnimation | undefined = manifest.animations[row.animation];
       if (anim === undefined) continue;
-      checkTiming(sink, row.animation, anim, row);
-      if (row.animation === 'idle') {
-        idleDistinct(sink, manifest, sheets, row);
-        checkIdlePixels(sink, anim, boxes);
-      }
+      checkCounts(sink, row.animation, anim, row);
+      if (row.animation === 'idle') idleDistinct(sink, manifest, sheets, boxes, row);
+      checkDurations(sink, row.animation, anim, row);
+      if (row.animation === 'idle') checkIdlePixels(sink, anim, boxes);
       if (ATTACKS.includes(row.animation)) checkReach(sink, row.animation, anim, boxes);
     }
     windupOrder(sink, manifest);

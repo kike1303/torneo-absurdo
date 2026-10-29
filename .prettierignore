@@ -28,3 +28,5 @@ apps/web/project.inlang/*
 !apps/web/project.inlang/settings.json
 # Written by packages/renderer/scripts/gen-placeholders.ts (plan-a1 decision 11)
 packages/renderer/placeholders/*/manifest.json
+# The reference export of the sprite importer: written by its gen:fixture script (007 RF-B8)
+tools/sprite-importer/fixtures/

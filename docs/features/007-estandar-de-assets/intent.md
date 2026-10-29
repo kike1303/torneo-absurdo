@@ -2,7 +2,7 @@
 id: "007"
 title: Estándar de assets para personajes propios
 type: intent
-status: approved
+status: done
 risk: medium
 author: product-owner
 reviewers: [architect, game-designer]
@@ -14,7 +14,7 @@ approvals:
 linear: TA-22
 depends_on: ["002", "003", "006"]
 created: 2026-10-27
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # Intent: Estándar de assets para personajes propios

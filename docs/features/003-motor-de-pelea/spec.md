@@ -14,7 +14,7 @@ approvals:
 linear: TA-3
 depends_on: ["001"]
 created: 2026-10-26
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # Spec: Motor de pelea v0
@@ -426,6 +426,8 @@ Un test unitario (`v1_respects_the_bounds`) comprueba sobre `Ruleset::v1()` las 
 | `abilities[].element` | Opcional, de la lista cerrada `fire`, `water`, `electric`, `ground`, `air` e `ice`. En la forma canónica se serializa como `null` si falta. |
 | `weaknesses` | De 0 a 2 elementos únicos de esa misma lista |
 | `rivals` | Slugs existentes en el roster, para el narrador; el motor los ignora |
+
+> **Enmienda (007, TA-25, 2026-10-28).** `character.json` suma un último campo opcional, `"sprites": "<id>"`: el set de `content/sprites/<id>/` que usa el personaje. Está **fuera de la forma motor** (no entra en `CharacterSpec` ni en `canonical_spec_json`, así que no cambia ninguna pelea). `crates/content` solo exige que, si la llave está, sea un string (`null` es `invalid_shape`) y lo expone como `Character::sprites()`; el patrón y la existencia del set los comprueba `just check` (`tools/sprite-importer check`). Ver RF-B5 y RF-B6 de la [spec de 007](../007-estandar-de-assets/spec.md).
 
 Se eligió JSON con `serde_json`, que ya está en el workspace, para no agregar dependencias. YAML exigiría un crate nuevo (`serde_yaml` está archivado), y TOML sumaría cinco crates. No hay floats, así que el parseo es exacto.
 

@@ -46,8 +46,25 @@ describe('the guide is outside the runtime', () => {
     expect(under(closure(src('guide/index.ts')).files, 'manifest').length).toBeGreaterThan(0);
   });
 
-  it.each(['index.ts', 'stage/index.ts'])('src/%s never reaches src/guide/', (entry) => {
+  it.each([
+    'index.ts',
+    'stage/index.ts',
+    'manifest/index.ts',
+    'timeline/index.ts',
+    'scene/index.ts',
+  ])('src/%s never reaches src/guide/', (entry) => {
     expect(under(closure(src(entry)).files, 'guide')).toEqual([]);
+  });
+
+  it('src/scene/index.ts (the ./scene subpath) never reaches stage, player nor pixi.js', () => {
+    const { files, packages } = closure(src('scene/index.ts'));
+    expect(under(files, 'stage')).toEqual([]);
+    expect(under(files, 'player')).toEqual([]);
+    expect([...packages].filter((p) => p === 'pixi.js' || p.startsWith('pixi.js/'))).toEqual([]);
+  });
+
+  it('src/guide/index.ts only reaches src/scene/types.ts inside scene/ (007 plan-b decision 8)', () => {
+    expect(under(closure(src('guide/index.ts')).files, 'scene')).toEqual(['src/scene/types.ts']);
   });
 
   it('src/guide/index.ts never reaches stage, player nor pixi.js', () => {
@@ -57,13 +74,17 @@ describe('the guide is outside the runtime', () => {
     expect([...packages].filter((p) => p === 'pixi.js' || p.startsWith('pixi.js/'))).toEqual([]);
   });
 
-  it('package.json exposes the ./guide subpath', () => {
+  it('package.json exposes the ./guide and ./scene subpaths', () => {
     const pkg = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as {
       exports: Record<string, unknown>;
     };
     expect(pkg.exports['./guide']).toEqual({
       types: './src/guide/index.ts',
       default: './src/guide/index.ts',
+    });
+    expect(pkg.exports['./scene']).toEqual({
+      types: './src/scene/index.ts',
+      default: './src/scene/index.ts',
     });
   });
 });

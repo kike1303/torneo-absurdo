@@ -65,7 +65,7 @@ describe('the windup range of the table', () => {
 
 describe('guideTable', () => {
   it('gives the approved table with v1', () => {
-    const attack = { recovery_min_ms: 200 };
+    const attack = { recovery_min_ms: 200, recovery_recommended_max_ms: 700 };
     const reaction = { duration_ms: { min: 200, max: 1000 }, first_frame_max_ms: 134 };
     expect(guideTable([V1])).toEqual([
       {
@@ -166,6 +166,16 @@ describe('guideTable', () => {
     };
     walk(guideTable([V1, v2({ windup_heavy_ms: 280 })]), '');
     expect(leaves.length).toBeGreaterThan(0);
+  });
+
+  it('recommends a recovery up to the lowest strike_gap_min_ms (007 plan-b decision 5)', () => {
+    const recommended = (rulesets: readonly RulesetTiming[]) =>
+      MOVES.map((m) => row(rulesets, m)?.recovery_recommended_max_ms);
+    expect(recommended([V1])).toEqual([700, 700, 700]);
+    expect(recommended([V1, v2({ strike_gap_min_ms: 650 })])).toEqual([650, 650, 650]);
+    expect(
+      guideTable([V1]).filter((r) => r.recovery_recommended_max_ms !== undefined),
+    ).toHaveLength(3);
   });
 
   it('throws without rulesets', () => {

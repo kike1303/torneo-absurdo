@@ -849,4 +849,15 @@ describe('ci.yml filters cover what each job runs (review of PR #5)', () => {
     const missing = [...scripts].filter((script) => !globs.some((g) => g.test(script)));
     expect(missing, `add to the ${filter} filter of ci.yml`).toEqual([]);
   });
+
+  it('the web filter covers what the sprite importer check reads (007 plan-b decision 27)', () => {
+    const globs = filters.web.flat(Infinity).map(globToRegExp);
+    const read = [
+      'content/sprites/x/manifest.json',
+      'content/characters/x/character.json',
+      'crates/content/tests/golden/ruleset-timing.json',
+      'docs/guides/sprites.md',
+    ];
+    expect(read.filter((file) => !globs.some((g) => g.test(file)))).toEqual([]);
+  });
 });

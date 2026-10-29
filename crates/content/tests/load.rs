@@ -459,3 +459,53 @@ fn errors_are_reported_in_name_order() {
         })
     );
 }
+
+/// 007 RF-B5: `sprites` is outside the engine shape. The pattern and the existence of the set
+/// are checked by `just check` (tools/sprite-importer), not here.
+mod sprites {
+    use super::*;
+
+    fn only(case: &str) -> content::Character {
+        let mut roster = load(case).unwrap_or_else(|e| panic!("{case}: {e:?}"));
+        assert_eq!(roster.len(), 1, "{case}");
+        roster.remove(0)
+    }
+
+    #[test]
+    fn sprites_is_optional_and_never_reaches_the_spec() {
+        let without = only("valid-solo-base");
+        let with = only("sprites-link");
+        assert_eq!(without.sprites(), None);
+        assert_eq!(with.sprites(), Some("solo_one"));
+        assert_eq!(with.spec(), without.spec());
+        assert_eq!(
+            canonical_spec_json(with.spec()),
+            canonical_spec_json(without.spec())
+        );
+    }
+
+    #[test]
+    fn sprites_null_is_invalid_shape() {
+        match error("sprites-null") {
+            ContentError::InvalidShape { path, .. } => {
+                assert_eq!(path, p("solo-one/character.json"));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn sprites_not_a_string_is_invalid_shape() {
+        match error("sprites-not-string") {
+            ContentError::InvalidShape { path, .. } => {
+                assert_eq!(path, p("solo-one/character.json"));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn sprites_pattern_is_not_checked_here() {
+        assert_eq!(only("sprites-any-string").sprites(), Some("Not An Id!"));
+    }
+}

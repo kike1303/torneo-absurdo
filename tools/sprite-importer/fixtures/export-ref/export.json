@@ -1,0 +1,117 @@
+{
+  "format": "torneo.sprites.export",
+  "format_version": 1,
+  "id": "ref_a",
+  "pixel_art": true,
+  "animations": {
+    "idle": {
+      "frame_ms": [
+        200,
+        250,
+        200,
+        250
+      ],
+      "loop": true
+    },
+    "attack_light": {
+      "frame_ms": [
+        60,
+        60,
+        90,
+        120
+      ],
+      "loop": false,
+      "impact_frame": 2
+    },
+    "attack_heavy": {
+      "frame_ms": [
+        100,
+        100,
+        100,
+        150,
+        220
+      ],
+      "loop": false,
+      "impact_frame": 3
+    },
+    "special": {
+      "frame_ms": [
+        80,
+        80,
+        80,
+        80,
+        160,
+        260
+      ],
+      "loop": false,
+      "impact_frame": 4
+    },
+    "hit": {
+      "frame_ms": [
+        80,
+        120,
+        200
+      ],
+      "loop": false
+    },
+    "block": {
+      "frame_ms": [
+        100,
+        250
+      ],
+      "loop": false
+    },
+    "dodge": {
+      "frame_ms": [
+        80,
+        160,
+        160
+      ],
+      "loop": false
+    },
+    "ko": {
+      "frame_ms": [
+        100,
+        150,
+        250,
+        500
+      ],
+      "loop": false
+    },
+    "win": {
+      "frame_ms": [
+        200,
+        200,
+        200,
+        200
+      ],
+      "loop": true
+    },
+    "intro": {
+      "frame_ms": [
+        200,
+        200,
+        200
+      ],
+      "loop": false
+    },
+    "walk": {
+      "frame_ms": [
+        110,
+        110,
+        110,
+        110
+      ],
+      "loop": true
+    },
+    "knockdown": {
+      "frame_ms": [
+        100,
+        150,
+        250,
+        400
+      ],
+      "loop": false
+    }
+  }
+}

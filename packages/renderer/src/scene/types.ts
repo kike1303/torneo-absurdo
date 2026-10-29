@@ -13,6 +13,11 @@ export const MARK_X: Readonly<Record<Side, number>> = Object.freeze({
   a: STAGE_WIDTH / 3,
   b: (2 * STAGE_WIDTH) / 3,
 });
+/**
+ * Distance between the two pivots when a strike connects. Lives here, with the rest of the stage
+ * geometry, so the guide layer reads it without loading the choreography (007 plan-b decision 8).
+ */
+export const CONTACT_PX = 64;
 /** Facing: `a` looks right (+x), `b` is mirrored and looks left. */
 export const FACING: Readonly<Record<Side, 1 | -1>> = Object.freeze({ a: 1, b: -1 });
 

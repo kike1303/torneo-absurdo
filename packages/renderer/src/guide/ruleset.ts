@@ -7,6 +7,8 @@ import { RULESET_CODES } from './codes.ts';
 /** One ruleset version, in snake_case like the golden. */
 export interface RulesetTiming {
   readonly ruleset_version: number;
+  /** The minimum gap between two impacts of the engine (006 RF1); a recommendation only. */
+  readonly strike_gap_min_ms: number;
   readonly windup_strike_ms: number;
   readonly windup_heavy_ms: number;
   readonly windup_special_ms: number;
@@ -25,6 +27,7 @@ export type RulesetResult =
 const ROOT_KEYS: readonly string[] = ['versions'];
 const TIMING_KEYS = [
   'ruleset_version',
+  'strike_gap_min_ms',
   'windup_strike_ms',
   'windup_heavy_ms',
   'windup_special_ms',

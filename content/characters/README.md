@@ -7,8 +7,9 @@ Cada personaje vive en `content/characters/<slug>/`, con el nombre del directori
   character.json   # datos de juego (stats, personalidad, habilidades, debilidades, rivales): solo códigos y enteros
   lore.es.md       # nombre, epíteto, nombres de habilidades (frontmatter `abilities`) y lore en español
   lore.en.md       # lo mismo en inglés, con el humor adaptado (no es una traducción literal)
-  sprites/         # opcional, desde la feature 004
 ```
+
+- Los sprites **no** van dentro del personaje: un set vive en [`content/sprites/<id>/`](../sprites/README.md) y el personaje lo enlaza con el campo opcional `"sprites": "<id>"` en `character.json`. Una carpeta `sprites/` aquí hace fallar `just check` (`link.misplaced_sprites`).
 
 - El formato exacto, el checklist legal "¿se parece demasiado?" (ADR-0004) y quién lo aprueba están en el skill [`write-character`](../../.claude/skills/write-character/SKILL.md). El esquema lo fija la spec del motor ([003](../../docs/features/003-motor-de-pelea/spec.md), "Esquema de personaje").
 - `crates/content` (`load_roster`) carga este directorio: ignora los archivos sueltos como este README, rechaza symlinks y deja todas las reglas de juego al motor. Un test (`crates/content/tests/real_content.rs`) lo carga dentro de `just check`, así que un personaje inválido no pasa CI.

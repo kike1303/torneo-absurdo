@@ -2,7 +2,7 @@
 id: "007"
 title: "Estándar de assets, fase A: contrato en el renderer y atadura al ruleset"
 type: plan
-status: approved
+status: done
 risk: medium
 author: frontend-engineer
 reviewers: [architect]

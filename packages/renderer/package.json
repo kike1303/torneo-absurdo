@@ -21,6 +21,10 @@
       "types": "./src/guide/index.ts",
       "default": "./src/guide/index.ts"
     },
+    "./scene": {
+      "types": "./src/scene/index.ts",
+      "default": "./src/scene/index.ts"
+    },
     "./placeholders/*": "./placeholders/*",
     "./fixtures/*": "./fixtures/*"
   },

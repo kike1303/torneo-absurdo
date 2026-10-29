@@ -1,7 +1,6 @@
 // Pure scene (RF-A9): no Pixi and no DOM.
 export * from './types.ts';
 export {
-  CONTACT_PX,
   MAX_ACTION_MS,
   MAX_WINDUP_MS,
   RETURN_MS,

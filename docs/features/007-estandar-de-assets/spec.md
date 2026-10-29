@@ -2,7 +2,7 @@
 id: "007"
 title: Estándar de assets para personajes propios
 type: spec
-status: approved
+status: done
 risk: medium
 author: architect
 reviewers: [product-owner, game-designer]
@@ -14,7 +14,7 @@ approvals:
 linear: TA-22
 depends_on: ["002", "003", "006"]
 created: 2026-10-27
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # Spec: Estándar de assets para personajes propios
@@ -88,6 +88,9 @@ Responde a la restricción del intent: los tiempos no se copian, y cada rango el
 
 - **RF-B2. Importador.** Paquete nuevo `tools/sprite-importer` (`@torneo/sprite-importer`, `private`, AGPL), con el mismo esqueleto que `tools/sff-converter`: TS ejecutado con `--experimental-strip-types`, dependencias `@torneo/renderer: workspace:*` y `pngjs` (ya fijado en el lockfile, sin dependencias nuevas). Comandos:
   - `pnpm -s --filter @torneo/sprite-importer import -- --in <export> --out <dir>`. Valida el export (RF-B1), arma el manifest, corre `validateManifest` con `expectedId`, decodifica y corre `validateGuide` contra el dorado del ruleset (RF-A5). Si todo pasa, escribe `manifest.json` y `sheet-N.png`. Si algo falla, no escribe nada.
+
+    > **Enmienda (fase B, TA-25, 2026-10-28).** El comando real es `pnpm -s --filter @torneo/sprite-importer run import -- --in <export> --out <dir>`, con `run`: `pnpm import` es un comando propio de pnpm (convierte lockfiles) y sin `run` nunca llega al script. El script sigue llamándose `import`, y lo mismo vale para el diagrama de "Diseño". La guía y el README del paquete documentan la forma con `run`, y `guide-doc.test.ts` falla si vuelve la otra. Ver la desviación 1 de [plan-b](./plan-b.md).
+
   - **Empaquetado determinista:** frames en el orden canónico (`REQUIRED_ANIMATIONS` y luego `OPTIONAL_ANIMATIONS`, cada uno en orden de `nn`). Frames con píxeles decodificados idénticos se deduplican en un solo frame del manifest. Rejilla de `floor(2048 / cellPx)` columnas por hoja (10 con 192), filas según hagan falta y una hoja nueva cuando se llena. Más hojas que `LIMITS.sheetsMax` da `export.too_many_frames`. Mismo export, mismos bytes de salida.
   - **`--out` cerrado:** solo `content/sprites/<id>/` (se commitea) o `content/_local/sprites/<id>/` (para probar en `/[lang]/dev/arena` con `just dev`, que ya sirve esa carpeta en dev). El importador se niega a escribir en cualquier otra ruta, igual que el convertidor de 002. Nunca toca ni crea `provenance.json`. Sí reemplaza los `sheet-N.png` previos del destino, y no deja sobrantes.
   - **Entrada no confiable:** no sigue symlinks. Lee el IHDR antes de decodificar y rechaza un PNG que no mida la celda. Cada archivo tiene un tope de bytes (`GUIDE_LIMITS.exportFileMaxBytes`) y el número de archivos está acotado por los máximos de frames.

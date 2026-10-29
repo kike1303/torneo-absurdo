@@ -4,7 +4,7 @@ type: glossary
 status: approved
 author: owner
 created: 2026-10-20
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # Glosario
@@ -37,4 +37,8 @@ updated: 2026-10-27
 | Repetición | `Replay` | Reproducir una pelea pasada a partir de su log o su semilla. |
 | Timeline del renderer | `Timeline` | Lista de *cues* que reproduce `@torneo/renderer` (formato propio y versionado, `timeline_version`). No es el `FightLog`: un adaptador del lado de `apps/web` traduce uno a la otra (spec de 002). |
 | Cue | `Cue` | Momento de la `Timeline` (`intro`, `strike`, `knockdown`, `ko`, `win` y, en la `timeline_version` 2, `time_up` y `draw`) con su `at_ms`; en un `strike`, `at_ms` es el instante del impacto. `time_up` marca el fin del tiempo, y lo cierra un `win` (decisión) o un `draw` (empate). |
+| Set de sprites | `SpriteSet` | Carpeta `content/sprites/<id>/` con `manifest.json`, sus hojas y `provenance.json`; un personaje la enlaza con `"sprites": "<id>"` (feature 007). |
+| Export | `SpriteExport` | Lo que entrega quien dibuja: `export.json` y un PNG por frame en una celda fija (`torneo.sprites.export`). El importador lo convierte en un set. |
+| Procedencia | `Provenance` | `provenance.json` de un set: autor (identificador público), origen, fecha, si intervino IA y licencia, sin texto libre. Los datos personales van en `private/`. |
+| Capa de guía | `validateGuide` | Reglas de arte (celda, tiempos, píxeles) sobre un manifest ya válido, con códigos `guide.*` (`@torneo/renderer/guide`). |
 | Manifest de sprites | `SpriteManifest` | `manifest.json` de un personaje: hojas PNG, frames con pivote y las animaciones estándar (`format: "torneo.sprites"`, `format_version`). |
