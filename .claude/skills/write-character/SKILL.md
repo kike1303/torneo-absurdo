@@ -13,9 +13,9 @@ content/characters/<slug>/
   character.json     # datos de juego: solo códigos y enteros, ningún texto para humanos
   lore.es.md         # nombre, epíteto, nombres de habilidades y lore en español
   lore.en.md         # lo mismo en inglés
-  sprites/           # opcional, llega con la feature 004 (el renderer usa placeholders mientras tanto)
 ```
 - El nombre del directorio **es** el `slug`. No hay symlinks: el cargador los rechaza.
+- Los sprites no viven aquí: un set propio vive en `content/sprites/<id>/` (manifest, sheets y `provenance.json`) y el personaje lo enlaza con el campo opcional `sprites`. Formato y reglas en [docs/guides/sprites.md](../../../docs/guides/sprites.md); sin set, el renderer usa placeholders.
 - Solo se commitea arte original. Nada de sprites de MUGEN ni de franquicias: esos van en `content/_local/` (ignorado por git, ADR-0004).
 - Cualquier otro archivo o directorio dentro del personaje se ignora (el cargador solo lee `character.json` y comprueba que existan los lore).
 
@@ -48,6 +48,7 @@ JSON estricto: un campo desconocido, un tipo incorrecto o un valor fuera de rang
 | `abilities[].element` | Opcional: `fire`, `water`, `electric`, `ground`, `air` o `ice`. |
 | `weaknesses` | De 0 a 2 elementos distintos de esa lista. Un golpe de ese elemento hace ×5/4. |
 | `rivals` | Slugs de otros personajes del roster, sin repetir y sin el propio. Para el narrador; el motor los ignora. |
+| `sprites` | Opcional, último campo. Id de un set en `content/sprites/<id>/`, con el patrón `^[a-z][a-z0-9_]{0,47}$` (`LIMITS.idPattern` del renderer). No entra en la forma que ve el motor. `null` hace fallar la carga en `crates/content`; el patrón y que el set exista los comprueba `just check`. |
 
 Qué mueve cada número (detalle en la tabla del ruleset de la spec): el daño del golpe y de los `heavy` escala con `attack` del atacante contra `defense` del rival, y el de los `special` con `special` contra `special`; `speed` acorta el intervalo entre acciones y sube la esquiva; `defense` y `caution` suben el bloqueo; `special` sube además la probabilidad de crítico; `aggression` pesa el golpe y los `heavy`; `showmanship` pesa los `special` (y más con poca vida). `hp` da `500 + 4·hp` de vida máxima.
 
