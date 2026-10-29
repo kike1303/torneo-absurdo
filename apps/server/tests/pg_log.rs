@@ -11,9 +11,11 @@ use support::db::TestDb;
 
 #[tokio::test]
 async fn failing_statements_never_log_their_values() {
+    // One file per run (the file name is the canary), so `just _check-pg-log` checks every run
+    // of the interval and never a stale value.
     let canary = format!("pglog-canary-{}", uuid::Uuid::new_v4().simple());
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
-    std::fs::write(dir.join("pglog-canary.txt"), &canary).unwrap();
+    std::fs::write(dir.join(format!("{canary}.txt")), &canary).unwrap();
 
     let db = TestDb::create().await;
     let pool = db.migrated_pool().await;

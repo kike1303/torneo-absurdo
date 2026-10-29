@@ -108,6 +108,8 @@ test: _web-prepare
 _test-rust:
     #!/usr/bin/env bash
     set -euo pipefail
+    # Stale canaries of earlier runs must not count: each run of tests/pg_log.rs writes its own.
+    rm -f target/tmp/pglog-canary-*.txt
     since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     DATABASE_URL='{{test_db_url}}' cargo test --workspace --locked
     DATABASE_URL='{{test_db_url}}' cargo test -p server --features dev-auth --locked
@@ -118,17 +120,24 @@ _test-rust:
 _check-pg-log since:
     #!/usr/bin/env bash
     set -euo pipefail
-    file=target/tmp/pglog-canary.txt
-    if [ ! -s "$file" ]; then
+    shopt -s nullglob
+    files=(target/tmp/pglog-canary-*.txt)
+    if [ "${#files[@]}" -eq 0 ]; then
         echo "check-pg-log: no canary (did apps/server/tests/pg_log.rs run?)" >&2
         exit 1
     fi
-    canary="$(cat "$file")"
     logs="$(docker compose -f infra/compose.dev.yml logs --no-log-prefix --since "{{since}}" postgres 2>&1)"
-    if grep -qF "$canary" <<<"$logs"; then
-        echo "check-pg-log: a value of a failed statement reached the Postgres log" >&2
-        exit 1
-    fi
+    for file in "${files[@]}"; do
+        canary="$(cat "$file")"
+        if [ -z "$canary" ]; then
+            echo "check-pg-log: an empty canary file" >&2
+            exit 1
+        fi
+        if grep -qF "$canary" <<<"$logs"; then
+            echo "check-pg-log: a value of a failed statement reached the Postgres log" >&2
+            exit 1
+        fi
+    done
     if ! grep -q ' ERROR: ' <<<"$logs"; then
         echo "check-pg-log: no ERROR line in the Postgres log of the run (positive control)" >&2
         exit 1
