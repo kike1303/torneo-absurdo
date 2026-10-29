@@ -3,8 +3,8 @@
 # "outside loopback", where the server refuses the public values of apps/server/.env.example, and
 # a fixed value committed to git would be accepted by the production binary too. So they are
 # generated on first use (32 bytes of /dev/urandom each, base64url without padding) into
-# infra/local.secrets.env, which git and .dockerignore ignore. An existing valid file is never
-# touched; an empty or truncated one is regenerated.
+# infra/local.secrets.env, which git and .dockerignore ignore. An existing valid file keeps its
+# content (its mode is set to 600); an empty or truncated one is regenerated.
 # Prints nothing: the values never reach the terminal.
 set -eu
 
@@ -19,6 +19,8 @@ valid() {
 }
 if [ -e "$file" ]; then
     if valid; then
+        # Kept as it is, but never readable by others (it may come from an older version).
+        chmod 600 "$file"
         exit 0
     fi
     rm -f "$file"

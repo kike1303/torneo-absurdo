@@ -2,6 +2,7 @@
 // ignored by git, and never anywhere else. Runs a copy of the script in a temporary tree.
 import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
   copyFileSync,
   mkdirSync,
   mkdtempSync,
@@ -74,6 +75,17 @@ describe('local-secrets.sh', () => {
     const first = readFileSync(out, 'utf8');
     run(root);
     expect(readFileSync(out, 'utf8')).toBe(first);
+  });
+
+  it('keeps a valid existing file and tightens its mode to 600', () => {
+    const root = tree();
+    run(root);
+    const out = join(root, 'infra', 'local.secrets.env');
+    const first = readFileSync(out, 'utf8');
+    chmodSync(out, 0o644);
+    run(root);
+    expect(readFileSync(out, 'utf8')).toBe(first);
+    expect(statSync(out).mode & 0o777).toBe(0o600);
   });
 
   it('regenerates an existing file that is empty or lost a secret', () => {

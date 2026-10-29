@@ -407,6 +407,50 @@ async fn db_admin(db: &TestDb) -> PgPool {
         .unwrap()
 }
 
+/// security on #54: when the session lookup of the handshake fails, the socket is anonymous:
+/// it opens, is never registered with a session, and `self` is forbidden.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_session_lookup_makes_an_anonymous_socket() {
+    use server::app::AppState;
+    let db = TestDb::create().await;
+    let direct = db.migrated_pool().await;
+    let (_, token) = support::app::user_with_session(&direct).await;
+    let url = db.url();
+    let config = support::config::config(&[("DATABASE_URL", url.as_str())]);
+    let options = config
+        .database
+        .clone()
+        .options([("statement_timeout", "300")]);
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .acquire_timeout(Duration::from_secs(2))
+        .connect_lazy_with(options);
+    let state = AppState::from_config(
+        &config,
+        &Settings::default(),
+        pool,
+        Arc::new(support::app::AlwaysUp),
+    );
+    let ws_state = state.ws.clone();
+    let app = support::app::start(state).await;
+    let mut lock = direct.begin().await.unwrap();
+    sqlx::query("LOCK TABLE users IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *lock)
+        .await
+        .unwrap();
+    let client = connect(app.addr, Some(&token), None).await;
+    lock.rollback().await.unwrap();
+    let mut client = client.expect("the socket opens, as anonymous");
+    assert_eq!(ws_state.session_sockets(), 0);
+    ws::send_text(&mut client, r#"{"type":"subscribe","channel":"self"}"#).await;
+    assert_eq!(
+        ws::next_data(&mut client, Duration::from_secs(2)).await,
+        Some(Message::Text(
+            r#"{"type":"error","code":"ws.forbidden_channel"}"#.into()
+        ))
+    );
+}
+
 // --- Limits (RF-B14, T18, T22) ----------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
