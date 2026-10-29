@@ -56,11 +56,14 @@ fn assert_callback_error(response: &http::Response, code: &str) {
 
 // --- The happy path ---------------------------------------------------------------------
 
+/// The dev identity of the first-login test.
+const IDENTITY: &str = "ana_bel-7";
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_first_login_creates_the_user_the_grant_and_a_session() {
     let db = TestDb::create().await;
     let (app, pool) = app(&db).await;
-    let done = flow::login(&app, "ana", Some("/es/onboarding"), None).await;
+    let done = flow::login(&app, IDENTITY, Some("/es/onboarding"), None).await;
     assert_eq!(done.status, 303, "{}", done.text());
     assert_eq!(done.header("location"), Some("/es/onboarding"));
     assert_eq!(done.header("cache-control"), Some("no-store"));
@@ -103,9 +106,12 @@ async fn a_first_login_creates_the_user_the_grant_and_a_session() {
     assert_eq!(body["providers"], serde_json::json!(["dev"]));
     assert_eq!(body["role"], "user");
     assert_eq!(body["display_name_is_generated"], true);
-    // T19: the alias is generated, never copied from the provider.
+    // T19: the alias is generated, never copied from the provider. The identity has `_` and
+    // `-`, which no alias has, so an alias can never contain it by chance (with `ana` it did:
+    // Iguana, Manzana, Campana…).
     let name = body["display_name"].as_str().unwrap();
-    assert!(!name.to_lowercase().contains("ana"), "{name}");
+    assert!(!name.to_lowercase().contains(IDENTITY), "{name}");
+    assert!(name.chars().all(|c| c.is_ascii_alphanumeric()), "{name}");
     assert!(server::profile::name::validate(name).is_ok());
 
     assert_eq!(count(&pool, "users").await, 1);
