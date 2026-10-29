@@ -74,6 +74,11 @@ jobs:
               - apps/web/**
               - packages/**
               - tools/**
+              # Read by the sprite importer check inside check-web (007 plan-b decision 27).
+              - content/sprites/**
+              - content/characters/**
+              - crates/content/tests/golden/**
+              - docs/guides/**
               - crates/protocol/**
               - crates/engine/**
               - crates/engine-wasm/**
