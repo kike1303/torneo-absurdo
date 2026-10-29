@@ -249,7 +249,10 @@ async fn appending_an_unbalanced_posting_to_an_existing_entry_never_commits() {
     let a = user(&pool).await;
     let b = user(&pool).await;
     let mut tx = pool.begin().await.unwrap();
-    let entry = ledger::grant(&mut tx, a, Coins(100)).await.unwrap().unwrap();
+    let entry = ledger::grant(&mut tx, a, Coins(100))
+        .await
+        .unwrap()
+        .unwrap();
     tx.commit().await.unwrap();
     let account_b = account_of(&pool, b).await;
     let mut tx = pool.begin().await.unwrap();
