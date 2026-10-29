@@ -106,9 +106,14 @@ function locateCsp(sf) {
   const names = [];
   /** @type {any[]} */
   const modules = [];
+  /** @type {any[]} */
+  const dynamicImports = [];
   const visit = (node) => {
     if (ts.isIdentifier(node) && node.text === 'sveltekit') names.push(node);
     if (ts.isStringLiteralLike(node) && node.text === KIT_VITE) modules.push(node);
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      dynamicImports.push(node);
+    }
     ts.forEachChild(node, visit);
   };
   visit(sf);
@@ -136,13 +141,34 @@ function locateCsp(sf) {
       line: lineOf(uses[1] ?? uses[0] ?? specifier),
     };
   }
+  // The `plugins` of the exported config, `export default { … }` or `defineConfig({ … })`, so a
+  // decoy config elsewhere in the file does not count (security-reviewer round 3 on #50).
   const array = call.parent;
+  const config = array.parent?.parent;
+  const exported =
+    config?.parent && ts.isCallExpression(config.parent)
+      ? ts.isIdentifier(config.parent.expression) &&
+        config.parent.expression.text === 'defineConfig' &&
+        config.parent.arguments.length === 1 &&
+        ts.isExportAssignment(config.parent.parent)
+      : ts.isExportAssignment(config?.parent);
   if (
     !ts.isArrayLiteralExpression(array) ||
     !ts.isPropertyAssignment(array.parent) ||
-    plainKey(array.parent) !== 'plugins'
+    plainKey(array.parent) !== 'plugins' ||
+    !ts.isObjectLiteralExpression(config) ||
+    !exported
   ) {
-    return { error: '`sveltekit(…)` must be an element of `plugins: [ … ]`', line: lineOf(call) };
+    return {
+      error: '`sveltekit(…)` must be an element of the exported config `plugins: [ … ]`',
+      line: lineOf(call),
+    };
+  }
+  if (dynamicImports.length > 0) {
+    return {
+      error: '`import()` is not allowed in vite.config.ts',
+      line: lineOf(dynamicImports[0]),
+    };
   }
   const [options, ...rest] = call.arguments;
   if (!options || rest.length > 0 || !ts.isObjectLiteralExpression(options)) {

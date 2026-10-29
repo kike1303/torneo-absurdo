@@ -287,7 +287,26 @@ describe('check-kit-config: csp is the exact B1 allowlist (ADR-0012 consequence 
     [
       'sveltekit outside plugins',
       config().replace('plugins: [sveltekit(', 'other: [sveltekit('),
-      /element of `plugins/,
+      /element of the exported config `plugins/,
+    ],
+    // security-reviewer round 3: a decoy config next to a plugin from elsewhere
+    [
+      'a decoy config that is not exported',
+      config().replace('export default {', 'const unused = {') +
+        'export default { plugins: [] };\n',
+      /element of the exported config/,
+    ],
+    [
+      'a dynamic import',
+      `${config()}const kv = await import('@sveltejs/' + 'kit/vite');\n`,
+      /`import\(\)` is not allowed/,
+    ],
+    [
+      'defineConfig with a second argument',
+      config()
+        .replace('export default {', 'export default defineConfig({')
+        .replace('};\n', '}, extra);\n'),
+      /element of the exported config/,
     ],
     // security-reviewer round 2: text tricks that fooled the lexer
     [
@@ -303,6 +322,12 @@ describe('check-kit-config: csp is the exact B1 allowlist (ADR-0012 consequence 
   ])('fails on %s', (_, source, pattern) => {
     const problems = csp(source);
     expect(problems.join('\n')).toMatch(pattern);
+  });
+  it('accepts the exported config wrapped in defineConfig', () => {
+    const source = config()
+      .replace('export default {', 'export default defineConfig({')
+      .replace('};\n', '});\n');
+    expect(csp(source)).toEqual([]);
   });
   it('accepts a quoted csp key, shorthand keys and a regex literal elsewhere', () => {
     const source = `const adapter = {};\nconst re = /'"\`/;\n${config().replace('sveltekit({ csp', "sveltekit({ adapter, 'csp'")}`;

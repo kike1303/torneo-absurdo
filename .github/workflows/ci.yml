@@ -103,6 +103,7 @@ jobs:
               - scripts/local-networks.sh
               # The CSP is fixed at build time: the image's /es/ is compared with B1 (ADR-0012).
               - apps/web/vite.config.ts
+              - apps/web/vite/**
               - Cargo.toml
               - Cargo.lock
               - rust-toolchain.toml
