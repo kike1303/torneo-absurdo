@@ -1,9 +1,9 @@
 //! `display_name` validation and `display_name_key` (ADR-0008 D1, 008 RF-B7).
 //!
-//! In this order: NFC, trim, refuse control (`Cc`) and invisible characters (every
-//! `Default_Ignorable_Code_Point` and U+2800), 3 to 24 graphemes, then the key (UTS #39
-//! skeleton over full case folding over NFKC) and the reserved names, compared on the letters
-//! and digits of the name only. Uniqueness is the database's `UNIQUE` on the key, never a prior
+//! In this order: NFC, trim, refuse control (`Cc`), the line and paragraph separators and
+//! invisible characters (every `Default_Ignorable_Code_Point` and a few other blanks), 3 to 24
+//! graphemes, then the key (UTS #39 skeleton over full case folding over NFKC) and the
+//! reserved names, compared by two forms built from the letters and digits of the name. Uniqueness is the database's `UNIQUE` on the key, never a prior
 //! check here.
 
 use std::collections::HashSet;
@@ -42,21 +42,37 @@ impl DisplayName {
     }
 }
 
-/// The reserved names of `content/names/reserved.txt`, as [`reserved_form`]s.
+/// Both [`reserved_forms`] of every name of `content/names/reserved.txt`.
 static RESERVED: LazyLock<HashSet<String>> = LazyLock::new(|| {
     words(include_str!("../../../../content/names/reserved.txt"))
-        .map(reserved_form)
+        .flat_map(reserved_forms)
         .collect()
 });
 
-/// The form compared against the reserved list: only the letters and digits of the name, without
-/// accents (NFD, then `char::is_alphanumeric`), keyed like `display_name_key`. So any
-/// punctuation, space or accent between the letters ("Torneo Absurdo", "Torneo·Absurdo",
-/// "Torneo—Absurdo", "Anónimo") does not get around the list (review of #54). Only for the
-/// reserved list: the `UNIQUE` key keeps them, so "Ana Bel" and "AnaBel" are still two names.
-fn reserved_form(text: &str) -> String {
-    let letters: String = text.nfd().filter(|c| c.is_alphanumeric()).collect();
-    key_of(&letters)
+/// The letters and digits of `text`, without accents (NFD, then `char::is_alphanumeric`).
+fn letters(text: &str) -> String {
+    text.nfd().filter(|c| c.is_alphanumeric()).collect()
+}
+
+/// The two forms compared against the reserved list (review of #54):
+/// - `key_of(letters(text))`: no punctuation, space or accent between the letters gets around
+///   the list ("Torneo·Absurdo", "Torneo—Absurdo", "Anónimo");
+/// - `key_of(letters(key_of(text)))`: a symbol the skeleton reads as a letter still counts as
+///   that letter ("Syst℮m", "Sta₽f"); the first form alone would drop it.
+///
+/// Invariant: a name whose `display_name_key` equals that of a reserved name always has the
+/// second form of that reserved name, so this only adds refusals to a plain key match. Only for
+/// the reserved list: the `UNIQUE` key keeps everything, so "Ana Bel" and "AnaBel" are still
+/// two names.
+fn reserved_forms(text: &str) -> [String; 2] {
+    [key_of(&letters(text)), key_of(&letters(&key_of(text)))]
+}
+
+/// Whether `text` is a reserved name by either form.
+pub(crate) fn is_reserved(text: &str) -> bool {
+    reserved_forms(text)
+        .iter()
+        .any(|form| RESERVED.contains(form))
 }
 
 /// The non-comment, non-empty lines of a word list.
@@ -89,18 +105,22 @@ const DEFAULT_IGNORABLE: &[(char, char)] = &[
     ('\u{E0000}', '\u{E0FFF}'),
 ];
 
-/// A character that shows nothing: a `Default_Ignorable_Code_Point`, or U+2800 (the braille
-/// blank, a visible "space" that is not one) (security-reviewer on #54).
+/// Blank characters outside `Default_Ignorable_Code_Point` (security-reviewer on #54): the
+/// braille blank, the full and half blanks of Egyptian hieroglyphs and the Khitan filler.
+const OTHER_BLANKS: &[char] = &['\u{2800}', '\u{13441}', '\u{13442}', '\u{16FE4}'];
+
+/// A character that shows nothing: a `Default_Ignorable_Code_Point` or one of [`OTHER_BLANKS`].
 pub fn is_invisible(c: char) -> bool {
-    c == '\u{2800}'
+    OTHER_BLANKS.contains(&c)
         || DEFAULT_IGNORABLE
             .iter()
             .any(|(first, last)| (*first..=*last).contains(&c))
 }
 
-/// Every `Cc` and every invisible character.
+/// Every `Cc`, the line and paragraph separators (U+2028, U+2029) and every invisible
+/// character.
 fn forbidden(c: char) -> bool {
-    c.is_control() || is_invisible(c)
+    c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') || is_invisible(c)
 }
 
 /// `display_name_key`: the UTS #39 skeleton of the full case folding of the NFKC form. So
@@ -141,7 +161,7 @@ pub fn validate(input: &str) -> Result<DisplayName, NameError> {
         return Err(NameError::Invalid);
     }
     let key = key_of(text);
-    if RESERVED.contains(&reserved_form(text)) {
+    if is_reserved(text) {
         return Err(NameError::Reserved);
     }
     Ok(DisplayName {

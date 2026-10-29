@@ -1,5 +1,7 @@
 // Tests of `profile::name` (T20 table, 008 RF-B7). Included from name.rs.
 
+use std::collections::HashSet;
+
 use proptest::prelude::*;
 
 use super::*;
@@ -118,6 +120,95 @@ fn invisible_characters_are_refused() {
         assert!(!is_invisible(c), "U+{:04X}", u32::from(c));
     }
     assert!(validate("Año⠁Ñu").is_ok());
+}
+
+/// architect on #54: keeping only letters and digits before the skeleton dropped symbols the
+/// skeleton maps to letters. Both forms are checked now.
+#[test]
+fn symbols_the_skeleton_reads_as_letters_stay_reserved() {
+    for input in ["Syst\u{212E}m", "Sta\u{20BD}f", "S\u{209E}stem", "Syst℮m"] {
+        assert_eq!(validate(input), Err(NameError::Reserved), "{input:?}");
+    }
+}
+
+/// qa on #54: accents are dropped before the comparison (the `nfd()` of `letters`). The skeleton
+/// output is decomposed, so the second form drops them anyway; `nfd()` decides when only the
+/// first form can match: an accent plus a dash the skeleton turns into `ー`.
+#[test]
+fn accented_reserved_names_stay_reserved() {
+    for input in [
+        "Ádmin",
+        "Tórneo Absurdo",
+        "Módérador",
+        "ADMÍN",
+        "Àdmin",
+        "Tórneo—Absurdo",
+        "Ád—min",
+        "Módé—rador",
+    ] {
+        assert_eq!(validate(input), Err(NameError::Reserved), "{input:?}");
+    }
+}
+
+/// The new comparison only adds refusals: every variant of a reserved word that the original
+/// rule (a plain `display_name_key` match) refused is still refused. Variants: each letter of
+/// each reserved word replaced by every BMP character with the same one-character key.
+#[test]
+fn the_reserved_rule_is_monotonic_over_the_original_one() {
+    use std::collections::HashMap;
+    let original: HashSet<String> = words(include_str!("../../../../content/names/reserved.txt"))
+        .map(key_of)
+        .collect();
+    let mut by_key: HashMap<String, Vec<char>> = HashMap::new();
+    for c in (0u32..=0xFFFF).filter_map(char::from_u32) {
+        if !c.is_control() && !is_invisible(c) {
+            by_key.entry(key_of(&c.to_string())).or_default().push(c);
+        }
+    }
+    let mut checked = 0;
+    for word in words(include_str!("../../../../content/names/reserved.txt")) {
+        let chars: Vec<char> = word.chars().collect();
+        for (i, c) in chars.iter().enumerate() {
+            let Some(twins) = by_key.get(&key_of(&c.to_string())) else {
+                continue;
+            };
+            for twin in twins {
+                let mut variant = chars.clone();
+                variant[i] = *twin;
+                let variant: String = variant.into_iter().collect();
+                if original.contains(&key_of(&variant)) {
+                    checked += 1;
+                    assert!(is_reserved(&variant), "{variant:?} ({word})");
+                }
+            }
+        }
+    }
+    assert!(checked > 1000, "{checked}");
+}
+
+#[test]
+fn line_and_paragraph_separators_are_refused() {
+    for c in ['\u{2028}', '\u{2029}'] {
+        assert_eq!(
+            validate(&format!("Ana{c}Bel")),
+            Err(NameError::Invalid),
+            "U+{:04X}",
+            u32::from(c)
+        );
+    }
+}
+
+#[test]
+fn egyptian_format_controls_and_the_khitan_filler_are_invisible() {
+    for c in ['\u{13441}', '\u{13442}', '\u{16FE4}'] {
+        assert!(is_invisible(c), "U+{:04X}", u32::from(c));
+        assert_eq!(
+            validate(&format!("Ana{c}Bel")),
+            Err(NameError::Invalid),
+            "U+{:04X}",
+            u32::from(c)
+        );
+    }
 }
 
 #[test]

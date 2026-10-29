@@ -1,6 +1,7 @@
-# Reserved display names (ADR-0008 D1), compared by display_name_key (UTS #39 skeleton over
-# NFKC + full case folding) without spaces, "_", "-" or ".", so case, homoglyphs and separators
-# do not get around them. Accents survive the key, so accented forms are listed too. One per line.
+# Reserved display names (ADR-0008 D1 and its 2026-10-29 amendment). A name is reserved if
+# either form matches the same form of a line: the key (UTS #39 skeleton over NFKC + full case
+# folding) of its letters and digits without accents, or the letters and digits of its key, keyed
+# again. So case, homoglyphs, accents, punctuation and spaces do not get around them. One per line.
 admin
 administrador
 administradora
