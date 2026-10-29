@@ -4,6 +4,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CLI_CODES, IO_CODES } from '../src/codes.ts';
 import { loadGolden } from '../src/golden.ts';
 import { renderGuideBlock, replaceGuideBlock } from '../src/guide-doc.ts';
 
@@ -12,13 +13,14 @@ const GUIDE = path.join(ROOT, 'docs', 'guides', 'sprites.md');
 
 const rulesets = loadGolden(ROOT);
 if (rulesets === null) {
-  process.stdout.write(JSON.stringify({ code: 'io.golden_invalid', file: '', path: '' }) + '\n');
+  process.stdout.write(JSON.stringify({ code: IO_CODES.goldenInvalid, file: '', path: '' }) + '\n');
   process.exit(2);
 }
 const next = replaceGuideBlock(readFileSync(GUIDE, 'utf8'), renderGuideBlock(rulesets));
 if (next === null) {
   process.stdout.write(
-    JSON.stringify({ code: 'cli.guide_markers', file: 'docs/guides/sprites.md', path: '' }) + '\n',
+    JSON.stringify({ code: CLI_CODES.guideMarkers, file: 'docs/guides/sprites.md', path: '' }) +
+      '\n',
   );
   process.exit(2);
 }

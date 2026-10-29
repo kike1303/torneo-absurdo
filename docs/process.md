@@ -62,7 +62,7 @@ Por defecto los agentes avanzan solos. El owner tiene que dar su OK explícito e
 
 ```yaml
 ---
-id: "003"                 # número de la feature (o del ADR)
+id: "003"                 # número de la feature (o del ADR); en una guía, su slug
 title: Motor de pelea v0
 type: intent | spec | plan | adr | vision | architecture | process | glossary | character | legal | guide
 status: draft | proposed | in-review | changes-requested | approved | rejected | superseded | done
@@ -89,7 +89,7 @@ docs/features/NNN-slug/
 ```
 Si la spec divide la feature en **fases** (un PR por fase), cada fase lleva su propio plan: `plan-<fase>.md` (p. ej. `plan-a.md`, `plan-b.md`). Cada uno se escribe, revisa y aprueba por separado, y el issue de Linear pasa a *In Progress* cuando se aprueba el primero.
 Los números son consecutivos y nunca se reutilizan. Las decisiones transversales salen como ADR en `docs/decisions/NNNN-slug.md`.
-Las guías transversales (por ejemplo, la de arte para sets de sprites) viven en `docs/guides/<slug>.md`, con `type: guide`.
+Las guías transversales (por ejemplo, la de arte para sets de sprites) viven en `docs/guides/<slug>.md`, con `type: guide` e `id` igual al slug del archivo (`id: "sprites"`).
 
 ## Público vs privado
 - El repo es **público**: todo lo de `docs/`, `.claude/` y el código es visible.

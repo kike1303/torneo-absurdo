@@ -1,8 +1,8 @@
 //! File shape of `content/characters/<slug>/character.json` (003 "Esquema de personaje").
 //!
 //! It is the engine shape plus `archetype`, `ruleset_version`, `rivals` and the optional
-//! `sprites` link (007 RF-B5), with the fields in the order of the spec. Every level rejects unknown fields (the nested types of the engine
-//! already do).
+//! `sprites` link (007 RF-B5), with the fields in the order of the spec. Every level rejects
+//! unknown fields (the nested types of the engine already do).
 use engine::{Ability, CharacterSpec, Element, Personality, Stats};
 use serde::{Deserialize, Deserializer};
 
