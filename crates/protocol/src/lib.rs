@@ -19,7 +19,7 @@ mod fight;
 mod health;
 mod ws;
 
-pub use error::{ApiError, ApiErrorCode, ErrorCode, WsErrorCode};
+pub use error::{ApiError, ApiErrorCode, AuthErrorCode, ErrorCode, WsErrorCode};
 pub use fight::{AbilityKind, EndReason, FightEvent, FightLog, FighterInfo, MomentKind, Side};
 pub use health::HealthResponse;
 pub use ws::{ClientMessage, ServerMessage};

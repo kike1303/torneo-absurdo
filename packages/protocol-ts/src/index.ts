@@ -2,6 +2,7 @@
 export type * from './generated/AbilityKind.js';
 export type * from './generated/ApiError.js';
 export type * from './generated/ApiErrorCode.js';
+export type * from './generated/AuthErrorCode.js';
 export type * from './generated/ClientMessage.js';
 export type * from './generated/EndReason.js';
 export type * from './generated/ErrorCode.js';

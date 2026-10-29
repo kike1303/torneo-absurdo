@@ -50,6 +50,7 @@
   "ws_close_reason_rate_limited": "Too many messages were sent. Wait a moment.",
   "ws_close_reason_pong_timeout": "The connection stopped responding.",
   "ws_close_reason_idle_timeout": "The connection was closed for inactivity.",
+  "ws_close_reason_ip_capacity": "Too many connections from your network. Try again later.",
   "ws_close_reason_unknown": "The connection was closed.",
   "arena_title": "Test arena",
   "arena_canvas_label": "Animated fight between {a} and {b}",

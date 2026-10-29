@@ -8,11 +8,13 @@ pub enum ApiErrorCode {
     NotFound,
     #[serde(rename = "http.method_not_allowed")]
     MethodNotAllowed,
+    #[serde(rename = "http.rate_limited")]
+    RateLimited,
 }
 
 impl ApiErrorCode {
     /// Every variant. A test with an exhaustive `match` keeps this list complete.
-    pub const ALL: &'static [Self] = &[Self::NotFound, Self::MethodNotAllowed];
+    pub const ALL: &'static [Self] = &[Self::NotFound, Self::MethodNotAllowed, Self::RateLimited];
     /// The only domain prefix this enum may use.
     pub const PREFIX: &'static str = "http.";
 
@@ -21,6 +23,7 @@ impl ApiErrorCode {
         match self {
             Self::NotFound => "http.not_found",
             Self::MethodNotAllowed => "http.method_not_allowed",
+            Self::RateLimited => "http.rate_limited",
         }
     }
 }
@@ -44,6 +47,8 @@ pub enum WsErrorCode {
     PongTimeout,
     #[serde(rename = "ws.idle_timeout")]
     IdleTimeout,
+    #[serde(rename = "ws.ip_capacity")]
+    IpCapacity,
 }
 
 impl WsErrorCode {
@@ -56,6 +61,7 @@ impl WsErrorCode {
         Self::RateLimited,
         Self::PongTimeout,
         Self::IdleTimeout,
+        Self::IpCapacity,
     ];
     /// The only domain prefix this enum may use.
     pub const PREFIX: &'static str = "ws.";
@@ -70,12 +76,35 @@ impl WsErrorCode {
             Self::RateLimited => "ws.rate_limited",
             Self::PongTimeout => "ws.pong_timeout",
             Self::IdleTimeout => "ws.idle_timeout",
+            Self::IpCapacity => "ws.ip_capacity",
+        }
+    }
+}
+
+/// Authentication codes (`auth.*`, feature 008). Phase A only has the `Origin` check (D4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum AuthErrorCode {
+    #[serde(rename = "auth.csrf_origin")]
+    CsrfOrigin,
+}
+
+impl AuthErrorCode {
+    /// Every variant. A test with an exhaustive `match` keeps this list complete.
+    pub const ALL: &'static [Self] = &[Self::CsrfOrigin];
+    /// The only domain prefix this enum may use.
+    pub const PREFIX: &'static str = "auth.";
+
+    /// The serialized code (the same string serde writes).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CsrfOrigin => "auth.csrf_origin",
         }
     }
 }
 
 /// Any error code the server can put in an HTTP body. Untagged, so in TypeScript it is
-/// `ApiErrorCode | WsErrorCode`. The string sets of the variants never overlap (each enum
+/// `ApiErrorCode | WsErrorCode | AuthErrorCode`. The string sets of the variants never overlap (each enum
 /// owns one prefix), which keeps deserialization unambiguous. A new domain (for example
 /// `auth.*`) gets a new enum and a new variant here, never codes inside the existing ones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -84,6 +113,7 @@ impl WsErrorCode {
 pub enum ErrorCode {
     Http(ApiErrorCode),
     Ws(WsErrorCode),
+    Auth(AuthErrorCode),
 }
 
 impl ErrorCode {
@@ -92,6 +122,7 @@ impl ErrorCode {
         match self {
             Self::Http(code) => code.as_str(),
             Self::Ws(code) => code.as_str(),
+            Self::Auth(code) => code.as_str(),
         }
     }
 }
@@ -105,6 +136,12 @@ impl From<ApiErrorCode> for ErrorCode {
 impl From<WsErrorCode> for ErrorCode {
     fn from(code: WsErrorCode) -> Self {
         Self::Ws(code)
+    }
+}
+
+impl From<AuthErrorCode> for ErrorCode {
+    fn from(code: AuthErrorCode) -> Self {
+        Self::Auth(code)
     }
 }
 
@@ -132,6 +169,7 @@ mod tests {
         match code {
             ApiErrorCode::NotFound => 0,
             ApiErrorCode::MethodNotAllowed => 1,
+            ApiErrorCode::RateLimited => 2,
         }
     }
 
@@ -144,11 +182,19 @@ mod tests {
             WsErrorCode::RateLimited => 4,
             WsErrorCode::PongTimeout => 5,
             WsErrorCode::IdleTimeout => 6,
+            WsErrorCode::IpCapacity => 7,
         }
     }
 
-    const API_COUNT: usize = 2;
-    const WS_COUNT: usize = 7;
+    fn auth_index(code: AuthErrorCode) -> usize {
+        match code {
+            AuthErrorCode::CsrfOrigin => 0,
+        }
+    }
+
+    const API_COUNT: usize = 3;
+    const WS_COUNT: usize = 8;
+    const AUTH_COUNT: usize = 1;
 
     #[test]
     fn all_lists_every_variant_once() {
@@ -158,6 +204,9 @@ mod tests {
         let ws: HashSet<usize> = WsErrorCode::ALL.iter().map(|c| ws_index(*c)).collect();
         assert_eq!(ws.len(), WS_COUNT);
         assert_eq!(WsErrorCode::ALL.len(), WS_COUNT);
+        let auth: HashSet<usize> = AuthErrorCode::ALL.iter().map(|c| auth_index(*c)).collect();
+        assert_eq!(auth.len(), AUTH_COUNT);
+        assert_eq!(AuthErrorCode::ALL.len(), AUTH_COUNT);
     }
 
     #[test]
@@ -165,7 +214,9 @@ mod tests {
         let expected = [
             (ApiErrorCode::NotFound, "http.not_found"),
             (ApiErrorCode::MethodNotAllowed, "http.method_not_allowed"),
+            (ApiErrorCode::RateLimited, "http.rate_limited"),
         ];
+        assert_eq!(expected.len(), API_COUNT);
         for (code, text) in expected {
             assert_eq!(serde_json::to_string(&code).unwrap(), format!("\"{text}\""));
             assert_eq!(
@@ -185,12 +236,26 @@ mod tests {
             (WsErrorCode::RateLimited, "ws.rate_limited"),
             (WsErrorCode::PongTimeout, "ws.pong_timeout"),
             (WsErrorCode::IdleTimeout, "ws.idle_timeout"),
+            (WsErrorCode::IpCapacity, "ws.ip_capacity"),
         ];
         assert_eq!(expected.len(), WS_COUNT);
         for (code, text) in expected {
             assert_eq!(serde_json::to_string(&code).unwrap(), format!("\"{text}\""));
             assert_eq!(
                 serde_json::from_str::<WsErrorCode>(&format!("\"{text}\"")).unwrap(),
+                code
+            );
+        }
+    }
+
+    #[test]
+    fn auth_codes_have_the_exact_strings() {
+        let expected = [(AuthErrorCode::CsrfOrigin, "auth.csrf_origin")];
+        assert_eq!(expected.len(), AUTH_COUNT);
+        for (code, text) in expected {
+            assert_eq!(serde_json::to_string(&code).unwrap(), format!("\"{text}\""));
+            assert_eq!(
+                serde_json::from_str::<AuthErrorCode>(&format!("\"{text}\"")).unwrap(),
                 code
             );
         }
@@ -212,6 +277,13 @@ mod tests {
             );
             assert_eq!(ErrorCode::from(*code).as_str(), code.as_str());
         }
+        for code in AuthErrorCode::ALL {
+            assert_eq!(
+                serde_json::to_value(code).unwrap(),
+                serde_json::Value::from(code.as_str())
+            );
+            assert_eq!(ErrorCode::from(*code).as_str(), code.as_str());
+        }
     }
 
     #[test]
@@ -225,7 +297,11 @@ mod tests {
             assert!(code.as_str().starts_with(WsErrorCode::PREFIX), "{code:?}");
             assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
         }
-        assert_eq!(seen.len(), API_COUNT + WS_COUNT);
+        for code in AuthErrorCode::ALL {
+            assert!(code.as_str().starts_with(AuthErrorCode::PREFIX), "{code:?}");
+            assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
+        }
+        assert_eq!(seen.len(), API_COUNT + WS_COUNT + AUTH_COUNT);
     }
 
     #[test]
@@ -244,7 +320,18 @@ mod tests {
                 ErrorCode::Ws(*code)
             );
         }
-        assert!(serde_json::from_str::<ErrorCode>("\"auth.csrf_origin\"").is_err());
+        for code in AuthErrorCode::ALL {
+            let json = format!("\"{}\"", code.as_str());
+            assert_eq!(
+                serde_json::from_str::<ErrorCode>(&json).unwrap(),
+                ErrorCode::Auth(*code)
+            );
+        }
+        assert_eq!(
+            serde_json::from_str::<ErrorCode>("\"auth.csrf_origin\"").unwrap(),
+            ErrorCode::Auth(AuthErrorCode::CsrfOrigin)
+        );
+        assert!(serde_json::from_str::<ErrorCode>("\"auth.unknown\"").is_err());
     }
 
     #[test]
@@ -265,6 +352,14 @@ mod tests {
             (
                 ApiError::new(WsErrorCode::Capacity),
                 r#"{"error":"ws.capacity"}"#,
+            ),
+            (
+                ApiError::new(AuthErrorCode::CsrfOrigin),
+                r#"{"error":"auth.csrf_origin"}"#,
+            ),
+            (
+                ApiError::new(ApiErrorCode::RateLimited),
+                r#"{"error":"http.rate_limited"}"#,
             ),
         ];
         for (value, json) in cases {
