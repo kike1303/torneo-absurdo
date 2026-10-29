@@ -3,6 +3,7 @@
     {
       "knockdown_ms": 1500,
       "ruleset_version": 1,
+      "strike_gap_min_ms": 700,
       "windup_heavy_ms": 700,
       "windup_special_ms": 1100,
       "windup_strike_ms": 400
