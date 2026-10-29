@@ -62,6 +62,8 @@ pub struct WsConfig {
     pub close_grace: Duration,
     /// A socket with a session revalidates it this often (RF-B14, D6: 5 min).
     pub revalidate_interval: Duration,
+    /// Bound of that revalidation query; past it the socket stays, as on a database error.
+    pub revalidate_timeout: Duration,
 }
 
 impl Default for WsConfig {
@@ -72,6 +74,7 @@ impl Default for WsConfig {
             idle_timeout: Duration::from_secs(120),
             close_grace: Duration::from_secs(5),
             revalidate_interval: Duration::from_secs(300),
+            revalidate_timeout: Duration::from_secs(5),
         }
     }
 }

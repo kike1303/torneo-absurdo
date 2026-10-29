@@ -20,6 +20,7 @@ const SLOW: WsConfig = WsConfig {
     idle_timeout: Duration::from_secs(120),
     close_grace: Duration::from_secs(2),
     revalidate_interval: Duration::from_secs(300),
+    revalidate_timeout: Duration::from_secs(5),
 };
 
 async fn start(ws: WsState) -> (RunningApp, Arc<WsState>) {
@@ -291,6 +292,7 @@ async fn a_client_that_never_reads_is_closed_after_the_pong_timeout() {
         idle_timeout: Duration::from_secs(10),
         close_grace: Duration::from_millis(200),
         revalidate_interval: Duration::from_secs(300),
+        revalidate_timeout: Duration::from_secs(5),
     };
     let (app, _) = start_echo(true, 2000, config).await;
     // A client that never writes after the handshake: no pongs, no close reply. It starts
@@ -320,6 +322,7 @@ async fn a_client_that_only_answers_pings_is_closed_when_idle() {
         idle_timeout: Duration::from_millis(800),
         close_grace: Duration::from_millis(500),
         revalidate_interval: Duration::from_secs(300),
+        revalidate_timeout: Duration::from_secs(5),
     };
     let (app, _) = start_echo(true, 2000, config).await;
     let mut client = ws::connect(app.addr, ORIGIN).await.unwrap();
@@ -344,6 +347,7 @@ async fn accepted_messages_reset_the_idle_timer() {
         idle_timeout: Duration::from_millis(600),
         close_grace: Duration::from_millis(500),
         revalidate_interval: Duration::from_secs(300),
+        revalidate_timeout: Duration::from_secs(5),
     };
     let (app, _) = start_echo(true, 2000, config).await;
     let mut client = ws::connect(app.addr, ORIGIN).await.unwrap();

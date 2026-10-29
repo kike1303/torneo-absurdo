@@ -122,12 +122,19 @@ async fn serve(
             () = closed.cancelled() => return policy(AuthErrorCode::Unauthenticated),
             _ = revalidate.tick(), if auth.is_some() => {
                 if let Some(auth) = auth {
-                    // A database error keeps the socket: the NOTIFY is still the main path.
-                    if let Ok(None) =
-                        sessions::validate_by_id(&auth.pool, auth.registration.session()).await
+                    // A database error, or no answer within the timeout, keeps the socket: the
+                    // NOTIFY is still the main path, and the socket must not freeze here
+                    // (deviation 17 of plan-b, review of #54).
+                    let check =
+                        sessions::validate_by_id(&auth.pool, auth.registration.session());
+                    if let Ok(Ok(None)) =
+                        tokio::time::timeout(config.revalidate_timeout, check).await
                     {
                         return policy(AuthErrorCode::Unauthenticated);
                     }
+                    // A full interval from now: after a slow check the tick would be due at
+                    // once, and this biased `select!` would never read the socket again.
+                    revalidate.reset();
                 }
             }
             Some(event) = self_rx.recv() => {

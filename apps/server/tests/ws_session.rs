@@ -94,7 +94,9 @@ async fn wait_until(mut done: impl FnMut() -> bool) {
 /// Waits until the revocation listener has run `LISTEN` (and so its startup revalidation),
 /// so a test sees only the path it is about.
 async fn listener_ready(pool: &PgPool) -> i32 {
+    let deadline = Instant::now() + Duration::from_secs(5);
     loop {
+        assert!(Instant::now() < deadline, "the listener never ran LISTEN");
         let row: Option<(i32,)> = sqlx::query_as(
             "SELECT pid FROM pg_stat_activity WHERE application_name = 'torneo-listener' \
              AND datname = current_database() AND query LIKE 'LISTEN%'",
@@ -284,6 +286,38 @@ async fn the_periodic_revalidation_closes_an_expired_session() {
         .await
         .unwrap();
     closes_unauthenticated(&mut client, Duration::from_secs(3)).await;
+}
+
+/// architect on #54 (condition of deviation 17): a revalidation query that hangs (here `users`
+/// is locked) is cut by its timeout and treated like an error, so the socket keeps answering
+/// instead of freezing inside the `select!`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_hung_revalidation_does_not_freeze_the_socket() {
+    let db = TestDb::create().await;
+    let settings = Settings {
+        ws: WsConfig {
+            revalidate_interval: Duration::from_millis(100),
+            revalidate_timeout: Duration::from_millis(200),
+            ..WsConfig::default()
+        },
+        ..Settings::default()
+    };
+    let (app, pool, _ws) = support::app::start_db_ws(&db, &[], &settings, |ws| ws).await;
+    let (_, token) = support::app::user_with_session(&pool).await;
+    let mut client = connect(app.addr, Some(&token), None).await.unwrap();
+    let mut lock = pool.begin().await.unwrap();
+    sqlx::query("LOCK TABLE users IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *lock)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    ws::send_text(&mut client, r#"{"type":"echo","payload":"vivo"}"#).await;
+    let reply = ws::next_data(&mut client, Duration::from_secs(2)).await;
+    lock.rollback().await.unwrap();
+    assert_eq!(
+        reply,
+        Some(Message::Text(r#"{"type":"echo","payload":"vivo"}"#.into()))
+    );
 }
 
 // --- Limits (RF-B14, T18, T22) ----------------------------------------------------------
