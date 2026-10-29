@@ -19,6 +19,8 @@ export const EXPORT_CODES = Object.freeze({
   frameExtra: 'export.frame_extra',
   pngInvalid: 'export.png_invalid',
   pngSize: 'export.png_size',
+  /** Adam7: pngjs inflates it without a cap, so it is refused before decoding. */
+  pngInterlaced: 'export.png_interlaced',
   tooManyFrames: 'export.too_many_frames',
 } as const);
 
@@ -63,6 +65,8 @@ export const CLI_CODES = Object.freeze({
   outSymlink: 'cli.out_symlink',
   outNotADirectory: 'cli.out_not_a_directory',
   outUnexpectedEntry: 'cli.out_unexpected_entry',
+  /** gen:guide: the markers of the generated block are missing or repeated. */
+  guideMarkers: 'cli.guide_markers',
 } as const);
 
 export const IO_CODES = Object.freeze({

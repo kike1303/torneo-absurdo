@@ -53,3 +53,41 @@ export function encodeRgb16(width: number, height: number, rgba: Uint8Array): Bu
     chunk('IEND', Buffer.alloc(0)),
   ]);
 }
+
+const ADAM7 = [
+  [0, 0, 8, 8],
+  [4, 0, 8, 8],
+  [0, 4, 4, 8],
+  [2, 0, 4, 4],
+  [0, 2, 2, 4],
+  [1, 0, 2, 2],
+  [0, 1, 1, 2],
+] as const;
+
+/** An Adam7-interlaced 8-bit RGBA PNG built by hand (pngjs never writes interlaced PNG). */
+export function encodeInterlaced(width: number, height: number, rgba: Uint8Array): Buffer {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  ihdr[12] = 1;
+  const rows: Buffer[] = [];
+  for (const [x0, y0, dx, dy] of ADAM7) {
+    const w = Math.ceil((width - x0) / dx);
+    if (w <= 0) continue;
+    for (let y = y0; y < height; y += dy) {
+      const row = Buffer.alloc(1 + w * 4);
+      for (let i = 0, x = x0; x < width; x += dx, i++) {
+        row.set(rgba.subarray((y * width + x) * 4, (y * width + x) * 4 + 4), 1 + i * 4);
+      }
+      rows.push(row);
+    }
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', deflateSync(Buffer.concat(rows))),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}

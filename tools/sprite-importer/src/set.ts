@@ -13,7 +13,7 @@ import {
 } from '@torneo/renderer/guide';
 import { LIMITS, validateManifest, type SpriteManifest } from '@torneo/renderer/manifest';
 import { PROVENANCE_CODES, SET_CODES as S } from './codes.ts';
-import { listDir, readBounded, type EntryKind } from './fsx.ts';
+import { listDir, readBounded, type EntryKind, type ReadResult } from './fsx.ts';
 import { readIhdr } from './ihdr.ts';
 import { TOOL_LIMITS } from './limits.ts';
 import { checkProvenance } from './provenance.ts';
@@ -33,18 +33,37 @@ function parseJson(bytes: Buffer): { ok: true; json: unknown } | { ok: false } {
   }
 }
 
+type ReadFailure = Extract<ReadResult, { ok: false }>['reason'];
+
+/**
+ * Reports a failed read, so it never passes in silence (QA nit, PR #52). An entry the listing
+ * did not see as a regular file is already `set.unexpected_entry`; anything else that fails here
+ * changed between the listing and the read.
+ */
+export function reportReadFailure(
+  sink: IssueSink,
+  file: string,
+  at: string,
+  reason: ReadFailure,
+  listed: EntryKind | undefined,
+  tooLarge: string,
+): void {
+  if (reason === 'missing') sink.add(S.missingFile, file, at);
+  else if (reason === 'too_large') sink.add(tooLarge, file, at);
+  else if (listed === 'file') sink.add(S.unexpectedEntry, file, at);
+}
+
 function readManifest(
   sink: IssueSink,
   dir: string,
   rel: string,
   id: string,
+  listed: EntryKind | undefined,
 ): SpriteManifest | null {
   const file = relFile(rel, MANIFEST_FILE);
   const read = readBounded(path.join(dir, MANIFEST_FILE), TOOL_LIMITS.jsonFileMaxBytes);
   if (!read.ok) {
-    if (read.reason === 'missing') sink.add(S.missingFile, file, '');
-    else if (read.reason === 'too_large') sink.add(S.fileTooLarge, file, '');
-    // A link or anything but a regular file is reported as set.unexpected_entry.
+    reportReadFailure(sink, file, '', read.reason, listed, S.fileTooLarge);
     return null;
   }
   const parsed = parseJson(read.bytes);
@@ -74,7 +93,8 @@ function readSheets(
     const at = `/sheets/${i}`;
     const read = readBounded(path.join(dir, sheet.file), GUIDE_LIMITS.sheetFileMaxBytes);
     if (!read.ok) {
-      if (read.reason === 'too_large') sink.add(S.fileTooLarge, file, at);
+      // Every declared sheet was listed as a regular file before this is called.
+      reportReadFailure(sink, file, at, read.reason, 'file', S.fileTooLarge);
       return;
     }
     const ihdr = readIhdr(read.bytes);
@@ -86,13 +106,16 @@ function readSheets(
       ihdr.width !== sheet.width ||
       ihdr.height !== sheet.height ||
       ihdr.bitDepth !== RGBA_BIT_DEPTH ||
-      ihdr.colorType !== RGBA_COLOR_TYPE
+      ihdr.colorType !== RGBA_COLOR_TYPE ||
+      // pngjs inflates an interlaced PNG without a cap (a decompression bomb): never decoded.
+      ihdr.interlace !== 0
     ) {
       sink.add(S.sheetHeader, file, at, {
         width: ihdr.width,
         height: ihdr.height,
         bit_depth: ihdr.bitDepth,
         color_type: ihdr.colorType,
+        interlace: ihdr.interlace,
       });
       return;
     }
@@ -114,12 +137,17 @@ function readSheets(
   return sink.count > before ? null : images;
 }
 
-function readProvenance(sink: IssueSink, dir: string, rel: string, id: string): void {
+function readProvenance(
+  sink: IssueSink,
+  dir: string,
+  rel: string,
+  id: string,
+  listed: EntryKind | undefined,
+): void {
   const file = relFile(rel, PROVENANCE_FILE);
   const read = readBounded(path.join(dir, PROVENANCE_FILE), TOOL_LIMITS.jsonFileMaxBytes);
   if (!read.ok) {
-    if (read.reason === 'missing') sink.add(S.missingFile, file, '');
-    else if (read.reason === 'too_large') sink.add(PROVENANCE_CODES.fileTooLarge, file, '');
+    reportReadFailure(sink, file, '', read.reason, listed, PROVENANCE_CODES.fileTooLarge);
     return;
   }
   const parsed = parseJson(read.bytes);
@@ -139,7 +167,7 @@ export function checkSet(
   const rel = relFile(...SETS_DIR, id);
   const dir = path.join(root, ...SETS_DIR, id);
   const entries = new Map<string, EntryKind>(listDir(dir).map((e) => [e.name, e.kind]));
-  const manifest = readManifest(sink, dir, rel, id);
+  const manifest = readManifest(sink, dir, rel, id, entries.get(MANIFEST_FILE));
   const declared = manifest === null ? null : new Set(manifest.sheets.map((s) => s.file));
   for (const [name, kind] of entries) {
     const known =
@@ -164,5 +192,5 @@ export function checkSet(
       }
     }
   }
-  readProvenance(sink, dir, rel, id);
+  readProvenance(sink, dir, rel, id, entries.get(PROVENANCE_FILE));
 }

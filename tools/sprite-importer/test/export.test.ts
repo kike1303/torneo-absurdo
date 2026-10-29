@@ -11,7 +11,7 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { readExport } from '../src/export.ts';
 import { IssueSink, type Issue } from '../src/report.ts';
-import { encodePng, encodeRgb16 } from './support/png.ts';
+import { encodeInterlaced, encodePng, encodeRgb16 } from './support/png.ts';
 import { copyExportRef, readExportJson, writeExportJson } from './support/root.ts';
 import { cleanupTmp } from './support/tmp.ts';
 
@@ -195,6 +195,18 @@ const CASES: ReadonlyArray<readonly [string, Mutate, readonly Issue[]]> = [
       },
     ],
   ],
+  [
+    'png_interlaced: Adam7 is refused before decoding',
+    (d) => writeFileSync(png(d, 'win/01.png'), encodeInterlaced(CELL, CELL, blank())),
+    [
+      {
+        code: 'export.png_interlaced',
+        file: 'frames/win/01.png',
+        path: '/animations/win/frames/1',
+        data: { interlace: 1 },
+      },
+    ],
+  ],
 ];
 
 describe('readExport', () => {
@@ -231,6 +243,7 @@ describe('readExport', () => {
       'export.invalid_value',
       'export.missing_field',
       'export.missing_file',
+      'export.png_interlaced',
       'export.png_invalid',
       'export.png_size',
       'export.symlink',

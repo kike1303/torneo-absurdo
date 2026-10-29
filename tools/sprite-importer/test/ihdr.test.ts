@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readIhdr } from '../src/ihdr.ts';
-import { encodePng } from './support/png.ts';
+import { decodePng, encodeInterlaced, encodePng } from './support/png.ts';
 
 // 007 plan-b decision 11: the header is read without decoding anything.
 describe('readIhdr', () => {
@@ -11,6 +11,13 @@ describe('readIhdr', () => {
     expect(
       readIhdr(encodePng(3, 2, new Uint8Array(24), { colorType: 6, bitDepth: 16 })),
     ).toMatchObject({ bitDepth: 16 });
+  });
+
+  it('reads the interlace of the hand-built Adam7 helper, which decodes to the same pixels', () => {
+    const rgba = new Uint8Array(13 * 11 * 4).map((_, i) => (i * 37) % 256);
+    const png = encodeInterlaced(13, 11, rgba);
+    expect(readIhdr(png)?.interlace).toBe(1);
+    expect(Buffer.from(decodePng(png).data).equals(Buffer.from(rgba))).toBe(true);
   });
 
   it('is null on a bad signature, a short file or a first chunk that is not IHDR', () => {

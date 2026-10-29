@@ -132,7 +132,7 @@ Las escribe `pnpm --filter @torneo/sprite-importer gen:guide` a partir de `GUIDE
 ```
 - Llaves exactas. `id` sigue el patrón de los manifests (`LIMITS.idPattern`: minúsculas, dígitos y guion bajo). Cada animación tiene `frame_ms` y `loop`, y los ataques además `impact_frame`.
 - En `frames/` va una carpeta por animación declarada, con exactamente tantos PNG como valores tenga su `frame_ms`.
-- Cada PNG mide exactamente la celda, mira a la derecha y tiene los pies sobre el pivote. Se acepta cualquier PNG que se pueda decodificar (paleta, gris, RGB, 16 bits); la salida siempre es RGBA de 8 bits.
+- Cada PNG mide exactamente la celda, mira a la derecha y tiene los pies sobre el pivote. Se acepta cualquier PNG sin entrelazado que se pueda decodificar (paleta, gris, RGB, 16 bits); la salida siempre es RGBA de 8 bits. Un PNG entrelazado (Adam7) se rechaza antes de decodificarlo.
 - Nada de symlinks ni de archivos de más.
 
 ### Importador
@@ -178,7 +178,7 @@ Hasta que exista la identidad visual, la paleta y el contorno son recomendacione
 Las cifras están en la tabla "Recomendaciones" de la sección 5.
 
 ## 8. Códigos
-Los comandos solo emiten códigos (ADR-0007); esta tabla es su diccionario. `data` trae los números que explican cada caso. Salida 1: el contenido no cumple. Salida 2: error de uso (`cli.*`), de E/S (`io.*`, por ejemplo `io.golden_invalid` si falta el dorado del ruleset) o inesperado (`internal.unexpected`). Pasados `LIMITS.maxErrors` problemas, la salida se corta con `report.too_many_errors`.
+Los comandos solo emiten códigos (ADR-0007); esta tabla es su diccionario. `data` trae los números que explican cada caso. Salida 1: el contenido no cumple. Salida 2: error de uso (`cli.*`, también `cli.guide_markers` si `gen:guide` no encuentra los marcadores una sola vez), de E/S (`io.*`, por ejemplo `io.golden_invalid` si falta el dorado del ruleset) o inesperado (`internal.unexpected`). Pasados `LIMITS.maxErrors` problemas, la salida se corta con `report.too_many_errors`.
 
 ### Export
 | Código | Qué significa |
@@ -197,6 +197,7 @@ Los comandos solo emiten códigos (ADR-0007); esta tabla es su diccionario. `dat
 | `export.frame_extra` | Sobra un PNG: hay más que valores en `frame_ms`. |
 | `export.png_invalid` | El PNG no se puede leer o decodificar. |
 | `export.png_size` | El PNG no mide la celda (`data`: `w`, `h`). |
+| `export.png_interlaced` | El PNG está entrelazado (Adam7); se rechaza antes de decodificarlo (`data`: `interlace`). Expórtalo sin entrelazado. |
 | `export.too_many_frames` | Más frames distintos de los que caben en `LIMITS.sheetsMax` hojas (`data`: `frames`, `max`). |
 
 ### Manifest
@@ -238,7 +239,7 @@ En `import`, un error de píxeles sobre un frame del manifest (`/frames/<i>`) sa
 | `set.missing_file` | Falta `manifest.json`, `provenance.json` o una hoja declarada. |
 | `set.file_too_large` | `manifest.json` o una hoja superan su tope de peso. |
 | `set.invalid_json` | `manifest.json` no es JSON. |
-| `set.sheet_header` | La cabecera de una hoja no coincide con `sheets[]` o no es RGBA de 8 bits (`data`: `width`, `height`, `bit_depth`, `color_type`). |
+| `set.sheet_header` | La cabecera de una hoja no coincide con `sheets[]` o no es RGBA de 8 bits sin entrelazado (`data`: `width`, `height`, `bit_depth`, `color_type`, `interlace`). |
 | `set.sheet_invalid` | Una hoja no se puede leer o decodificar. |
 
 ### Procedencia

@@ -21,7 +21,7 @@ import {
   validRoot,
   writeCharacter,
 } from './support/fixture-root.ts';
-import { decodePng, encodePng, encodeRgb16 } from './support/png.ts';
+import { decodePng, encodeInterlaced, encodePng, encodeRgb16 } from './support/png.ts';
 import { cleanupTmp } from './support/tmp.ts';
 
 afterAll(cleanupTmp);
@@ -145,7 +145,7 @@ const CASES: ReadonlyArray<readonly [string, Mutate, readonly Issue[]]> = [
       writeFileSync(at(r, 'sheet-0.png'), encodePng(width, 192, new Uint8Array(width * 192 * 4)));
       expect(height).not.toBe(192);
     },
-    [sheet({ width: 1920, height: 192, bit_depth: 8, color_type: 6 })],
+    [sheet({ width: 1920, height: 192, bit_depth: 8, color_type: 6, interlace: 0 })],
   ],
   [
     'set.sheet_header: RGB without alpha',
@@ -156,7 +156,7 @@ const CASES: ReadonlyArray<readonly [string, Mutate, readonly Issue[]]> = [
         encodePng(png.width, png.height, png.data, { colorType: 2 }),
       );
     },
-    [sheet({ width: 1920, height: 384, bit_depth: 8, color_type: 2 })],
+    [sheet({ width: 1920, height: 384, bit_depth: 8, color_type: 2, interlace: 0 })],
   ],
   [
     'set.sheet_header: 16 bits',
@@ -164,7 +164,15 @@ const CASES: ReadonlyArray<readonly [string, Mutate, readonly Issue[]]> = [
       const png = decodePng(readFileSync(at(r, 'sheet-0.png')));
       writeFileSync(at(r, 'sheet-0.png'), encodeRgb16(png.width, png.height, png.data));
     },
-    [sheet({ width: 1920, height: 384, bit_depth: 16, color_type: 2 })],
+    [sheet({ width: 1920, height: 384, bit_depth: 16, color_type: 2, interlace: 0 })],
+  ],
+  [
+    'set.sheet_header: Adam7 interlaced (refused before decoding)',
+    (r) => {
+      const png = decodePng(readFileSync(at(r, 'sheet-0.png')));
+      writeFileSync(at(r, 'sheet-0.png'), encodeInterlaced(png.width, png.height, png.data));
+    },
+    [sheet({ width: 1920, height: 384, bit_depth: 8, color_type: 6, interlace: 1 })],
   ],
   [
     'set.sheet_invalid: not a PNG',

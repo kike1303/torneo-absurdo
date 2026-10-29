@@ -256,6 +256,11 @@ function readPng(sink: IssueSink, dir: string, file: string, at: string): Png {
     sink.add(E.pngSize, file, at, { w: ihdr.width, h: ihdr.height });
     return { ok: false };
   }
+  // pngjs inflates an interlaced PNG without a cap (a decompression bomb): never decoded.
+  if (ihdr.interlace !== 0) {
+    sink.add(E.pngInterlaced, file, at, { interlace: ihdr.interlace });
+    return { ok: false };
+  }
   return { ok: true, bytes: read.bytes };
 }
 
