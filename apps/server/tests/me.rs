@@ -10,7 +10,7 @@ use support::db::TestDb;
 use support::http;
 use uuid::Uuid;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn only_the_production_cookie_is_read() {
     let db = TestDb::create().await;
     let (app, pool) = support::app::start_db(&db, &[], &Settings::default()).await;

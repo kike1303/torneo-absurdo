@@ -117,7 +117,7 @@ async fn revoke(pool: &PgPool, filter: RevokeFilter) {
 
 // --- Revocation (T10) -------------------------------------------------------------------
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_revoked_session_closes_its_socket_at_once() {
     let db = TestDb::create().await;
     let (app, pool, ws_state) =
@@ -140,7 +140,7 @@ async fn a_revoked_session_closes_its_socket_at_once() {
     wait_until(|| ws_state.session_sockets() == 0).await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_login_that_rotates_the_session_closes_the_old_socket() {
     let db = TestDb::create().await;
     let (app, pool, _ws) = support::app::start_db_ws(&db, &[], &Settings::default(), |ws| ws).await;
@@ -155,7 +155,7 @@ async fn a_login_that_rotates_the_session_closes_the_old_socket() {
     closes_unauthenticated(&mut client, Duration::from_secs(5)).await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_listener_catches_up_after_losing_its_connection() {
     let db = TestDb::create().await;
     let (app, pool, ws_state) =
@@ -194,7 +194,7 @@ impl ValidationGate for Gate {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_revoke_between_registration_and_validation_closes_the_socket() {
     let db = TestDb::create().await;
     let gate = Arc::new(Gate {
@@ -240,7 +240,7 @@ impl ValidationGate for RegisterGate {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_revoke_before_the_registration_is_caught_by_the_second_validation() {
     let db = TestDb::create().await;
     let gate = Arc::new(RegisterGate {
@@ -265,7 +265,7 @@ async fn a_revoke_before_the_registration_is_caught_by_the_second_validation() {
     closes_unauthenticated(&mut client, Duration::from_secs(5)).await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_periodic_revalidation_closes_an_expired_session() {
     let db = TestDb::create().await;
     let settings = Settings {
@@ -288,7 +288,7 @@ async fn the_periodic_revalidation_closes_an_expired_session() {
 
 // --- Limits (RF-B14, T18, T22) ----------------------------------------------------------
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_sixth_socket_of_a_user_is_503_and_they_do_not_use_anonymous_slots() {
     let db = TestDb::create().await;
     let (app, pool, ws_state) =
@@ -308,7 +308,7 @@ async fn the_sixth_socket_of_a_user_is_503_and_they_do_not_use_anonymous_slots()
     assert_eq!(ws_state.session_sockets(), 5);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_invalid_cookie_is_an_anonymous_socket_without_self() {
     let db = TestDb::create().await;
     let (app, pool, ws_state) =
@@ -351,7 +351,7 @@ async fn an_invalid_cookie_is_an_anonymous_socket_without_self() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_201st_socket_with_a_session_from_one_64_is_503() {
     let db = TestDb::create().await;
     let (settings, clock) = manual();
@@ -385,7 +385,7 @@ async fn the_201st_socket_with_a_session_from_one_64_is_503() {
     assert_eq!(ws_state.session_sockets(), 201);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn one_user_from_two_ips_shares_its_upgrade_bucket() {
     let db = TestDb::create().await;
     let (settings, _clock) = manual();
@@ -414,7 +414,7 @@ async fn one_user_from_two_ips_shares_its_upgrade_bucket() {
 
 // --- Channels (T17, T18) ----------------------------------------------------------------
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn t17_self_reaches_only_its_user_and_other_channels_are_forbidden() {
     let db = TestDb::create().await;
     let (app, pool, ws_state) =
@@ -495,7 +495,7 @@ async fn t17_self_reaches_only_its_user_and_other_channels_are_forbidden() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_message_over_4_kb_closes_a_socket_with_a_session() {
     let db = TestDb::create().await;
     let (app, pool, _ws) = support::app::start_db_ws(&db, &[], &Settings::default(), |ws| ws).await;

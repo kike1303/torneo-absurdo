@@ -17,7 +17,7 @@ use support::db::TestDb;
 use support::http;
 use support::pg_proxy::PgProxy;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_logout_without_the_database_does_not_claim_success() {
     let db = TestDb::create().await;
     let direct = db.migrated_pool().await;

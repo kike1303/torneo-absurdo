@@ -110,6 +110,11 @@ impl TestDb {
     }
 }
 
+// The drop blocks the thread it runs on. A test that starts the app on this database must use a
+// multi-thread runtime (`#[tokio::test(flavor = "multi_thread")]`): on a single thread, a
+// connection the app is still opening (its revocation listener, its retention job) cannot move
+// while the drop waits, Postgres keeps that half-authenticated backend until
+// `authentication_timeout` (1 min), and `DROP DATABASE … WITH (FORCE)` waits for it.
 impl Drop for TestDb {
     fn drop(&mut self) {
         if !is_test_name(&self.name) {

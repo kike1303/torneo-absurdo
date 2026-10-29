@@ -56,7 +56,7 @@ fn assert_callback_error(response: &http::Response, code: &str) {
 
 // --- The happy path ---------------------------------------------------------------------
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_first_login_creates_the_user_the_grant_and_a_session() {
     let db = TestDb::create().await;
     let (app, pool) = app(&db).await;
@@ -129,7 +129,7 @@ async fn a_first_login_creates_the_user_the_grant_and_a_session() {
     assert_eq!(lens, [32, 32]);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_second_login_is_the_same_user_without_a_new_grant() {
     let db = TestDb::create().await;
     let (app, pool) = app(&db).await;
@@ -149,7 +149,7 @@ async fn a_second_login_is_the_same_user_without_a_new_grant() {
     assert_eq!(count(&pool, "sessions").await, 2);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn providers_and_unknown_providers() {
     let db = TestDb::create().await;
     let (app, _pool) = app(&db).await;
@@ -180,7 +180,7 @@ async fn providers_and_unknown_providers() {
 
 // --- T4 adapted and T5 ------------------------------------------------------------------
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn every_bad_callback_is_303_invalid_state_without_a_session() {
     let db = TestDb::create().await;
     let (app, pool) = app(&db).await;
@@ -258,7 +258,7 @@ async fn every_bad_callback_is_303_invalid_state_without_a_session() {
     assert_eq!(count(&pool, "sessions").await, 1);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_external_next_redirects_to_the_root() {
     let db = TestDb::create().await;
     let (app, _pool) = app(&db).await;
@@ -276,7 +276,27 @@ async fn an_external_next_redirects_to_the_root() {
     assert_eq!(done.header("location"), Some("/es/cuenta"));
 }
 
-#[tokio::test]
+/// A stored `next` that is not a valid header value (a flow written before `sanitize` refused
+/// DEL) never breaks the response after the login committed: it falls back to `/`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stored_next_that_cannot_be_a_location_falls_back_to_the_root() {
+    let db = TestDb::create().await;
+    let (app, pool) = app(&db).await;
+    let started = flow::start(&app, &[("dev_identity", "ana")], None).await;
+    let id = started.cookie(FLOW).unwrap().to_owned();
+    let authorized = flow::authorize(&app, &started).await;
+    sqlx::query("UPDATE oauth_flows SET next = '/a' || chr(127) || 'b'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let done = flow::callback(&app, &authorized.location_path(), &[format!("{FLOW}={id}")]).await;
+    assert_eq!(done.status, 303, "{}", done.text());
+    assert_eq!(done.header("location"), Some("/"));
+    let token = flow::session_of(&done);
+    assert_eq!(flow::me(app.addr, &token).await.status, 200);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_invalid_dev_identity_never_starts_a_flow() {
     let db = TestDb::create().await;
     let (app, pool) = app(&db).await;
@@ -291,7 +311,7 @@ async fn an_invalid_dev_identity_never_starts_a_flow() {
 
 // --- Each callback error code -----------------------------------------------------------
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_banned_user_gets_auth_banned_and_no_session() {
     let db = TestDb::create().await;
     let (app, pool) = app(&db).await;
@@ -305,7 +325,7 @@ async fn a_banned_user_gets_auth_banned_and_no_session() {
     assert_eq!(count(&pool, "sessions").await, before);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_tampered_code_verifier_is_a_provider_error() {
     let db = TestDb::create().await;
     let (app, pool) = app(&db).await;
@@ -321,7 +341,7 @@ async fn a_tampered_code_verifier_is_a_provider_error() {
     assert_eq!(count(&pool, "users").await, 0);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_provider_error_in_the_query_is_a_provider_error() {
     let db = TestDb::create().await;
     let (app, _pool) = app(&db).await;
@@ -360,7 +380,7 @@ fn fixed(names: &[&str]) -> Settings {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn t20_a_colliding_alias_is_retried_and_ten_collisions_are_try_again() {
     let db = TestDb::create().await;
     // A user that already holds "TigreVeloz42" (by key, so "TIGREVELOZ42" collides too).
@@ -403,7 +423,7 @@ fn state(db: &TestDb, pool: PgPool) -> AppState {
     AppState::from_config(&config, &Settings::default(), pool, Arc::new(AlwaysUp))
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_failure_after_the_user_insert_leaves_no_user_and_no_grant() {
     let db = TestDb::create().await;
     let pool = db.migrated_pool().await;
@@ -450,7 +470,7 @@ async fn a_failure_after_the_user_insert_leaves_no_user_and_no_grant() {
 
 // --- T10: rotation and logout -----------------------------------------------------------
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_login_with_a_previous_session_rotates_it() {
     let db = TestDb::create().await;
     let (app, pool) = app(&db).await;
@@ -477,7 +497,7 @@ async fn logout(app: &flow::App, path: &str, token: Option<&str>) -> http::Respo
     http::send(addr, "POST", path, &headers).await
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn logout_and_logout_all() {
     let db = TestDb::create().await;
     let (app, pool) = app(&db).await;
@@ -516,7 +536,7 @@ async fn logout_and_logout_all() {
     assert_eq!(forged.status, 403);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn me_without_a_valid_session_is_401() {
     let db = TestDb::create().await;
     let (app, _pool) = app(&db).await;
@@ -531,7 +551,7 @@ async fn me_without_a_valid_session_is_401() {
 
 // --- Rate limit and Origin --------------------------------------------------------------
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_sixth_start_in_a_burst_is_429_with_retry_after_6() {
     let db = TestDb::create().await;
     let (settings, clock) = flow::with_manual_clock(Settings::default());
@@ -567,7 +587,7 @@ async fn the_sixth_start_in_a_burst_is_429_with_retry_after_6() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn only_the_dev_token_endpoint_is_exempt_from_origin() {
     let db = TestDb::create().await;
     let (app, _pool) = app(&db).await;
