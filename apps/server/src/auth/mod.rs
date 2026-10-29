@@ -154,6 +154,31 @@ mod source_rules {
         }
     }
 
+    /// ADR-0001: `OsRng` is for tokens, `state`, `code_verifier` and the alias only, never in
+    /// the engine or any other crate of `crates/` (008 plan-b decision 14).
+    #[test]
+    fn os_rng_never_enters_the_crates() {
+        let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates");
+        let needle = ["Os", "Rng"].concat();
+        let mut stack = vec![crates];
+        let mut files = 0;
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    if !path.ends_with("target") {
+                        stack.push(path);
+                    }
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    files += 1;
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    assert!(!text.contains(&needle), "{} uses {needle}", path.display());
+                }
+            }
+        }
+        assert!(files > 10, "{files}");
+    }
+
     /// The `Location` of a callback error is built in one place, from `CallbackErrorCode` only
     /// (ADR-0008, amendment 2026-10-28).
     #[test]
