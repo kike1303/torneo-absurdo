@@ -21,7 +21,7 @@ updated: 2026-10-28
 
 # Spec: Autenticación y sesiones
 
-> Intent: [intent.md](./intent.md) · ADRs: [0005](../../decisions/0005-economia-sin-dinero-real.md), [0006](../../decisions/0006-despliegue-y-ci.md), [0007](../../decisions/0007-i18n-desde-cero.md), [0008](../../decisions/0008-autenticacion.md) (con su "Nota (2026-10-28): reparto de tests por feature"), [0009](../../decisions/0009-ui-design-system.md), [0012](../../decisions/0012-logs-y-cabeceras-de-seguridad.md)
+> Intent: [intent.md](./intent.md) · ADRs: [0005](../../decisions/0005-economia-sin-dinero-real.md), [0006](../../decisions/0006-despliegue-y-ci.md), [0007](../../decisions/0007-i18n-desde-cero.md), [0008](../../decisions/0008-autenticacion.md) (con su "Nota (2026-10-28): reparto de tests por feature" y su "Enmienda 2026-10-28: errores del callback OAuth"), [0009](../../decisions/0009-ui-design-system.md), [0012](../../decisions/0012-logs-y-cabeceras-de-seguridad.md)
 
 ## Resumen
 La feature implementa ADR-0008 dentro del alcance del intent, en **cuatro fases, con un PR y un plan (`plan-a.md` … `plan-d.md`) cada una**:
@@ -32,7 +32,7 @@ La feature implementa ADR-0008 dentro del alcance del intent, en **cuatro fases,
 
 Dependencias: B depende de A, C de B y D de C. A se puede mergear sola: protege el `/ws` que ya existe. **Nada de esta spec despliega**: todo corre con `just dev`, `just check`, `just test` y `just e2e` en local.
 
-**Pendiente del owner:** `B = 100` (`DAILY_GRANT`). game-designer lo propone y el owner lo aprueba en esta spec (ver "Respuestas a preguntas abiertas").
+**`B = 100`** (`DAILY_GRANT`) es el valor provisional que propuso game-designer y aprobó el owner el 2026-10-28 (transmitido por la sesión coordinadora). Su valor definitivo lo fija TA-27.
 
 ## Requisitos funcionales
 
@@ -91,10 +91,10 @@ Cada RF dice cómo se verifica (→). "T<n>" es el test mínimo número n de ADR
   - `POST /api/auth/{provider}/start`: un formulario con `next` opcional y, solo para `dev`, `dev_identity`.
   - Crea la fila en `oauth_flows`, pone la cookie del flujo (RF-B9) y responde 303 a la URL de autorización.
   - `GET /api/auth/{provider}/callback`: consume el flujo con `DELETE … RETURNING`, compara `state` en tiempo constante, canjea el `code` con PKCE `S256`, lee `userinfo`, descarta los tokens del proveedor y responde 303 a `next`. La respuesta lleva `Cache-Control: no-store` y la cookie del flujo siempre se expira.
-  - Los errores del callback son 400 `auth.invalid_state`, 403 `auth.banned`, 502 `auth.provider_error` (el proveedor falló o devolvió algo inválido) y 503 `auth.try_again`.
+  - **Errores del callback** (Enmienda 2026-10-28 de ADR-0008): 303 a `/login?error=<code>`. No se crea ni rota una sesión, la cookie del flujo se expira, la respuesta lleva `Cache-Control: no-store` y `next` nunca se usa. `<code>` sale de un enum cerrado de `crates/protocol` (`CallbackErrorCode`), y el server no copia al `Location` nada de la petición ni del proveedor. Los códigos son `auth.invalid_state`, `auth.banned`, `auth.provider_error` (el proveedor falló o devolvió algo inválido), `auth.try_again`, `auth.already_linked` y `auth.provider_already_linked` (estos dos, en la fase C).
   - `next` se valida con el regex de D2.
   - El proveedor `{provider}` que no existe o no está habilitado da 404.
-  → T4, T5 e IT de los errores.
+  → T4 adaptado (cada rechazo da 303 a `/login?error=auth.invalid_state`, sin `Set-Cookie` de sesión y con la cookie del flujo expirada), T5 e IT de cada código de la lista.
 - **RF-B6. Proveedor `dev`** (intent, Restricciones).
   - Existe solo con la feature de cargo `dev-auth`, con `PUBLIC_ORIGIN` `http` en loopback **y con `BIND_ADDR` de loopback** (`127.0.0.1` o `::1`). Con la feature activada y otro origen, el server no arranca (`config.invalid`, `var = DEV_AUTH`). Con otro `BIND_ADDR` (incluido el valor por defecto, `0.0.0.0`), tampoco (`config.invalid`, `var = BIND_ADDR`). `Origin` es defensa CSRF, no autenticación: sin este gate, cualquiera en la red local podría pedir una sesión de cualquier `dev_identity`.
   - Implementa en el mismo proceso `GET /api/auth/dev/oauth/authorize`, `POST /api/auth/dev/oauth/token` y `GET /api/auth/dev/oauth/userinfo`. El cliente OAuth los llama por HTTP a `127.0.0.1`, con el mismo código que usa para Google y Discord, y valida el `code_challenge` (S256).
@@ -169,8 +169,8 @@ Cada RF dice cómo se verifica (→). "T<n>" es el test mínimo número n de ADR
   - En el test, la URL base de cada proveedor es inyectable.
   → T19 con un servidor HTTP de prueba que imita a cada proveedor (sin red): la URL de autorización pide solo su scope y el alias no coincide con ningún campo devuelto, aunque el falso devuelva `name`, `email`, `username` y `global_name`.
 - **RF-C2. Vincular (D1).** `POST /api/auth/link/{provider}` con sesión, mismo flujo con `purpose = link`. En el callback, la sesión actual tiene que ser la de `link_user_id`.
-  - Si `(provider, id)` es de otro usuario, 409 `auth.already_linked`, sin fusión.
-  - Si el usuario ya tiene ese proveedor, 409 `auth.provider_already_linked` (`UNIQUE (user_id, provider)`).
+  - Si `(provider, id)` es de otro usuario, el callback responde 303 a `/login?error=auth.already_linked` (RF-B5), sin fusión.
+  - Si el usuario ya tiene ese proveedor, 303 a `/login?error=auth.provider_already_linked` (`UNIQUE (user_id, provider)`).
   - Al vincular, el token se rota y se escribe `auth_events` de `link`.
   → T4 (flujo `link` de otra sesión), T6 e IT.
 - **RF-C3. Desvincular (D1).** `POST /api/auth/unlink/{provider}` exige que quede otro proveedor (si no, 409 `auth.last_provider`). Revoca todas las demás sesiones del usuario y escribe `auth_events` de `unlink`. → IT.
@@ -210,7 +210,7 @@ Cada RF dice cómo se verifica (→). "T<n>" es el test mínimo número n de ADR
   - Cada pantalla tiene sus estados de cargando, error (por código) y vacío.
   - Todo texto vive en `messages/{en,es}.json`. El alias es dato.
   → E2E y `check-i18n`.
-- **RF-D6. Errores del callback en la UI.** El callback responde un 400, 403, 502 o 503 con cuerpo JSON (RF-B5), que el navegador mostraría crudo. La web no puede interceptarlo, porque `/api` va directo al server. Mientras no haya una enmienda ("Áreas de preocupación" 3), la web no muestra nada propio en ese caso. → No aplica: no hay comportamiento nuevo que verificar.
+- **RF-D6. Errores del callback en la UI.** `/[locale]/login` lee `error` y lo resuelve a una llave i18n (`auth_error.<code>`) **solo** si es uno de los códigos de `CallbackErrorCode`, importados de `packages/protocol-ts`. Un valor desconocido muestra un texto genérico y nunca se refleja (ni en la página, ni en un atributo, ni en un log). Con sesión, la página muestra el error y un enlace a la cuenta. → UT del resolvedor y E2E: un callback con `state` inválido termina en `/login` con el texto traducido, y `?error=<canario>` no deja el canario en el HTML.
 - **RF-D7. Topología del e2e.**
   - `just e2e` corre `db-up`, crea la base `torneo_e2e` desde cero, compila el server con `--features dev-auth` y levanta en `127.0.0.1` el server, la web y un proxy de borde (`apps/web/e2e/support/edge.mjs`) que imita a Traefik.
   - El proxy enruta `/api` y `/ws` al server y lo demás a la web, y agrega `X-Forwarded-For`.
@@ -348,7 +348,7 @@ admin_audit (                             -- fase C; solo inserción (mismo trig
 | Método y ruta | Sesión | Respuesta | Fase |
 |---|---|---|---|
 | `POST /api/auth/{provider}/start` | no | 303 al proveedor y cookie del flujo | B (dev), C |
-| `GET /api/auth/{provider}/callback` | opcional | 303 a `next` y cookie de sesión | B, C |
+| `GET /api/auth/{provider}/callback` | opcional | 303 a `next` y cookie de sesión; si falla, 303 a `/login?error=<code>` | B, C |
 | `GET /api/auth/providers` | no | `["google","discord","dev"]` (los habilitados) | B |
 | `POST /api/auth/link/{provider}` | sí | 303 al proveedor | C |
 | `POST /api/auth/unlink/{provider}` | sí | 303 a `/` (desde form) | C |
@@ -385,14 +385,14 @@ Mobile-first a 375 px, con los tokens y las primitivas de ADR-0009 y sin colores
 ## Áreas de preocupación
 1. **La CLI es otro proceso.** `docker exec server admin ban` no ve el registro de sockets en memoria del proceso que sirve, y D3 pide cerrar los sockets "en el acto". Se resuelve con `LISTEN/NOTIFY` (RF-B10). Si el listener está caído, la revalidación de 5 min queda como respaldo y el listener al reconectar revalida todo. El payload es el `id` interno de la sesión, que no es secreto ni dato de A4. security-reviewer debe confirmar que `pg_notify` no deja el payload en los logs de Postgres con la configuración de A9.
 2. **`locale` y `theme`: esta spec se aparta de lo que recomendé en el intent.** Recomendé "solo columnas", pero ADR-0009 D3 (aprobado) ya decidió: "con sesión, la preferencia se guarda en el perfil… al iniciar sesión, el valor del perfil reescribe la cookie". Solo columnas contradiría ese ADR, así que la spec implementa la sincronización (RF-C5 y RF-D4).
-3. **Errores del callback como 400/403/502/503 en una navegación top-level.** ADR-0008 D2 y T4 fijan "400 `auth.invalid_state`". En un celular, el usuario ve un JSON crudo, y la web no puede intervenir porque `/api` no pasa por SvelteKit. Para la UX lo correcto sería un 303 a `/login?error=<code>`, pero eso cambia el ADR, así que **esta spec no lo hace**. **Pendiente del owner:** una enmienda de ADR-0008 que, en el callback, cambie el 400 por un 303 a `/login?error=<code>`, con T4 adaptado. product-owner la recomienda, y security-reviewer no se opone con estas condiciones: `error` solo admite un código de una lista cerrada (`auth.invalid_state`, `auth.banned`, `auth.provider_error` y `auth.try_again`); la web lo resuelve a una llave i18n, un valor desconocido se muestra con un texto genérico y **nunca se refleja**; no se crea sesión; la cookie del flujo se expira. Si se aprueba, entra en la fase C o D. Si no, queda como bloqueante de la apertura al público en TA-6 y TA-8.
+3. **Errores del callback en una navegación top-level.** Antes, ADR-0008 D2 y T4 fijaban un 400 con JSON, que en el celular se veía crudo. La "Enmienda 2026-10-28" de ADR-0008, aprobada por el owner y pendiente de security-reviewer, lo cambia por un 303 a `/login?error=<code>` con las condiciones de seguridad: lista cerrada, sin reflejar, sin sesión y con la cookie del flujo expirada. El server lo hace en RF-B5 (fase B) y la web en RF-D6 (fase D). Riesgo que queda: entre la fase B y la D, `/login` todavía no existe y el 303 termina en un 404 de la web. No se despliega nada, así que es aceptable.
 4. **CI del e2e.** Hoy el job `e2e` corre en la imagen de Playwright sin Docker, Rust ni Postgres, y los `services:` de GitHub Actions no aceptan `command`, así que no reciben los flags de A9. Opciones que decide el plan-d: (a) un service container de Postgres con los flags puestos por `ALTER SYSTEM` y `pg_reload_conf()` antes de los tests, y el binario del server compilado en otro job y pasado como artifact; o (b) correr el e2e fuera del contenedor, lo que devuelve la dependencia del mirror de apt que 001 evitó. El plan tiene que dar la duración estimada y mantenerse bajo el timeout de 20 min.
 5. **`TRUSTED_PROXIES` con loopback.** El e2e necesita `127.0.0.1/32`. RF-A3 lo permite solo con un origen de loopback, para que un error de configuración en producción no convierta a cualquier proceso local en proxy de confianza.
 6. **`dev` en el `CHECK` de `oauth_accounts.provider`.** La migración es la misma en todos los entornos, así que la BD de producción acepta `dev`. No es explotable: el binario de release no tiene el proveedor y nadie puede insertar esa fila sin acceso a la BD. Separar la migración por entorno costaría más de lo que protege. Lo dejo explícito para security-reviewer.
 7. **Memoria del rate limiter frente a la rotación de `/64`.** Desde un `/48` o un `/32` de IPv6, un atacante crea llaves nuevas más rápido de lo que `retain_recent` las limpia. Por diseño, el tope fijo de RF-A4 acota la memoria. El costo: con el tope lleno, un usuario legítimo con una IP nueva recibe 429 hasta que `retain_recent` libere llaves. Es preferible a un OOM que tire todos los sockets.
 8. **`rustls` y `cargo deny`.** El proveedor por defecto de `rustls` es `aws-lc-rs`, que `just deny` prohíbe. El plan-c fija `ring` y `webpki-roots` (la imagen distroless no trae un bundle de CA que mantengamos).
 9. **El contexto de build del Dockerfile.** Hoy solo copia `apps/server` y `crates`. `include_str!` de `content/names/` obliga a copiarlo, y `content/` tiene todos los derechos reservados. Va dentro del binario igual que va en el repo público, así que no cambia nada de licencia, pero `check-dockerignore` tiene que seguir dejando fuera `content/_local/`.
-10. **`B = 100` pendiente del owner.** `DAILY_GRANT` no tiene valor por defecto en el código. Los `.env.example` usan 100 marcado "pendiente de aprobación del owner". Si el owner elige otro valor, solo cambian los ejemplos.
+10. **`B = 100`.** `DAILY_GRANT` no tiene valor por defecto en el código. La fase B agrega `DAILY_GRANT=100` a `apps/server/.env.example`. Cuando TA-27 fije el valor definitivo, solo cambian los ejemplos y la configuración.
 11. **Sesión anónima y CGNAT.** Los 50 sockets anónimos por IP pueden quedarse cortos en el main event detrás de un CGNAT grande. Es el número que fijó ADR-0008, así que esta spec no lo cambia. La prueba de carga es de TA-6 y TA-8.
 12. **WebKit y las cookies `Secure` en `http://localhost`.** Por eso existe la política de loopback (RF-B9). `just prod-local` usa el binario de release con `__Host-` sobre `http://127.0.0.1:3000`, donde WebKit puede no guardar la sesión. En `prod-local` el login solo se garantiza en Chromium, y queda escrito en `CLAUDE.md`.
 
@@ -400,7 +400,8 @@ Mobile-first a 375 px, con los tokens y las primitivas de ADR-0009 y sin colores
 - **P: ¿Cómo inicia sesión un desarrollador en local?** → R: con las dos vías. El proveedor `dev` (RF-B6) es obligatorio para `just dev` y el e2e, y la guía de apps OAuth de desarrollo (RF-C10) permite probar Google y Discord reales en `just dev`. Decidido por el architect; security-reviewer confirma al revisar esta spec.
 - **P: ¿Cookies `__Host-` en `http://localhost` con WebKit?** → R: la política de cookies de RF-B9. Producción solo con `__Host-`, y nombres sin prefijo ni `Secure` solo con la feature `dev-auth` y un origen `http` en loopback, verificado con el binario de release. No hay https local: cuesta certificados y configuración en cada máquina, y no prueba nada que la política no pruebe.
 - **P: ¿`locale` y `theme` sincronizados o solo columnas?** → R: sincronizados, porque así lo pide ADR-0009 D3 (Área de preocupación 2).
-- **`B` provisional** → `DAILY_GRANT = 100`, propuesto por game-designer. **Lo aprueba el owner en esta spec**, y queda pendiente hasta su OK.
+- **`B` provisional** → `DAILY_GRANT = 100`, propuesto por game-designer y aprobado por el owner el 2026-10-28 (transmitido por la sesión coordinadora).
+- **Errores del callback** → 303 a `/login?error=<code>`, por la Enmienda 2026-10-28 de ADR-0008 (aprobada por el owner, transmitida por la sesión coordinadora): RF-B5 y RF-D6.
 - **Ban** (decisión del owner) → RF-C6.
 - **Reparto de tests** (decisión del owner) → la "Nota (2026-10-28)" de ADR-0008. Esta spec cubre: T1–T6, T9–T11, T13–T17, T19–T22, de T18 el mensaje, la suscripción y los sockets por IP, y de T28 el caso del `/64`.
 
@@ -514,3 +515,14 @@ Mobile-first a 375 px, con los tokens y las primitivas de ADR-0009 y sin colores
 - Cambio no pedido (RF-B18: secretos siempre obligatorios y el mismo valor de desarrollo en los dos `.env.example`): no contradice el intent. El intent pide rechazar el valor público fuera de loopback, y en producción `PUBLIC_ORIGIN` es `https://…` por el compose, así que el valor de ejemplo siempre se rechaza. Con un `PUBLIC_ORIGIN` de loopback, ese valor solo permitiría falsificar `X-Client-Ip` (la llave de rate limit y el `ip_hash`) en un entorno local, no saltarse D4. Además arregla el 403 de las form actions que señalé.
 - Nota para el plan-b, no bloquea: RF-B18 dice "fuera de loopback" sin definirlo. Que server y `web` usen el **mismo** predicado que RF-B9 y RF-A3 (`PUBLIC_ORIGIN` `http` en loopback), con un UT en cada app: el valor del `.env.example` con un origen `https` o que no es de loopback no arranca.
 - Owner: `B = 100` es configuración en un rango validado; si el owner elige otro valor, solo cambian los ejemplos. La enmienda del Área 3 tiene resueltos los dos caminos: si se aprueba, entra en C o D con las condiciones de seguridad; si no, bloquea la apertura en TA-6 y TA-8. Ninguno de los dos bloquea esta aprobación.
+
+### security-reviewer — 2026-10-28 — APPROVE (ronda 3: enmienda del callback)
+**🤖 security-reviewer**
+
+- Verifiqué RF-B5, RF-C2, RF-D6, la tabla de API y el Área 3 contra la "Enmienda 2026-10-28" de ADR-0008:
+  - **Redirección abierta:** no hay. El `Location` es una ruta fija, el código sale de un enum de `crates/protocol` y `next` nunca se usa.
+  - **Reflejo:** no hay. La web resuelve el código a una llave i18n solo si está en `CallbackErrorCode`, y su E2E comprueba que un `?error=<canario>` no deja el canario en el HTML.
+  - **Cookie del flujo:** se consume y se expira en todo error, así que no se puede reintentar un flujo. No se crea ni se rota ninguna sesión.
+  - **Vinculación fallida con sesión:** vuelve a `/login` sin tocar la sesión vigente, y no hay fusión.
+- No hay oráculo útil: `auth.already_linked` y `auth.banned` solo los ve quien acaba de autenticarse como esa identidad en el proveedor. Un tercero puede armar `/login?error=auth.banned` y mostrarle a la víctima un mensaje de la lista cerrada, sin sesión ni cambio de estado. Es un engaño de bajo impacto, y lo acepto.
+- Nota para el plan-d, no bloquea: el canario de `?error=` también debe buscarse en los logs de `web` (A8), no solo en el HTML. Y un `error` que mande el proveedor (p. ej. `access_denied`, cuando el usuario cancela) se mapea a un código de la lista, sin copiar `error_description`.

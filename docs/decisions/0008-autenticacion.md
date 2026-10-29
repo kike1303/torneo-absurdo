@@ -309,6 +309,19 @@ Ninguna decisión de D1 a D10 cambia, y ningún número fijado tampoco. Esta not
 - **Reserva de capacidad de D6:** se implementa con la feature de apuestas. Sin apuestas liquidadas, toda cuenta sigue en carencia, y la reserva solo bajaría el tope útil al 80 % de `WS_MAX_CONNECTIONS`. Hasta entonces el tope es `WS_MAX_CONNECTIONS` para todos.
 - **Retención de `ip_hash`:** hasta la feature de temporadas se aplica el piso de 30 días de D8.
 
+## Enmienda 2026-10-28: errores del callback OAuth
+Aprobada por el owner el 2026-10-28 (transmitida por la sesión coordinadora). Revisada y aprobada por security-reviewer el 2026-10-28. Solo reemplaza **cómo responde** `GET /api/auth/{provider}/callback` cuando falla. Las condiciones de rechazo de D2 y el resto de D1 a D10 no cambian.
+
+- **Por qué.** El callback es una navegación top-level que vuelve del proveedor. Un 400 con cuerpo JSON deja al usuario del celular ante un texto crudo, sin salida. La web no puede intervenir, porque `/api` va directo al server.
+- **Respuesta.** En vez de 400 `auth.invalid_state` (y de los otros errores del callback), el server responde **303** con `Location: /login?error=<code>`. Vale para los flujos `login` y `link` por igual: con sesión, `/login` muestra el error y enlaza a la cuenta. Además:
+  - no crea ni rota ninguna sesión;
+  - expira siempre la cookie del flujo y consume la fila de `oauth_flows` si existía;
+  - lleva `Cache-Control: no-store`;
+  - nunca usa `next`.
+- **Lista cerrada de códigos.** `error` solo puede valer `auth.invalid_state`, `auth.banned`, `auth.provider_error`, `auth.try_again`, `auth.already_linked` o `auth.provider_already_linked`. Es un enum de `crates/protocol`, y el server nunca copia al `Location` nada que venga de la petición ni del proveedor.
+- **En la web.** `/login` resuelve `error` a una llave i18n solo si está en la lista. Un valor desconocido se muestra con un texto genérico, y **nunca se refleja** en la página, en un atributo ni en un log.
+- **T4 adaptado.** Un callback sin `state`, con `state` reusado, expirado o de otra cookie responde 303 a `/login?error=auth.invalid_state`, sin `Set-Cookie` de sesión y con la cookie del flujo expirada. Un flujo `link` de otra sesión no vincula. T4 suma un caso nuevo: con un `error` ajeno a la lista en la query de `/login`, la página no contiene ese valor.
+
 ## Revisión
 ### security-reviewer — 2026-10-20 — REQUEST_CHANGES
 **🤖 security-reviewer**
