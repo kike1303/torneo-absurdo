@@ -65,6 +65,10 @@ check-web: _web-prepare
     pnpm --filter @torneo/sff-converter exec tsc -p tsconfig.json --noEmit
     pnpm --filter @torneo/sff-converter exec eslint .
     pnpm --filter @torneo/sff-converter exec vitest run
+    pnpm --filter @torneo/sprite-importer exec tsc -p tsconfig.json --noEmit
+    pnpm --filter @torneo/sprite-importer exec eslint .
+    pnpm --filter @torneo/sprite-importer exec vitest run
+    pnpm -s --filter @torneo/sprite-importer check
     pnpm exec vitest run --config scripts/vitest.config.mjs
     node scripts/check-tokens.mjs
     node scripts/check-i18n.mjs
@@ -86,11 +90,13 @@ check-rust:
     {{just_executable()}} _check-gen
     {{just_executable()}} _check-ts-rs-graph
 
-# Unit and integration tests (web, renderer, SFF converter, repo scripts and Rust)
+# Unit and integration tests (web, renderer, SFF converter, sprite importer, repo scripts and Rust)
 test: _web-prepare
     pnpm --filter web exec vitest run
     pnpm --filter @torneo/renderer exec vitest run
     pnpm --filter @torneo/sff-converter exec vitest run
+    pnpm --filter @torneo/sprite-importer exec vitest run
+    pnpm -s --filter @torneo/sprite-importer check
     pnpm exec vitest run --config scripts/vitest.config.mjs
     {{just_executable()}} db-up
     DATABASE_URL='{{test_db_url}}' cargo test --workspace --locked
