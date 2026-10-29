@@ -342,6 +342,16 @@ const CASES = [
   ],
   ['RUST_LOG missing', { [C]: [[SERVER_ENV, '']] }, /env: RUST_LOG is required/],
   [
+    'TRUSTED_PROXIES missing',
+    { [C]: [['      TRUSTED_PROXIES: 10.250.0.2/32\n', '']] },
+    /services\.server: env: TRUSTED_PROXIES is required/,
+  ],
+  [
+    'TRUSTED_PROXIES is the subnet',
+    { [C]: [['      TRUSTED_PROXIES: 10.250.0.2/32\n', '      TRUSTED_PROXIES: 10.250.0.0/28\n']] },
+    /services\.server: env: TRUSTED_PROXIES must be 10\.250\.0\.2\/32/,
+  ],
+  [
     'web value changed',
     { [C]: [["      XFF_DEPTH: '1'\n", "      XFF_DEPTH: '2'\n"]] },
     /env: XFF_DEPTH must be 1/,

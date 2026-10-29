@@ -47,7 +47,14 @@ const PERMISSIONS_POLICY =
 const ENV = {
   // Exactly info (RF-C4): `warn` or `off` drop the /api/health line the log retention relies on,
   // and a bare target (`info,sqlx`) or a number (`server=5`) turns on TRACE.
-  server: { DATABASE_URL: '${DATABASE_URL:?}', PUBLIC_ORIGIN, RUST_LOG: 'info' },
+  // TRUSTED_PROXIES is exactly coolify-proxy's IP (ADR-0006 D2, 008 plan-a decision 13): without
+  // it every client shares the proxy's IpKey, and the subnet would also trust web.
+  server: {
+    DATABASE_URL: '${DATABASE_URL:?}',
+    PUBLIC_ORIGIN,
+    RUST_LOG: 'info',
+    TRUSTED_PROXIES: '10.250.0.2/32',
+  },
   web: {
     PUBLIC_ORIGIN,
     ADDRESS_HEADER: 'X-Forwarded-For',
