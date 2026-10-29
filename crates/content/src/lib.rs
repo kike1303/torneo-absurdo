@@ -8,7 +8,8 @@
 //! Layout of the root directory:
 //! - regular files (`README.md`) are ignored;
 //! - each directory is a character: `<slug>/character.json`, `<slug>/lore.<locale>.md` for
-//!   every locale of [`LOCALES`], and anything else (e.g. `sprites/`) is ignored;
+//!   every locale of [`LOCALES`], and anything else is ignored (sprite sets live in
+//!   `content/sprites/`, and `just check` flags a `sprites/` folder here, 007 RF-B6);
 //! - any other entry, symlinks included, is an error: links are never followed. `character.json`
 //!   is checked again on the opened descriptor, so swapping it for a link, a fifo or another file
 //!   between the check and the read is also `unexpected_entry`.
@@ -43,6 +44,7 @@ pub struct Character {
     spec: CharacterSpec,
     archetype: String,
     rivals: Vec<String>,
+    sprites: Option<String>,
 }
 
 impl Character {
@@ -62,6 +64,13 @@ impl Character {
     #[must_use]
     pub fn rivals(&self) -> &[String] {
         &self.rivals
+    }
+
+    /// Id of the sprite set in `content/sprites/` (007 RF-B5); the pattern and the existence are
+    /// checked by `just check`, not here.
+    #[must_use]
+    pub fn sprites(&self) -> Option<&str> {
+        self.sprites.as_deref()
     }
 
     #[must_use]
@@ -168,7 +177,12 @@ fn load_character(root: &Path, dir: &str, ruleset: &Ruleset) -> Result<Character
             }
         }
     }
-    let (spec, archetype, rivals) = file.into_parts();
+    let file::FileParts {
+        spec,
+        archetype,
+        rivals,
+        sprites,
+    } = file.into_parts();
     spec.validate(ruleset)
         .map_err(|source| ContentError::Spec {
             path: path.clone(),
@@ -179,6 +193,7 @@ fn load_character(root: &Path, dir: &str, ruleset: &Ruleset) -> Result<Character
         spec,
         archetype,
         rivals,
+        sprites,
     })
 }
 
