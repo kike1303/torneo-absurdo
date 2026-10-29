@@ -38,6 +38,19 @@ tungstenite.workspace = true
 governor.workspace = true
 subtle.workspace = true
 base64.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+rand_core.workspace = true
+unicode-normalization.workspace = true
+unicode-segmentation.workspace = true
+unicode-security.workspace = true
+caseless.workspace = true
+oauth2.workspace = true
+
+[features]
+# The dev OAuth provider and the loopback cookie names (008 RF-B6, RF-B9). Never in `default`
+# and never in the release image (RF-D9).
+dev-auth = []
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["process", "test-util"] }
