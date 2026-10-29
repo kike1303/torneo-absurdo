@@ -13,6 +13,7 @@ pub mod ledger;
 pub mod net;
 pub mod profile;
 pub mod rate;
+pub mod sessions;
 pub mod shutdown;
 pub mod telemetry;
 pub mod version;
