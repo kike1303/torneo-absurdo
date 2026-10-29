@@ -11,22 +11,31 @@ import { fail } from './errors.ts';
 
 export interface CharacterMap {
   readonly id: string;
-  readonly actions: Readonly<Partial<Record<AnimationCode, number>>>;
+  /** The MUGEN actions of each animation, played one after the other (only `knockdown` chains). */
+  readonly actions: Readonly<Partial<Record<AnimationCode, readonly number[]>>>;
   readonly impactFrames: Readonly<Record<AttackAnimation, number>>;
   readonly scale: number;
   /** SFF v1 with a shared palette: the sprite (group, image) that holds the palette. */
   readonly paletteSprite: readonly [number, number];
 }
 
-/** Standard MUGEN actions (spec RF-B2). */
-export const DEFAULT_ACTIONS: Readonly<Partial<Record<AnimationCode, number>>> = Object.freeze({
-  idle: 0,
-  walk: 20,
-  hit: 5000,
-  knockdown: 5050,
-  intro: 190,
-  win: 180,
-});
+/**
+ * Standard MUGEN actions (spec RF-B2). The knockdown chains the fall in the air, the hit on the
+ * ground and lying down: in MUGEN the height of the fall comes from the physics, not the frames,
+ * and the landing is another action (TA-24).
+ */
+export const DEFAULT_ACTIONS: Readonly<Partial<Record<AnimationCode, readonly number[]>>> =
+  Object.freeze({
+    idle: [0],
+    walk: [20],
+    hit: [5000],
+    knockdown: [5050, 5100, 5110],
+    intro: [190],
+    win: [180],
+  });
+
+/** Most actions a chain may have. */
+export const CHAIN_MAX = 8;
 
 const FIELDS = ['id', 'actions', 'impact_frames', 'scale', 'palette_sprite'];
 const CODES: readonly string[] = [...REQUIRED_ANIMATIONS, ...OPTIONAL_ANIMATIONS];
@@ -38,6 +47,18 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function isInt(value: unknown, min: number, max: number): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
+}
+
+function isAction(value: unknown): value is number {
+  return isInt(value, -1, 2_147_483_647);
+}
+
+/** One action, or (knockdown only) a chain of 1 to CHAIN_MAX; null when invalid. */
+function parseActions(code: string, value: unknown): number[] | null {
+  if (isAction(value)) return [value];
+  if (code !== 'knockdown' || !Array.isArray(value)) return null;
+  if (value.length === 0 || value.length > CHAIN_MAX || !value.every(isAction)) return null;
+  return [...value];
 }
 
 /**
@@ -52,13 +73,14 @@ export function parseMap(json: unknown): CharacterMap {
   const id = json['id'];
   if (typeof id !== 'string' || !LIMITS.idPattern.test(id)) return fail('map.invalid_id');
 
-  const actions: Partial<Record<AnimationCode, number>> = { ...DEFAULT_ACTIONS };
+  const actions: Partial<Record<AnimationCode, readonly number[]>> = { ...DEFAULT_ACTIONS };
   const rawActions = json['actions'] ?? {};
   if (!isObject(rawActions)) return fail('map.invalid_field', { field: 'actions' });
   for (const [key, value] of Object.entries(rawActions)) {
     if (!CODES.includes(key)) fail('map.unknown_field', { field: `actions.${key}` });
-    if (!isInt(value, -1, 2_147_483_647)) fail('map.invalid_action', { animation: key });
-    actions[key as AnimationCode] = value;
+    const chain = parseActions(key, value);
+    if (chain === null) return fail('map.invalid_action', { animation: key });
+    actions[key as AnimationCode] = chain;
   }
   for (const code of REQUIRED_ANIMATIONS) {
     if (actions[code] === undefined) fail('map.missing_action', { animation: code });

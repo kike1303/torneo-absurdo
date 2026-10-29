@@ -7,6 +7,8 @@ export interface FrameImage extends RgbaImage {
   /** The feet, in frame coordinates (inside the frame: `0 ≤ pivot ≤ size`). */
   readonly pivotX: number;
   readonly pivotY: number;
+  /** The pivot was raised to the lowest visible row (`FramePlacement.ground`). */
+  readonly grounded?: true;
 }
 
 export interface FramePlacement {
@@ -17,6 +19,12 @@ export interface FramePlacement {
   readonly y: number;
   readonly flipH: boolean;
   readonly flipV: boolean;
+  /**
+   * The frame must rest on the ground: when its visible pixels end above the pivot, the pivot
+   * goes up to the lowest visible row. A MUGEN fall lifts the sprite above its axis because the
+   * height comes from the physics, and the renderer has no physics (TA-24).
+   */
+  readonly ground?: boolean;
 }
 
 export const EMPTY_FRAME: FrameImage = Object.freeze({
@@ -72,7 +80,8 @@ export function visibleBounds(
 
 /**
  * The pivot is the sprite axis (mirrored with the sprite) minus the AIR offset; the transparent
- * borders are trimmed and the frame is padded until the pivot falls inside it.
+ * borders are trimmed and the frame is padded until the pivot falls inside it (never below it
+ * with `ground`).
  */
 export function buildFrame(sprite: RgbaImage | null, at: FramePlacement): FrameImage {
   if (sprite === null) return EMPTY_FRAME;
@@ -87,18 +96,24 @@ export function buildFrame(sprite: RgbaImage | null, at: FramePlacement): FrameI
   const left = Math.max(0, -pivotX);
   const top = Math.max(0, -pivotY);
   const right = Math.max(0, pivotX - trimmed.width);
-  const bottom = Math.max(0, pivotY - trimmed.height);
+  let bottom = Math.max(0, pivotY - trimmed.height);
+  const grounded = at.ground === true && bottom > 0;
+  if (grounded) {
+    pivotY = trimmed.height;
+    bottom = 0;
+  }
+  const extra = grounded ? { grounded: true as const } : {};
   const width = trimmed.width + left + right;
   const height = trimmed.height + top + bottom;
   const max = INPUT_LIMITS.spriteSideMax;
   if (width > max || height > max) fail('convert.pivot_too_far', { width, height });
   if (left === 0 && top === 0 && right === 0 && bottom === 0) {
-    return { ...trimmed, pivotX, pivotY };
+    return { ...trimmed, pivotX, pivotY, ...extra };
   }
   const rgba = new Uint8Array(width * height * 4);
   for (let y = 0; y < trimmed.height; y++) {
     const src = y * trimmed.width * 4;
     rgba.set(trimmed.rgba.subarray(src, src + trimmed.width * 4), ((y + top) * width + left) * 4);
   }
-  return { width, height, rgba, pivotX: pivotX + left, pivotY: pivotY + top };
+  return { width, height, rgba, pivotX: pivotX + left, pivotY: pivotY + top, ...extra };
 }

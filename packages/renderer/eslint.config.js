@@ -14,7 +14,7 @@ import ts from 'typescript-eslint';
 const CLOCK_MESSAGE =
   'Time comes from the injected clock (RF-A11) and randomness from src/fx/prng.ts (RF-A10).';
 const DOM_MESSAGE =
-  'The pure core (manifest, timeline, scene, fx, player, stats) has no DOM (RF-A3).';
+  'The pure core (manifest, timeline, scene, fx, player, stats, guide) has no DOM (RF-A3).';
 const FRAMEWORK_MESSAGE =
   'The renderer is framework agnostic and decoupled from the protocol (RF-A3).';
 const PIXI_MESSAGE = 'Only src/stage/ imports pixi.js; the pure core never does (RF-A3).';
@@ -33,6 +33,7 @@ const PURE = [
   'src/fx/**/*.ts',
   'src/player/**/*.ts',
   'src/stats/**/*.ts',
+  'src/guide/**/*.ts',
 ];
 
 const clockGlobals = ['Date', 'performance', 'crypto'].map((name) => ({

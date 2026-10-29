@@ -11,10 +11,12 @@ describe('parseMap (RF-B2)', () => {
     delete rest['scale'];
     const map = parseMap(rest);
     expect(map.actions).toMatchObject(DEFAULT_ACTIONS);
-    expect(map.actions.attack_light).toBe(200);
+    expect(map.actions.attack_light).toEqual([200]);
     expect(map.scale).toBe(1);
     expect(map.paletteSprite).toEqual([0, 0]);
-    expect(parseMap({ ...base(), actions: { ...MAP_JSON.actions, idle: 7 } }).actions.idle).toBe(7);
+    expect(parseMap({ ...base(), actions: { ...MAP_JSON.actions, idle: 7 } }).actions.idle).toEqual(
+      [7],
+    );
   });
 
   it('every character-specific action must be mapped', () => {
@@ -55,5 +57,24 @@ describe('parseMap (RF-B2)', () => {
 
   it('a non-object is map.not_object', () => {
     expect(converterError(() => parseMap([1])).code).toBe('map.not_object');
+  });
+
+  it('knockdown takes one action or a chain of 1 to 8 (TA-24)', () => {
+    expect(DEFAULT_ACTIONS.knockdown).toEqual([5050, 5100, 5110]);
+    const with_ = (knockdown: unknown) =>
+      parseMap({ ...base(), actions: { ...MAP_JSON.actions, knockdown } });
+    expect(with_(5100).actions.knockdown).toEqual([5100]);
+    expect(with_([5050, 5100]).actions.knockdown).toEqual([5050, 5100]);
+    expect(parseMap(base()).actions.ko).toEqual([5150]);
+    for (const bad of [[], Array.from({ length: 9 }, () => 5100), [5100, 1.5], '5100']) {
+      expect(converterError(() => with_(bad))).toMatchObject({
+        code: 'map.invalid_action',
+        data: { animation: 'knockdown' },
+      });
+    }
+    // Only the knockdown chains actions.
+    expect(
+      converterError(() => parseMap({ ...base(), actions: { ...MAP_JSON.actions, hit: [5000] } })),
+    ).toMatchObject({ code: 'map.invalid_action', data: { animation: 'hit' } });
   });
 });

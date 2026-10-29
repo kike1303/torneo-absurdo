@@ -17,6 +17,10 @@
       "types": "./src/timeline/index.ts",
       "default": "./src/timeline/index.ts"
     },
+    "./guide": {
+      "types": "./src/guide/index.ts",
+      "default": "./src/guide/index.ts"
+    },
     "./placeholders/*": "./placeholders/*",
     "./fixtures/*": "./fixtures/*"
   },

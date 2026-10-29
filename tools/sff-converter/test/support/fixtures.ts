@@ -117,13 +117,17 @@ export const ACTIONS: readonly AirActionSpec[] = [
       { group: 0, image: 3, ticks: 30, flip: 'HV' },
     ],
   },
+  // Knockdown, as MUGEN splits it: 5050 falls in the air (its height comes from the physics, so
+  // the AIR lifts the sprite above the axis), 5100 hits the ground and 5110 lies down.
   {
     id: 5050,
     frames: [
-      { group: 0, image: 5, ticks: 12 },
-      { group: 0, image: 2, ticks: 12 },
+      { group: 0, image: 5, y: -30, ticks: 12 },
+      { group: 0, image: 2, y: -20, ticks: 12 },
     ],
   },
+  { id: 5100, frames: [{ group: 0, image: 4, ticks: 6 }] },
+  { id: 5110, frames: [{ group: 0, image: 3, y: 2, ticks: 20 }] },
 ];
 
 export const MAP_JSON = {

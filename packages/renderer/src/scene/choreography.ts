@@ -13,7 +13,7 @@
 // A windup that would start during an own `knockdown` waits for its end and starts at the frame
 // that corresponds to `t − (at_ms − windup_ms)`, so the impact still lands on `at_ms`
 // (plan-a1 decision 15).
-import type { AnimationCode } from '../manifest/types.ts';
+import { LIMITS, type AnimationCode } from '../manifest/types.ts';
 import {
   SIDES,
   otherSide,
@@ -30,8 +30,11 @@ export const RETURN_MS = 300;
 export const CONTACT_PX = 64;
 /** Cap for reactions and recoveries (the longest non-looping animation of the format). */
 export const MAX_ACTION_MS = 3000;
-/** Longest windup of the format: the renderer looks this far ahead (RF-A11). */
-export const MAX_WINDUP_MS = 400;
+/**
+ * Longest windup of the format: the renderer looks this far ahead (RF-A11). Derived from the
+ * manifest limit (007 RF-A1).
+ */
+export const MAX_WINDUP_MS = LIMITS.windupMaxMs;
 
 export interface AnimationTiming {
   /** The animation actually played (after the RF-A5 fallback). */
