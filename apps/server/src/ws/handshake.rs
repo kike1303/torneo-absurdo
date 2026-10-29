@@ -119,6 +119,7 @@ pub async fn handler(
             let auth = match &admission {
                 Admission::Anonymous { .. } => None,
                 Admission::Session { info, .. } => {
+                    ws.gate.before_register().await;
                     let registration = ws.registry.register(info.id);
                     ws.gate.before_validate().await;
                     match sessions::validate_by_id(&pool, info.id).await {

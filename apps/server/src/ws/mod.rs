@@ -26,10 +26,15 @@ use self_hub::SelfHub;
 
 use crate::net::IpKey;
 
-/// A pause between the registration of a socket with a session and its second validation
-/// (RF-B14). Production uses [`NoGate`]; the race test holds the socket there to revoke its
-/// session in between.
+/// Pauses around the registration of a socket with a session (RF-B14): after the first
+/// validation and before the registration, and between the registration and the second
+/// validation. Production uses [`NoGate`]; the race tests hold the socket at each point to
+/// revoke its session there.
 pub trait ValidationGate: Send + Sync {
+    fn before_register(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(std::future::ready(()))
+    }
+
     fn before_validate(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 }
 

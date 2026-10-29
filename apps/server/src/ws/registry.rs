@@ -14,6 +14,7 @@ use crate::sessions::SessionId;
 pub struct Registry {
     sockets: Mutex<HashMap<SessionId, HashMap<u64, CancellationToken>>>,
     next: AtomicU64,
+    closes: AtomicU64,
 }
 
 impl Registry {
@@ -40,11 +41,18 @@ impl Registry {
 
     /// Closes every socket of `session` (a revoked session).
     pub fn close(&self, session: SessionId) {
+        self.closes.fetch_add(1, Ordering::Relaxed);
         if let Some(sockets) = self.lock().remove(&session) {
             for token in sockets.values() {
                 token.cancel();
             }
         }
+    }
+
+    /// How many closes were requested, with or without sockets to close (the race tests wait
+    /// on it to know a NOTIFY was handled).
+    pub fn closes_requested(&self) -> u64 {
+        self.closes.load(Ordering::Relaxed)
     }
 
     /// The sessions with at least one socket.

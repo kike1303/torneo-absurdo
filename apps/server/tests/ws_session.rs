@@ -91,6 +91,24 @@ async fn wait_until(mut done: impl FnMut() -> bool) {
     assert!(done(), "timed out");
 }
 
+/// Waits until the revocation listener has run `LISTEN` (and so its startup revalidation),
+/// so a test sees only the path it is about.
+async fn listener_ready(pool: &PgPool) -> i32 {
+    loop {
+        let row: Option<(i32,)> = sqlx::query_as(
+            "SELECT pid FROM pg_stat_activity WHERE application_name = 'torneo-listener' \
+             AND datname = current_database() AND query LIKE 'LISTEN%'",
+        )
+        .fetch_optional(pool)
+        .await
+        .unwrap();
+        if let Some((pid,)) = row {
+            return pid;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 async fn revoke(pool: &PgPool, filter: RevokeFilter) {
     let mut tx = pool.begin().await.unwrap();
     sessions::revoke(&mut tx, filter).await.unwrap();
@@ -146,19 +164,7 @@ async fn the_listener_catches_up_after_losing_its_connection() {
     let mut client = connect(app.addr, Some(&token), None).await.unwrap();
     wait_until(|| ws_state.session_sockets() == 1).await;
     // Wait for the listener to be connected, then cut it.
-    let pid = loop {
-        let row: Option<(i32,)> = sqlx::query_as(
-            "SELECT pid FROM pg_stat_activity WHERE application_name = 'torneo-listener' \
-             AND datname = current_database()",
-        )
-        .fetch_optional(&pool)
-        .await
-        .unwrap();
-        if let Some((pid,)) = row {
-            break pid;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    };
+    let pid = listener_ready(&pool).await;
     sqlx::query("SELECT pg_terminate_backend($1)")
         .bind(pid)
         .execute(&pool)
@@ -167,7 +173,7 @@ async fn the_listener_catches_up_after_losing_its_connection() {
     // Revoked in the gap: the NOTIFY has no listener.
     revoke(&pool, RevokeFilter::AllOfUser(user)).await;
     // The revalidation on reconnect closes it, long before the 5-minute one.
-    closes_unauthenticated(&mut client, Duration::from_secs(10)).await;
+    closes_unauthenticated(&mut client, Duration::from_secs(5)).await;
 }
 
 /// RF-B14: the socket is registered before the second validation, so a revoke in between is
@@ -204,6 +210,57 @@ async fn a_revoke_between_registration_and_validation_closes_the_socket() {
     let mut client = connect(app.addr, Some(&token), None).await.unwrap();
     gate.registered.notified().await;
     revoke(&pool, RevokeFilter::AllOfUser(user)).await;
+    gate.go.notify_one();
+    closes_unauthenticated(&mut client, Duration::from_secs(5)).await;
+}
+
+/// RF-B14, pinned: the socket is held after the first validation and before its registration,
+/// and the session is revoked there. Its NOTIFY finds nothing registered, so only the second
+/// validation, which must come after the registration, can close it. A registration moved
+/// after the second validation leaves this socket open and fails the test.
+struct RegisterGate {
+    reached: Notify,
+    go: Notify,
+}
+
+impl ValidationGate for RegisterGate {
+    fn before_register(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        Box::pin(async {
+            self.reached.notify_one();
+            self.go.notified().await;
+        })
+    }
+
+    fn before_validate(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        Box::pin(std::future::ready(()))
+    }
+}
+
+#[tokio::test]
+async fn a_revoke_before_the_registration_is_caught_by_the_second_validation() {
+    let db = TestDb::create().await;
+    let gate = Arc::new(RegisterGate {
+        reached: Notify::new(),
+        go: Notify::new(),
+    });
+    let held = gate.clone();
+    let (app, pool, ws_state) =
+        support::app::start_db_ws(&db, &[], &Settings::default(), move |ws| {
+            ws.with_validation_gate(held)
+        })
+        .await;
+    let (user, token) = support::app::user_with_session(&pool).await;
+    listener_ready(&pool).await;
+    let mut client = connect(app.addr, Some(&token), None).await.unwrap();
+    gate.reached.notified().await;
+    assert_eq!(ws_state.session_sockets(), 0);
+    revoke(&pool, RevokeFilter::AllOfUser(user)).await;
+    // The NOTIFY has been handled, and found no socket to close.
+    wait_until(|| ws_state.registry().closes_requested() == 1).await;
     gate.go.notify_one();
     closes_unauthenticated(&mut client, Duration::from_secs(5)).await;
 }
