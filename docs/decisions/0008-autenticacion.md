@@ -51,7 +51,7 @@ updated: 2026-10-28
   - Se rechazan caracteres de control (`Cc`), de formato bidi (U+061C, U+200E–U+200F, U+202A–U+202E, U+2066–U+2069) y de ancho cero (U+200B–U+200D, U+2060, U+FEFF).
   - **Llave de comparación `display_name_key`** = skeleton de confusables de UTS #39 (p. ej. crate `unicode-security`) aplicado sobre NFKC + casefold. Así `Tоrneo_King` con `о` cirílica y `Torneo_King` con `o` latina dan la misma llave.
   - Lista de reservados (`admin`, `moderador`, `system`, la marca y sus variantes), comparada por `display_name_key`.
-  - *Ver la "Enmienda 2026-10-29: caracteres invisibles y comparación de reservados" (security-reviewer firmó el 2026-10-29 (https://github.com/kike1303/torneo-absurdo/pull/54#issuecomment-6502944943); pendiente de architect): se rechazan todos los caracteres invisibles, y los reservados se comparan por dos formas construidas con las letras y los dígitos, que solo agregan rechazos a la comparación por `display_name_key`.*
+  - *Ver la "Enmienda 2026-10-29: caracteres invisibles y comparación de reservados" (security-reviewer firmó el 2026-10-29 (https://github.com/kike1303/torneo-absurdo/pull/54#issuecomment-6502944943); architect firmó el 2026-10-29 (https://github.com/kike1303/torneo-absurdo/pull/54#issuecomment-6504044430)): se rechazan todos los caracteres invisibles, y los reservados se comparan por dos formas construidas con las letras y los dígitos, que solo agregan rechazos a la comparación por `display_name_key`.*
   - **Único por `display_name_key`**, garantizado por la BD: columna `users.display_name_key` con `UNIQUE`. La aplicación no hace un "¿existe?" previo; si el `INSERT`/`UPDATE` viola el índice, responde `profile.display_name_taken`. Dos renombres concurrentes al mismo nombre: gana exactamente uno.
   - **Alias generado:** pasa por la misma validación. Si choca con un reservado o con el índice único, se genera otro, hasta 10 intentos; si se agotan, el login responde 503 `auth.try_again` y no crea el usuario.
   - Errores: `profile.display_name_invalid`, `profile.display_name_reserved`, `profile.display_name_taken`.
@@ -328,7 +328,7 @@ Aprobada por el owner el 2026-10-28 (transmitida por la sesión coordinadora). R
 - **T4 adaptado.** Un callback sin `state`, con `state` reusado, expirado o de otra cookie responde 303 a `/login?error=auth.invalid_state`, sin `Set-Cookie` de sesión y con la cookie del flujo expirada. Un flujo `link` de otra sesión no vincula. T4 suma un caso nuevo: con un `error` ajeno a la lista en la query de `/login`, la página no contiene ese valor.
 
 ## Enmienda 2026-10-29: caracteres invisibles y comparación de reservados
-**Firmas:** security-reviewer firmó el 2026-10-29 (https://github.com/kike1303/torneo-absurdo/pull/54#issuecomment-6502944943). Pendiente de la firma de architect, que firma tras revisar la ronda 3 del PR #54. La firma de security-reviewer cubre el texto anterior al invariante de dos formas; se revalida en la ronda siguiente.
+**Firmas:** security-reviewer firmó el 2026-10-29 (https://github.com/kike1303/torneo-absurdo/pull/54#issuecomment-6502944943). architect firmó el 2026-10-29 (https://github.com/kike1303/torneo-absurdo/pull/54#issuecomment-6504044430). La firma de security-reviewer cubre el texto anterior al invariante de dos formas; se revalida en la ronda siguiente.
 
 Viene del hallazgo de security-reviewer en esa revisión: con la letra de D1, un nombre podía ser invisible o hacerse pasar por la marca. Cambia dos viñetas de la validación de `display_name` de D1; el resto no cambia.
 
