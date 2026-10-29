@@ -80,6 +80,8 @@ describe('the renderer forbids clocks, randomness and framework imports', () => 
     ),
     ["import 'pixi.js' in player", 'src/player/x.ts', "import 'pixi.js';\n", IMPORTS],
     ["import 'pixi.js' in stats", 'src/stats/x.ts', "import 'pixi.js';\n", IMPORTS],
+    ["import 'pixi.js' in guide", 'src/guide/x.ts', "import 'pixi.js';\n", IMPORTS],
+    ['document in the guide', 'src/guide/x.ts', 'export const b = document.body;\n', GLOBALS],
     ['document in the player', 'src/player/x.ts', 'export const b = document.body;\n', GLOBALS],
     [
       'performance.now() in stats',
