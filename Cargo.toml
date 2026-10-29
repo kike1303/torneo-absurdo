@@ -48,6 +48,14 @@ tungstenite = { version = "=0.29.0", default-features = false }
 futures-util = "=0.3.34"
 # Only for the O_NOFOLLOW / O_NONBLOCK open of crates/content (already in the lock via tokio).
 libc = "=0.2.191"
+# Rate limiter (008 plan-a decision 6): no quanta, dashmap nor jitter.
+governor = { version = "=0.10.4", default-features = false, features = ["std"] }
+# Constant-time comparison of X-Internal-Secret (already in the lock via rustls).
+subtle = "=2.6.1"
+# INTERNAL_API_SECRET decoding (already in the lock via rustls).
+base64 = "=0.22.1"
+# Property tests of the server (dev-dependency only): no fork, timeout nor tempfile.
+proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
