@@ -239,3 +239,28 @@ async fn amounts_are_never_zero() {
     // The CHECK fails at insert time, before the deferred balance check.
     assert_eq!(sqlstate(&error).as_deref(), Some("23514"));
 }
+
+/// An entry that already balanced cannot be unbalanced later by appending a posting: the
+/// deferred check runs again for the entry the new posting touches.
+#[tokio::test]
+async fn appending_an_unbalanced_posting_to_an_existing_entry_never_commits() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let a = user(&pool).await;
+    let b = user(&pool).await;
+    let mut tx = pool.begin().await.unwrap();
+    let entry = ledger::grant(&mut tx, a, Coins(100)).await.unwrap().unwrap();
+    tx.commit().await.unwrap();
+    let account_b = account_of(&pool, b).await;
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("INSERT INTO ledger_postings (entry_id, account_id, amount) VALUES ($1, $2, 50)")
+        .bind(entry)
+        .bind(account_b)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let error = tx.commit().await.unwrap_err();
+    assert_eq!(sqlstate(&error).as_deref(), Some("TA002"));
+    assert_eq!(ledger::balance(&pool, b).await.unwrap(), Coins(0));
+    assert_eq!(total(&pool).await, 0);
+}
