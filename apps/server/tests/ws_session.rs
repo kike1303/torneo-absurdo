@@ -241,7 +241,7 @@ async fn a_hung_second_validation_closes_the_socket_with_try_again() {
     let held = gate.clone();
     let settings = Settings {
         ws: WsConfig {
-            revalidate_timeout: Duration::from_millis(300),
+            handshake_validate_timeout: Duration::from_millis(300),
             ..WsConfig::default()
         },
         ..Settings::default()
@@ -260,6 +260,44 @@ async fn a_hung_second_validation_closes_the_socket_with_try_again() {
     gate.go.notify_one();
     let ending = ws::ending(&mut client, Duration::from_secs(3)).await;
     lock.rollback().await.unwrap();
+    assert_eq!(ending, Ending::Close(1008, "auth.try_again".into()));
+}
+
+/// QA on #54: a database error (not a timeout) in the second validation also fails closed with
+/// `auth.try_again`, never as `auth.unauthenticated` (the session may be fine).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_database_error_in_the_second_validation_closes_with_try_again() {
+    use server::app::AppState;
+    use support::pg_proxy::PgProxy;
+    let db = TestDb::create().await;
+    let direct = db.migrated_pool().await;
+    let (_, token) = support::app::user_with_session(&direct).await;
+    let proxy = PgProxy::start(db.server_addr()).await;
+    let url = db.url_via(proxy.addr());
+    let config = support::config::config(&[("DATABASE_URL", url.as_str())]);
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .acquire_timeout(Duration::from_secs(1))
+        .connect_lazy_with(config.database.clone());
+    let gate = Arc::new(Gate {
+        registered: Notify::new(),
+        go: Notify::new(),
+    });
+    let held = gate.clone();
+    let state = AppState::from_config(
+        &config,
+        &Settings::default(),
+        pool,
+        Arc::new(support::app::AlwaysUp),
+    )
+    .with_ws(AppState::ws_from_config(&config, &Settings::default()).with_validation_gate(held));
+    let app = support::app::start(state).await;
+    let mut client = connect(app.addr, Some(&token), None).await.unwrap();
+    gate.registered.notified().await;
+    proxy.cut();
+    gate.go.notify_one();
+    let ending = ws::ending(&mut client, Duration::from_secs(4)).await;
+    proxy.restore();
     assert_eq!(ending, Ending::Close(1008, "auth.try_again".into()));
 }
 

@@ -131,7 +131,7 @@ pub async fn handler(
                     // shutdown, no revocation). Fails closed: an error or a timeout closes the
                     // socket with `auth.try_again` and the client reconnects (round 3 of #54).
                     let second = tokio::time::timeout(
-                        config.revalidate_timeout,
+                        config.handshake_validate_timeout,
                         sessions::validate_by_id(&pool, info.id),
                     )
                     .await;

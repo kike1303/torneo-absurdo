@@ -64,6 +64,10 @@ pub struct WsConfig {
     pub revalidate_interval: Duration,
     /// Bound of that revalidation query; past it the socket stays, as on a database error.
     pub revalidate_timeout: Duration,
+    /// Bound of the second validation of the handshake; past it, or on a database error, the
+    /// socket closes with `auth.try_again`. Its own setting, so a test that shortens the
+    /// periodic check never closes sockets in their handshake (round 4 of #54).
+    pub handshake_validate_timeout: Duration,
 }
 
 impl Default for WsConfig {
@@ -75,6 +79,7 @@ impl Default for WsConfig {
             close_grace: Duration::from_secs(5),
             revalidate_interval: Duration::from_secs(300),
             revalidate_timeout: Duration::from_secs(5),
+            handshake_validate_timeout: Duration::from_secs(5),
         }
     }
 }
