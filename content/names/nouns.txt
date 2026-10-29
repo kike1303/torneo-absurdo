@@ -7,7 +7,7 @@ Oso
 Puma
 Lince
 Jaguar
-Pantera
+Reloj
 Gato
 Perro
 Conejo
@@ -15,9 +15,9 @@ Liebre
 Ardilla
 Castor
 Nutria
-Foca
-Morsa
-Ballena
+Orca
+Albatros
+Ostra
 Pulpo
 Calamar
 Cangrejo
@@ -34,9 +34,9 @@ Serpiente
 Cobra
 Boa
 Cuervo
-Paloma
+Golondrina
 Loro
-Perico
+Canario
 Flamenco
 Garza
 Cisne
@@ -51,8 +51,8 @@ Panda
 Mapache
 Erizo
 Topo
-Mono
-Gorila
+Suricata
+Narval
 Elefante
 Jirafa
 Cebra
@@ -92,7 +92,7 @@ Avispa
 Hormiga
 Grillo
 Cigarra
-Escarabajo
+Paraguas
 Mantis
 Caracol
 Lombriz
@@ -156,7 +156,7 @@ Martillo
 Yunque
 Escudo
 Lanza
-Flecha
+Catalejo
 Arco
 Ancla
 Faro
@@ -182,7 +182,7 @@ Puente
 Muralla
 Molino
 Farol
-Linterna
+Lupa
 Vela
 Antorcha
 Tambor
@@ -191,7 +191,7 @@ Flauta
 Trompeta
 Piano
 Arpa
-Maraca
+Bongo
 Marimba
 Campana
 Silbato
@@ -199,10 +199,10 @@ Taco
 Tamal
 Elote
 Nopal
-Chile
+Calabaza
 Mango
 Coco
-Papaya
+Pitaya
 Guayaba
 Mamey
 Tuna
@@ -253,10 +253,10 @@ Grifo
 Unicornio
 Quimera
 Sirena
-Duende
+Kraken
 Hada
 Gnomo
-Ogro
+Fauno
 Yeti
 Nahual
 Alebrije

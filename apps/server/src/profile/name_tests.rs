@@ -66,6 +66,40 @@ fn reserved_names_are_refused_by_key() {
     assert!(validate("AdminDeLaCasa").is_ok());
 }
 
+/// game-designer on #54: the brand with a space, a dot, an underscore or a hyphen, the accented
+/// forms that survive the skeleton, and the names of authorities a user could impersonate.
+#[test]
+fn reserved_names_ignore_separators_and_cover_authorities() {
+    for input in [
+        "Torneo Absurdo",
+        "torneo.absurdo",
+        "Torneo_Absurdo",
+        "Torneo-Absurdo",
+        "TORNEO  ABSURDO",
+        "Torneo Absurdo Oficial",
+        "Anónimo",
+        "anónima",
+        "Anonima",
+        "Árbitro",
+        "arbitro",
+        "Referee",
+        "Juez",
+        "Judge",
+        "Equipo",
+        "Team",
+        "Presentador",
+        "Host",
+        "Usuario Eliminado",
+        "Deleted User",
+        "deleted_user",
+        "a.d.m.i.n",
+    ] {
+        assert_eq!(validate(input), Err(NameError::Reserved), "{input:?}");
+    }
+    // The UNIQUE key keeps the separators: two people can still be "Ana Bel" and "AnaBel".
+    assert_ne!(ok("Ana Bel").key(), ok("AnaBel").key());
+}
+
 #[test]
 fn case_and_homoglyphs_give_the_same_key() {
     let latin = ok("Torneo_King");

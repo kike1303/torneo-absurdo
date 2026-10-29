@@ -2,7 +2,7 @@
 //!
 //! In this order: NFC, trim, refuse control (`Cc`), bidi and zero-width characters, 3 to 24
 //! graphemes, then the key (UTS #39 skeleton over full case folding over NFKC) and the
-//! reserved names by key. Uniqueness is the database's `UNIQUE` on the key, never a prior
+//! reserved names by key, ignoring spaces, `_`, `-` and `.`. Uniqueness is the database's `UNIQUE` on the key, never a prior
 //! check here.
 
 use std::collections::HashSet;
@@ -41,12 +41,22 @@ impl DisplayName {
     }
 }
 
-/// The reserved names of `content/names/reserved.txt`, as keys.
+/// The reserved names of `content/names/reserved.txt`, as [`reserved_form`]s.
 static RESERVED: LazyLock<HashSet<String>> = LazyLock::new(|| {
     words(include_str!("../../../../content/names/reserved.txt"))
-        .map(key_of)
+        .map(|word| reserved_form(&key_of(word)))
         .collect()
 });
+
+/// The form compared against the reserved list: the key without spaces, `_`, `-` or `.`, so
+/// "Torneo Absurdo", "torneo.absurdo" and "Torneo_Absurdo" are all the brand (review of #54).
+/// Only for the reserved list: the `UNIQUE` key keeps them, so "Ana Bel" and "AnaBel" are
+/// still two names.
+fn reserved_form(key: &str) -> String {
+    key.chars()
+        .filter(|c| !matches!(c, ' ' | '_' | '-' | '.'))
+        .collect()
+}
 
 /// The non-comment, non-empty lines of a word list.
 pub(crate) fn words(text: &'static str) -> impl Iterator<Item = &'static str> {
@@ -109,7 +119,7 @@ pub fn validate(input: &str) -> Result<DisplayName, NameError> {
         return Err(NameError::Invalid);
     }
     let key = key_of(text);
-    if RESERVED.contains(&key) {
+    if RESERVED.contains(&reserved_form(&key)) {
         return Err(NameError::Reserved);
     }
     Ok(DisplayName {

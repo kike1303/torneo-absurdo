@@ -1,5 +1,6 @@
 # Reserved display names (ADR-0008 D1), compared by display_name_key (UTS #39 skeleton over
-# NFKC + full case folding), so case and homoglyphs do not get around them. One per line.
+# NFKC + full case folding) without spaces, "_", "-" or ".", so case, homoglyphs and separators
+# do not get around them. Accents survive the key, so accented forms are listed too. One per line.
 admin
 administrador
 administradora
@@ -30,3 +31,20 @@ torneo_absurdo
 torneo-absurdo
 torneoabsurdooficial
 absurdo
+torneo absurdo
+torneo.absurdo
+torneo absurdo oficial
+anónimo
+anónima
+anonima
+árbitro
+arbitro
+referee
+juez
+judge
+equipo
+team
+presentador
+host
+usuario eliminado
+deleted user

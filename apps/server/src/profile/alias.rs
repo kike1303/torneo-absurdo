@@ -13,6 +13,14 @@ use super::name::words;
 
 pub const NUMBERS: RangeInclusive<u32> = 10..=999;
 
+/// Numbers with a loaded meaning, never in an alias (game-designer on #54): 69, 88 (a neo-Nazi
+/// code, next to `Vikingo`), 420 and 666.
+pub const SKIPPED_NUMBERS: &[u32] = &[69, 88, 420, 666];
+
+/// [`NUMBERS`] without [`SKIPPED_NUMBERS`]: the numbers an alias draws from.
+pub static ALIAS_NUMBERS: LazyLock<Vec<u32>> =
+    LazyLock::new(|| NUMBERS.filter(|n| !SKIPPED_NUMBERS.contains(n)).collect());
+
 pub static NOUNS: LazyLock<Vec<&'static str>> =
     LazyLock::new(|| words(include_str!("../../../../content/names/nouns.txt")).collect());
 
@@ -59,13 +67,17 @@ impl AliasSource for OsAlias {
         let noun = NOUNS.get(usize::try_from(uniform_index(len(&NOUNS)?, &mut draw)?).ok()?)?;
         let adjective =
             ADJECTIVES.get(usize::try_from(uniform_index(len(&ADJECTIVES)?, &mut draw)?).ok()?)?;
-        let span = NUMBERS.end() - NUMBERS.start() + 1;
-        let number = NUMBERS.start() + uniform_index(span, &mut draw)?;
+        let number = *ALIAS_NUMBERS
+            .get(usize::try_from(uniform_index(len_of(&ALIAS_NUMBERS)?, &mut draw)?).ok()?)?;
         Some(compose(noun, adjective, number))
     }
 }
 
 fn len(list: &[&str]) -> Option<u32> {
+    len_of(list)
+}
+
+fn len_of<T>(list: &[T]) -> Option<u32> {
     u32::try_from(list.len()).ok()
 }
 
@@ -100,8 +112,76 @@ mod tests {
     fn the_lists_are_large_enough() {
         assert!(NOUNS.len() >= 200, "{}", NOUNS.len());
         assert!(ADJECTIVES.len() >= 100, "{}", ADJECTIVES.len());
-        let combinations = NOUNS.len() * ADJECTIVES.len() * NUMBERS.clone().count();
-        assert!(combinations >= 4_000_000, "{combinations}");
+        let combinations = NOUNS.len() * ADJECTIVES.len() * ALIAS_NUMBERS.len();
+        // The space of the spec (≥ 4 M) and of game-designer's review (≈ 19.8 M), after the
+        // skipped numbers.
+        assert!(combinations >= 19_800_000, "{combinations}");
+    }
+
+    #[test]
+    fn the_counts_stay_after_the_review_swaps() {
+        assert_eq!(NOUNS.len(), 281);
+        assert_eq!(ADJECTIVES.len(), 123);
+    }
+
+    /// game-designer on #54: words that form franchise names, regional vulgarities or insults
+    /// against a person are out of the lists.
+    #[test]
+    fn the_removed_words_stay_out() {
+        for word in [
+            "Linterna",
+            "Flecha",
+            "Duende",
+            "Escarabajo",
+            "Pantera",
+            "Chile",
+            "Papaya",
+            "Maraca",
+            "Mono",
+            "Gorila",
+            "Foca",
+            "Morsa",
+            "Ballena",
+            "Paloma",
+            "Perico",
+            "Concha",
+            "Ogro",
+        ] {
+            assert!(!NOUNS.contains(&word), "{word}");
+        }
+        for word in ["Ardiente", "Mejor"] {
+            assert!(!ADJECTIVES.contains(&word), "{word}");
+        }
+    }
+
+    /// No noun + adjective of the lists may form the Spanish name of a protected character
+    /// (ADR-0004). A future edit that brings one back fails here.
+    #[test]
+    fn no_blocked_pair_is_complete() {
+        const BLOCKED_PAIRS: &[(&str, &str)] = &[
+            ("Linterna", "Verde"),
+            ("Flecha", "Verde"),
+            ("Duende", "Verde"),
+            ("Escarabajo", "Azul"),
+            ("Pantera", "Rosa"),
+            ("Ogro", "Verde"),
+        ];
+        for (noun, adjective) in BLOCKED_PAIRS {
+            assert!(
+                !(NOUNS.contains(noun) && ADJECTIVES.contains(adjective)),
+                "{noun}{adjective}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_alias_numbers_skip_the_loaded_ones() {
+        for number in SKIPPED_NUMBERS {
+            assert!(NUMBERS.contains(number), "{number}");
+            assert!(!ALIAS_NUMBERS.contains(number), "{number}");
+        }
+        assert_eq!(ALIAS_NUMBERS.len(), 990 - SKIPPED_NUMBERS.len());
+        assert!(ALIAS_NUMBERS.iter().all(|n| NUMBERS.contains(n)));
     }
 
     #[test]
@@ -162,7 +242,7 @@ mod tests {
             assert!(name::validate(&alias).is_ok(), "{alias}");
             let digits: String = alias.chars().filter(char::is_ascii_digit).collect();
             let number: u32 = digits.parse().unwrap();
-            assert!(NUMBERS.contains(&number), "{alias}");
+            assert!(ALIAS_NUMBERS.contains(&number), "{alias}");
             assert!(alias.ends_with(&digits), "{alias}");
         }
     }
