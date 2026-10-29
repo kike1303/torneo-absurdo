@@ -409,6 +409,16 @@ describe('sanitize: header values on the next line or in an object (TA-11)', () 
     'cookie: [x]; sid=SECRET',
     'cookie: "x"; sid=SECRET',
     "{ cookie: 'a' + 'SECRET' }",
+    // PR #51 review, 2nd round: one closing character must not end a header line.
+    'Cookie: {}}; __Host-sid=SECRET',
+    'Cookie: {},; __Host-sid=SECRET',
+    'Cookie: {}, __Host-sid=SECRET',
+    'cookie={"a":1}) __Host-sid=SECRET',
+    'Authorization: {"a":1}\t,SECRET',
+    'Cookie: {}, a: 1; __Host-sid=SECRET',
+    'Cookie: "x"); __Host-sid=SECRET',
+    'Cookie: [x]]; __Host-sid=SECRET',
+    '{} Cookie: {}}; __Host-sid=SECRET',
   ])('redacts the rest of the line when a value goes on after it closes: %s', (input) => {
     expect(sanitize(input)).not.toContain('SECRET');
   });

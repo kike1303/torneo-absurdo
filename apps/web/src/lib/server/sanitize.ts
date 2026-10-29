@@ -36,12 +36,12 @@ const HEADER_NAMES = [
  * string) and its separator: `:`, `=`, the `=>` of `util.inspect(new Map())` or the `, value:` of a
  * `{ name, value }` pair, on one line or several (TA-11). The value that follows is consumed by
  * `redactHeaderValues()`, which reads its structure instead of stopping at the first quote or `]`
- * (PR #2 review).
+ * (PR #2 review). Group 1 is the closing quote, if any.
  */
 const OPTIONAL_QUOTE = `(?:\\\\?["'\`])?`;
 const VALUE_KEY = `,\\s*${OPTIONAL_QUOTE}value${OPTIONAL_QUOTE}\\s*[:=]`;
 const SENSITIVE_HEADER = new RegExp(
-  `\\b(?:${HEADER_NAMES})${OPTIONAL_QUOTE}\\s*(?:=>|[:=]|${VALUE_KEY})[ \\t]*`,
+  `\\b(?:${HEADER_NAMES})(\\\\?["'\`])?\\s*(?:=>|[:=]|${VALUE_KEY})[ \\t]*`,
   'gi',
 );
 
@@ -119,16 +119,28 @@ function endsAt(text: string, end: number): boolean {
 
 /**
  * Redacts every sensitive header value in one left-to-right pass (linear: each value is read
- * once). An array or an object goes whole; a quoted string goes whole and keeps its quotes;
- * anything else (including a value that opens with an escaped quote) goes to the end of the line,
- * and so does one of them when the line goes on after it closes. A string, an array or an object
- * that never closes is redacted to the end of the input: when in doubt, redact more.
+ * once, and the text between values is scanned once for brackets). A value ends where its string,
+ * array or object closes only inside a structure: the header name is quoted (JSON, `Map`) or an
+ * unclosed `{` or `[` comes before it on its line (`util.inspect`), and the next character closes
+ * an entry or a structure. Anything else goes to the end of the line, so a raw header line
+ * (`Cookie: {}}; __Host-sid=…`) is never cut short (PR #51 review). The quotes of a whole string
+ * are kept. A string, an array or an object that never closes is redacted to the end of the
+ * input: when in doubt, redact more.
  */
 function redactHeaderValues(text: string): string {
   let out = '';
   let last = 0;
+  let scanned = 0;
+  let depth = 0;
   SENSITIVE_HEADER.lastIndex = 0;
   for (let match; (match = SENSITIVE_HEADER.exec(text)) !== null;) {
+    for (; scanned < match.index; scanned++) {
+      const ch = text[scanned];
+      if (ch === '\n' || ch === '\r') depth = 0;
+      else if (ch === '{' || ch === '[') depth++;
+      else if ((ch === '}' || ch === ']') && depth > 0) depth--;
+    }
+    const structured = match[1] !== undefined || depth > 0;
     const start = valueStart(text, match.index + match[0].length);
     const first = text[start] ?? '';
     let end: number;
@@ -142,12 +154,13 @@ function redactHeaderValues(text: string): string {
     } else {
       end = lineEnd(text, start);
     }
-    if (!endsAt(text, end)) {
+    if (!structured || !endsAt(text, end)) {
       end = lineEnd(text, end);
       if (QUOTES.has(first)) replacement = `${first}${REDACTED}`;
     }
     out += text.slice(last, start) + replacement;
     last = end;
+    scanned = Math.max(scanned, end);
     SENSITIVE_HEADER.lastIndex = end;
   }
   return out + text.slice(last);
