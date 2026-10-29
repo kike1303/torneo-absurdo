@@ -66,14 +66,8 @@ export const CLI_CODES = Object.freeze({
 } as const);
 
 export const IO_CODES = Object.freeze({
-  readFailed: 'io.read_failed',
   writeFailed: 'io.write_failed',
   goldenInvalid: 'io.golden_invalid',
 } as const);
 
 export const INTERNAL_CODES = Object.freeze({ unexpected: 'internal.unexpected' } as const);
-
-/** Usage, I/O and internal codes: exit 2. Everything else is content: exit 1. */
-export function isUsageCode(code: string): boolean {
-  return code.startsWith('cli.') || code.startsWith('io.') || code.startsWith('internal.');
-}
