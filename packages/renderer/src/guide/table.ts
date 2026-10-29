@@ -41,6 +41,11 @@ export interface GuideRow {
   readonly impact_frame_min?: number;
   readonly impact_hold_min_ms?: number;
   readonly recovery_min_ms?: number;
+  /**
+   * attacks: `min_v strike_gap_min_ms(v)`. A recommendation (spec, game-designer point 2):
+   * validateGuide never reads it.
+   */
+  readonly recovery_recommended_max_ms?: number;
   /** hit, block, dodge */
   readonly first_frame_max_ms?: number;
 }
@@ -119,6 +124,7 @@ function attackRow(
     impact_frame_min: limits.impactFrameMin,
     impact_hold_min_ms: limits.impactHoldMinMs,
     recovery_min_ms: REACTION_WINDOW_MS,
+    recovery_recommended_max_ms: Math.min(...rulesets.map((r) => r.strike_gap_min_ms)),
   };
 }
 

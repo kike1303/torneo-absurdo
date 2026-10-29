@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { GUIDE_LIMITS, parseRulesetTiming, windupCap } from '../src/guide/index.ts';
+import { REACTION_WINDOW_MS } from '../src/manifest/index.ts';
 import { GOLDEN, goldenJson } from './support/guide-ref.ts';
 
 // 007 RF-A5 (TS side) and plan-a decision 6: the golden parses and the guide can be met with
 // every version it lists.
 const TIMING = {
   ruleset_version: 1,
+  strike_gap_min_ms: 700,
   windup_strike_ms: 400,
   windup_heavy_ms: 700,
   windup_special_ms: 1100,
@@ -37,6 +39,11 @@ describe('parseRulesetTiming', () => {
       'a missing key',
       { versions: [{ ...TIMING, knockdown_ms: undefined }] },
       '/versions/0/knockdown_ms',
+    ],
+    [
+      'a missing strike_gap_min_ms (a golden older than 007 phase B)',
+      { versions: [{ ...TIMING, strike_gap_min_ms: undefined }] },
+      '/versions/0/strike_gap_min_ms',
     ],
     ['a repeated version', { versions: [TIMING, TIMING] }, '/versions/1/ruleset_version'],
     [
@@ -111,5 +118,10 @@ describe('the guide can be met with every version of the golden', () => {
       ...v,
       knockdown: r.knockdown_ms >= A.knockdown.framesMin * GUIDE_LIMITS.frameMsMin,
     }).toEqual({ ...v, knockdown: true });
+    // The recommended recovery (007 plan-b decision 5) never falls below the validated minimum.
+    expect({ ...v, recovery: r.strike_gap_min_ms >= REACTION_WINDOW_MS }).toEqual({
+      ...v,
+      recovery: true,
+    });
   });
 });
