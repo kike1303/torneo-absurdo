@@ -117,9 +117,11 @@ async fn run_canaries(rust_log: &str) {
     ));
     client.close(None).await.unwrap();
     ws::assert_stream_ends(&mut client, Duration::from_secs(2)).await;
-    // 5. An extension method.
+    // 5. An extension method, with a valid Origin (so it reaches the 405).
+    let mut purge = sensitive.clone();
+    purge.push(("origin", ORIGIN));
     assert_eq!(
-        http::send(addr, "PURGE", "/api/health", &sensitive)
+        http::send(addr, "PURGE", "/api/health", &purge)
             .await
             .status,
         405

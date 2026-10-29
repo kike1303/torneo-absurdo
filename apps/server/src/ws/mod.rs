@@ -62,6 +62,11 @@ impl WsState {
         }
     }
 
+    /// The exact `Origin` the handshake accepts (`PUBLIC_ORIGIN`).
+    pub fn public_origin(&self) -> &str {
+        &self.public_origin
+    }
+
     /// Cancelled at shutdown: every socket closes with 1012.
     pub fn shutdown_token(&self) -> CancellationToken {
         self.shutdown.clone()
