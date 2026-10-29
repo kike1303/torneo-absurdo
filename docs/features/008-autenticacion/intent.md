@@ -2,11 +2,15 @@
 id: "008"
 title: Autenticación y sesiones
 type: intent
-status: changes-requested
+status: approved
 risk: high
 author: product-owner
 reviewers: [architect, security-reviewer]
-approvals: []
+approvals:
+  - by: architect
+    date: 2026-10-28
+  - by: security-reviewer
+    date: 2026-10-28
 linear: TA-26
 depends_on: ["001"]
 created: 2026-10-28
@@ -23,12 +27,12 @@ ADR-0008 (aprobado) ya decidió el diseño: D1 a D10. Lo que falta es construirl
 ## Resultado propuesto
 1. **Login con Google o Discord** (D1, D2) desde el celular, en en/es, sin contraseñas ni email. Al primer login se crea el usuario con un alias generado (nunca el nombre del proveedor), y un onboarding invita a cambiarlo con la validación de D1.
 2. **El ledger nace aquí.** Esta feature crea el esquema base del ledger: doble entrada, la cuenta del sistema que emite las monedas, el tipo de asiento `grant` con su `grant_day` calculado en la BD y el índice único parcial por usuario y día de D8. La feature de apuestas lo **extiende** (stakes, pagos, rescate, reembolsos, rake) sin reescribirlo. No hay columna de saldo: el saldo siempre se deriva, y los asientos solo se insertan.
-3. **Monedas iniciales por el ledger.** El primer login crea, en **una sola transacción**, el usuario, su cuenta OAuth, su cuenta en el ledger, el asiento inicial (ADR-0005) y su `auth_events`. Si algo falla, no queda nada. Vincular, desvincular y rotar la sesión nunca crean asientos. Un usuario nuevo nunca queda sin monedas ni con dos asientos iniciales (el tipo del asiento lo decide el owner, ver Preguntas abiertas).
+3. **Monedas iniciales por el ledger.** El primer login crea, en **una sola transacción**, el usuario, su cuenta OAuth, su cuenta en el ledger, el asiento inicial (ADR-0005) y su `auth_events`. Si algo falla, no queda nada. Vincular, desvincular y rotar la sesión nunca crean asientos. El asiento inicial es el **`grant` del día UTC** y reusa su índice único (decisión del owner, ver Decisiones). No hay asiento de bienvenida aparte. Un usuario nuevo nunca queda sin monedas ni con dos `grant` el mismo día. El monto `B` es configuración (p. ej. `DAILY_GRANT`, entero > 0, validado al arrancar; 100 propuesto por game-designer, lo aprueba el owner en la spec), nunca un número escrito en el código, y cada asiento guarda su propio monto. Reclamar el bono los días siguientes es de TA-27.
 4. **Sesión** con cookie, expiración por inactividad y absoluta, rotación en login y vinculación, logout y "cerrar todas" (D3, D10). Borrar una sesión cierra sus sockets en el acto.
 5. **Vincular y desvincular** un segundo proveedor desde una sesión iniciada, sin fusiones automáticas (D1).
 6. **Defensas del API**: el middleware de `Origin` de D4 reemplaza la capa de solo lectura; SSR con secreto interno (D5); IP del cliente con `TRUSTED_PROXIES` y rate limiting por usuario e IP (D7) en las rutas de auth y de perfil.
 7. **`/ws` con sesión y límites por IP** (D6, D7). Entran **ya**, porque protegen el WS que existe hoy: 50 sockets anónimos por `ip_key`, upgrade anónimo a 30/min con ráfaga 10, e IP real detrás de `TRUSTED_PROXIES`. Con sesión: autenticación por cookie en el upgrade, 5 sockets por usuario y 200 por IP, revalidación cada 5 min y canal privado `self` (un socket anónimo no puede suscribirse).
-8. **Rol `admin` y ban**: `server admin grant|revoke` por CLI, sesiones de admin de 12 h y reautenticación a los 60 min (D9). Un usuario baneado no inicia sesión (D10). Cómo se aplica el ban lo decide el owner (ver Preguntas abiertas).
+8. **Rol `admin` y ban**: `server admin grant|revoke` por CLI, sesiones de admin de 12 h y reautenticación a los 60 min (D9). Ban y desban con `server admin ban|unban` por CLI (decisión del owner): cada uno escribe su fila en `admin_audit` (solo de inserción, nace aquí), y el ban revoca todas las sesiones del usuario y cierra sus sockets. Un usuario baneado no inicia sesión (`auth.banned`, D10).
 9. **Señales**: `auth_events` de login y vinculación con `ip_hash` (nunca la IP en claro) y su retención con el piso de 30 días de D8. El término `temporada + 7 días` llega con la feature de temporadas.
 10. **Login en local y en el e2e sin red** con un proveedor de desarrollo (`dev`) que nunca existe en producción (ver Restricciones).
 
@@ -40,7 +44,13 @@ ADR-0008 (aprobado) ya decidió el diseño: D1 a D10. Lo que falta es construirl
 
 ## Restricciones
 - **ADR-0008 manda.** El intent no redecide D1 a D10, y la spec los implementa con sus números fijados. Los tests mínimos del ADR que caen en este alcance bloquean el merge (ver Criterios).
-- **Desviación de ADR-0008, pendiente del OK del owner.** El ADR dice que sus 28 tests mínimos bloquean el merge de la feature de auth. Este intent propone mover 7, 8, 12, 23–27, lo demás de 28 y la reserva de capacidad de D6 (parte de 18) a las features que tienen el código que prueban: apuestas, peleas (TA-13) y temporadas. Cada test movido entra como **criterio bloqueante en el issue de Linear de su feature dueña**, con su ID escrito aquí: apuestas `TA-<pendiente>`, peleas TA-13 (test 12), temporadas `TA-<pendiente>`. Requiere una nota en ADR-0008 sobre la feature dueña de cada test; la escribe el architect y la aprueba el owner.
+- **Desviación de ADR-0008, aceptada por el owner (2026-10-28).** El ADR dice que sus 28 tests mínimos bloquean el merge de la feature de auth. Los que prueban código de otras features pasan a ellas, y cada uno entra como **criterio bloqueante en el issue de Linear de su feature dueña**:
+  - Apuestas, **TA-27**: tests 7, 8, 23, 24 y 26, la reserva de capacidad de D6 (parte de 18) y guardar `bets.ranked_stake` al crear cada apuesta.
+  - El test 25 y la parte de carencia de 27 bloquean a la feature que escriba `season_stats` primero (TA-27 o TA-28).
+  - Peleas en vivo, **TA-13**: test 12.
+  - Temporadas, **TA-28**: la parte de temporada de 27, el test 28 salvo el caso del `/64` y el término `temporada + 7 días` de la retención de `ip_hash`.
+  - La nota de ADR-0008 sobre la feature dueña de cada test la escribe el architect.
+- **Economía:** `B` se lee de configuración al arrancar (entero > 0; si falta o no es válido, el server no arranca), con valor 100 **propuesto por game-designer; lo aprueba el owner en la spec**. Con 100, `R = 50` es entero y `R ≤ B`, coincide con los ejemplos de D8 y da topes de 500 (`5 B`) y 100 en carencia (`1 B`). Como cada asiento guarda su monto, cuando TA-27 cambie `B` solo cambian los asientos nuevos.
 - **ADR-0005:** nada de dinero real. Las monedas iniciales entran **solo** como asiento del ledger. No hay columna de saldo, y en el código no hay `UPDATE` ni `DELETE` sobre los asientos (lo hace cumplir un chequeo en CI o un trigger).
 - **Proveedor `dev` (para local y e2e), imposible en producción:**
   - Se compila solo con una feature de cargo que el `Dockerfile` de release no activa, y un chequeo de CI lo comprueba sobre la imagen o el compose.
@@ -62,9 +72,10 @@ ADR-0008 (aprobado) ya decidió el diseño: D1 a D10. Lo que falta es construirl
 ## Criterios de éxito
 - [ ] En `just dev`, un desarrollador inicia sesión con el proveedor `dev`, ve su alias generado, lo cambia, cierra sesión y vuelve a entrar con la misma cuenta, en los dos idiomas.
 - [ ] **Móvil, en CI:** el e2e corre el flujo completo de login, onboarding y logout con el proveedor `dev` en Chromium y WebKit con emulación móvil (viewport de 375 px, táctil). **Móvil, manual:** antes de abrir al público (fuera de esta feature, con el deploy), el owner prueba el ida y vuelta con Google y Discord reales en Safari de iOS y Chrome de Android, y deja constancia en el issue de deploy.
-- [ ] Un usuario nuevo tiene saldo inicial > 0 justo después del primer login, y ese saldo es la suma de sus asientos. 20 primeros logins concurrentes con la misma identidad crean un solo usuario y un solo asiento inicial. Un fallo a mitad del primer login (p. ej. al insertar la cuenta OAuth) no deja ni usuario ni asiento.
+- [ ] Un usuario nuevo tiene, justo después del primer login, un solo asiento `grant` del día UTC por el `B` configurado, y su saldo es la suma de sus asientos. Con `DAILY_GRANT` ausente, 0 o no entero, el server no arranca. 20 primeros logins concurrentes con la misma identidad crean un solo usuario y un solo asiento inicial. Un fallo a mitad del primer login (p. ej. al insertar la cuenta OAuth) no deja ni usuario ni asiento.
 - [ ] No hay columna de saldo, y un chequeo en CI (o un trigger probado) impide `UPDATE` y `DELETE` sobre los asientos. Vincular, desvincular y rotar la sesión no crean asientos.
-- [ ] Pasan los tests mínimos de ADR-0008 que caen en este alcance: 1–6, 9–11, 13–17, 19–22, de 18 los casos de mensaje, suscripción y sockets por IP, y de 28 "dos IPv6 del mismo `/64` producen el mismo `ip_hash`". Los movidos (ver Restricciones) figuran como criterio bloqueante en el issue de su feature dueña, con el ID escrito en este intent antes de aprobar la spec.
+- [ ] Pasan los tests mínimos de ADR-0008 que caen en este alcance: 1–6, 9–11, 13–17, 19–22, de 18 los casos de mensaje, suscripción y sockets por IP, y de 28 "dos IPv6 del mismo `/64` producen el mismo `ip_hash`". Los movidos figuran como criterio bloqueante en TA-27, TA-13 y TA-28 según el reparto de Restricciones.
+- [ ] **Ban:** tras `server admin ban <user_id>`, las sesiones del usuario dan 401, sus sockets se cierran y un login nuevo responde `auth.banned`. Tras `unban` puede volver a entrar. Cada comando escribe exactamente una fila en `admin_audit`, y ningún endpoint HTTP escribe `banned_at`.
 - [ ] El socket anónimo número 51 desde la misma `ip_key` y el upgrade anónimo que pasa de 30/min (ráfaga 10) se rechazan; un `X-Forwarded-For` falsificado desde un peer fuera de `TRUSTED_PROXIES` no cambia la llave.
 - [ ] La capa de solo lectura desaparece y ninguna mutación pasa sin el middleware de `Origin`.
 - [ ] **Canarios (ADR-0012 A4, A4.13 y A8):** en una corrida de login completa, ningún log contiene la cookie de sesión, `__Host-oauth`, `code`, `state`, `code_verifier`, el access token del proveedor (el proveedor `dev` devuelve un canario), `token_hash`, `X-Internal-Secret`, `X-Client-Origin`, `X-Client-Fetch-Site`, la IP, `ip_key`, `ip_hash`, `user_id`, `provider_user_id` ni `display_name`.
@@ -75,19 +86,21 @@ ADR-0008 (aprobado) ya decidió el diseño: D1 a D10. Lo que falta es construirl
 - [ ] `just check` y `just e2e` (Chromium y WebKit) pasan con el login incluido, sin red. En CI, un cambio en `apps/server` dispara el job `e2e`.
 
 ## Fuera de alcance
-- **Apuestas y economía de juego** (feature de apuestas, que extiende el ledger de aquí): `POST /api/bets`, reclamar el bono de los días siguientes (`POST /api/bonus/claim`), rescate, valores definitivos de `B`, `R`, `m` y `r`, tope por pelea, carencia y sus efectos, y la reserva de capacidad de D6 (sin apuestas, toda cuenta sigue en carencia y la reserva solo bajaría el tope útil al 80 %). Sus tests van como criterio bloqueante en su issue.
-- **Temporadas** (feature propia): `RankedProfit`, `season_stats`, leaderboard, `farm-report` y cierre de temporada. Criterio bloqueante en su issue: agregar a la retención de `ip_hash` el término `temporada + 7 días` **antes** de abrir la primera temporada.
+- **Apuestas y economía de juego** (TA-27, que extiende el ledger de aquí): `POST /api/bets`, reclamar el bono de los días siguientes (`POST /api/bonus/claim`), rescate, valores definitivos de `B`, `R`, `m` y `r`, tope por pelea, carencia y sus efectos, y la reserva de capacidad de D6 (sin apuestas, toda cuenta sigue en carencia y la reserva solo bajaría el tope útil al 80 %). Sus tests van como criterio bloqueante en su issue.
+- **Temporadas** (TA-28): `RankedProfit`, `season_stats`, leaderboard, `farm-report` y cierre de temporada. Criterio bloqueante en su issue: agregar a la retención de `ip_hash` el término `temporada + 7 días` **antes** de abrir la primera temporada.
 - **Peleas en vivo y commit-reveal** (TA-13): scheduler, canales de pelea y el test de la semilla con sesión de admin (test 12).
 - **Despliegue**: VPS, Coolify, dominio, `redirect_uri` de producción y logs de Traefik (TA-6, TA-8). Publicar el aviso de privacidad es requisito para abrir al público, no para mergear esta feature.
 - Magic link, email, recuperación de cuenta, perfil público, avatar y personalización (Fase 3).
 - Endpoints HTTP de admin y panel de moderación.
 
+## Decisiones
+- **Monedas iniciales (owner, 2026-10-28).** El asiento inicial es el `grant` del día UTC y reusa su índice único. No hay asiento de bienvenida, y ADR-0005 no cambia. `B` va por configuración validada al arrancar. Su valor (100, propuesto por game-designer) no está decidido: lo aprueba el owner en la spec. Cada asiento guarda su monto. El bono de los días siguientes es de TA-27.
+- **Reparto de tests y reserva de D6 (owner, 2026-10-28).** Se acepta la desviación de ADR-0008 con el reparto de Restricciones (TA-27, TA-13, TA-28). La reserva de D6 se aplaza a TA-27. El architect escribe la nota en ADR-0008.
+- **Ban (owner, 2026-10-28).** Entra en esta feature: `server admin ban|unban` por CLI, con su fila en `admin_audit` y la revocación de sesiones de D10.
+
 ## Preguntas abiertas
 Todas se resuelven **antes de aprobar la spec**.
 
-- **Monedas iniciales. Decide: owner (el valor de `B`, con game-designer).** (a) El asiento inicial es el `grant` del día UTC: consume el bono de ese día y reusa su índice único. Lo recomiendan architect y security-reviewer: no agrega una fuente de monedas ni le da más saldo a cada alt. (b) Un asiento de bienvenida aparte, con su propio índice único por usuario: es una fuente que ADR-0005 no lista y obliga a enmendarlo. Falta también el valor provisional de `B` hasta que la spec de apuestas lo fije.
-- **Reparto de tests y reserva de D6. Decide: owner.** Aceptar la desviación de Restricciones (los tests 7, 8, 12, 23–27 y el resto de 28 pasan a sus features dueñas, con una nota en ADR-0008 que escribe el architect) y aplazar la reserva de D6 a la feature de apuestas. Lo recomiendan los dos revisores. La alternativa es implementar la reserva ya, con todas las cuentas en carencia.
-- **Ban. Decide: owner.** Recomendado por los dos revisores: `server admin ban|unban` por CLI en esta feature, con su fila en `admin_audit` y la revocación de sesiones de D10. Sin eso, "un usuario baneado no inicia sesión" solo se prueba con SQL, y no hay respuesta ante un abuso en cuanto el login sea público.
 - **Login en local. Decide: architect y security-reviewer, en la spec.** El proveedor `dev` es obligatorio (lo exige el e2e sin red y queda acotado en Restricciones). Falta decidir si además se documentan apps OAuth de desarrollo con `redirect_uri` a `localhost` para probar Google y Discord reales en local. El architect recomienda las dos.
 - **Cookies `__Host-` en `http://localhost`. Decide: architect y security-reviewer, en la spec.** Exigen `Secure`, y WebKit, que corre en el e2e, puede no aceptarlas en `http://localhost`. Salidas: https local, o un nombre alternativo solo detrás del gate de Restricciones. El architect recomienda un solo punto de config que derive los nombres, con `__Host-` fijo fuera de loopback y un test que lo afirme.
 - **`locale` y `theme` en `users`. Decide: architect, en la spec.** ¿Esta feature sincroniza las preferencias de la UI con la cuenta, o solo crea las columnas? El architect recomienda solo las columnas.
@@ -142,3 +155,17 @@ Todas se resuelven **antes de aprobar la spec**.
   7. La retención con el término de temporadas antes de la primera temporada va como criterio bloqueante.
 - No queda ningún hallazgo de seguridad abierto fuera de las tres preguntas del owner: (a) el asiento inicial y el `B` provisional; (b) el reparto de tests, con la reserva de D6, como desviación de ADR-0008; (c) el ban por CLI. Mi aprobación queda en suspenso hasta que el owner las responda. Si en (a) elige un asiento de bienvenida, o en (c) pospone el ban, vuelvo a revisar el intent.
 - `approvals` y `status` no cambian hasta entonces.
+
+### architect — 2026-10-28 — APPROVE (ronda 3)
+- Verifiqué que la sección "Decisiones" recoge las tres respuestas del owner. (a) El asiento inicial es el `grant` del día, sin asiento de bienvenida, así que ADR-0005 no cambia, y `B` va por configuración validada, con 100 propuesto y la aprobación del owner pendiente en la spec. (b) Están el reparto de tests y la reserva de D6 aplazada a TA-27. (c) Está el ban por CLI, con su criterio verificable. Las preguntas que quedan son técnicas y las decide la spec.
+- Coherencia con la "Nota (2026-10-28): reparto de tests por feature" de ADR-0008: Restricciones y Criterios asignan los mismos tests a TA-26, TA-27, TA-13 y TA-28, incluidos los casos parciales de 18, 27 y 28 y el término de retención `temporada + 7 días`.
+
+### security-reviewer — 2026-10-28 (tercera pasada) — APPROVE
+**🤖 security-reviewer**
+
+- Verifiqué la sección Decisiones y su reflejo en el cuerpo:
+  - (a) El asiento inicial es el `grant` del día y reusa su índice único. No hay fuente nueva de monedas, ADR-0005 no cambia, `B` va por configuración validada al arrancar y cada asiento guarda su monto.
+  - (b) El reparto de tests a TA-27, TA-13 y TA-28 coincide con la nota de ADR-0008, y el caso `/64` → `ip_hash` se queda en 008.
+  - (c) `server admin ban|unban` tiene criterio verificable: 401, cierre de sockets, `auth.banned`, una fila en `admin_audit` y ningún endpoint escribe `banned_at`.
+- Lo que la feature 008 necesita en materia de seguridad se queda en 008. Las preguntas abiertas que siguen (apps OAuth de desarrollo, nombre de la cookie en loopback, `locale`/`theme`) se deciden en la spec, dentro de las Restricciones ya fijadas.
+- Nota: la aceptación del owner llegó transmitida por el coordinador. Igual que en la nota de ADR-0008, conviene que el owner la confirme en este documento.
