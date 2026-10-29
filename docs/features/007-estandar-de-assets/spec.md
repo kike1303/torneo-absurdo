@@ -2,7 +2,7 @@
 id: "007"
 title: Estándar de assets para personajes propios
 type: spec
-status: approved
+status: done
 risk: medium
 author: architect
 reviewers: [product-owner, game-designer]

@@ -2,7 +2,7 @@
 id: "007"
 title: "Estándar de assets, fase B: export, importador, procedencia, vínculo y just check"
 type: plan
-status: approved
+status: done
 risk: medium
 author: frontend-engineer
 reviewers: [architect]

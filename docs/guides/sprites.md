@@ -2,11 +2,11 @@
 id: "sprites"
 title: Guía de arte para sets de sprites
 type: guide
-status: in-review
+status: approved
 risk: medium
 author: frontend-engineer
 reviewers: [game-designer, architect]
-approvals: []
+approvals: [{by: game-designer, date: 2026-10-28}, {by: architect, date: 2026-10-28}]
 linear: TA-25
 depends_on: ["002", "003", "006", "007"]
 created: 2026-10-28
@@ -259,3 +259,12 @@ En `import`, un error de píxeles sobre un frame del manifest (`/frames/<i>`) sa
 | `link.unknown_set` | `sprites` apunta a un set que no existe en `content/sprites/` (`data`: `set`). |
 | `link.misplaced_sprites` | Hay una carpeta `sprites/` dentro del personaje; los sets van en `content/sprites/`. |
 | `link.character_unreadable` | `character.json` no se puede leer (falta, es un enlace, es muy grande o no es un objeto JSON). |
+
+## Revisión
+### game-designer — 2026-10-28 — APPROVE
+- Verifiqué: las tablas generadas contra "Guía: números" de la spec 007 que aprobé: celda 192, pivote (96, 184), margen 8, alto 64–176, pies 181–183, alcance ≥ 32 px (columna 128), frames 33–1000 ms, `windupStepMs` 100, pesos 4 MiB / 1 MiB; y por acción, `idle` 4–12 (≥ 3 distintos, ciclo 600–2400, ≤ 250 por frame), windups 100–250 / 250–400 / 300–400, `impact_frame` ≥ 1/2/3 con 50/66/66 ms, R ≥ 200, reacciones 200–1000 con primer frame ≤ 134, `ko` y `knockdown` ≤ 1500, `intro` ≤ 1600, `walk` 300–1200. La recuperación recomendada sale de `min_v strike_gap_min_ms` (`guideTable` en `packages/renderer/src/guide/table.ts`, dorado con 700 ms en v1) y la prosa la atribuye a `strike_gap_min()` de 006 como no validada. C1/C2, `guide.windup_order` y la aclaración del `idle` irregular topado en 250 ms dicen lo mismo que los puntos 1 a 3 de game-designer en la spec. Recomendaciones (≤ 32 colores, alfa binaria, contorno de 1 px, ciclo de `idle` 800–1600) coinciden con la spec y quedan como no validadas. No elige ni recomienda herramientas de arte (sección 1 y flujo neutros), y el ejemplo de referencia es `ref_a`, no los placeholders. Para quien dibuja se entiende: cada regla trae su porqué y la sección 6 da el export mínimo y el flujo de prueba en la arena.
+- No bloquean: (a) en la sección 4, "`idle` en los respiros" nombra el tope por frame como `frame_max_ms` (campo de `guideTable`), que se confunde con `GUIDE_LIMITS.frameMsMax` (1000); mejor "el tope por frame de `idle` de la tabla" o la ruta en `GUIDE_LIMITS`. (b) Un ejemplo de tiempos de un ataque completo (por ejemplo 120/300/320 de windup, como en la spec) ayudaría a quien dibuja a ver `windup_order` en números concretos sin salir de la guía.
+
+### architect — 2026-10-28 — APPROVE
+- Verifiqué: frontmatter válido según el esquema de `docs/process.md` tras 80badc3 (`type: guide`, `id: "sprites"` igual al slug del archivo, `author` frontend-engineer distinto de los dos revisores, `depends_on` con 002, 003, 006 y 007). Cobertura de RF-B7 punto por punto: celda, pivote, facing, alturas y lectura a 375 px (sección 2); obligatorias y opcionales con `ANIMATION_FALLBACK` (3); porqué de cada regla nombrando su fuente, con C1/C2 igual que `windupCap = min(C1, C2)` de la spec (4); export (RF-B1), importador con la forma `run import` de la enmienda (RF-B2), set (RF-B3), procedencia sin texto libre y cesión en `private/` (RF-B4) y el flujo export → `_local` → arena → `content/sprites` → `provenance.json` → PR (6); paleta y contorno como recomendaciones no validadas (7). Las tablas van entre los marcadores, salen de `GUIDE_LIMITS`, `guideTable` y el dorado (con `strike_gap_min_ms` 700 de 006, así que no aplica el fallback) y `guide-doc.test.ts` pasa (9 tests: frescura, marcadores únicos, sin cifras de tiempo fuera del bloque, frontmatter, cada código explicado). Los códigos de la sección 8 coinciden con los que emiten `tools/sprite-importer/src` y `packages/renderer/src/guide`; el único que falta, `guide.sheets_mismatch`, es un `RangeError` de programación y no un código de contenido, así que está bien fuera. ADR-0007: la guía es el diccionario de los códigos y la herramienta no emite texto. Ningún ADR `approved` contradicho; no elige herramienta de arte (frontera con 004); `dummy_a`/`dummy_b` declarados como no modelo (Área 5 de la spec).
+- No bloquean: (a) la sección 1 dice que "las cifras aparecen solo en las tablas generadas", pero el JSON de ejemplo de la sección 6 trae `frame_ms` concretos; hoy cumplen la guía (idle 900 ms de ciclo; ligero con W 120, impacto 90, R 210), pero ningún test los valida, así que si cambia `GUIDE_LIMITS` pueden quedar inválidos sin aviso. Basta acotar la frase a "la prosa" o validar el ejemplo en `guide-doc.test.ts`. (b) Sobre la nota (b) de game-designer: un ejemplo 120/300/320 en prosa chocaría con la regla de RF-B7 (y con su test); si se agrega, que vaya en el JSON de ejemplo y con la validación de (a).
