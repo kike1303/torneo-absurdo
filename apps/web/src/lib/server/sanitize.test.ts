@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sanitize } from './sanitize.js';
+import { REDACTED_IP, sanitize } from './sanitize.js';
 
 // Every fragment of an address that must not survive sanitizing.
 function expectNoFragments(out: string, address: string): void {
@@ -284,6 +284,18 @@ describe('sanitize: every pattern is linear on 8 KB, the worst real case (PR #2 
       "cookie: ['",
       'cookie:"\\',
       '\\"cookie\\":',
+      // TA-11: the IPv6 scanner and header values in objects or on the next line.
+      'a::',
+      '::',
+      'xd:',
+      'deadbeef:',
+      '1:1:1:1:1:1:1:1.1.1.1.',
+      '::1.1.1.1.',
+      'cookie:\n',
+      'cookie: {',
+      "cookie: {'",
+      "name: 'cookie', ",
+      'cookie,',
     ].map((s) => [s]),
   )('%j', (s) => {
     const input = unit(s);
@@ -291,5 +303,88 @@ describe('sanitize: every pattern is linear on 8 KB, the worst real case (PR #2 
     const start = performance.now();
     sanitize(input);
     expect(performance.now() - start).toBeLessThan(50);
+  });
+});
+
+describe('sanitize: IPv6 after a key that looks like hex (TA-11)', () => {
+  it.each([
+    ['face:::2001:db8:1', '2001'],
+    ['deadbeef:2001:db8::1', '2001'],
+    ['12345:2001:db8::1', '2001'],
+    ['cafe:::ffff:abcd:1 x', 'abcd'],
+    ['deadbeef:2001:db8:85a3:0:0:8a2e:370:7334', '7334'],
+  ])('%s', (input, leak) => {
+    const out = sanitize(input);
+    expect(out).toContain(REDACTED_IP);
+    expect(out).not.toMatch(/db8|85a3|8a2e/);
+    expect(out).not.toContain(leak);
+  });
+
+  it.each([
+    ['deadbeef:2001:db8::1', 'deadbeef:[ip]'],
+    ['12345:2001:db8::1 x', '12345:[ip] x'],
+  ])('keeps a key that cannot be an IPv6 group: %s', (input, expected) => {
+    expect(sanitize(input)).toBe(expected);
+  });
+
+  it.each([
+    ['id:2001:db8::1', 'id:[ip]'],
+    ['from id:fe80::1%eth0 x', 'from id:[ip] x'],
+  ])('keeps the whole label when it ends in a hex digit: %s', (input, expected) => {
+    expect(sanitize(input)).toBe(expected);
+  });
+
+  it.each([
+    ['x2001:db8::1', 'x[ip]'],
+    // A key made only of hex letters may be the first group: when in doubt, redact more.
+    ['bad:2001:db8::1 refused', '[ip] refused'],
+    ['at x (src/a.ts:12:34) 10:20:30', 'at x (src/a.ts:12:34) 10:20:30'],
+    ['mac aa:bb:cc:dd:ee:ff', 'mac aa:bb:cc:dd:ee:ff'],
+  ])('neither leaks a glued group nor touches what is not an address: %s', (input, expected) => {
+    expect(sanitize(input)).toBe(expected);
+  });
+
+  it('removes an embedded IPv4 that ends a sentence', () => {
+    const out = sanitize('from ::ffff:203.0.113.77. Then');
+    expect(out).toBe('from [ip]. Then');
+  });
+});
+
+describe('sanitize: header values on the next line or in an object (TA-11)', () => {
+  it.each([
+    ["{\n  'cookie' =>\n    'sid=SECRET'\n}", "{\n  'cookie' =>\n    '[redacted]'\n}"],
+    ['cookie:\n  sid=SECRET\nnext', 'cookie:\n  [redacted]\nnext'],
+    [
+      "{ cookie: {\n    name: 'sid',\n    value: 'SECRET'\n  }, x: 1 }",
+      '{ cookie: [redacted], x: 1 }',
+    ],
+    [
+      "{ authorization: { scheme: 'Bearer', token: 'a}b', rest: \"SECRET\" } }",
+      '{ authorization: [redacted] }',
+    ],
+  ])('%j', (input, expected) => {
+    const out = sanitize(input);
+    expect(out).toBe(expected);
+    expect(out).not.toContain('SECRET');
+  });
+
+  it.each([
+    ["[{ name: 'cookie', value: 'sid=SECRET' }]", "[{ name: 'cookie', value: '[redacted]' }]"],
+    [
+      "[\n  {\n    name: 'Set-Cookie',\n    value: 'sid=SECRET'\n  }\n]",
+      "[\n  {\n    name: 'Set-Cookie',\n    value: '[redacted]'\n  }\n]",
+    ],
+    [
+      '{"name":"authorization","value":"Bearer SECRET"}',
+      '{"name":"authorization","value":"[redacted]"}',
+    ],
+  ])('redacts the value of a { name, value } pair: %j', (input, expected) => {
+    const out = sanitize(input);
+    expect(out).toBe(expected);
+    expect(out).not.toContain('SECRET');
+  });
+
+  it('redacts to the end when an object never closes', () => {
+    expect(sanitize("cookie: { name: 'sid',\n value: 'SECRET'")).not.toContain('SECRET');
   });
 });
