@@ -12,4 +12,5 @@ export type WsErrorCode =
   | 'ws.echo_disabled'
   | 'ws.rate_limited'
   | 'ws.pong_timeout'
-  | 'ws.idle_timeout';
+  | 'ws.idle_timeout'
+  | 'ws.ip_capacity';

@@ -190,3 +190,50 @@ async fn an_unknown_subcommand_exits_with_two() {
     assert_eq!(line["event"], "cli.invalid");
     assert!(finished.stderr.is_empty());
 }
+
+/// 008 RF-A3: an invalid `TRUSTED_PROXIES`, or a loopback proxy with a public origin, stops
+/// the start with only the variable name in the log.
+#[tokio::test]
+async fn an_invalid_trusted_proxies_is_config_invalid_without_the_value() {
+    for (proxies, origin) in [
+        ("10.250.0.0/28", "https://torneo.example"),
+        ("198.51.100.77,,198.51.100.78", "https://torneo.example"),
+        ("127.0.0.1/32", "https://torneo.example"),
+        ("127.0.0.1", "http://torneo.example"),
+    ] {
+        let finished = run_to_exit(&[
+            ("DATABASE_URL", "postgres://u:p@127.0.0.1:1/x"),
+            ("PUBLIC_ORIGIN", origin),
+            ("TRUSTED_PROXIES", proxies),
+        ])
+        .await;
+        assert_eq!(finished.status.code(), Some(1), "{proxies}");
+        let line = single_json_line(&finished.stdout);
+        assert_eq!(line["event"], "config.invalid");
+        assert_eq!(line["var"], "TRUSTED_PROXIES");
+        for text in finished.stdout.iter().chain(&finished.stderr) {
+            assert!(
+                !text.contains("10.250") && !text.contains("198.51") && !text.contains("127.0"),
+                "{text}"
+            );
+        }
+        assert!(finished.stderr.is_empty());
+    }
+}
+
+/// 008 RF-A6: an `INTERNAL_API_SECRET` shorter than 32 bytes stops the start.
+#[tokio::test]
+async fn a_short_internal_api_secret_is_config_invalid_without_the_value() {
+    let finished = run_to_exit(&[
+        ("DATABASE_URL", "postgres://u:p@127.0.0.1:1/x"),
+        ("PUBLIC_ORIGIN", "http://localhost:5173"),
+        ("INTERNAL_API_SECRET", "c2hvcnQtY2FuYXJ5"),
+    ])
+    .await;
+    assert_eq!(finished.status.code(), Some(1));
+    let line = single_json_line(&finished.stdout);
+    assert_eq!(line["var"], "INTERNAL_API_SECRET");
+    for text in finished.stdout.iter().chain(&finished.stderr) {
+        assert!(!text.contains("c2hvcnQtY2FuYXJ5"), "{text}");
+    }
+}

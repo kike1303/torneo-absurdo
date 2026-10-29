@@ -7,7 +7,7 @@ use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::FromRef;
+use axum::extract::{ConnectInfo, FromRef};
 use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::service::TowerToHyperService;
 use tokio::net::TcpListener;
@@ -16,7 +16,10 @@ use tokio_util::task::TaskTracker;
 
 use crate::config::Config;
 use crate::db::{self, DbProbe, PgProbe, RetryConfig};
+use crate::http::origin::OriginPolicy;
 use crate::http::{self, health::HealthConfig, health::HealthState};
+use crate::net::NetState;
+use crate::rate::{self, RateLimits, RateSettings};
 use crate::ws::{WsConfig, WsState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -48,26 +51,49 @@ impl Default for HttpConfig {
 }
 
 /// Settings that are not environment variables (the tests shorten them).
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Settings {
     pub health: HealthConfig,
     pub db_retry: RetryConfig,
     pub http: HttpConfig,
     pub ws: WsConfig,
+    pub rate: RateSettings,
 }
 
 #[derive(Clone)]
 pub struct AppState {
     pub health: Arc<HealthState>,
     pub ws: Arc<WsState>,
+    pub net: Arc<NetState>,
+    pub origin: Arc<OriginPolicy>,
+    pub rate: Arc<RateLimits>,
 }
 
 impl AppState {
+    /// The state with no trusted proxy and no internal secret (see [`AppState::with_net`]).
+    /// The `Origin` policy uses the WebSocket's `PUBLIC_ORIGIN`.
     pub fn new(probe: Arc<dyn DbProbe>, settings: &Settings, ws: WsState) -> Self {
         Self {
             health: Arc::new(HealthState::new(probe, settings.health)),
+            origin: Arc::new(OriginPolicy::new(ws.public_origin().to_owned())),
             ws: Arc::new(ws),
+            net: Arc::new(NetState::default()),
+            rate: Arc::new(RateLimits::new(&settings.rate)),
         }
+    }
+
+    /// Replaces the trusted proxies and the internal secret.
+    pub fn with_net(mut self, net: NetState) -> Self {
+        self.net = Arc::new(net);
+        self
+    }
+
+    /// The client context settings from the configuration.
+    pub fn net_from_config(config: &Config) -> NetState {
+        NetState::new(
+            config.trusted_proxies.clone(),
+            config.internal_secret.clone(),
+        )
     }
 
     /// The WebSocket state from the configuration.
@@ -90,6 +116,12 @@ impl FromRef<AppState> for Arc<HealthState> {
 impl FromRef<AppState> for Arc<WsState> {
     fn from_ref(state: &AppState) -> Self {
         state.ws.clone()
+    }
+}
+
+impl FromRef<AppState> for Arc<RateLimits> {
+    fn from_ref(state: &AppState) -> Self {
+        state.rate.clone()
     }
 }
 
@@ -126,12 +158,14 @@ pub async fn serve(
         .port();
     tracing::info!(event = "server.listening", port);
     let ws = AppState::ws_from_config(config, &settings);
-    let state = AppState::new(Arc::new(PgProbe::new(pool)), &settings, ws);
+    let state = AppState::new(Arc::new(PgProbe::new(pool)), &settings, ws)
+        .with_net(AppState::net_from_config(config));
     run_until_shutdown(listener, state, settings.http, shutdown).await
 }
 
 /// Serves until `shutdown` resolves, then stops accepting, closes every WebSocket with 1012
-/// and waits for the HTTP connections and the sockets, bounded by [`SHUTDOWN_DEADLINE`].
+/// and waits for the HTTP connections and the sockets, bounded by [`SHUTDOWN_DEADLINE`]. The
+/// rate limiter sweeper runs until the signal.
 pub async fn run_until_shutdown(
     listener: TcpListener,
     state: AppState,
@@ -143,6 +177,7 @@ pub async fn run_until_shutdown(
 
     // On the signal: stop accepting and close every WebSocket with 1012 at the same time.
     let stop = CancellationToken::new();
+    tokio::spawn(rate::sweeper(state.rate.clone(), stop.clone()));
     let on_signal = stop.clone();
     tokio::spawn(async move {
         shutdown.await;
@@ -201,11 +236,11 @@ pub async fn serve_listener(
     let closing = CancellationToken::new();
     let mut shutdown = pin!(shutdown);
     loop {
-        let stream = tokio::select! {
+        let (stream, peer) = tokio::select! {
             biased;
             () = &mut shutdown => break,
             accepted = listener.accept() => match accepted {
-                Ok((stream, _)) => stream,
+                Ok(accepted) => accepted,
                 // Usually out of file descriptors: back off instead of spinning.
                 Err(_) => {
                     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -213,7 +248,17 @@ pub async fn serve_listener(
                 }
             },
         };
-        let service = TowerToHyperService::new(router.clone());
+        // The peer of the connection, for `net::layer` (008 plan-a decision 3).
+        let with_peer = tower::util::MapRequest::new(
+            router.clone(),
+            move |mut request: axum::http::Request<hyper::body::Incoming>| {
+                request
+                    .extensions_mut()
+                    .insert(ConnectInfo::<SocketAddr>(peer));
+                request
+            },
+        );
+        let service = TowerToHyperService::new(with_peer);
         let closing = closing.clone();
         connections.spawn(async move {
             let mut builder = hyper::server::conn::http1::Builder::new();

@@ -14,6 +14,7 @@ export type CloseReasonKey =
   | 'ws_close_reason_rate_limited'
   | 'ws_close_reason_pong_timeout'
   | 'ws_close_reason_idle_timeout'
+  | 'ws_close_reason_ip_capacity'
   | 'ws_close_reason_unknown';
 
 /** Maps a close reason to its key. Fails to compile if a `WsErrorCode` has no case. */
@@ -34,6 +35,8 @@ export function closeReasonKey(reason: string): CloseReasonKey {
       return 'ws_close_reason_pong_timeout';
     case 'ws.idle_timeout':
       return 'ws_close_reason_idle_timeout';
+    case 'ws.ip_capacity':
+      return 'ws_close_reason_ip_capacity';
     default: {
       // `code` is `never` here only while every WsErrorCode has a case above. At runtime an
       // empty or unknown reason (1003, 1009, 1012 have none) lands here.

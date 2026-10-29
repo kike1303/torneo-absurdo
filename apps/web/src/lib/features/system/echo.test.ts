@@ -98,6 +98,7 @@ describe('closeReasonKey', () => {
     ['ws.rate_limited', 'ws_close_reason_rate_limited'],
     ['ws.pong_timeout', 'ws_close_reason_pong_timeout'],
     ['ws.idle_timeout', 'ws_close_reason_idle_timeout'],
+    ['ws.ip_capacity', 'ws_close_reason_ip_capacity'],
   ];
   it.each(cases)('%s → %s', (code, key) => {
     expect(closeReasonKey(code)).toBe(key);

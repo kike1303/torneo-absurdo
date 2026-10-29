@@ -50,6 +50,7 @@
   "ws_close_reason_rate_limited": "Se enviaron demasiados mensajes. Espera un momento.",
   "ws_close_reason_pong_timeout": "La conexión dejó de responder.",
   "ws_close_reason_idle_timeout": "La conexión se cerró por inactividad.",
+  "ws_close_reason_ip_capacity": "Hay demasiadas conexiones desde tu red. Vuelve a intentarlo más tarde.",
   "ws_close_reason_unknown": "La conexión se cerró.",
   "arena_title": "Arena de prueba",
   "arena_canvas_label": "Pelea animada entre {a} y {b}",

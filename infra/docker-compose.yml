@@ -19,6 +19,9 @@ services:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       PUBLIC_ORIGIN: https://${PUBLIC_HOST:?PUBLIC_HOST is required}
       RUST_LOG: info
+      # The fixed IP of coolify-proxy in torneo-edge (ADR-0006 D2): only its X-Forwarded-For
+      # is read (ADR-0008 D7). Not the subnet: web is in it too and is not a proxy.
+      TRUSTED_PROXIES: 10.250.0.2/32
     healthcheck:
       test: ['CMD', '/server', 'healthcheck']
       interval: 15s

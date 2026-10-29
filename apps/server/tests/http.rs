@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use server::app::{AppState, HttpConfig, Settings};
 use server::db::{DbProbe, PingFuture};
+use support::app::{ORIGIN, SECRET};
 use support::http::{self, Response};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -66,22 +67,179 @@ async fn unknown_route_is_404_with_a_code() {
     }
 }
 
-#[tokio::test]
-async fn write_methods_are_405_everywhere() {
-    let app = app().await;
-    for (method, path) in [
-        ("POST", "/api/health"),
-        ("DELETE", "/cualquier"),
-        ("PUT", "/api/health"),
-        ("PATCH", "/nada"),
-        ("PURGE", "/api/health"),
-    ] {
-        let response = http::send(app.addr, method, path, &[]).await;
-        assert_eq!(response.status, 405, "{method} {path}");
+const UNSAFE: [&str; 5] = ["POST", "PUT", "PATCH", "DELETE", "PURGE"];
+const PATHS: [&str; 2] = ["/api/health", "/cualquier"];
+
+async fn app_with_secret() -> support::app::RunningApp {
+    support::app::start(support::app::state_with(
+        support::app::net(Default::default(), true),
+        &Settings::default(),
+    ))
+    .await
+}
+
+fn assert_csrf_403(response: &Response, what: &str) {
+    assert_eq!(response.status, 403, "{what}");
+    assert_eq!(response.text(), r#"{"error":"auth.csrf_origin"}"#, "{what}");
+    assert_security_headers(response);
+}
+
+/// With a valid same-origin proof the router answers as before: 405 with `Allow` on a route
+/// that exists, 404 on one that does not (RF-A5).
+fn assert_routed(response: &Response, path: &str, what: &str) {
+    if path == "/api/health" {
+        assert_eq!(response.status, 405, "{what}");
         assert_eq!(response.text(), r#"{"error":"http.method_not_allowed"}"#);
         assert_eq!(response.header("allow"), Some("GET, HEAD, OPTIONS"));
-        assert_security_headers(&response);
+    } else {
+        assert_eq!(response.status, 404, "{what}");
+        assert_eq!(response.text(), r#"{"error":"http.not_found"}"#);
     }
+    assert_security_headers(response);
+}
+
+/// T2: without a same-origin proof, every unsafe method is 403 before routing.
+#[tokio::test]
+async fn unsafe_methods_without_a_same_origin_proof_are_403() {
+    let app = app().await;
+    let refused: [&[(&str, &str)]; 9] = [
+        &[],
+        &[("origin", "https://evil.example")],
+        &[("origin", "null")],
+        &[("origin", ORIGIN), ("origin", ORIGIN)],
+        &[("origin", ORIGIN), ("origin", "https://evil.example")],
+        &[("sec-fetch-site", "same-site")],
+        &[("sec-fetch-site", "cross-site")],
+        &[("sec-fetch-site", "none")],
+        // Not internal without the secret: X-Client-Origin is ignored.
+        &[("x-client-origin", ORIGIN)],
+    ];
+    for method in UNSAFE {
+        for path in PATHS {
+            for headers in refused {
+                let response = http::send(app.addr, method, path, headers).await;
+                assert_csrf_403(&response, &format!("{method} {path} {headers:?}"));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn unsafe_methods_with_a_same_origin_proof_keep_the_405_and_the_404() {
+    let app = app().await;
+    let accepted: [&[(&str, &str)]; 2] =
+        [&[("origin", ORIGIN)], &[("sec-fetch-site", "same-origin")]];
+    for method in UNSAFE {
+        for path in PATHS {
+            for headers in accepted {
+                let response = http::send(app.addr, method, path, headers).await;
+                assert_routed(&response, path, &format!("{method} {path} {headers:?}"));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn safe_methods_are_not_checked() {
+    let app = app().await;
+    let foreign = [("origin", "https://evil.example")];
+    assert_eq!(
+        http::send(app.addr, "GET", "/api/health", &foreign)
+            .await
+            .status,
+        200
+    );
+    assert_eq!(
+        http::send(app.addr, "HEAD", "/api/health", &foreign)
+            .await
+            .status,
+        200
+    );
+    assert_eq!(
+        http::send(app.addr, "OPTIONS", "/api/health", &foreign)
+            .await
+            .status,
+        405
+    );
+    assert_eq!(
+        http::send(app.addr, "GET", "/cualquier", &foreign)
+            .await
+            .status,
+        404
+    );
+}
+
+/// T15: an internal request needs `X-Client-Origin` and, if present, a same-origin
+/// `X-Client-Fetch-Site`.
+#[tokio::test]
+async fn internal_requests_are_checked_on_the_forwarded_headers() {
+    let app = app_with_secret().await;
+    let secret = ("x-internal-secret", SECRET);
+    let refused: [&[(&str, &str)]; 7] = [
+        &[],
+        // The browser's Origin does not count for an internal request.
+        &[("origin", ORIGIN)],
+        &[("x-client-origin", "https://evil.example")],
+        &[("x-client-origin", ORIGIN), ("x-client-origin", ORIGIN)],
+        &[
+            ("x-client-origin", ORIGIN),
+            ("x-client-fetch-site", "cross-site"),
+        ],
+        &[
+            ("x-client-origin", ORIGIN),
+            ("x-client-fetch-site", "same-site"),
+        ],
+        &[("x-client-origin", ORIGIN), ("x-client-fetch-site", "none")],
+    ];
+    let accepted: [&[(&str, &str)]; 3] = [
+        &[("x-client-origin", ORIGIN)],
+        &[
+            ("x-client-origin", ORIGIN),
+            ("x-client-fetch-site", "same-origin"),
+        ],
+        &[
+            ("x-client-origin", ORIGIN),
+            ("origin", "https://web.internal"),
+        ],
+    ];
+    for method in UNSAFE {
+        for path in PATHS {
+            for headers in refused {
+                let mut all = vec![secret];
+                all.extend_from_slice(headers);
+                let response = http::send(app.addr, method, path, &all).await;
+                assert_csrf_403(&response, &format!("{method} {path} {headers:?}"));
+            }
+            for headers in accepted {
+                let mut all = vec![secret];
+                all.extend_from_slice(headers);
+                let response = http::send(app.addr, method, path, &all).await;
+                assert_routed(&response, path, &format!("{method} {path} {headers:?}"));
+            }
+        }
+    }
+}
+
+/// T3 (Origin part): without a valid secret the request is external, so `X-Client-Origin`
+/// alone is no proof.
+#[tokio::test]
+async fn a_wrong_or_repeated_secret_is_an_external_request() {
+    let wrong = format!("{}A", &SECRET[..SECRET.len() - 1]);
+    let with_secret = app_with_secret().await;
+    for secrets in [vec![wrong.as_str()], vec![SECRET, SECRET], vec!["short"]] {
+        let mut headers: Vec<(&str, &str)> = secrets
+            .iter()
+            .map(|value| ("x-internal-secret", *value))
+            .collect();
+        headers.push(("x-client-origin", ORIGIN));
+        let response = http::send(with_secret.addr, "POST", "/api/health", &headers).await;
+        assert_csrf_403(&response, &format!("{secrets:?}"));
+    }
+    // No secret configured: even the right value is ignored.
+    let without = app().await;
+    let headers = [("x-internal-secret", SECRET), ("x-client-origin", ORIGIN)];
+    let response = http::send(without.addr, "POST", "/api/health", &headers).await;
+    assert_csrf_403(&response, "no secret configured");
 }
 
 #[tokio::test]
@@ -93,17 +251,24 @@ async fn options_on_a_route_is_405_with_the_code() {
     assert_security_headers(&response);
 }
 
+/// T21: no CORS anywhere, not even for a foreign preflight or a refused `POST` (RF-A8).
 #[tokio::test]
 async fn no_cors_even_for_a_foreign_preflight() {
     let app = app().await;
     let headers = [
         ("origin", "https://evil.example"),
         ("access-control-request-method", "POST"),
+        ("access-control-request-headers", "content-type"),
     ];
-    for method in ["OPTIONS", "GET"] {
-        let response = http::send(app.addr, method, "/api/health", &headers).await;
-        assert_no_cors(&response);
+    for path in ["/api/health", "/no-existe", "/ws"] {
+        for method in ["OPTIONS", "GET"] {
+            let response = http::send(app.addr, method, path, &headers).await;
+            assert_no_cors(&response);
+        }
     }
+    let refused = http::send(app.addr, "POST", "/api/health", &headers).await;
+    assert_eq!(refused.status, 403);
+    assert_no_cors(&refused);
 }
 
 #[tokio::test]

@@ -35,11 +35,15 @@ uuid.workspace = true
 mimalloc.workspace = true
 thiserror.workspace = true
 tungstenite.workspace = true
+governor.workspace = true
+subtle.workspace = true
+base64.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["process", "test-util"] }
 tokio-tungstenite.workspace = true
 futures-util.workspace = true
+proptest.workspace = true
 
 [lints]
 workspace = true
