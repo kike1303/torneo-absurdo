@@ -4,6 +4,7 @@
 // (or an `origin:` key inside `paths`), or if apps/web/svelte.config.js exists.
 // ADR-0012 B1/B3/B4 (consequence 6): the `csp` option is an exact allowlist, not a blocklist.
 import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -32,262 +33,144 @@ export const CSP_EXTENSIONS = Object.freeze({
   extraDirectives: { 'worker-src': ['self'] },
 });
 
+/** Kit's plugin factory: the only import allowed from this module (security-reviewer on #50). */
+const KIT_VITE = '@sveltejs/kit/vite';
+
+// The TypeScript compiler apps/web already pins; the root has no copy of its own.
+const ts = createRequire(path.join(ROOT, 'apps/web/package.json'))('typescript');
+
 /**
- * Splits the literal that follows `csp:` into tokens. Only object and array punctuation, plain
- * string literals and identifiers (as keys) exist; anything else (spreads, template literals,
- * calls, escapes) is reported, so the check always sees the whole configuration.
- * @param {string} source
- * @param {number} start index of the `{` after `csp:`
- * @param {number} firstLine 1-based line of `start`
- * @returns {{ tokens: {kind: string, value: string, line: number}[], error: string | null }}
+ * Converts a literal of the csp option to `{ value }`, `{ array }` or `{ object }`, with lines.
+ * Only plain keys, string literals, arrays of them and nested objects are accepted, so the check
+ * always reads the value Kit receives.
+ * @param {any} node
+ * @param {any} sf
+ * @returns {any}
  */
-function tokenize(source, start, firstLine) {
-  /** @type {{kind: string, value: string, line: number}[]} */
-  const tokens = [];
-  let line = firstLine;
-  let depth = 0;
-  let i = start;
-  while (i < source.length) {
-    const ch = source[i];
-    if (ch === '\n') {
-      line++;
-      i++;
-    } else if (/\s/.test(ch)) {
-      i++;
-    } else if (source.startsWith('//', i)) {
-      while (i < source.length && source[i] !== '\n') i++;
-    } else if (source.startsWith('/*', i)) {
-      const end = source.indexOf('*/', i + 2);
-      if (end === -1) return { tokens, error: `line ${line}: unterminated comment` };
-      for (const c of source.slice(i, end)) if (c === '\n') line++;
-      i = end + 2;
-    } else if ('{}[]:,'.includes(ch)) {
-      tokens.push({ kind: ch, value: ch, line });
-      if (ch === '{' || ch === '[') depth++;
-      if (ch === '}' || ch === ']') depth--;
-      i++;
-      if (depth === 0) return { tokens, error: null };
-    } else if (ch === "'" || ch === '"') {
-      const end = source.indexOf(ch, i + 1);
-      const value = end === -1 ? '' : source.slice(i + 1, end);
-      if (end === -1 || /[\\\n]/.test(value)) {
-        return { tokens, error: `line ${line}: only plain string literals are allowed` };
-      }
-      tokens.push({ kind: 'string', value, line });
-      i = end + 1;
-    } else if (/[A-Za-z_$]/.test(ch)) {
-      const m = /^[A-Za-z_$][\w$]*/.exec(source.slice(i));
-      tokens.push({ kind: 'ident', value: m[0], line });
-      i += m[0].length;
-    } else {
+function literal(node, sf) {
+  const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+  if (ts.isStringLiteral(node)) return { value: node.text, line };
+  if (ts.isArrayLiteralExpression(node)) {
+    return {
+      array: node.elements.map((e) => {
+        if (!ts.isStringLiteral(e))
+          throw new LiteralError(e, sf, 'sources must be string literals');
+        return { value: e.text, line: sf.getLineAndCharacterOfPosition(e.getStart(sf)).line + 1 };
+      }),
+      line,
+    };
+  }
+  if (ts.isObjectLiteralExpression(node)) {
+    /** @type {Map<string, any>} */
+    const object = new Map();
+    for (const property of node.properties) {
+      const name = plainKey(property);
+      if (name === null)
+        throw new LiteralError(property, sf, 'keys must be plain (no spread or computed key)');
+      if (object.has(name)) throw new LiteralError(property, sf, `repeats \`${name}\``);
+      const keyLine = sf.getLineAndCharacterOfPosition(property.getStart(sf)).line + 1;
+      object.set(name, { ...literal(property.initializer, sf), keyLine });
+    }
+    return { object, line };
+  }
+  throw new LiteralError(
+    node,
+    sf,
+    `\`${node.getText(sf)}\` is not allowed (the value must be a literal)`,
+  );
+}
+
+class LiteralError extends Error {
+  constructor(node, sf, message) {
+    super(message);
+    this.line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+  }
+}
+
+/** Name of a `key: value` property with an identifier or string key; null for anything else. */
+function plainKey(property) {
+  if (!ts.isPropertyAssignment(property)) return null;
+  const { name } = property;
+  return ts.isIdentifier(name) || ts.isStringLiteral(name) ? name.text : null;
+}
+
+/**
+ * Finds the csp literal Kit receives: `sveltekit` imported once, by that name, from
+ * `@sveltejs/kit/vite`, and called once as an element of `plugins`, with one object literal whose
+ * keys are all plain and unique. Any other use of the name or of the module fails.
+ * @returns {{ node: any } | { error: string, line: number }}
+ */
+function locateCsp(sf) {
+  const lineOf = (node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+  /** @type {any[]} */
+  const names = [];
+  /** @type {any[]} */
+  const modules = [];
+  const visit = (node) => {
+    if (ts.isIdentifier(node) && node.text === 'sveltekit') names.push(node);
+    if (ts.isStringLiteralLike(node) && node.text === KIT_VITE) modules.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  const specifier = names.find((n) => ts.isImportSpecifier(n.parent) && !n.parent.propertyName);
+  const declaration = specifier?.parent.parent.parent.parent;
+  if (
+    !specifier ||
+    modules.length !== 1 ||
+    !ts.isImportDeclaration(declaration) ||
+    declaration.moduleSpecifier !== modules[0] ||
+    declaration.importClause.name ||
+    declaration.importClause.isTypeOnly ||
+    declaration.importClause.namedBindings.elements.length !== 1
+  ) {
+    return {
+      error: `\`sveltekit\` must be imported once, unaliased and alone, from '${KIT_VITE}'`,
+      line: modules[1] ? lineOf(modules[1]) : 1,
+    };
+  }
+  const uses = names.filter((n) => n !== specifier);
+  const call = uses[0]?.parent;
+  if (uses.length !== 1 || !ts.isCallExpression(call) || call.expression !== uses[0]) {
+    return {
+      error: '`sveltekit` must be called exactly once and used nowhere else',
+      line: lineOf(uses[1] ?? uses[0] ?? specifier),
+    };
+  }
+  const array = call.parent;
+  if (
+    !ts.isArrayLiteralExpression(array) ||
+    !ts.isPropertyAssignment(array.parent) ||
+    plainKey(array.parent) !== 'plugins'
+  ) {
+    return { error: '`sveltekit(…)` must be an element of `plugins: [ … ]`', line: lineOf(call) };
+  }
+  const [options, ...rest] = call.arguments;
+  if (!options || rest.length > 0 || !ts.isObjectLiteralExpression(options)) {
+    return { error: '`sveltekit(` must receive one object literal', line: lineOf(call) };
+  }
+  /** @type {Set<string>} */
+  const keys = new Set();
+  let csp = null;
+  for (const property of options.properties) {
+    const name = ts.isShorthandPropertyAssignment(property)
+      ? property.name.text
+      : plainKey(property);
+    if (name === null) {
       return {
-        tokens,
-        error: `line ${line}: \`${ch}\` is not allowed (the value must be a literal)`,
+        error: '`sveltekit({ … })` keys must be plain (no spread or computed key)',
+        line: lineOf(property),
       };
     }
+    if (keys.has(name))
+      return { error: `\`sveltekit({ … })\` repeats \`${name}\``, line: lineOf(property) };
+    keys.add(name);
+    if (name === 'csp') csp = property;
   }
-  return { tokens, error: 'unterminated literal' };
-}
-
-/**
- * Parses an object of string arrays or strings, one level of nesting, from tokens.
- * @returns {{ value: any, error: string | null }}
- */
-function parseLiteral(tokens) {
-  let pos = 0;
-  const peek = () => tokens[pos];
-  const fail = (msg) => {
-    throw new Error(`line ${peek()?.line ?? tokens.at(-1)?.line}: ${msg}`);
-  };
-  const expect = (kind) => {
-    if (peek()?.kind !== kind) fail(`expected \`${kind}\``);
-    return tokens[pos++];
-  };
-  /** @returns {any} */
-  const value = () => {
-    const t = peek();
-    if (t?.kind === 'string') {
-      pos++;
-      return { value: t.value, line: t.line };
-    }
-    if (t?.kind === '[') {
-      pos++;
-      const items = [];
-      while (peek()?.kind !== ']') {
-        const item = expect('string');
-        items.push({ value: item.value, line: item.line });
-        if (peek()?.kind === ',') pos++;
-        else if (peek()?.kind !== ']') fail('expected `,` or `]`');
-      }
-      pos++;
-      return { array: items, line: t.line };
-    }
-    if (t?.kind === '{') {
-      pos++;
-      /** @type {Map<string, any>} */
-      const entries = new Map();
-      while (peek()?.kind !== '}') {
-        const key = peek();
-        if (key?.kind !== 'string' && key?.kind !== 'ident') fail('expected a key');
-        pos++;
-        expect(':');
-        if (entries.has(key.value)) fail(`duplicate key \`${key.value}\``);
-        entries.set(key.value, { ...value(), keyLine: key.line });
-        if (peek()?.kind === ',') pos++;
-        else if (peek()?.kind !== '}') fail('expected `,` or `}`');
-      }
-      pos++;
-      return { object: entries, line: t.line };
-    }
-    return fail(`\`${t?.value ?? 'end'}\` is not allowed (the value must be a literal)`);
-  };
-  try {
-    return { value: value(), error: null };
-  } catch (error) {
-    return { value: null, error: /** @type {Error} */ (error).message };
+  if (!csp) return { error: 'the `csp` option is missing', line: lineOf(options) };
+  if (!ts.isPropertyAssignment(csp) || !ts.isObjectLiteralExpression(csp.initializer)) {
+    return { error: 'must be written `csp: { … }`', line: lineOf(csp) };
   }
-}
-
-/**
- * Masks comments, template literals, regular expression literals and the contents of strings with
- * spaces (offsets are kept), so a `csp` or `sveltekit(` written as text never counts as code.
- * Strings keep their quotes, so a quoted key is still visible as `'   '`.
- * @param {string} source
- * @returns {string}
- */
-export function maskNonCode(source) {
-  const out = source.split('');
-  const blank = (from, to) => {
-    for (let k = from; k < to; k++) if (out[k] !== '\n') out[k] = ' ';
-  };
-  let i = 0;
-  /** Last significant code character, to tell a regex literal from a division. */
-  let prev = '';
-  while (i < source.length) {
-    const ch = source[i];
-    if (source.startsWith('//', i)) {
-      const end = source.indexOf('\n', i);
-      const stop = end === -1 ? source.length : end;
-      blank(i, stop);
-      i = stop;
-    } else if (source.startsWith('/*', i)) {
-      const end = source.indexOf('*/', i + 2);
-      const stop = end === -1 ? source.length : end + 2;
-      blank(i, stop);
-      i = stop;
-    } else if (ch === "'" || ch === '"' || ch === '`') {
-      let j = i + 1;
-      while (j < source.length && source[j] !== ch) j += source[j] === '\\' ? 2 : 1;
-      if (ch === '`') blank(i, j + 1);
-      else blank(i + 1, j);
-      i = j + 1;
-      prev = ch;
-    } else if (ch === '/' && (prev === '' || /[(,=:[!&|?{};]/.test(prev))) {
-      let j = i + 1;
-      let inClass = false;
-      while (j < source.length && source[j] !== '\n') {
-        if (source[j] === '\\') j++;
-        else if (source[j] === '[') inClass = true;
-        else if (source[j] === ']') inClass = false;
-        else if (source[j] === '/' && !inClass) break;
-        j++;
-      }
-      blank(i, j + 1);
-      i = j + 1;
-      prev = '/';
-    } else {
-      if (!/\s/.test(ch)) prev = ch;
-      i++;
-    }
-  }
-  return out.join('');
-}
-
-/**
- * Finds the `{` of the `csp` value and proves it is the policy Kit receives: `sveltekit(` is called
- * once, with one object literal whose top-level keys are all plain (no spread, no computed key, no
- * duplicate), `csp` is one of them, and `csp` appears nowhere else in the code.
- * @param {string} source
- * @returns {{ open: number, error?: undefined, at?: undefined } | { error: string, at: number }}
- */
-function locateCsp(source) {
-  const code = maskNonCode(source);
-  const calls = [...code.matchAll(/\bsveltekit\s*\(/g)];
-  if (calls.length !== 1) {
-    return { error: '`sveltekit(` must be called exactly once', at: calls[1]?.index ?? 0 };
-  }
-  // A quoted key is masked to `'   '`; the source tells whether it spells csp.
-  const mentions = [...code.matchAll(/\bcsp\b|(['"]) {3}\1/g)].filter(
-    (m) => m[0] === 'csp' || source.slice(m.index + 1, m.index + 4) === 'csp',
-  );
-  if (mentions.length === 0) return { error: 'the `csp` option is missing', at: 0 };
-  if (mentions.length > 1) {
-    return { error: '`csp` must appear exactly once', at: mentions[1].index };
-  }
-  let i = calls[0].index + calls[0][0].length;
-  while (/\s/.test(code[i] ?? '')) i++;
-  if (code[i] !== '{') return { error: '`sveltekit(` must receive an object literal', at: i };
-  /** @type {{ key: string, at: number, value: number }[]} */
-  const keys = [];
-  let depth = 0;
-  let segmentStart = i + 1;
-  const closers = { '(': ')', '[': ']', '{': '}' };
-  /** @type {string[]} */
-  const stack = [];
-  const readKey = (from, to) => {
-    const text = code.slice(from, to);
-    const lead = text.length - text.trimStart().length;
-    const at = from + lead;
-    const m = /^(?:([A-Za-z_$][\w$]*)|(['"])\s*\2)\s*(:)?/.exec(text.trimStart());
-    if (!m || text.trim() === '')
-      return text.trim() === '' ? null : { error: 'not a plain key', at };
-    const key = m[1] ?? source.slice(at + 1, at + m[0].indexOf(m[2], 1));
-    if (!m[3] && (m[2] || /\S/.test(text.trim().slice(m[0].length)))) {
-      return { error: 'not a plain key', at };
-    }
-    return { key, at, value: at + m[0].length };
-  };
-  for (let j = i; j < code.length; j++) {
-    const ch = code[j];
-    if (ch in closers) {
-      stack.push(closers[ch]);
-      depth++;
-    } else if (ch === ')' || ch === ']' || ch === '}') {
-      if (stack.pop() !== ch) return { error: 'unbalanced brackets', at: j };
-      depth--;
-    }
-    if ((ch === ',' && depth === 1) || depth === 0) {
-      const found = readKey(segmentStart, j);
-      if (found?.error) {
-        return {
-          error: `\`sveltekit({ … })\` keys must be plain (no spread or computed key)`,
-          at: found.at,
-        };
-      }
-      if (found) {
-        if (keys.some((k) => k.key === found.key)) {
-          return { error: `\`sveltekit({ … })\` repeats \`${found.key}\``, at: found.at };
-        }
-        keys.push(found);
-      }
-      segmentStart = j + 1;
-    }
-    if (depth === 0) {
-      let k = j + 1;
-      while (/\s/.test(code[k] ?? '')) k++;
-      if (code[k] === ',') k++;
-      while (/\s/.test(code[k] ?? '')) k++;
-      if (code[k] !== ')') return { error: '`sveltekit(` must receive one argument', at: k };
-      const csp = keys.find((k2) => k2.key === 'csp');
-      if (!csp)
-        return { error: '`csp` must be a key of `sveltekit({ … })`', at: mentions[0].index };
-      let v = csp.value;
-      while (/\s/.test(code[v] ?? '')) v++;
-      if (code[v] !== '{') return { error: 'must be written `csp: { … }`', at: csp.at };
-      return { open: v };
-    }
-  }
-  return { error: 'unterminated `sveltekit({ … })`', at: i };
+  return { node: csp.initializer };
 }
 
 /**
@@ -299,13 +182,22 @@ function locateCsp(source) {
  */
 export function checkCspSource(source, file) {
   const rule = 'csp (ADR-0012 B1/B4)';
-  const lineOf = (index) => source.slice(0, index).split('\n').length;
-  const located = locateCsp(source);
-  if (located.error) return [`${file}:${lineOf(located.at)}: ${rule}: ${located.error}`];
-  const open = located.open;
-  const { tokens, error: tokenError } = tokenize(source, open, lineOf(open));
-  const parsed = tokenError ? { value: null, error: tokenError } : parseLiteral(tokens);
-  if (parsed.error) return [`${file}: ${rule}: ${parsed.error}`];
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  if (sf.parseDiagnostics.length > 0) {
+    const d = sf.parseDiagnostics[0];
+    const line = sf.getLineAndCharacterOfPosition(d.start).line + 1;
+    return [`${file}:${line}: ${rule}: not valid TypeScript`];
+  }
+  const located = locateCsp(sf);
+  if ('error' in located) return [`${file}:${located.line}: ${rule}: ${located.error}`];
+  /** @type {{ value: any, error: string | null }} */
+  let parsed;
+  try {
+    parsed = { value: literal(located.node, sf), error: null };
+  } catch (error) {
+    if (!(error instanceof LiteralError)) throw error;
+    return [`${file}:${error.line}: ${rule}: ${error.message}`];
+  }
 
   /** @type {string[]} */
   const problems = [];

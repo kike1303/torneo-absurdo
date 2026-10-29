@@ -175,32 +175,45 @@ describe('check-kit-config: csp is the exact B1 allowlist (ADR-0012 consequence 
     expect(problems).toContainEqual(expect.stringContaining(`option \`${name}\` is not allowed`));
   });
   it('fails without the csp option', () => {
-    expect(csp('export default { plugins: [sveltekit({ adapter: adapter() })] };\n')).toEqual([
-      'vite.config.ts:1: csp (ADR-0012 B1/B4): the `csp` option is missing',
+    expect(csp(config().replace(/csp: \{[\s\S]*\}\s*\}\)\]/, 'adapter })]'))).toEqual([
+      'vite.config.ts:3: csp (ADR-0012 B1/B4): the `csp` option is missing',
     ]);
   });
-  it('ignores csp in a line comment', () => {
-    expect(csp(`// csp: { mode: 'hash' }\n${config()}`)).toEqual([]);
+  it('ignores csp in comments, strings and unrelated variables', () => {
+    const source = `// csp: { mode: 'hash' }\nconst csp = { mode: 'hash' };\nconst s = "sveltekit({ csp: {} })";\n${config()}`;
+    expect(csp(source)).toEqual([]);
   });
-  it.each([
-    ['a second csp', `${config()}const csp = {};\n`, /exactly once/],
-    ['a shorthand csp', 'const csp = {};\nsveltekit({ csp });\n', /exactly once/],
-    ['a spread', config().replace("'mode'", "...extra, 'mode'"), /`\.` is not allowed/],
-    ['an identifier value', config().replace("'auto'", 'MODE'), /`MODE` is not allowed/],
-    ['a template literal', config().replace("'auto'", '`auto`'), /``` is not allowed/],
-    [
-      'a computed directive',
-      config().replace("'default-src': [", "'default-src': sources() || ["),
-      /`\(` is not allowed/,
-    ],
-    ['an escaped string', config().replace("'self'", "'\\x73elf'"), /plain string literals/],
-  ])('fails on %s', (_, source, pattern) => {
-    const problems = csp(source);
-    expect(problems.join('\n')).toMatch(pattern);
+  it('reads escapes as the value Kit receives', () => {
+    expect(csp(config().replace("'self'", "'\\x73elf'"))).toEqual([]);
+    expect(
+      csp(config(add('connect-src', 'https:')).replace("'https:'", "'\\x68ttps:'")),
+    ).toContainEqual(expect.stringContaining("must not contain 'https:'"));
   });
+  it('fails on invalid TypeScript', () => {
+    expect(csp(`${config()}\nconst = ;\n`)).toContainEqual(
+      expect.stringContaining('not valid TypeScript'),
+    );
+  });
+
   // security-reviewer and architect on #50: the literal must be the policy Kit receives.
   const RELAXED = "{ mode: 'auto', directives: { 'script-src': ['self', 'unsafe-inline'] } }";
+  const IMPORT = "import { sveltekit } from '@sveltejs/kit/vite';";
   it.each([
+    // Values that are not literals
+    ['a spread in csp', config().replace("'mode'", "...extra, 'mode'"), /keys must be plain/],
+    ['an identifier value', config().replace("'auto'", 'MODE'), /`MODE` is not allowed/],
+    ['a template literal', config().replace("'auto'", '`auto`'), /``auto`` is not allowed/],
+    [
+      'a call in a directive',
+      config().replace("'default-src': [", "'default-src': sources() || ["),
+      /`sources\(\) \|\| \[/,
+    ],
+    [
+      'a value chosen by the environment',
+      config().replace('csp: {', `csp: process.env.CI ? ${RELAXED} : {`),
+      /must be written `csp: \{ … \}`/,
+    ],
+    // The options object
     [
       'a computed key after csp',
       config().replace('})],', `, ['c' + 'sp']: ${RELAXED} })],`),
@@ -213,40 +226,79 @@ describe('check-kit-config: csp is the exact B1 allowlist (ADR-0012 consequence 
       /keys must be plain/,
     ],
     [
-      'a decoy B1 in a template literal and the real csp computed',
-      `const decoy = \`${config()}\`;\n` +
-        config().replace('sveltekit({ csp: ', `sveltekit({ ['c' + 'sp']: ${RELAXED}, x: `),
-      /keys must be plain|`csp` option is missing/,
+      'a shorthand csp',
+      config().replace('sveltekit({ csp: ', 'sveltekit({ csp, x: '),
+      /must be written/,
     ],
     [
-      'a decoy B1 in a block comment',
-      `/* ${config()} */\n` + config().replace('sveltekit({ csp: ', `sveltekit({ ['csp']: `),
-      /keys must be plain|`csp` option is missing/,
+      'a quoted csp key repeated',
+      config().replace('})],', `, 'csp': ${RELAXED} })],`),
+      /repeats `csp`/,
     ],
     [
-      'a decoy B1 in a string',
-      `const decoy = ${JSON.stringify(config())};\n` +
-        config().replace('sveltekit({ csp: ', `sveltekit({ ['csp']: `),
-      /keys must be plain|`csp` option is missing/,
+      'csp nested in another key',
+      config().replace('sveltekit({ csp', 'sveltekit({ kit: { csp').replace('})],', '} })],'),
+      /the `csp` option is missing/,
     ],
     [
       'Object.assign around the options',
       config()
         .replace('sveltekit({ csp', 'sveltekit(Object.assign({ csp')
         .replace('})],', '}, extra))],'),
-      /must receive an object literal/,
+      /must receive one object literal/,
     ],
-    ['a second argument', config().replace('})],', '}, extra)],'), /one argument/],
+    ['a second argument', config().replace('})],', '}, extra)],'), /one object literal/],
+    // The call and the import
     ['a second sveltekit call', `${config()}sveltekit({});\n`, /called exactly once/],
     [
-      'a quoted csp key repeated',
-      config().replace('})],', `, 'csp': ${RELAXED} })],`),
-      /exactly once|repeats `csp`/,
+      'a decoy call in an unused function',
+      `${config()}function decoy() { return sveltekit({ csp: {} }); }\n`,
+      /called exactly once/,
     ],
     [
-      'csp nested in another key',
-      config().replace('sveltekit({ csp', 'sveltekit({ kit: { csp').replace('})],', '} })],'),
-      /must be a key of/,
+      'an aliased import',
+      config()
+        .replace(IMPORT, "import { sveltekit as kit } from '@sveltejs/kit/vite';")
+        .replace('sveltekit({ csp: ', `kit({ ['c' + 'sp']: ${RELAXED}, x: `),
+      /imported once, unaliased/,
+    ],
+    [
+      'a local sveltekit bound to an alias, with a decoy call',
+      config()
+        .replace(
+          IMPORT,
+          "import { sveltekit as kit } from '@sveltejs/kit/vite';\nconst sveltekit = kit;",
+        )
+        .replace('[sveltekit({', `[kit({ ['c' + 'sp']: ${RELAXED} }), (() => sveltekit({`)
+        .replace('})],', '}))],'),
+      /imported once, unaliased/,
+    ],
+    [
+      'a namespace import',
+      `import * as kitVite from '@sveltejs/kit/vite';\n${config()}`,
+      /imported once, unaliased/,
+    ],
+    [
+      'a second import of the module',
+      `${config()}const kitVite = await import('@sveltejs/kit/vite');\n`,
+      /imported once, unaliased/,
+    ],
+    ['no import', config().replace(IMPORT, ''), /imported once, unaliased/],
+    [
+      'sveltekit outside plugins',
+      config().replace('plugins: [sveltekit(', 'other: [sveltekit('),
+      /element of `plugins/,
+    ],
+    // security-reviewer round 2: text tricks that fooled the lexer
+    [
+      'a regex read as a division',
+      `void /'/;\n` + config().replace('})],', `, ['c' + 'sp']: ${RELAXED} })],`) + "void /'/;\n",
+      /keys must be plain/,
+    ],
+    [
+      'code inside a template expression',
+      config().replace('sveltekit({ csp: ', `sveltekit({ x: \`\${0}\`, ['csp']: ${RELAXED}, y: `),
+      /keys must be plain/,
     ],
   ])('fails on %s', (_, source, pattern) => {
     const problems = csp(source);

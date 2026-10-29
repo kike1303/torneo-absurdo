@@ -101,6 +101,8 @@ jobs:
               - scripts/check-dockerignore.sh
               - scripts/fixtures/context.Dockerfile
               - scripts/local-networks.sh
+              # The CSP is fixed at build time: the image's /es/ is compared with B1 (ADR-0012).
+              - apps/web/vite.config.ts
               - Cargo.toml
               - Cargo.lock
               - rust-toolchain.toml
@@ -420,7 +422,7 @@ jobs:
             shift 2
             headers="$(curl -sS -I "$url")"
             echo "$headers"
-            status="$(head -n 1 <<<"$headers" | awk '{ print $2 }')"
+            status="$(head -n 1 <<<"$headers" | tr -d '\r' | awk '{ print $2 }')"
             if [ "$status" != "$want" ]; then
               echo "$url answers $status, expected $want" >&2
               return 1
@@ -440,6 +442,22 @@ jobs:
           once http://127.0.0.1:3000/es/ 200 x-content-type-options referrer-policy \
             strict-transport-security cross-origin-opener-policy permissions-policy \
             content-security-policy
+          # ADR-0012 B1 exactly, as this image emits it (nonce normalized; directive and source
+          # order ignored). A B4 extension changes this line in its own PR.
+          csp_norm() {
+            tr -d '\r' | sed -E "s/'nonce-[A-Za-z0-9+/_=-]+'/'nonce-*'/g" | tr ';' '\n' |
+              while read -r name rest; do
+                [ -n "$name" ] || continue
+                printf '%s %s\n' "$name" "$(tr ' ' '\n' <<<"$rest" | grep -v '^$' | sort | paste -sd ' ' -)"
+              done | sort
+          }
+          b1="default-src 'self'; script-src 'self' 'nonce-*'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+          csp="$(curl -sS -I http://127.0.0.1:3000/es/ | grep -i '^content-security-policy:' |
+            sed 's/^[^:]*:[[:space:]]*//')"
+          if ! diff <(csp_norm <<<"$b1") <(csp_norm <<<"$csp"); then
+            echo "/es/ CSP is not ADR-0012 B1: $csp" >&2
+            exit 1
+          fi
           server_headers=(x-content-type-options strict-transport-security
             cross-origin-resource-policy content-security-policy)
           once http://127.0.0.1:8080/api/health 200 "${server_headers[@]}"

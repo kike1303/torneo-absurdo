@@ -257,11 +257,21 @@ jobs:
           server=("$nosniff" "$hsts"
             'cross-origin-resource-policy=same-origin'
             "content-security-policy=default-src 'none'; frame-ancestors 'none'")
+          # ADR-0012 B1 as Kit emits it; `B1` as a value compares with this (nonce normalized,
+          # directive and source order ignored). A B4 extension changes this line in its own PR.
+          b1="default-src 'self'; script-src 'self' 'nonce-*'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+          csp_norm() {
+            tr -d '\r' | sed -E "s/'nonce-[A-Za-z0-9+/_=-]+'/'nonce-*'/g" | tr ';' '\n' |
+              while read -r name rest; do
+                [ -n "$name" ] || continue
+                printf '%s %s\n' "$name" "$(tr ' ' '\n' <<<"$rest" | grep -v '^$' | sort | paste -sd ' ' -)"
+              done | sort
+          }
           fail=0
           headers="$(mktemp)"
           trap 'rm -f "$headers"' EXIT
-          # check <path> <status> <name=value>...: a value of `*` only requires the header once,
-          # and `-` requires it to be absent.
+          # check <path> <status> <name=value>...: `-` requires the header to be absent and `B1`
+          # compares it with $b1; any other value must match exactly, once.
           check() {
             local path="$1" want="$2" url="https://$PUBLIC_HOST$1" status pair name value got count
             shift 2
@@ -284,16 +294,19 @@ jobs:
               elif [ "$count" != 1 ]; then
                 echo "$path sends $name $count times, expected once" >&2
                 fail=1
-              elif [ "$value" != '*' ] && [ "$got" != "$value" ]; then
+              elif [ "$value" = B1 ]; then
+                if ! diff <(csp_norm <<<"$b1") <(csp_norm <<<"$got") >/dev/null; then
+                  echo "$path sends $name: $got, expected ADR-0012 B1" >&2
+                  fail=1
+                fi
+              elif [ "$got" != "$value" ]; then
                 echo "$path sends $name: $got, expected $value" >&2
                 fail=1
               fi
             done
             echo "$path: $status, checked"
           }
-          # B1 carries a nonce per request, so only its presence (once) is checked here; its
-          # directives are enforced by scripts/check-kit-config.mjs and the e2e.
-          check /es/ 200 "${web[@]}" 'content-security-policy=*'
+          check /es/ 200 "${web[@]}" 'content-security-policy=B1'
           check /_app/version.json 200 "${web[@]}"
           check /healthz/ 308 "${web[@]}"
           # torneo-web-headers belongs to web only (RF-C4).
