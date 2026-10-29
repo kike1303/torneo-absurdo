@@ -1,0 +1,31 @@
+{
+  "name": "@torneo/sprite-importer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "import": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts import",
+    "check": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts check",
+    "gen:guide": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/gen-guide.ts",
+    "gen:fixture": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/gen-fixture.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@torneo/renderer": "workspace:*",
+    "pngjs": "7.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "22.20.5",
+    "@types/pngjs": "6.0.5",
+    "eslint": "10.13.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.13.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.0",
+    "vitest": "5.0.5"
+  }
+}
