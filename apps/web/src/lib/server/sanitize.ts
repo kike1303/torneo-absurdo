@@ -18,10 +18,18 @@ export const REDACTED_IP = '[ip]';
 
 /**
  * Sensitive header names. `forwarded`, `x-real-ip` and every `x-client-*` come from ADR-0012
- * (TA-11); the `x-client-` suffix is bounded so a long run of them stays linear.
+ * (TA-11). The `x-client-` suffix is bounded so a long run of them stays linear; a suffix longer
+ * than 64 characters is not a real header name.
  */
-const HEADER_NAMES =
-  'cookie|authorization|forwarded|x-forwarded-for|x-real-ip|x-internal-secret|x-client-[a-z-]{1,64}';
+const HEADER_NAMES = [
+  'cookie',
+  'authorization',
+  'forwarded',
+  'x-forwarded-for',
+  'x-real-ip',
+  'x-internal-secret',
+  'x-client-[a-z0-9-]{1,64}',
+].join('|');
 
 /**
  * A sensitive header name, an optional closing quote (also escaped, `\"`, as in JSON inside a
@@ -89,12 +97,32 @@ function valueStart(text: string, start: number): number {
   return i;
 }
 
+/** End of the line that holds `i` (before its line break), or the end of the input. */
+function lineEnd(text: string, i: number): number {
+  while (i < text.length && text[i] !== '\n' && text[i] !== '\r') i++;
+  return i;
+}
+
+/** What may follow a whole value on its line: the end of an entry, a structure or the line. */
+const AFTER_VALUE = new Set([',', '}', ']', ')', '\n', '\r', '']);
+
+/**
+ * True when a value that closed at `end` also ends there: the next non-blank character of the
+ * line closes an entry or a structure. Anything else (`{"a":1}; sid=…`, `"x".SECRET`) means the
+ * value goes on, and `;` is not an end because it separates cookies (PR #51 review).
+ */
+function endsAt(text: string, end: number): boolean {
+  let i = end;
+  while (text[i] === ' ' || text[i] === '\t') i++;
+  return AFTER_VALUE.has(text[i] ?? '');
+}
+
 /**
  * Redacts every sensitive header value in one left-to-right pass (linear: each value is read
  * once). An array or an object goes whole; a quoted string goes whole and keeps its quotes;
- * anything else (including a value that opens with an escaped quote) goes to the end of the line.
- * A string, an array or an object that never closes is redacted to the end of the input: when in
- * doubt, redact more.
+ * anything else (including a value that opens with an escaped quote) goes to the end of the line,
+ * and so does one of them when the line goes on after it closes. A string, an array or an object
+ * that never closes is redacted to the end of the input: when in doubt, redact more.
  */
 function redactHeaderValues(text: string): string {
   let out = '';
@@ -112,8 +140,11 @@ function redactHeaderValues(text: string): string {
       end = close < 0 ? text.length : close;
       replacement = close < 0 ? `${first}${REDACTED}` : `${first}${REDACTED}${first}`;
     } else {
-      end = start;
-      while (end < text.length && text[end] !== '\n' && text[end] !== '\r') end++;
+      end = lineEnd(text, start);
+    }
+    if (!endsAt(text, end)) {
+      end = lineEnd(text, end);
+      if (QUOTES.has(first)) replacement = `${first}${REDACTED}`;
     }
     out += text.slice(last, start) + replacement;
     last = end;

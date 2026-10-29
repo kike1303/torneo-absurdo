@@ -360,6 +360,7 @@ describe('sanitize: headers added by ADR-0012 (TA-11)', () => {
     ['{"Forwarded":"for=\\"[2001:db8::1]\\";by=SECRET"}', '{"Forwarded":"[redacted]"}'],
     ["{ 'x-client-cert': 'MIIB-SECRET' }", "{ 'x-client-cert': '[redacted]' }"],
     ['X-Client-Geo-Country=SECRET', 'X-Client-Geo-Country=[redacted]'],
+    ['x-client-ip6: SECRET', 'x-client-ip6: [redacted]'],
   ])('%s', (input, expected) => {
     const out = sanitize(input);
     expect(out).toBe(expected);
@@ -399,6 +400,17 @@ describe('sanitize: header values on the next line or in an object (TA-11)', () 
     const out = sanitize(input);
     expect(out).toBe(expected);
     expect(out).not.toContain('SECRET');
+  });
+
+  it.each([
+    'Cookie: {"a":1}; __Host-sid=SECRET',
+    'cookie={"a":1}; __Host-sid=SECRET',
+    'Authorization: {"alg":"none"}.SECRET',
+    'cookie: [x]; sid=SECRET',
+    'cookie: "x"; sid=SECRET',
+    "{ cookie: 'a' + 'SECRET' }",
+  ])('redacts the rest of the line when a value goes on after it closes: %s', (input) => {
+    expect(sanitize(input)).not.toContain('SECRET');
   });
 
   it('redacts to the end when an object never closes', () => {
