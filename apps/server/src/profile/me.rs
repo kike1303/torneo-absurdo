@@ -3,7 +3,7 @@
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use protocol::{Locale, MAX_SAFE_INTEGER, Me, Provider, Role, Theme};
 use sqlx::Row;
@@ -13,17 +13,15 @@ use crate::http::session::{self, PRIVATE_NO_STORE};
 use crate::ledger;
 
 pub async fn handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let Some(info) = session::current(&state, &headers).await else {
-        return session::unauthenticated(&state);
+    let info = match session::current(&state, &headers).await {
+        Ok(Some(info)) => info,
+        Ok(None) => return session::unauthenticated(&state),
+        Err(_) => return session::try_again(),
     };
     match me(&state, info.user_id).await {
         Ok(Some(me)) => ([(header::CACHE_CONTROL, PRIVATE_NO_STORE)], Json(me)).into_response(),
         Ok(None) => session::unauthenticated(&state),
-        Err(()) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            [(header::CACHE_CONTROL, PRIVATE_NO_STORE)],
-        )
-            .into_response(),
+        Err(()) => session::try_again(),
     }
 }
 

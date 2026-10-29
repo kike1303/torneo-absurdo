@@ -17,11 +17,27 @@ pub fn token_hash(state: &AppState, headers: &HeaderMap) -> Option<TokenHash> {
     state.auth.cookies.read_session(headers).map(TokenHash::of)
 }
 
-/// The valid session of the request, if any. A database error counts as no session (fail
-/// closed).
-pub async fn current(state: &AppState, headers: &HeaderMap) -> Option<SessionInfo> {
-    let hash = token_hash(state, headers)?;
-    sessions::validate(&state.db, &hash).await.ok().flatten()
+/// The valid session of the request: `Ok(None)` without one, `Err` when the database could not
+/// say. The two are never the same: a caller that treated an error as "no session" could log a
+/// user out on a hiccup, or a logout-all could revoke only this session and claim success
+/// (review of #54).
+pub async fn current(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Option<SessionInfo>, sqlx::Error> {
+    let Some(hash) = token_hash(state, headers) else {
+        return Ok(None);
+    };
+    sessions::validate(&state.db, &hash).await
+}
+
+/// 503 `auth.try_again` with `private, no-store` and no cookie change: the session may be fine.
+pub fn try_again() -> Response {
+    let mut response = error_response(StatusCode::SERVICE_UNAVAILABLE, AuthErrorCode::TryAgain);
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, PRIVATE_NO_STORE);
+    response
 }
 
 /// 401 `auth.unauthenticated`, with the session cookie expired and `private, no-store`.

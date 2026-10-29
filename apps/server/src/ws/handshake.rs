@@ -64,7 +64,11 @@ pub async fn handler(
     // `net::layer` always runs first; without it, one shared key (more restrictive).
     let key = client.map_or(IpKey::from(IpAddr::V4(Ipv4Addr::UNSPECIFIED)), |c| c.0.key);
     // 3. The session, read from the cookie only (never a token in the query, D6).
-    let session = crate::http::session::current(&state, &headers).await;
+    // A database error is no session: the socket is anonymous (no `self`, anonymous quotas),
+    // which grants nothing.
+    let session = crate::http::session::current(&state, &headers)
+        .await
+        .unwrap_or(None);
     // 4. The upgrade rate and 5. the sockets, by kind (an invalid upgrade consumed nothing).
     let admission = match session {
         Some(info) => {

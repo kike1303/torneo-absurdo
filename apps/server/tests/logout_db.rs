@@ -60,3 +60,89 @@ async fn a_logout_without_the_database_does_not_claim_success() {
     assert_eq!(done.header("location"), Some("/"));
     assert!(sessions::validate(&direct, &hash).await.unwrap().is_none());
 }
+
+/// QA, security and architect on #54: the session lookup fails but the database is otherwise up
+/// (here `users` is locked and the app's statements time out after 300 ms; the revoke only
+/// touches `sessions`). logout-all must not fall back to revoking just this session and
+/// claiming success: nothing is revoked, the cookie stays, and the user is told to retry.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn logout_all_with_a_failed_session_lookup_revokes_nothing() {
+    let db = TestDb::create().await;
+    let direct = db.migrated_pool().await;
+    let (user, token) = support::app::user_with_session(&direct).await;
+    let other = support::app::session_for(&direct, user).await;
+    let url = db.url();
+    let config = support::config::config(&[("DATABASE_URL", url.as_str())]);
+    let options = config
+        .database
+        .clone()
+        .options([("statement_timeout", "300")]);
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .acquire_timeout(Duration::from_secs(2))
+        .connect_lazy_with(options);
+    let state = AppState::from_config(&config, &Settings::default(), pool, Arc::new(AlwaysUp));
+    let app = support::app::start(state).await;
+    let cookie = format!("{}={token}", config.cookies.session_name());
+    let headers = [("origin", ORIGIN), ("cookie", cookie.as_str())];
+
+    let mut lock = direct.begin().await.unwrap();
+    sqlx::query("LOCK TABLE users IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *lock)
+        .await
+        .unwrap();
+    let failed = http::send(app.addr, "POST", "/api/auth/logout-all", &headers).await;
+    lock.rollback().await.unwrap();
+
+    assert_eq!(failed.status, 303, "{}", failed.text());
+    assert_eq!(
+        failed.header("location"),
+        Some("/login?error=auth.try_again")
+    );
+    assert!(
+        failed.set_cookies().is_empty(),
+        "{:?}",
+        failed.set_cookies()
+    );
+    for live in [&token, &other] {
+        let hash = TokenHash::of(live);
+        assert!(sessions::validate(&direct, &hash).await.unwrap().is_some());
+    }
+}
+
+/// The same failure on `GET /api/me` is not "no session": no 401 and no expired cookie (that
+/// would log the user out on a database hiccup), but 503 `auth.try_again`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn me_with_a_failed_session_lookup_keeps_the_session() {
+    let db = TestDb::create().await;
+    let direct = db.migrated_pool().await;
+    let (_, token) = support::app::user_with_session(&direct).await;
+    let url = db.url();
+    let config = support::config::config(&[("DATABASE_URL", url.as_str())]);
+    let options = config
+        .database
+        .clone()
+        .options([("statement_timeout", "300")]);
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .acquire_timeout(Duration::from_secs(2))
+        .connect_lazy_with(options);
+    let state = AppState::from_config(&config, &Settings::default(), pool, Arc::new(AlwaysUp));
+    let app = support::app::start(state).await;
+    let cookie = format!("{}={token}", config.cookies.session_name());
+
+    let mut lock = direct.begin().await.unwrap();
+    sqlx::query("LOCK TABLE users IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *lock)
+        .await
+        .unwrap();
+    let me = http::send(app.addr, "GET", "/api/me", &[("cookie", &cookie)]).await;
+    lock.rollback().await.unwrap();
+
+    assert_eq!(me.status, 503, "{}", me.text());
+    assert_eq!(me.text(), r#"{"error":"auth.try_again"}"#);
+    assert_eq!(me.header("cache-control"), Some("private, no-store"));
+    assert!(me.set_cookies().is_empty(), "{:?}", me.set_cookies());
+    let ok = http::send(app.addr, "GET", "/api/me", &[("cookie", &cookie)]).await;
+    assert_eq!(ok.status, 200);
+}
