@@ -1,20 +1,28 @@
-//! Anonymous sockets per `IpKey` (008 RF-A7). Bounded by `WS_MAX_CONNECTIONS`: every key in
-//! the map has at least one live socket.
+//! Sockets per key (008 RF-A7, RF-B14): anonymous per `IpKey`, with a session per `IpKey` and
+//! per user. Bounded by `WS_MAX_CONNECTIONS`: every key in a map has at least one live socket.
 
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::net::IpKey;
 
 /// Anonymous sockets per `IpKey` (ADR-0008 D6). A constant, not an environment variable.
 pub const WS_ANON_PER_IP: u32 = 50;
+/// Sockets with a session per `IpKey` (D6); they never use the anonymous slots.
+pub const WS_SESSION_PER_IP: u32 = 200;
+/// Sockets per user (D6).
+pub const WS_PER_USER: u32 = 5;
 
-pub struct IpSlots {
+pub struct Slots<K: Hash + Eq + Clone> {
     limit: u32,
-    in_use: Mutex<HashMap<IpKey, u32>>,
+    in_use: Mutex<HashMap<K, u32>>,
 }
 
-impl IpSlots {
+/// The anonymous slots of phase A.
+pub type IpSlots = Slots<IpKey>;
+
+impl<K: Hash + Eq + Clone> Slots<K> {
     pub fn new(limit: u32) -> Self {
         Self {
             limit,
@@ -22,14 +30,14 @@ impl IpSlots {
         }
     }
 
-    fn lock(&self) -> MutexGuard<'_, HashMap<IpKey, u32>> {
+    fn lock(&self) -> MutexGuard<'_, HashMap<K, u32>> {
         self.in_use.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// One more socket for `key`, or `None` if it already has `limit`.
-    pub fn try_acquire(self: &Arc<Self>, key: IpKey) -> Option<IpSlot> {
+    pub fn try_acquire(self: &Arc<Self>, key: K) -> Option<Slot<K>> {
         let mut in_use = self.lock();
-        let count = in_use.entry(key).or_insert(0);
+        let count = in_use.entry(key.clone()).or_insert(0);
         if *count >= self.limit {
             if *count == 0 {
                 in_use.remove(&key);
@@ -37,7 +45,7 @@ impl IpSlots {
             return None;
         }
         *count += 1;
-        Some(IpSlot {
+        Some(Slot {
             slots: self.clone(),
             key,
         })
@@ -50,12 +58,14 @@ impl IpSlots {
 }
 
 /// One socket of a key; released on drop (RAII).
-pub struct IpSlot {
-    slots: Arc<IpSlots>,
-    key: IpKey,
+pub struct Slot<K: Hash + Eq + Clone> {
+    slots: Arc<Slots<K>>,
+    key: K,
 }
 
-impl Drop for IpSlot {
+pub type IpSlot = Slot<IpKey>;
+
+impl<K: Hash + Eq + Clone> Drop for Slot<K> {
     fn drop(&mut self) {
         let mut in_use = self.slots.lock();
         if let Some(count) = in_use.get_mut(&self.key) {

@@ -1,8 +1,11 @@
 //! WebSocket `/ws` (RF-B13, plan-b decision 10).
 
+pub mod channels;
 mod handshake;
 pub mod ip_slots;
 pub mod rate;
+pub mod registry;
+pub mod self_hub;
 mod session;
 
 use std::sync::Arc;
@@ -12,9 +15,31 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
+use std::future::Future;
+use std::pin::Pin;
+
 pub use handshake::handler;
-use ip_slots::IpSlots;
 pub use ip_slots::WS_ANON_PER_IP;
+use ip_slots::{IpSlots, Slots, WS_PER_USER, WS_SESSION_PER_IP};
+use registry::Registry;
+use self_hub::SelfHub;
+
+use crate::net::IpKey;
+
+/// A pause between the registration of a socket with a session and its second validation
+/// (RF-B14). Production uses [`NoGate`]; the race test holds the socket there to revoke its
+/// session in between.
+pub trait ValidationGate: Send + Sync {
+    fn before_validate(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
+}
+
+pub struct NoGate;
+
+impl ValidationGate for NoGate {
+    fn before_validate(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(std::future::ready(()))
+    }
+}
 
 /// Largest message and frame the server reads, fixed in the protocol (RF-B13).
 pub const MAX_MESSAGE_BYTES: usize = 4096;
@@ -30,6 +55,8 @@ pub struct WsConfig {
     pub idle_timeout: Duration,
     /// Bound for every send and for the close handshake; then the TCP connection is dropped.
     pub close_grace: Duration,
+    /// A socket with a session revalidates it this often (RF-B14, D6: 5 min).
+    pub revalidate_interval: Duration,
 }
 
 impl Default for WsConfig {
@@ -39,6 +66,7 @@ impl Default for WsConfig {
             pong_timeout: Duration::from_secs(60),
             idle_timeout: Duration::from_secs(120),
             close_grace: Duration::from_secs(5),
+            revalidate_interval: Duration::from_secs(300),
         }
     }
 }
@@ -48,6 +76,11 @@ pub struct WsState {
     echo: bool,
     permits: Arc<Semaphore>,
     ip_slots: Arc<IpSlots>,
+    session_ip_slots: Arc<Slots<IpKey>>,
+    user_slots: Arc<Slots<uuid::Uuid>>,
+    registry: Arc<Registry>,
+    self_hub: Arc<SelfHub>,
+    gate: Arc<dyn ValidationGate>,
     config: WsConfig,
     tracker: TaskTracker,
     shutdown: CancellationToken,
@@ -61,6 +94,11 @@ impl WsState {
             echo,
             permits: Arc::new(Semaphore::new(permits)),
             ip_slots: Arc::new(IpSlots::new(WS_ANON_PER_IP)),
+            session_ip_slots: Arc::new(Slots::new(WS_SESSION_PER_IP)),
+            user_slots: Arc::new(Slots::new(WS_PER_USER)),
+            registry: Arc::new(Registry::default()),
+            self_hub: Arc::new(SelfHub::default()),
+            gate: Arc::new(NoGate),
             config,
             tracker: TaskTracker::new(),
             shutdown: CancellationToken::new(),
@@ -72,6 +110,27 @@ impl WsState {
     pub fn with_ip_limit(mut self, limit: u32) -> Self {
         self.ip_slots = Arc::new(IpSlots::new(limit));
         self
+    }
+
+    /// Replaces the gate between registration and validation (the race test).
+    pub fn with_validation_gate(mut self, gate: Arc<dyn ValidationGate>) -> Self {
+        self.gate = gate;
+        self
+    }
+
+    /// Sockets with a session.
+    pub fn session_sockets(&self) -> usize {
+        self.registry.len()
+    }
+
+    /// The registry of sockets with a session (the revocation listener closes them).
+    pub fn registry(&self) -> Arc<Registry> {
+        self.registry.clone()
+    }
+
+    /// The `self` channel (TA-27 and the rename of phase C publish here).
+    pub fn self_hub(&self) -> Arc<SelfHub> {
+        self.self_hub.clone()
     }
 
     /// The exact `Origin` the handshake accepts (`PUBLIC_ORIGIN`).

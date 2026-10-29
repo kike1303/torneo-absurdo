@@ -7,6 +7,8 @@
 //! - [`revoke`] is the only code that deletes sessions, and it notifies every deleted id on
 //!   [`REVOKED_CHANNEL`] in the same transaction, so the sockets close at once (D6).
 
+pub mod listener;
+
 use std::fmt;
 
 use base64::Engine as _;

@@ -1,15 +1,32 @@
-//! One socket's life (RF-B13): limits, ping/pong, idleness, echo and shutdown.
-//! Nothing here is logged at `info`; at `debug` only `ws.closed` with the close code.
+//! One socket's life (RF-B13, 008 RF-B14, RF-B15): limits, ping/pong, idleness, echo,
+//! subscriptions, the `self` channel, the session (revocation and periodic revalidation) and
+//! shutdown. Nothing here is logged at `info`; at `debug` only `ws.closed` with the close code.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
-use protocol::{ClientMessage, ServerMessage, WsErrorCode};
+use protocol::{AuthErrorCode, ClientMessage, ErrorCode, ServerMessage, WsErrorCode};
+use sqlx::PgPool;
+use tokio::sync::mpsc;
 use tokio::time::{Instant, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 use super::WsConfig;
+use super::channels::Subscriptions;
 use super::rate::RateWindow;
+use super::registry::Registration;
+use super::self_hub::{QUEUE, SelfHub, SelfSubscription};
+use crate::sessions;
+
+/// The session of a socket that passed its second validation.
+pub struct SocketAuth {
+    pub registration: Registration,
+    pub user_id: Uuid,
+    pub pool: PgPool,
+    pub hub: Arc<SelfHub>,
+}
 
 pub const CLOSE_UNSUPPORTED_DATA: u16 = 1003;
 pub const CLOSE_POLICY_VIOLATION: u16 = 1008;
@@ -30,8 +47,15 @@ enum End {
     Drop,
 }
 
-fn policy(code: WsErrorCode) -> End {
-    End::Close(CLOSE_POLICY_VIOLATION, code.as_str())
+fn policy(code: impl Into<ErrorCode>) -> End {
+    End::Close(CLOSE_POLICY_VIOLATION, code.into().as_str())
+}
+
+/// Closes a socket whose session failed the second validation.
+pub async fn reject(socket: &mut WebSocket, config: WsConfig) {
+    let reason = AuthErrorCode::Unauthenticated.as_str();
+    tracing::debug!(event = "ws.closed", close_code = CLOSE_POLICY_VIOLATION);
+    close(socket, CLOSE_POLICY_VIOLATION, reason, config.close_grace).await;
 }
 
 fn is_capacity_error(error: axum::Error) -> bool {
@@ -41,9 +65,14 @@ fn is_capacity_error(error: axum::Error) -> bool {
         .is_some_and(|e| matches!(e, tungstenite::Error::Capacity(_)))
 }
 
-pub async fn run(mut socket: WebSocket, context: Context, shutdown: CancellationToken) {
+pub async fn run(
+    mut socket: WebSocket,
+    context: Context,
+    shutdown: CancellationToken,
+    auth: Option<SocketAuth>,
+) {
     let config = context.config;
-    let end = serve(&mut socket, context, &shutdown).await;
+    let end = serve(&mut socket, context, &shutdown, auth.as_ref()).await;
     if let End::Close(code, reason) = end {
         tracing::debug!(event = "ws.closed", close_code = code);
         close(&mut socket, code, reason, config.close_grace).await;
@@ -51,9 +80,33 @@ pub async fn run(mut socket: WebSocket, context: Context, shutdown: Cancellation
     // Dropping the socket closes the TCP connection.
 }
 
-async fn serve(socket: &mut WebSocket, context: Context, shutdown: &CancellationToken) -> End {
+/// Sends a server message; `false` if the socket is gone.
+async fn reply(socket: &mut WebSocket, message: &ServerMessage, grace: Duration) -> bool {
+    match serde_json::to_string(message) {
+        Ok(text) => send(socket, Message::Text(text.into()), grace).await,
+        Err(_) => false,
+    }
+}
+
+async fn serve(
+    socket: &mut WebSocket,
+    context: Context,
+    shutdown: &CancellationToken,
+    auth: Option<&SocketAuth>,
+) -> End {
     let config = context.config;
     let mut rate = RateWindow::default();
+    let mut subscriptions = Subscriptions::default();
+    // One queue for the life of the socket; the hub holds its sender only while subscribed.
+    let (self_tx, mut self_rx) = mpsc::channel(QUEUE);
+    let mut self_subscription: Option<SelfSubscription> = None;
+    // Cancelled when the session is revoked; never for an anonymous socket.
+    let closed = auth.map_or_else(CancellationToken::new, |a| a.registration.closed());
+    let mut revalidate = tokio::time::interval_at(
+        Instant::now() + config.revalidate_interval,
+        config.revalidate_interval,
+    );
+    revalidate.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut last_frame = Instant::now();
     let mut last_data = Instant::now();
     let mut pings =
@@ -66,6 +119,22 @@ async fn serve(socket: &mut WebSocket, context: Context, shutdown: &Cancellation
         tokio::select! {
             biased;
             () = shutdown.cancelled() => return End::Close(CLOSE_SERVICE_RESTART, ""),
+            () = closed.cancelled() => return policy(AuthErrorCode::Unauthenticated),
+            _ = revalidate.tick(), if auth.is_some() => {
+                if let Some(auth) = auth {
+                    // A database error keeps the socket: the NOTIFY is still the main path.
+                    if let Ok(None) =
+                        sessions::validate_by_id(&auth.pool, auth.registration.session()).await
+                    {
+                        return policy(AuthErrorCode::Unauthenticated);
+                    }
+                }
+            }
+            Some(event) = self_rx.recv() => {
+                if !reply(socket, &ServerMessage::SelfEvent { event }, config.close_grace).await {
+                    return End::Drop;
+                }
+            }
             () = tokio::time::sleep_until(pong_deadline) => {
                 return policy(WsErrorCode::PongTimeout);
             }
@@ -104,20 +173,44 @@ async fn serve(socket: &mut WebSocket, context: Context, shutdown: &Cancellation
                         match message {
                             Message::Binary(_) => return End::Close(CLOSE_UNSUPPORTED_DATA, ""),
                             Message::Text(text) => {
-                                let Ok(ClientMessage::Echo { payload }) =
+                                let Ok(message) =
                                     serde_json::from_str::<ClientMessage>(text.as_str())
                                 else {
                                     return policy(WsErrorCode::InvalidMessage);
                                 };
-                                if !context.echo {
-                                    return policy(WsErrorCode::EchoDisabled);
-                                }
-                                let Ok(reply) =
-                                    serde_json::to_string(&ServerMessage::Echo { payload })
-                                else {
-                                    return End::Drop;
+                                let answer = match message {
+                                    ClientMessage::Echo { payload } => {
+                                        if !context.echo {
+                                            return policy(WsErrorCode::EchoDisabled);
+                                        }
+                                        ServerMessage::Echo { payload }
+                                    }
+                                    ClientMessage::Subscribe { channel } => {
+                                        match subscriptions.subscribe(&channel, auth.is_some()) {
+                                            Ok(channel) => {
+                                                // `self` is the only channel: resolved from
+                                                // the session, never from the client.
+                                                if let (Some(auth), None) = (auth, &self_subscription) {
+                                                    self_subscription = Some(
+                                                        auth.hub.subscribe(auth.user_id, self_tx.clone()),
+                                                    );
+                                                }
+                                                ServerMessage::Subscribed { channel }
+                                            }
+                                            Err(code) => ServerMessage::Error { code: code.into() },
+                                        }
+                                    }
+                                    ClientMessage::Unsubscribe { channel } => {
+                                        match subscriptions.unsubscribe(&channel) {
+                                            Ok(channel) => {
+                                                self_subscription = None;
+                                                ServerMessage::Unsubscribed { channel }
+                                            }
+                                            Err(code) => ServerMessage::Error { code: code.into() },
+                                        }
+                                    }
                                 };
-                                if !send(socket, Message::Text(reply.into()), config.close_grace).await {
+                                if !reply(socket, &answer, config.close_grace).await {
                                     return End::Drop;
                                 }
                                 last_data = now;

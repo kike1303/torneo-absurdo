@@ -118,3 +118,50 @@ pub async fn start_db(
     let state = AppState::from_config(&config, settings, pool.clone(), Arc::new(AlwaysUp));
     (start(state).await, pool)
 }
+
+/// Like [`start_db`], with the WebSocket state of the config changed by `ws`.
+pub async fn start_db_ws(
+    db: &super::db::TestDb,
+    vars: &[(&str, &str)],
+    settings: &Settings,
+    ws: impl FnOnce(WsState) -> WsState,
+) -> (RunningApp, sqlx::PgPool, Arc<WsState>) {
+    let url = db.url();
+    let mut all = vec![("DATABASE_URL", url.as_str())];
+    all.extend_from_slice(vars);
+    let config = super::config::config(&all);
+    let pool = db.migrated_pool().await;
+    let state = AppState::from_config(&config, settings, pool.clone(), Arc::new(AlwaysUp));
+    let state = state.with_ws(ws(AppState::ws_from_config(&config, settings)));
+    let handle = state.ws.clone();
+    (start(state).await, pool, handle)
+}
+
+/// A user with a ledger account and a valid session; returns the user id and the token.
+pub async fn user_with_session(pool: &sqlx::PgPool) -> (uuid::Uuid, String) {
+    let user = uuid::Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, display_name, display_name_key) VALUES ($1, $2, $3)")
+        .bind(user)
+        .bind(format!("Test{}", user.simple()))
+        .bind(format!("test{}", user.simple()))
+        .execute(pool)
+        .await
+        .unwrap();
+    (user, session_for(pool, user).await)
+}
+
+/// Another valid session of `user`.
+pub async fn session_for(pool: &sqlx::PgPool, user: uuid::Uuid) -> String {
+    let mut tx = pool.begin().await.unwrap();
+    let issued = server::sessions::issue(
+        &mut tx,
+        user,
+        protocol::Role::User,
+        &[0; 32],
+        server::sessions::UaFamily::Other,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    issued.token.as_str().to_owned()
+}

@@ -244,6 +244,14 @@ pub async fn serve_listener(
     http_config: HttpConfig,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
+    // The revocation listener lives as long as this server (008 RF-B10).
+    let background = CancellationToken::new();
+    tokio::spawn(crate::sessions::listener::run(
+        state.db.clone(),
+        state.ws.registry(),
+        background.clone(),
+    ));
+    let _stop_background = background.drop_guard();
     let router = http::router(state);
     let connections = TaskTracker::new();
     let closing = CancellationToken::new();
