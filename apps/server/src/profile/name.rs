@@ -3,8 +3,8 @@
 //! In this order: NFC, trim, refuse control (`Cc`), the line and paragraph separators and
 //! invisible characters (every `Default_Ignorable_Code_Point` and a few other blanks), 3 to 24
 //! graphemes, then the key (UTS #39 skeleton over full case folding over NFKC) and the
-//! reserved names, compared by two forms built from the letters and digits of the name. Uniqueness is the database's `UNIQUE` on the key, never a prior
-//! check here.
+//! reserved names, compared by two forms built from the letters and digits of the name.
+//! Uniqueness is the database's `UNIQUE` on the key, never a prior check here.
 
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -54,7 +54,8 @@ fn letters(text: &str) -> String {
     text.nfd().filter(|c| c.is_alphanumeric()).collect()
 }
 
-/// The two forms compared against the reserved list (review of #54):
+/// The two forms compared against the reserved list (review of #54); either form of a name
+/// against either form of a reserved name:
 /// - `key_of(letters(text))`: no punctuation, space or accent between the letters gets around
 ///   the list ("Torneo·Absurdo", "Torneo—Absurdo", "Anónimo");
 /// - `key_of(letters(key_of(text)))`: a symbol the skeleton reads as a letter still counts as

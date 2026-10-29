@@ -129,7 +129,7 @@ pub async fn handler(
                     // Bounded like the periodic check: the client already has its 101, and a
                     // hung query here would keep the socket out of its loop (no frames, no
                     // shutdown, no revocation). Fails closed: an error or a timeout closes the
-                    // socket with `auth.try_again` and the client reconnects (round 3 of #54).
+                    // socket with `auth.try_again`, so a client can reconnect (round 3 of #54).
                     let second = tokio::time::timeout(
                         config.handshake_validate_timeout,
                         sessions::validate_by_id(&pool, info.id),
