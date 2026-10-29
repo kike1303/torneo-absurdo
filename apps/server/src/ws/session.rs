@@ -2,6 +2,8 @@
 //! subscriptions, the `self` channel, the session (revocation and periodic revalidation) and
 //! shutdown. Nothing here is logged at `info`; at `debug` only `ws.closed` with the close code.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -80,6 +82,15 @@ pub async fn run(
     // Dropping the socket closes the TCP connection.
 }
 
+/// The outcome of a periodic revalidation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Revalidation {
+    /// The session is gone or expired: close with `auth.unauthenticated`.
+    Invalid,
+    /// Valid, or the database could not say in time: keep the socket.
+    Keep,
+}
+
 /// Sends a server message; `false` if the socket is gone.
 async fn reply(socket: &mut WebSocket, message: &ServerMessage, grace: Duration) -> bool {
     match serde_json::to_string(message) {
@@ -107,6 +118,7 @@ async fn serve(
         config.revalidate_interval,
     );
     revalidate.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut check: Option<Pin<Box<dyn Future<Output = Revalidation> + Send>>> = None;
     let mut last_frame = Instant::now();
     let mut last_data = Instant::now();
     let mut pings =
@@ -120,21 +132,35 @@ async fn serve(
             biased;
             () = shutdown.cancelled() => return End::Close(CLOSE_SERVICE_RESTART, ""),
             () = closed.cancelled() => return policy(AuthErrorCode::Unauthenticated),
-            _ = revalidate.tick(), if auth.is_some() => {
+            // The periodic revalidation runs beside the socket, never inside an arm: while the
+            // query is out, the loop keeps reading frames and answering the shutdown and the
+            // revocation (deviation 17 of plan-b, review of #54).
+            _ = revalidate.tick(), if auth.is_some() && check.is_none() => {
                 if let Some(auth) = auth {
-                    // A database error, or no answer within the timeout, keeps the socket: the
-                    // NOTIFY is still the main path, and the socket must not freeze here
-                    // (deviation 17 of plan-b, review of #54).
-                    let check =
-                        sessions::validate_by_id(&auth.pool, auth.registration.session());
-                    if let Ok(Ok(None)) =
-                        tokio::time::timeout(config.revalidate_timeout, check).await
-                    {
-                        return policy(AuthErrorCode::Unauthenticated);
-                    }
-                    // A full interval from now: after a slow check the tick would be due at
-                    // once, and this biased `select!` would never read the socket again.
-                    revalidate.reset();
+                    let pool = auth.pool.clone();
+                    let id = auth.registration.session();
+                    let limit = config.revalidate_timeout;
+                    check = Some(Box::pin(async move {
+                        // A database error, or no answer within the timeout, keeps the socket:
+                        // the NOTIFY is still the main path.
+                        match tokio::time::timeout(limit, sessions::validate_by_id(&pool, id)).await {
+                            Ok(Ok(None)) => Revalidation::Invalid,
+                            _ => Revalidation::Keep,
+                        }
+                    }));
+                }
+            }
+            outcome = async {
+                match check.as_mut() {
+                    Some(pending) => pending.await,
+                    None => std::future::pending().await,
+                }
+            }, if check.is_some() => {
+                check = None;
+                // The next check a full interval after this one ended.
+                revalidate.reset();
+                if outcome == Revalidation::Invalid {
+                    return policy(AuthErrorCode::Unauthenticated);
                 }
             }
             Some(event) = self_rx.recv() => {
