@@ -251,6 +251,8 @@ pub async fn serve_listener(
         state.ws.registry(),
         background.clone(),
     ));
+    // Retention (008 RF-B16): a pass at startup, then daily.
+    tokio::spawn(crate::jobs::run(state.db.clone(), background.clone()));
     let _stop_background = background.drop_guard();
     let router = http::router(state);
     let connections = TaskTracker::new();

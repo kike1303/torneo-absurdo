@@ -10,6 +10,7 @@ pub mod config;
 pub mod db;
 pub mod healthcheck;
 pub mod http;
+pub mod jobs;
 pub mod ledger;
 pub mod net;
 pub mod profile;
