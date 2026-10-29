@@ -123,7 +123,8 @@ function endsAt(text: string, end: number): boolean {
  * array or object closes only inside a structure: the header name is quoted (JSON, `Map`) or an
  * unclosed `{` or `[` comes before it on its line (`util.inspect`), and the next character closes
  * an entry or a structure. Anything else goes to the end of the line, so a raw header line
- * (`Cookie: {}}; __Host-sid=…`) is never cut short (PR #51 review). The quotes of a whole string
+ * (`Cookie: {}}; __Host-sid=…`) is never cut short (PR #51 review). The text before the name is
+ * assumed to come from the formatter (`util.inspect`, JSON), not from the request. The quotes of a whole string
  * are kept. A string, an array or an object that never closes is redacted to the end of the
  * input: when in doubt, redact more.
  */
