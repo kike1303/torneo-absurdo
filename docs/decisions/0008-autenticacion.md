@@ -17,6 +17,10 @@ approvals:
     date: 2026-10-22
   - by: security-reviewer
     date: 2026-10-22
+  - by: security-reviewer
+    date: 2026-10-28
+  - by: owner
+    date: 2026-10-28
 supersedes: null
 linear: TA-5
 depends_on: ["0002", "0003", "0005", "0006", "0007"]
@@ -296,7 +300,7 @@ El owner aprobó el 2026-10-22 usar **SvelteKit 3** desde la feature 001. Kit 3 
 - **D5 no cambia.** `X-Client-Origin` y `X-Client-Fetch-Site` siguen siendo copia literal de los headers del navegador, y el middleware de axum sigue siendo la defensa de las mutaciones del API. `ADDRESS_HEADER=X-Forwarded-For` y `XFF_DEPTH=1` siguen existiendo en adapter-node 6 con el mismo comportamiento (lo verifiqué en su código).
 
 ## Nota (2026-10-28): reparto de tests por feature
-Ninguna decisión de D1 a D10 cambia, y ningún número fijado tampoco. Esta nota solo precisa **qué feature tiene que pasar cada test mínimo antes de mergear**. Donde "Tests mínimos" dice "bloquean el merge de la feature de auth", ahora vale este reparto. Cada test sigue bloqueando el merge de la feature que tiene el código que prueba, y está como criterio bloqueante en el issue de Linear de esa feature. El owner aceptó el reparto el 2026-10-28 desde la revisión del intent de la feature 008. El coordinador transmitió esa aceptación, y falta que el owner la confirme en este documento.
+Ninguna decisión de D1 a D10 cambia, y ningún número fijado tampoco. Esta nota solo precisa **qué feature tiene que pasar cada test mínimo antes de mergear**. Donde "Tests mínimos" dice "bloquean el merge de la feature de auth", ahora vale este reparto. Cada test sigue bloqueando el merge de la feature que tiene el código que prueba, y está como criterio bloqueante en el issue de Linear de esa feature. El owner aceptó el reparto el 2026-10-28 desde la revisión del intent de la feature 008. El owner confirmó la nota en chat el 2026-10-28.
 
 | Feature | Tests |
 |---|---|

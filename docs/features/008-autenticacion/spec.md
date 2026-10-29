@@ -13,6 +13,8 @@ approvals:
     date: 2026-10-28
   - by: security-reviewer
     date: 2026-10-28
+  - by: owner
+    date: 2026-10-28
 linear: TA-26
 depends_on: ["001"]
 created: 2026-10-28
@@ -526,3 +528,7 @@ Mobile-first a 375 px, con los tokens y las primitivas de ADR-0009 y sin colores
   - **Vinculación fallida con sesión:** vuelve a `/login` sin tocar la sesión vigente, y no hay fusión.
 - No hay oráculo útil: `auth.already_linked` y `auth.banned` solo los ve quien acaba de autenticarse como esa identidad en el proveedor. Un tercero puede armar `/login?error=auth.banned` y mostrarle a la víctima un mensaje de la lista cerrada, sin sesión ni cambio de estado. Es un engaño de bajo impacto, y lo acepto.
 - Nota para el plan-d, no bloquea: el canario de `?error=` también debe buscarse en los logs de `web` (A8), no solo en el HTML. Y un `error` que mande el proveedor (p. ej. `access_denied`, cuando el usuario cancela) se mapea a un código de la lista, sin copiar `error_description`.
+
+### owner
+
+- **APPROVE** (2026-10-28, en chat): aprueba la spec (`risk: high`), `B = 100`, la enmienda del callback y la nota de ADR-0008 sobre el reparto de tests. Sigue plan-a.
