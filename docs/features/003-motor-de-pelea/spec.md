@@ -57,6 +57,8 @@ Se entrega en dos fases, con un PR y un plan cada una:
   - `simulate(seed: &Seed, a: &CharacterSpec, b: &CharacterSpec, ruleset: &Ruleset) -> Result<FightLog, SpecError>`. Valida los dos personajes contra el ruleset y después simula; la simulación en sí no falla con ningún ruleset que pase el test de cotas de `Ruleset` (incluida la cota de eventos de RF21).
   - `Seed` es un newtype de `[u8; 32]` que solo se construye con `Seed::from_bytes([u8; 32])`. No implementa `Serialize`, `Display` ni `LowerHex`/`UpperHex`, no expone sus bytes, y su `Debug` imprime exactamente `Seed(<redacted>)`. El server conserva su propia copia de los bytes para el commit y la base de datos.
   - `Ruleset` solo se construye con `Ruleset::for_version(u16) -> Option<Ruleset>` (en v0, solo existe `1`). Sus campos son de solo lectura y son **todas** las constantes de la [tabla del ruleset](#modelo-de-simulación-ruleset-v1); ninguna constante de juego vive fuera de `Ruleset`.
+
+    > **Enmienda (006, TA-21).** Ver la [spec de 006](../006-ritmo-rapido/spec.md), RF5 y RF11. Dos familias de constantes viven fuera de `Ruleset` y **no** son constantes de juego, así que no violan esta regla: (1) el contrato del consumidor, `engine::TIMELINE_CONTRACT` (`crates/engine/src/contract.rs`), espejo de `TIMELINE_LIMITS` del renderer, que la simulación nunca lee y que no cambia ningún byte del log (lo usan el test de cotas, `assert_invariants` y `sim`); y (2) las definiciones de medida de `sim`, `DURATION_BAND_MS`, `BURST_GAP_MAX_MS` (900) y `PAUSE_GAP_MIN_MS` (2500), en `crates/sim/src/report.rs`. Toda entrada de la simulación, incluidos los cuatro campos `breather_*`, sigue siendo un campo de `Ruleset`.
   - `CharacterSpec` implementa `Serialize` y `Deserialize` con `deny_unknown_fields` (forma motor, ver [Esquema de personaje](#esquema-de-personaje)).
   - `SpecError` es un enum de códigos sin texto, por ejemplo `stat_out_of_range`, `budget_exceeded` o `event_limit` (este último es una guarda inalcanzable con un ruleset que pase el test de cotas: si se alcanzara `max_events`, `simulate` devuelve el error en lugar de truncar el log o entrar en pánico).
   - `canonical_json(&FightLog) -> Result<Vec<u8>, EncodeError>` y `canonical_spec_json(&CharacterSpec) -> Result<Vec<u8>, EncodeError>`. `EncodeError` es un código sin texto, y ninguna de las dos usa `unwrap_or_default()` ni descarta errores.
@@ -83,8 +85,12 @@ Se entrega en dos fases, con un PR y un plan cada una:
   3. Solo si es golpe o bloqueo, `roll(31)`: varianza.
   4. Solo si es golpe, `roll(1000)`: crítico.
   5. `roll(201)`: jitter del siguiente turno del atacante.
+  6. Solo si la acción no terminó en KO, no produjo knockdown y `since_breather >= breather_after_resolutions` (contando ya esta resolución), `roll(1000)`: respiro si el resultado es `< breather_chance_permille`.
+  7. Solo si hubo respiro en el paso 6, `roll(breather_span_ms + 1)` = `roll(801)`: duración del respiro.
 
-  No se consume nada más: la desesperación, el knockdown, los momentos y el resultado son deterministas a partir del estado.
+  No se consume nada más: la desesperación, el knockdown, los momentos y el resultado son deterministas a partir del estado. Los pasos 6 y 7 se consumen **después** de aplicar el daño, el knockdown, `low_hp`, los momentos y el KO.
+
+  > **Enmienda (006, TA-21).** Los pasos 6 y 7 son el respiro (RF2 y RF3 de la [spec de 006](../006-ritmo-rapido/spec.md)). Antes, la lista terminaba en el paso 5.
 - **RF8.** Simulación por **turnos con tiempo simulado** (en ms enteros), según el [modelo de simulación](#modelo-de-simulación-ruleset-v1):
   - **Quién actúa:** el luchador con menor `next_at`. En empate actúa el que no actuó último, y si ninguno ha actuado, el que ganó la iniciativa.
   - **Recuperación:** después de **cualquier** resolución (golpe, bloqueo o esquiva), `next_at_def = max(next_at_def, t_res + recovery_ms)`. Un knockdown la alarga (ver la tabla).
@@ -151,6 +157,8 @@ Se entrega en dos fases, con un PR y un plan cada una:
   - `time_up` en como mucho el 10 % de las peleas, y `draw` en menos del 1 %;
   - el lado `a` gana entre el 47 % y el 53 % de los espejos;
   - cada `MomentKind` aparece en al menos el 3 % de las peleas, para que ningún momento quede muerto para el narrador (ADR-0010).
+
+  > **Enmienda (006, TA-21).** La fracción en 45–90 s sube de 80 % a **90 %** (`in_band_min_permille: 900`), y `Criteria::RF17` suma los criterios de ritmo de RF12 de la [spec de 006](../006-ritmo-rapido/spec.md): separación media entre resoluciones de 1100 a 1300 ms (la banda viene del owner y cambiarla necesita el OK del product-owner), ≥ 250 ‰ de separaciones en ráfaga (≤ 900 ms), mediana de ≥ 2 pausas (≥ 2500 ms) por pelea, ≥ 900 ‰ de peleas con alguna pausa y separación mínima ≥ `TIMELINE_CONTRACT.strike_gap_ms`. El game-designer puede ajustar la ráfaga, la mediana de pausas y las peleas con pausa.
 
   El game-designer puede ajustar en la fase B la fracción del 80 %, el tope de `time_up`, la banda del sesgo y el 3 % por `MomentKind`, que son valores iniciales de esta spec. La banda de 45 000–90 000 ms viene del intent y de 002 y no se ajusta en esta fase, y subir el tope de `time_up` por encima del 10 % necesita además el OK del product-owner (preocupación 7). Todo ajuste queda en `Criteria::RF17` de `sim` y en esta spec.
 - **RF18.** WASM:
@@ -335,6 +343,15 @@ Cada fila es un campo de `Ruleset` con su valor v1. Los valores se afinan en la 
 - separación mínima entre impactos de 700 ms (invariante de RF2, no una medición);
 - 49,8 % de victorias del lado `a` en los espejos.
 
+> **Enmienda (006, TA-21).** Con el respiro, las cifras de arriba son históricas. `just sim` (ruleset v1 reescrito, mismos cruces, espejos y semilla) mide ahora (RF13 de la [spec de 006](../006-ritmo-rapido/spec.md)):
+> - win rate por personaje entre 48,9 y 51,1 % (cruces de 39,3 a 60,6 %);
+> - 98,6 % de las peleas en 45–90 s (p10/p50/p90 de `end.t` = 50,6/59,4/70,6 s);
+> - momentos en el 38,1 % (comeback 13,2, decisive_crit 11,5 y clutch_ko 23,1 %);
+> - 99,8 % de KO, 0,1 % de decisión, 0,1 % de `time_up` y 0,0 % de `draw`;
+> - 36/43/51 resoluciones por pelea (p10/p50/p90), con una separación media de 1226 ms y mínima de 700 ms;
+> - 28,5 % de separaciones en ráfaga y 6,2 % en pausa, con 1/3/4 pausas por pelea (p10/p50/p90) y el 98,9 % de las peleas con alguna pausa;
+> - 49,3 % de victorias del lado `a` en los espejos (49,40 / 50,26 / 50,14 % con tres semillas raíz).
+
 Antes de la fase B, estas cifras salían de la reimplementación aproximada en Python del game-designer (ver la Revisión).
 
 | Concepto (campos) | Regla v1 |
@@ -360,13 +377,20 @@ Antes de la fase B, estas cifras salían de la reimplementación aproximada en P
 | HP bajo (`low_hp_permille`) | La primera vez que `hp·1000/max_hp ≤ 250` con `hp > 0`, una vez por lado |
 | Momentos (`comeback_deficit_permille`, `clutch_permille`) | 250 y 60 (ver abajo) |
 | Tope de eventos (`max_events`) | 512 |
+| Respiro (`breather_after_resolutions`, `breather_chance_permille`, `breather_min_ms`, `breather_span_ms`) | Tras cada acción sin KO: si hubo knockdown, `since_breather = 0` y no se sortea nada; si no, `since_breather += 1`, y con `since_breather ≥ 9`, `roll(1000) < 200` abre un respiro de `d = 1800 + roll(801)` ms (1800–2600): `next_at_a += d`, `next_at_b += d` (con `saturating_add`) y `since_breather = 0`. Desplaza los dos relojes por igual, así que no cambia quién actúa; no emite eventos. Derivados: `strike_gap_min() = min(recovery_ms, interval_min) + windup_strike_ms` = 700 ms y `breather_gap_min() = breather_min_ms + strike_gap_min()` = 2500 ms. |
 
-Un test unitario comprueba sobre `Ruleset::v1()` las cotas que el ritmo de RF2 necesita:
-- `end_ms ≥ 3500`;
-- `intro_ms + windup_strike_ms ≥ 2000`;
-- `recovery_ms + windup_strike_ms ≥ 600`;
-- `interval_min + windup_strike_ms ≥ 600`;
-- `800 ≤ knockdown_ms ≤ 3000`.
+> **Enmienda (006, TA-21).** Fila "Respiro" nueva (RF1 y RF2 de la [spec de 006](../006-ritmo-rapido/spec.md)). Ningún otro valor de la tabla cambia.
+
+Un test unitario (`v1_respects_the_bounds`) comprueba sobre `Ruleset::v1()` las cotas que el ritmo de RF2 necesita, contra `TIMELINE_CONTRACT` y sin literales:
+- `end_ms ≥ win_gap_ms + win_pose_ms` (3500);
+- `intro_ms + windup_strike_ms ≥ intro_gap_ms` (2000);
+- `strike_gap_min() ≥ strike_gap_ms` (600), que reemplaza a `recovery_ms + windup_strike_ms ≥ 600` y a `interval_min + windup_strike_ms ≥ 600`;
+- `knockdown_min_ms ≤ knockdown_ms ≤ knockdown_max_ms` (800–3000);
+- `breather_after_resolutions ≥ 1`, `breather_chance_permille ≤ 1000` y `breather_span_ms + 1` es una cota válida de `roll`;
+- `time_limit_ms + interval_base_ms + jitter_ms + breather_min_ms + breather_span_ms + knockdown_ms + recovery_ms` cabe en `u32`;
+- `max_events_bound()` sigue en 418 (el respiro solo resta acciones).
+
+> **Enmienda (006, TA-21).** Lista de cotas según RF6 de la [spec de 006](../006-ritmo-rapido/spec.md). El umbral de pausa (2500) no se comprueba aquí: es una definición de `sim`, que lo ata a `breather_gap_min()` con su propio test.
 
 **Momentos.** Se emiten como `moment`, cada `kind` como mucho una vez por lado y por pelea:
 - **`comeback`**: un lado que en algún momento estuvo por debajo del rival en ≥ 250 ‰ de HP relativo (`hp·1000/max_hp`) pasa a estar estrictamente por encima. Se emite al resolver el ataque que lo provoca, aunque ese lado no termine ganando.
@@ -437,7 +461,9 @@ Seed (32 B, server or sim) ──▶ engine::simulate(seed, a, b, Ruleset::for_v
    - knockdown emitido por el motor, no derivado en el adaptador, porque cambia el tiempo de la pelea: nadie golpea durante la caída, y eso solo lo puede garantizar la simulación;
    - ≥ 1,5 s de KO a victoria y ≥ 2 s de pose, gracias a `end_ms = 4000`.
 
-   La densidad la mide `sim`: con el contenido real hay de 36 a 51 resoluciones por pelea (p10 a p90, p50 43), así que se cumplen los ≥ 30 golpes, y la separación media entre resoluciones es de ~1096 ms, por debajo de los ~1,9 s que pidió 002. No es criterio de la fase B: se ajusta con `interval_*`. La separación que fije el owner en RF-B9 de 002 entra como un ajuste de valores. El cue `taunt` (personalidad) queda como extensión futura: entraría con un evento nuevo, una `ruleset_version` nueva y `timeline_version` 2 o 3, a pedido de game-designer.
+   La densidad la mide `sim`: con el contenido real hay de 36 a 51 resoluciones por pelea (p10 a p90, p50 43), así que se cumplen los ≥ 30 golpes, y la separación media entre resoluciones es de ~1096 ms, por debajo de los ~1,9 s que pidió 002. No es criterio de la fase B: se ajusta con `interval_*`.
+
+   > **Enmienda (006, TA-21).** El owner bajó la referencia a ~1,2 s en RF-B9 de 002, y la media pasó a ser criterio de `sim` (1100–1300 ms, medida en 1226 ms), con el respiro como mecanismo de las pausas (ver la [spec de 006](../006-ritmo-rapido/spec.md)). La separación que fije el owner en RF-B9 de 002 entra como un ajuste de valores. El cue `taunt` (personalidad) queda como extensión futura: entraría con un evento nuevo, una `ruleset_version` nueva y `timeline_version` 3, a pedido de game-designer.
 9. **Empates y apuestas.** Los produce un `time_up` con HP relativo idéntico, y deben ser menos del 1 % (RF17). En un empate lo natural es un reembolso, y, como todo movimiento de monedas, se hace con asientos del ledger (ADR-0005), nunca tocando saldos. Lo decide la spec de apuestas.
 10. **Debilidades en v0 y balance.** Con solo 2–4 personajes, una debilidad (×5/4) puede inclinar mucho un cruce. El criterio de 40–60 % es global, y una matriz asimétrica es aceptable e interesante para el parimutuel. `sim` avisa, sin fallar, de los cruces fuera de 30–70 %.
 11. **El balance dentro de `just check`.** Un cambio de contenido que desbalancee rompe el check. Es intencional (lo dice el skill `write-character`).

@@ -1,7 +1,8 @@
 <script lang="ts">
   // Test arena of 002 (RF-A16), behind the /dev/** guard. It only composes: every visible text
   // lives in lib/components/fight/ (ADR-0009 D5). Phase B adds the local fighters (only in
-  // `vite dev`) and `?pace=` (RF-B7, RF-B9); phase C, `?log=` to play an engine log (RF-C3).
+  // `vite dev`) and `?pace=` (RF-B7, RF-B9); phase C, `?log=` to play an engine log (RF-C3). 006
+  // clamps `?pace=` to the smallest valid factor of the timeline (RF16) and reports it (RF17).
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import type { FrameStats, Side } from '@torneo/renderer';
@@ -12,7 +13,14 @@
   import { ARENA_FIGHTERS, type ArenaFighterId } from '#lib/features/arena/fighters.js';
   import { createLocalAssets, loadLocalFighterIds } from '#lib/features/arena/local-fighters.js';
   import { loadEngineLogTimeline, parseEngineLog } from '#lib/features/fight/engine-logs.js';
-  import { meanStrikeGapMs, parsePace, retimeTimeline } from '#lib/features/arena/retime.js';
+  import {
+    meanStrikeGapMs,
+    parsePace,
+    resolvePace,
+    retimeTimeline,
+    type PaceResolution,
+    type TimelineCheck,
+  } from '#lib/features/arena/retime.js';
   import { m } from '#lib/paraglide/messages.js';
 
   const STATS_REFRESH_MS = 500;
@@ -34,9 +42,17 @@
   let canvasWidth = $state(0);
   let meanGap = $state<number | null>(null);
   let dpr = $state(1);
+  let paceInfo = $state<PaceResolution | null>(null);
   const start = initialT();
   const pace = parsePace(page.url.searchParams.get('pace'));
-  const retime = pace === null ? undefined : (t: Timeline) => retimeTimeline(t, pace);
+  const retime =
+    pace === null
+      ? undefined
+      : (t: Timeline, isValid: TimelineCheck) => {
+          const resolved = resolvePace(pace, t, isValid);
+          paceInfo = resolved;
+          return resolved.min === null ? t : retimeTimeline(t, resolved.effective);
+        };
   const log = parseEngineLog(page.url.searchParams.get('log'));
   const source =
     log === null
@@ -98,6 +114,7 @@
         fighters: [fighters.a, fighters.b],
         mean_strike_gap_ms: meanGap,
       }}
+      pace={paceInfo ?? undefined}
     />
   {/if}
 </div>

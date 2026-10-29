@@ -168,6 +168,24 @@ fn json_is_valid_and_reproducible() {
     ] {
         assert!(first["report"].get(field).is_some(), "{field}");
     }
+    // 006 RF11: the pacing metrics.
+    for field in [
+        "mean_gap_ms",
+        "min_gap_ms",
+        "burst_gaps",
+        "pause_gaps",
+        "pauses_p10",
+        "pauses_p50",
+        "pauses_p90",
+        "fights_with_pause",
+    ] {
+        assert!(
+            first["report"]["density"]
+                .get(field)
+                .is_some_and(Value::is_u64),
+            "density.{field}"
+        );
+    }
     assert!(first["failures"].is_array() && first["warnings"].is_array());
     assert_eq!(
         first["report"]["seed_hex"],

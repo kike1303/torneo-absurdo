@@ -69,6 +69,14 @@ ruleset! {
     /// `damage * 1000 >= knockdown_min_permille * max_hp` knocks it down for `knockdown_ms`.
     knockdown_min_permille: u32,
     knockdown_ms: u16,
+    /// Breather (006 RF1, RF2): resolutions without KO nor knockdown, since the start or the
+    /// last breather or knockdown, before a breather can be rolled.
+    breather_after_resolutions: u32,
+    /// A breather starts when `roll(1000) < breather_chance_permille` (step 6 of RF7).
+    breather_chance_permille: u32,
+    /// Both clocks move by `breather_min_ms + roll(breather_span_ms + 1)` (step 7 of RF7).
+    breather_min_ms: u32,
+    breather_span_ms: u32,
     /// Action weights: strike `w_strike_base + aggression`, each heavy
     /// `w_heavy_base + aggression`, each special `w_special_base + w_special_per_show *
     /// showmanship`, times `w_special_desperation_mul` when desperate.
@@ -155,6 +163,10 @@ impl Ruleset {
             recovery_ms: 300,
             knockdown_min_permille: 100,
             knockdown_ms: 1500,
+            breather_after_resolutions: 9,
+            breather_chance_permille: 200,
+            breather_min_ms: 1800,
+            breather_span_ms: 800,
             w_strike_base: 100,
             w_heavy_base: 50,
             w_special_base: 30,
@@ -202,6 +214,26 @@ impl Ruleset {
         self.interval_base_ms - self.interval_per_speed_ms * self.stat_max as u32
     }
 
+    /// Shortest structural separation between two consecutive resolutions (006 RF1): the
+    /// defender acts after at least `recovery_ms`, the attacker repeats after at least
+    /// `interval_min`, and either one resolves a strike windup later.
+    #[must_use]
+    pub const fn strike_gap_min(&self) -> u32 {
+        let wait = if self.recovery_ms < self.interval_min() {
+            self.recovery_ms
+        } else {
+            self.interval_min()
+        };
+        wait + self.windup_strike_ms
+    }
+
+    /// Shortest separation between the resolution that opens a breather and the next one
+    /// (006 RF1, RF4 b).
+    #[must_use]
+    pub const fn breather_gap_min(&self) -> u32 {
+        self.breather_min_ms + self.strike_gap_min()
+    }
+
     /// Upper bound of the events of one fight (decision 2 of plan-a): every side makes at most
     /// `A` actions, each with at most 3 events (attack, resolution, knockdown), plus the unique
     /// ones (intro, 2 low_hp, 2 comeback, decisive_crit, clutch_ko, ko, time_up, end).
@@ -222,6 +254,7 @@ pub(crate) const EVENTS_TAIL_MAX: u32 = 9;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TIMELINE_CONTRACT;
 
     #[test]
     fn only_version_one_exists() {
@@ -235,12 +268,19 @@ mod tests {
     #[test]
     fn v1_respects_the_bounds() {
         let r = Ruleset::v1();
-        // Pacing (spec, "Modelo de simulación").
-        assert!(r.end_ms() >= 3500);
-        assert!(r.intro_ms() + r.windup_strike_ms() >= 2000);
-        assert!(r.recovery_ms() + r.windup_strike_ms() >= 600);
-        assert!(r.interval_min() + r.windup_strike_ms() >= 600);
-        assert!((800..=3000).contains(&r.knockdown_ms()));
+        // Pacing: the `Timeline` contract (spec 003 "Modelo de simulación", 006 RF6).
+        let c = TIMELINE_CONTRACT;
+        assert!(r.end_ms() >= c.win_gap_ms + c.win_pose_ms);
+        assert!(r.intro_ms() + r.windup_strike_ms() >= c.intro_gap_ms);
+        assert!((c.knockdown_min_ms..=c.knockdown_max_ms).contains(&u32::from(r.knockdown_ms())));
+        assert!(r.strike_gap_min() >= c.strike_gap_ms);
+
+        // Breather (006 RF1, RF6).
+        assert!(r.breather_after_resolutions() >= 1);
+        assert!(r.breather_chance_permille() <= 1000);
+        assert!(r.breather_span_ms().checked_add(1).is_some());
+        assert_eq!(r.strike_gap_min(), 700);
+        assert_eq!(r.breather_gap_min(), 2500);
 
         // Events (decision 2): A = 68 actions per side, 418 events, below max_events.
         assert!(r.interval_base_ms() > r.interval_per_speed_ms() * u32::from(r.stat_max()));
@@ -288,11 +328,16 @@ mod tests {
             + u32::from(r.personality_max());
         assert!(dodge + block <= 1000);
         assert!(r.time_limit_ms().checked_add(r.end_ms()).is_some());
-        let latest = r.time_limit_ms() + r.interval_base_ms() + r.jitter_ms();
-        assert!(
-            latest
-                .checked_add(u32::from(r.knockdown_ms()) + r.recovery_ms())
-                .is_some()
-        );
+        let latest = [
+            r.interval_base_ms(),
+            r.jitter_ms(),
+            r.breather_min_ms(),
+            r.breather_span_ms(),
+            u32::from(r.knockdown_ms()),
+            r.recovery_ms(),
+        ]
+        .into_iter()
+        .try_fold(r.time_limit_ms(), u32::checked_add);
+        assert!(latest.is_some());
     }
 }

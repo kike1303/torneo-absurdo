@@ -3,6 +3,7 @@
   // PR. Only `import type` from the renderer: this component is in the catalog (ADR-0009 D4).
   import type { FrameStats } from '@torneo/renderer';
   import { Button } from '#lib/components/ui/button/index.js';
+  import type { PaceResolution } from '#lib/features/arena/retime.js';
   import { copyText } from './copy-text.js';
   import { formatDecimal, formatInteger } from '#lib/i18n/format.js';
   import { m } from '#lib/paraglide/messages.js';
@@ -18,9 +19,11 @@
       /** Mean gap between strikes of the script played (`?pace=`, 002 RF-B9); not shown. */
       mean_strike_gap_ms?: number | null;
     };
+    /** How `?pace=` resolved (006 RF16); without it there is no pace row. */
+    pace?: PaceResolution;
   }
 
-  let { stats, context }: Props = $props();
+  let { stats, context, pace }: Props = $props();
   let copied = $state(false);
   /** The JSON shown for a manual copy when the Clipboard API is missing or fails (TA-20). */
   let manual = $state<string | null>(null);
@@ -41,7 +44,11 @@
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   async function copy(): Promise<void> {
-    const json = JSON.stringify({ ...stats, ...context }, null, 2);
+    const paceKeys =
+      pace === undefined
+        ? {}
+        : { pace_requested: pace.requested, pace_effective: pace.effective, pace_min: pace.min };
+    const json = JSON.stringify({ ...stats, ...context, ...paceKeys }, null, 2);
     clearTimeout(timer);
     copied = false;
     // `navigator.clipboard` is undefined outside a secure context (a phone on the LAN URL).
@@ -74,6 +81,23 @@
         <dd class="font-mono tabular-nums" data-testid={`arena-stats-${row.key}`}>{row.value}</dd>
       </div>
     {/each}
+    {#if pace !== undefined}
+      <div class="flex flex-col">
+        <dt class="text-muted-foreground">{m.arena_stats_pace()}</dt>
+        <dd
+          class="font-mono tabular-nums"
+          data-testid="arena-stats-pace"
+          data-clamped={pace.clamped ? 'true' : 'false'}
+        >
+          {formatDecimal(pace.effective, locale, 2)}
+        </dd>
+        {#if pace.clamped}
+          <dd class="text-xs text-muted-foreground" data-testid="arena-stats-pace-clamped">
+            {m.arena_stats_pace_clamped({ requested: formatDecimal(pace.requested, locale, 2) })}
+          </dd>
+        {/if}
+      </div>
+    {/if}
   </dl>
   <div class="flex items-center gap-3">
     <Button variant="outline" onclick={copy} data-testid="arena-copy-stats"

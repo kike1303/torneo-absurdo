@@ -6,7 +6,7 @@
 //! side-a bias (decision 8). No `HashMap`: every collection is a `Vec` in roster order.
 use std::fmt::Write as _;
 
-use engine::{EndReason, FightEvent, FightLog, MomentKind, Ruleset, Side};
+use engine::{EndReason, FightEvent, FightLog, MomentKind, Ruleset, Side, TIMELINE_CONTRACT};
 use serde::Serialize;
 
 use crate::{Plan, SimError, args::seed_hex};
@@ -14,6 +14,15 @@ use crate::{Plan, SimError, args::seed_hex};
 /// `end.t` band of RF17. It comes from the intent and from 002, so it is not one of the
 /// thresholds the game-designer may adjust (it is not in [`Criteria`]).
 pub const DURATION_BAND_MS: (u32, u32) = (45_000, 90_000);
+
+/// A separation between consecutive resolutions up to this is a burst (006 RF11). A definition
+/// of measure from 002 ("Datos para 003") and the owner, like [`DURATION_BAND_MS`]: not a game
+/// constant and not adjusted by the game-designer.
+pub const BURST_GAP_MAX_MS: u32 = 900;
+
+/// A separation between consecutive resolutions from this on is a pause (006 RF11). Same rule
+/// as [`BURST_GAP_MAX_MS`]; a test ties it to `Ruleset::breather_gap_min()`.
+pub const PAUSE_GAP_MIN_MS: u32 = 2500;
 
 const MOMENT_KINDS: [MomentKind; 3] = [
     MomentKind::Comeback,
@@ -47,6 +56,16 @@ pub struct Criteria {
     /// A matchup outside this band is a warning, never a failure.
     pub matchup_warn_min_permille: u32,
     pub matchup_warn_max_permille: u32,
+    /// Mean separation between resolutions, inclusive (006 RF12; moving it needs the
+    /// product-owner's OK).
+    pub mean_gap_min_ms: u32,
+    pub mean_gap_max_ms: u32,
+    /// Separations of at most [`BURST_GAP_MAX_MS`], in ‰ of all separations.
+    pub burst_min_permille: u32,
+    /// Median of the pauses per fight.
+    pub pauses_p50_min: u32,
+    /// Fights with at least one pause.
+    pub paused_fights_min_permille: u32,
 }
 
 impl Criteria {
@@ -54,7 +73,7 @@ impl Criteria {
         win_rate_min_permille: 400,
         win_rate_max_permille: 600,
         any_moment_min_permille: 150,
-        in_band_min_permille: 800,
+        in_band_min_permille: 900,
         time_up_max_permille: 100,
         draw_below_permille: 10,
         mirror_side_a_min_permille: 470,
@@ -63,6 +82,11 @@ impl Criteria {
         moment_kind_fails: true,
         matchup_warn_min_permille: 300,
         matchup_warn_max_permille: 700,
+        mean_gap_min_ms: 1100,
+        mean_gap_max_ms: 1300,
+        burst_min_permille: 250,
+        pauses_p50_min: 2,
+        paused_fights_min_permille: 900,
     };
 }
 
@@ -70,13 +94,46 @@ impl Criteria {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "code", rename_all = "snake_case")]
 pub enum Failure {
-    WinRate { slug: String, permille: u32 },
-    AnyMoment { permille: u32 },
-    DurationInBand { permille: u32 },
-    TimeUp { permille: u32 },
-    Draw { permille: u32 },
-    MirrorSideA { permille: u32 },
-    MomentKind { kind: MomentKind, permille: u32 },
+    WinRate {
+        slug: String,
+        permille: u32,
+    },
+    AnyMoment {
+        permille: u32,
+    },
+    DurationInBand {
+        permille: u32,
+    },
+    TimeUp {
+        permille: u32,
+    },
+    Draw {
+        permille: u32,
+    },
+    MirrorSideA {
+        permille: u32,
+    },
+    MomentKind {
+        kind: MomentKind,
+        permille: u32,
+    },
+    /// The mean separation (integer division; 0 without separations).
+    MeanGap {
+        ms: u64,
+    },
+    BurstShare {
+        permille: u32,
+    },
+    PausesMedian {
+        count: u32,
+    },
+    PausedFights {
+        permille: u32,
+    },
+    /// The shortest separation, below `TIMELINE_CONTRACT.strike_gap_ms`.
+    StrikeGap {
+        ms: u32,
+    },
 }
 
 /// Printed, never fails `--check` nor the balance test.
@@ -157,8 +214,8 @@ impl Moments {
     }
 }
 
-/// Resolutions (`hit`, `block`, `dodge`) per fight and the gap between consecutive ones, for
-/// the pacing of 002 (informative).
+/// Resolutions (`hit`, `block`, `dodge`) per fight and the separations between consecutive
+/// ones, the pacing of 002 and 006 (RF11). A pause counts by its separation, whatever its cause.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Density {
     pub resolutions_p10: u32,
@@ -166,8 +223,20 @@ pub struct Density {
     pub resolutions_p90: u32,
     pub gap_total_ms: u64,
     pub gaps: u64,
-    /// `gap_total_ms / gaps` (0 without gaps).
+    /// `gap_total_ms / gaps` over every separation, pauses included (0 without gaps).
     pub mean_gap_ms: u64,
+    /// The shortest separation (0 without gaps).
+    pub min_gap_ms: u32,
+    /// Separations of at most [`BURST_GAP_MAX_MS`].
+    pub burst_gaps: u64,
+    /// Separations of at least [`PAUSE_GAP_MIN_MS`].
+    pub pause_gaps: u64,
+    /// Pauses per fight, nearest-rank percentiles.
+    pub pauses_p10: u32,
+    pub pauses_p50: u32,
+    pub pauses_p90: u32,
+    /// Fights with at least one pause.
+    pub fights_with_pause: u32,
 }
 
 /// Counts over a schedule. Deterministic: no clock, no maps.
@@ -278,7 +347,40 @@ impl Report {
                 out.push(Failure::MomentKind { kind, permille });
             }
         }
+        self.pacing_failures(criteria, &mut out);
         out
+    }
+
+    /// 006 RF12. Without separations the mean fails and the shortest one is not evaluated.
+    fn pacing_failures(&self, criteria: &Criteria, out: &mut Vec<Failure>) {
+        let d = self.density;
+        let (total, gaps) = (d.gap_total_ms, d.gaps);
+        if gaps == 0
+            || total < u64::from(criteria.mean_gap_min_ms) * gaps
+            || total > u64::from(criteria.mean_gap_max_ms) * gaps
+        {
+            out.push(Failure::MeanGap { ms: d.mean_gap_ms });
+        }
+        if !at_least(d.burst_gaps, gaps, criteria.burst_min_permille) {
+            out.push(Failure::BurstShare {
+                permille: permille(d.burst_gaps, gaps),
+            });
+        }
+        if d.pauses_p50 < criteria.pauses_p50_min {
+            out.push(Failure::PausesMedian {
+                count: d.pauses_p50,
+            });
+        }
+        let n = u64::from(self.cross_fights);
+        let paused = u64::from(d.fights_with_pause);
+        if !at_least(paused, n, criteria.paused_fights_min_permille) {
+            out.push(Failure::PausedFights {
+                permille: permille(paused, n),
+            });
+        }
+        if gaps > 0 && d.min_gap_ms < TIMELINE_CONTRACT.strike_gap_ms {
+            out.push(Failure::StrikeGap { ms: d.min_gap_ms });
+        }
     }
 
     /// What to look at without failing: matchups outside the warning band and, if
@@ -420,6 +522,20 @@ impl Report {
             "density: resolutions per fight p10 {}, p50 {}, p90 {}; mean gap {} ms",
             de.resolutions_p10, de.resolutions_p50, de.resolutions_p90, de.mean_gap_ms
         );
+        let _ = writeln!(
+            s,
+            "pacing: min gap {} ms; burst (<= {} ms) {} of gaps; pauses (>= {} ms) {} of gaps, \
+             per fight p10 {}, p50 {}, p90 {}; fights with a pause {}",
+            de.min_gap_ms,
+            BURST_GAP_MAX_MS,
+            pct(permille(de.burst_gaps, de.gaps)),
+            PAUSE_GAP_MIN_MS,
+            pct(permille(de.pause_gaps, de.gaps)),
+            de.pauses_p10,
+            de.pauses_p50,
+            de.pauses_p90,
+            share(de.fights_with_pause)
+        );
         let warnings = self.warnings(criteria);
         if !warnings.is_empty() {
             let _ = writeln!(s, "\nwarnings:");
@@ -506,6 +622,27 @@ fn describe_failure(f: &Failure, c: &Criteria) -> String {
             pct(*permille),
             pct(c.moment_kind_min_permille)
         ),
+        Failure::MeanGap { ms } => format!(
+            "mean_gap: {ms} ms (must be {}..={} ms)",
+            c.mean_gap_min_ms, c.mean_gap_max_ms
+        ),
+        Failure::BurstShare { permille } => format!(
+            "burst_share: {} (must be >= {})",
+            pct(*permille),
+            pct(c.burst_min_permille)
+        ),
+        Failure::PausesMedian { count } => {
+            format!("pauses_median: {count} (must be >= {})", c.pauses_p50_min)
+        }
+        Failure::PausedFights { permille } => format!(
+            "paused_fights: {} (must be >= {})",
+            pct(*permille),
+            pct(c.paused_fights_min_permille)
+        ),
+        Failure::StrikeGap { ms } => format!(
+            "strike_gap: {ms} ms (must be >= {} ms)",
+            TIMELINE_CONTRACT.strike_gap_ms
+        ),
     }
 }
 
@@ -552,6 +689,9 @@ struct Facts {
     resolutions: u32,
     gap_total_ms: u64,
     gaps: u64,
+    min_gap_ms: Option<u32>,
+    burst_gaps: u64,
+    pause_gaps: u64,
     /// The winner was at some point at least `deficit` ‰ of relative hp below the loser.
     winner_was_behind: bool,
 }
@@ -577,6 +717,9 @@ fn facts(log: &FightLog, deficit_permille: u32) -> Result<Facts, SimError> {
         resolutions: 0,
         gap_total_ms: 0,
         gaps: 0,
+        min_gap_ms: None,
+        burst_gaps: 0,
+        pause_gaps: 0,
         winner_was_behind: false,
     };
     let mut last_resolution: Option<u32> = None;
@@ -588,8 +731,12 @@ fn facts(log: &FightLog, deficit_permille: u32) -> Result<Facts, SimError> {
         let mut resolved = |t: u32| {
             f.resolutions += 1;
             if let Some(last) = last_resolution {
-                f.gap_total_ms += u64::from(t.saturating_sub(last));
+                let gap = t.saturating_sub(last);
+                f.gap_total_ms += u64::from(gap);
                 f.gaps += 1;
+                f.min_gap_ms = Some(f.min_gap_ms.map_or(gap, |m| m.min(gap)));
+                f.burst_gaps += u64::from(gap <= BURST_GAP_MAX_MS);
+                f.pause_gaps += u64::from(gap >= PAUSE_GAP_MIN_MS);
             }
             last_resolution = Some(t);
         };
@@ -660,6 +807,12 @@ pub(crate) struct Tally {
     resolutions: Vec<u32>,
     gap_total_ms: u64,
     gaps: u64,
+    min_gap_ms: Option<u32>,
+    burst_gaps: u64,
+    pause_gaps: u64,
+    /// Pauses per cross fight (sorted in `finish`).
+    pauses: Vec<u32>,
+    fights_with_pause: u32,
 }
 
 impl Tally {
@@ -718,6 +871,11 @@ impl Tally {
             resolutions: Vec::new(),
             gap_total_ms: 0,
             gaps: 0,
+            min_gap_ms: None,
+            burst_gaps: 0,
+            pause_gaps: 0,
+            pauses: Vec::new(),
+            fights_with_pause: 0,
         }
     }
 
@@ -767,6 +925,15 @@ impl Tally {
         self.resolutions.push(f.resolutions);
         self.gap_total_ms += f.gap_total_ms;
         self.gaps += f.gaps;
+        self.min_gap_ms = match (self.min_gap_ms, f.min_gap_ms) {
+            (Some(x), Some(y)) => Some(x.min(y)),
+            (x, y) => x.or(y),
+        };
+        self.burst_gaps += f.burst_gaps;
+        self.pause_gaps += f.pause_gaps;
+        self.pauses
+            .push(u32::try_from(f.pause_gaps).unwrap_or(u32::MAX));
+        self.fights_with_pause += u32::from(f.pause_gaps > 0);
         Ok(())
     }
 
@@ -785,6 +952,7 @@ impl Tally {
     pub(crate) fn finish(mut self, plan: &Plan, seed: [u8; 32]) -> Report {
         self.durations.sort_unstable();
         self.resolutions.sort_unstable();
+        self.pauses.sort_unstable();
         let cross_fights = u32::try_from(self.durations.len()).unwrap_or(u32::MAX);
         Report {
             seed_hex: seed_hex(&seed),
@@ -816,6 +984,13 @@ impl Tally {
                 gap_total_ms: self.gap_total_ms,
                 gaps: self.gaps,
                 mean_gap_ms: self.gap_total_ms.checked_div(self.gaps).unwrap_or(0),
+                min_gap_ms: self.min_gap_ms.unwrap_or(0),
+                burst_gaps: self.burst_gaps,
+                pause_gaps: self.pause_gaps,
+                pauses_p10: nearest_rank(&self.pauses, 10),
+                pauses_p50: nearest_rank(&self.pauses, 50),
+                pauses_p90: nearest_rank(&self.pauses, 90),
+                fights_with_pause: self.fights_with_pause,
             },
         }
     }

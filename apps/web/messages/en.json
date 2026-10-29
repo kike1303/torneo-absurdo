@@ -88,5 +88,7 @@
   "arena_stats_p95": "p95 (ms)",
   "arena_stats_p99": "p99 (ms)",
   "arena_stats_over_33": "Frames over 33 ms",
-  "arena_stats_title": "Frame statistics"
+  "arena_stats_title": "Frame statistics",
+  "arena_stats_pace": "Pace (factor)",
+  "arena_stats_pace_clamped": "clamped from {requested}"
 }

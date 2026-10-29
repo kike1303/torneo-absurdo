@@ -3,7 +3,9 @@
 //! - (a) fixed `(seed, a, b) -> log` vectors against `golden/log-*.json` (also the fixtures of
 //!   002's adapter, decision 6 of plan-a);
 //! - (b) an FNV-1a 64 digest of the canonical JSON of 1000 fights against `golden/digest-1000.txt`;
-//! - (c) `canonical_spec_json` of every fixture against `golden/spec-*.json`, and its round trip.
+//! - (c) `canonical_spec_json` of every fixture against `golden/spec-*.json`, and its round trip;
+//! - (d) the canonical JSON of `TIMELINE_CONTRACT` against `golden/timeline-contract.json`, which a
+//!   Vitest of `apps/web` compares with the renderer's `TIMELINE_LIMITS` (006 RF5).
 //!
 //! Every golden file is exactly the canonical bytes plus a final `\n`. Regenerate them with
 //! `UPDATE_GOLDEN=1 cargo test -p engine --test golden`, natively only (in WASI the environment
@@ -11,11 +13,12 @@
 mod common;
 
 use common::{
-    FIXTURES, assert_invariants, assert_only_codes, derive_seed, fixture, fixtures, hex, v1,
+    FIXTURES, assert_invariants, assert_only_codes, derive_seed, fixture, fixtures, hex,
+    resolution_times, v1,
 };
 use engine::{
-    CharacterSpec, EndReason, FightEvent, FightLog, MomentKind, Seed, Side, canonical_json,
-    canonical_spec_json, simulate,
+    CharacterSpec, EndReason, FightEvent, FightLog, MomentKind, Seed, Side, TIMELINE_CONTRACT,
+    canonical_json, canonical_spec_json, simulate,
 };
 
 type Covers = fn(&FightLog) -> bool;
@@ -94,6 +97,15 @@ fn draw(log: &FightLog) -> bool {
     log.outcome() == Some((None, EndReason::Draw))
 }
 
+/// Separations between consecutive resolutions of at least `breather_gap_min()` (006 RF9).
+fn pauses(log: &FightLog) -> usize {
+    let gap = v1().breather_gap_min();
+    resolution_times(log)
+        .windows(2)
+        .filter(|w| matches!(w, [x, y] if y - x >= gap))
+        .count()
+}
+
 /// What each vector must show; the seeds come from `search_golden_seeds`.
 const TARGETS: [(&str, Covers); 7] = [
     ("log-ko-decisive-crit.json", ko_decisive_crit),
@@ -105,37 +117,39 @@ const TARGETS: [(&str, Covers); 7] = [
     ("log-draw.json", draw),
 ];
 
-/// Seeds chosen with `search_golden_seeds`: varied pairs, and no vector is another one with the
-/// sides swapped (same seed, mirrored fight). The draw is a turtle mirror.
+/// Seeds chosen with `search_golden_seeds`: the lowest seed of each target with varied pairs, and
+/// no vector is another one with the sides swapped (same seed, mirrored fight). The draw is a
+/// turtle mirror. Every KO has at least 2 pauses; `log-ko-clutch.json` has the most (5), the
+/// one the owner checks in the arena (006 RF9, RF20).
 const VECTORS: [Vector; 7] = [
     Vector {
         file: "log-ko-decisive-crit.json",
-        a: "striker",
-        b: "trickster",
+        a: "trickster",
+        b: "tank",
         seed: 1,
         expected: include_bytes!("golden/log-ko-decisive-crit.json"),
         covers: ko_decisive_crit,
     },
     Vector {
         file: "log-ko-knockdown.json",
-        a: "trickster",
-        b: "tank",
+        a: "striker",
+        b: "trickster",
         seed: 0,
         expected: include_bytes!("golden/log-ko-knockdown.json"),
         covers: ko_knockdown,
     },
     Vector {
         file: "log-ko-comeback.json",
-        a: "striker",
-        b: "tank",
-        seed: 4,
+        a: "trickster",
+        b: "trickster",
+        seed: 3,
         expected: include_bytes!("golden/log-ko-comeback.json"),
         covers: ko_comeback,
     },
     Vector {
         file: "log-ko-clutch.json",
-        a: "trickster",
-        b: "trickster",
+        a: "striker",
+        b: "tank",
         seed: 1,
         expected: include_bytes!("golden/log-ko-clutch.json"),
         covers: ko_clutch,
@@ -150,9 +164,9 @@ const VECTORS: [Vector; 7] = [
     },
     Vector {
         file: "log-decision-b.json",
-        a: "turtle",
+        a: "tank",
         b: "tank",
-        seed: 1,
+        seed: 0,
         expected: include_bytes!("golden/log-decision-b.json"),
         covers: decision_b,
     },
@@ -160,7 +174,7 @@ const VECTORS: [Vector; 7] = [
         file: "log-draw.json",
         a: "turtle",
         b: "turtle",
-        seed: 53,
+        seed: 118,
         expected: include_bytes!("golden/log-draw.json"),
         covers: draw,
     },
@@ -280,6 +294,24 @@ fn vectors_cover_every_event_and_moment() {
             ..
         }
     )));
+
+    // 006 RF9: a KO shows both rhythms (at least 2 pauses), and the knockdown vector keeps it.
+    assert!(
+        VECTORS.iter().zip(&logs).any(|(_, log)| {
+            matches!(log.outcome(), Some((_, EndReason::Ko))) && pauses(log) >= 2
+        }),
+        "no KO vector with 2 pauses"
+    );
+    assert!(
+        VECTORS.iter().zip(&logs).any(|(v, log)| {
+            v.file == "log-ko-knockdown.json"
+                && log
+                    .events
+                    .iter()
+                    .any(|e| matches!(e, FightEvent::Knockdown { .. }))
+        }),
+        "log-ko-knockdown.json without a knockdown"
+    );
 }
 
 /// FNV-1a, 64 bits.
@@ -340,6 +372,17 @@ fn specs_match_their_golden_files() {
     }
 }
 
+/// (d) The engine's mirror of the `Timeline` rules (006 RF5).
+#[test]
+fn timeline_contract_matches_its_golden() {
+    let canonical = serde_json::to_vec(&TIMELINE_CONTRACT).unwrap_or_else(|e| panic!("{e}"));
+    check_golden(
+        "timeline-contract.json",
+        &golden_bytes(canonical),
+        include_bytes!("golden/timeline-contract.json"),
+    );
+}
+
 /// Finds the seeds of `VECTORS`: `cargo test -p engine --test golden -- --ignored --nocapture`.
 #[test]
 #[ignore = "tool to choose the golden seeds"]
@@ -351,9 +394,11 @@ fn search_golden_seeds() {
         'search: for seed in 0..20_000_u32 {
             for (an, a) in &all {
                 for (bn, b) in &all {
-                    if covers(&simulate_vector(a, b, seed)) {
-                        found.push(format!("{an} vs {bn} seed {seed}"));
-                        if found.len() == 6 {
+                    let log = simulate_vector(a, b, seed);
+                    if covers(&log) {
+                        let pauses = pauses(&log);
+                        found.push(format!("{an} vs {bn} seed {seed} pauses {pauses}"));
+                        if found.len() == 12 {
                             break 'search;
                         }
                     }

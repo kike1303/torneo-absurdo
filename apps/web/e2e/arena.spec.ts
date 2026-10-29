@@ -1,10 +1,15 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import spike from '@torneo/renderer/fixtures/spike.timeline.json' with { type: 'json' };
+import { validateTimeline } from '@torneo/renderer/timeline';
 import comeback from '../src/lib/features/fight/fixtures/log-ko-comeback.json' with { type: 'json' };
+import clutch from '../src/lib/features/fight/fixtures/log-ko-clutch.json' with { type: 'json' };
+import decisiveCrit from '../src/lib/features/fight/fixtures/log-ko-decisive-crit.json' with { type: 'json' };
+import knockdownLog from '../src/lib/features/fight/fixtures/log-ko-knockdown.json' with { type: 'json' };
 import decisionA from '../src/lib/features/fight/fixtures/log-decision-a.json' with { type: 'json' };
 import decisionB from '../src/lib/features/fight/fixtures/log-decision-b.json' with { type: 'json' };
 import draw from '../src/lib/features/fight/fixtures/log-draw.json' with { type: 'json' };
+import { paceMin } from '../src/lib/features/arena/retime.js';
 import {
   timelineFromFightLog,
   type AdapterLog,
@@ -309,11 +314,36 @@ test('?pace=1.5 scales mean_strike_gap_ms in the copied stats', async ({ page, c
   expect(copied.mean_strike_gap_ms).toBeLessThan(base * 1.55);
 });
 
-// 002 RF-C3 (plan-c step 4): ?log=<name> plays an engine log through the adapter. In the
-// ko-comeback golden `b` wins, the other way round from the spike script.
+// 002 RF-C3 (plan-c step 4): ?log=<name> plays an engine log through the adapter. The winner and
+// the HP come from the arena copy, never from literals: the goldens are regenerated (006 decision 9).
+function adapted(log: unknown) {
+  const result = timelineFromFightLog(log as AdapterLog, {
+    a: { asset: 'dummy_a' },
+    b: { asset: 'dummy_b' },
+  });
+  if (!result.ok) throw new Error('the arena copy does not adapt');
+  return result.timeline;
+}
+
+type Side = 'a' | 'b';
+
+function koWinner(log: { events: readonly { type: string; winner?: string | null }[] }): {
+  winner: Side;
+  loser: Side;
+} {
+  const winner = log.events.at(-1)?.winner;
+  if (winner === 'a') return { winner, loser: 'b' };
+  if (winner === 'b') return { winner, loser: 'a' };
+  throw new Error('the log does not end with a winner');
+}
+
 for (const lang of ['es', 'en'] as const) {
-  const winsB = lang === 'es' ? 'Gana Muñeco B' : 'Dummy B wins';
-  const winsA = lang === 'es' ? 'Gana Muñeco A' : 'Dummy A wins';
+  const NAMES = {
+    a: lang === 'es' ? 'Muñeco A' : 'Dummy A',
+    b: lang === 'es' ? 'Muñeco B' : 'Dummy B',
+  };
+  const wins = (side: Side) => (lang === 'es' ? `Gana ${NAMES[side]}` : `${NAMES[side]} wins`);
+  const { winner, loser } = koWinner(comeback);
 
   test(`/${lang}/dev/arena?log=ko-comeback plays without console errors`, async ({ page }) => {
     const errors = trackErrors(page);
@@ -323,36 +353,112 @@ for (const lang of ['es', 'en'] as const) {
     expect(errors).toEqual([]);
   });
 
-  test(`/${lang}/dev/arena?log=ko-comeback at the end: b wins with a at 0 HP`, async ({ page }) => {
+  test(`/${lang}/dev/arena?log=ko-comeback at the end: its winner, the loser at 0 HP`, async ({
+    page,
+  }) => {
     const errors = trackErrors(page);
     await page.goto(`/${lang}/dev/arena?log=ko-comeback&t=99999999999`);
     await expect(stage(page)).toHaveAttribute('data-state', 'finished', { timeout: 15_000 });
-    await expect(page.getByTestId('fight-winner')).toHaveText(winsB);
-    await expect(stage(page)).toHaveAttribute('data-hp-a', '0');
+    await expect(page.getByTestId('fight-winner')).toHaveText(wins(winner));
+    await expect(stage(page)).toHaveAttribute(`data-hp-${loser}`, '0');
     expect(errors).toEqual([]);
   });
 
   test(`/${lang}/dev/arena?log=<unknown> plays the spike script`, async ({ page }) => {
     await page.goto(`/${lang}/dev/arena?log=desconocido&t=99999999999`);
     await expect(stage(page)).toHaveAttribute('data-state', 'finished', { timeout: 15_000 });
-    await expect(page.getByTestId('fight-winner')).toHaveText(winsA);
+    await expect(page.getByTestId('fight-winner')).toHaveText(wins('a'));
   });
 }
 
-test('?log=ko-comeback just after a knockdown: the last cue is that knockdown', async ({
+test('?log=ko-knockdown just after a knockdown: the last cue is that knockdown', async ({
   page,
 }) => {
-  const result = timelineFromFightLog(comeback as unknown as AdapterLog, {
-    a: { asset: 'dummy_a' },
-    b: { asset: 'dummy_b' },
-  });
-  if (!result.ok) throw new Error('the arena copy does not adapt');
-  const index = result.timeline.cues.findIndex((c) => c.type === 'knockdown');
-  const knockdown = result.timeline.cues[index];
-  if (knockdown === undefined) throw new Error('no knockdown in ko-comeback');
-  await page.goto(`/es/dev/arena?log=ko-comeback&t=${knockdown.at_ms + 200}`);
+  const timeline = adapted(knockdownLog);
+  const index = timeline.cues.findIndex((c) => c.type === 'knockdown');
+  const knockdown = timeline.cues[index];
+  if (knockdown === undefined) throw new Error('no knockdown in ko-knockdown');
+  await page.goto(`/es/dev/arena?log=ko-knockdown&t=${knockdown.at_ms + 200}`);
   await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
   await expect(stage(page)).toHaveAttribute('data-last-cue', String(index));
+});
+
+// 006 RF16 and RF17: the seven goldens play to the end with any `?pace`. The minimum is computed
+// here with the same validator the arena uses, never fixed.
+const ENGINE_LOGS = [
+  { name: 'ko-comeback', log: comeback, ending: 'ko' },
+  { name: 'ko-clutch', log: clutch, ending: 'ko' },
+  { name: 'ko-decisive-crit', log: decisiveCrit, ending: 'ko' },
+  { name: 'ko-knockdown', log: knockdownLog, ending: 'ko' },
+  { name: 'decision-a', log: decisionA, ending: 'decision' },
+  { name: 'decision-b', log: decisionB, ending: 'decision' },
+  { name: 'draw', log: draw, ending: 'draw' },
+] as const;
+const isValid = (t: Parameters<typeof validateTimeline>[0]) => validateTimeline(t).ok;
+const decimal = new Intl.NumberFormat('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+for (const { name, log, ending } of ENGINE_LOGS) {
+  const min = paceMin(adapted(log), isValid);
+
+  test(`?log=${name}&t=<end> reaches finished with ending ${ending}`, async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto(`/es/dev/arena?log=${name}&t=99999999999`);
+    await expect(stage(page)).toHaveAttribute('data-state', 'finished', { timeout: 15_000 });
+    await expect(stage(page)).toHaveAttribute('data-ending', ending);
+    expect(errors).toEqual([]);
+  });
+
+  test(`?log=${name}&pace=0 is clamped to the minimum and reaches finished`, async ({ page }) => {
+    if (min === null) throw new Error(`${name} is invalid with factor 1`);
+    const errors = trackErrors(page);
+    await page.goto(`/es/dev/arena?log=${name}&pace=0&t=99999999999`);
+    await expect(stage(page)).toHaveAttribute('data-state', 'finished', { timeout: 15_000 });
+    await expect(stage(page)).toHaveAttribute('data-ending', ending);
+    await waitForHydration(page);
+    await page.getByTestId('arena-show-stats').click();
+    const row = page.getByTestId('arena-stats-pace');
+    await expect(row).toHaveText(decimal.format(min));
+    await expect(row).toHaveAttribute('data-clamped', 'true');
+    await expect(page.getByTestId('arena-stats-pace-clamped')).toHaveText(
+      `ajustado desde ${decimal.format(0)}`,
+    );
+    expect(errors).toEqual([]);
+  });
+
+  test(`?log=${name}&pace=1.5 reaches finished`, async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto(`/es/dev/arena?log=${name}&pace=1.5&t=99999999999`);
+    await expect(stage(page)).toHaveAttribute('data-state', 'finished', { timeout: 15_000 });
+    await expect(stage(page)).toHaveAttribute('data-ending', ending);
+    expect(errors).toEqual([]);
+  });
+}
+
+test('?log=ko-knockdown&pace=0.8: the copied JSON has the requested, effective and min pace', async ({
+  page,
+  context,
+}) => {
+  const min = paceMin(adapted(knockdownLog), isValid);
+  if (min === null) throw new Error('ko-knockdown is invalid with factor 1');
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const errors = trackErrors(page);
+  await page.goto('/es/dev/arena?log=ko-knockdown&pace=0.8');
+  await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
+  await waitForHydration(page);
+  await page.getByTestId('arena-show-stats').click();
+  await expect(page.getByTestId('arena-stats-pace')).toHaveAttribute(
+    'data-clamped',
+    String(min > 0.8),
+  );
+  await page.getByTestId('arena-copy-stats').click();
+  await expect(page.getByText('Copiado')).toBeVisible();
+  const copied = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
+  expect(copied).toMatchObject({
+    pace_requested: 0.8,
+    pace_effective: Math.max(0.8, min),
+    pace_min: min,
+  });
+  expect(errors).toEqual([]);
 });
 
 // 005 RF18: the engine logs that end by time. `time_up` at 86 000, the closing (`win` or `draw`) at
@@ -364,12 +470,7 @@ const TIME_LOGS = [
 ] as const;
 
 function timeUpIndex(log: unknown): number {
-  const result = timelineFromFightLog(log as AdapterLog, {
-    a: { asset: 'dummy_a' },
-    b: { asset: 'dummy_b' },
-  });
-  if (!result.ok) throw new Error('the arena copy does not adapt');
-  const index = result.timeline.cues.findIndex((c) => c.type === 'time_up');
+  const index = adapted(log).cues.findIndex((c) => c.type === 'time_up');
   if (index < 0) throw new Error('no time_up');
   return index;
 }
@@ -407,6 +508,29 @@ for (const lang of ['es', 'en'] as const) {
       await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
       await expect(stage(page)).toHaveAttribute('data-last-cue', String(timeUpIndex(log)));
       expect(errors).toEqual([]);
+    });
+  }
+}
+
+// 006 RF17: the pace row and its clamp note, without horizontal scroll, for review.
+for (const size of SIZES) {
+  for (const lang of ['es', 'en'] as const) {
+    test(`screenshot of the pace row ${lang} ${size.name}, without horizontal scroll`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await page.goto(`/${lang}/dev/arena?log=ko-knockdown&pace=0`);
+      await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
+      await waitForHydration(page);
+      await page.getByTestId('arena-show-stats').click();
+      await expect(page.getByTestId('arena-stats-pace-clamped')).toBeVisible();
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(overflow).toBeLessThanOrEqual(0);
+      await page.getByTestId('arena-stats').screenshot({
+        path: `${DIR}/arena-pace-${lang}-${size.name}.png`,
+      });
     });
   }
 }

@@ -12,6 +12,9 @@
 //! - integer arithmetic only, in the order of the ruleset table;
 //! - no panics with untrusted input (RF21): every input is validated, and the log never
 //!   contains the seed (RF20).
+//!
+//! [`TIMELINE_CONTRACT`] mirrors the renderer's `Timeline` rules for tests and `crates/sim`; the
+//! simulation never reads it (006 RF5).
 #![deny(
     clippy::float_arithmetic,
     clippy::indexing_slicing,
@@ -21,6 +24,7 @@
     clippy::unimplemented
 )]
 
+mod contract;
 mod encode;
 mod rng;
 mod ruleset;
@@ -28,6 +32,7 @@ mod seed;
 mod sim;
 mod spec;
 
+pub use contract::{TIMELINE_CONTRACT, TimelineContract};
 pub use encode::{EncodeError, canonical_json, canonical_spec_json};
 pub use protocol::{AbilityKind, EndReason, FightEvent, FightLog, FighterInfo, MomentKind, Side};
 pub use ruleset::Ruleset;

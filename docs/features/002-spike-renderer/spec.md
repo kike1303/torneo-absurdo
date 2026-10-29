@@ -143,7 +143,9 @@ Cada requisito dice cómo se verifica (→). "check" es `just check`; "e2e" es `
   5. ¿Se nota quién toma la iniciativa en cada intercambio?
   6. ¿Funcionan los dos ritmos (la ráfaga y la pausa)?
 
-  Además registra la **separación media entre golpes** que le pareció buena (en ms; puede probar variantes del guion con `?pace=<factor>` en `/[lang]/dev/arena`, de 0.8 a 1.5, que reescala los tiempos del combate sin cambiar sus cues; el resultado pasa `validateTimeline` y, si no, la ruta queda en `error: timeline_invalid`. La separación media de la variante sale como `mean_strike_gap_ms` en el JSON de "copiar estadísticas", sin texto nuevo en pantalla) y confirma o ajusta los valores de "Datos para 003". → registro en la spec.
+  Además registra la **separación media entre golpes** que le pareció buena (en ms; puede probar variantes del guion con `?pace=<factor>` en `/[lang]/dev/arena`, del mínimo dinámico a 1.5, que reescala los tiempos del combate sin cambiar sus cues; un valor fuera de rango se lleva al límite válido más cercano. La separación media de la variante sale como `mean_strike_gap_ms` en el JSON de "copiar estadísticas", sin texto nuevo en pantalla) y confirma o ajusta los valores de "Datos para 003". → registro en la spec.
+
+  > **Enmienda (006, TA-21).** Decía "de 0.8 a 1.5", y un factor que rompía una regla terminaba en `error: timeline_invalid`. Ahora el rango va del **mínimo dinámico** (el menor factor con el que la `Timeline` adaptada sigue pasando `validateTimeline`, con piso 0.5; 0.86 en los dorados) a 1.5, y un valor fuera de rango se lleva al límite válido más cercano, con el factor efectivo visible en las estadísticas. Ver RF15 y RF16 de la [spec de 006](../006-ritmo-rapido/spec.md).
 
 ### Fase C — adaptador `FightLog → Timeline` (bloqueada por 003)
 
@@ -278,6 +280,8 @@ content/_local/ (dev)┘                                                        
 Valores iniciales que 003 puede usar como restricciones del ritmo; el go/no-go (RF-B9) los confirma o ajusta:
 - **Duración de 45 a 90 s de `duration_ms` total**, intro y pose de victoria incluidas, no solo el tramo de combate. El guion del spike dura ~64 s.
 - Densidad y ritmo de referencia: ≥ 30 golpes en el guion, con ráfagas de golpes a ≤ 900 ms y pausas de ≥ 2.5 s. **Separación media entre golpes de ~1.2 s**, fijada por el owner en RF-B9 (2026-10-27, `?pace=0.8` sobre los 1468 ms que mide el guion; ver la nota del owner en `## Revisión`). Es un parámetro del ruleset, no una constante.
+
+  > **Enmienda (006, TA-21).** La media no es un campo del ruleset: es un **criterio de `sim`** (`Criteria::RF17`, de 1100 a 1300 ms), y sus entradas son los campos `breather_*` (el respiro) e `interval_*` del ruleset v1. Los 900 ms de la ráfaga y los 2500 ms de la pausa son definiciones de medida de `sim` (`BURST_GAP_MAX_MS` y `PAUSE_GAP_MIN_MS`), con criterios propios (≥ 25 % de separaciones en ráfaga, mediana de ≥ 2 pausas y ≥ 90 % de peleas con pausa). Medido con el contenido real: 1226 ms de media, 28,5 % en ráfaga y 3 pausas en la pelea mediana. Ver la [spec de 006](../006-ritmo-rapido/spec.md).
 - Un `knockdown` siempre coincide con un golpe `hit` o `crit` sobre ese luchador (o lo sigue en ≤ 100 ms), y como mucho uno por golpe.
 - El `ko` llega solo con HP 0, justo después del golpe que lo deja en 0, y después de él solo viene el `win`. Ninguna timeline pasa de 1 h.
 - Intro ≥ 2 s antes del primer golpe; ≥ 600 ms entre impactos consecutivos; knockdown de 0.8 a 3 s; ≥ 1.5 s de KO a victoria y ≥ 2 s de pose de victoria.
