@@ -128,7 +128,7 @@ Cada requisito dice cómo se verifica (→). "check" es `just check`; "e2e" es `
 - **RF-B5. Salida.**
   - Por defecto `content/_local/sprites/<id>/` (`manifest.json` y `sheet-<n>.png`).
   - **Se niega a escribir** en un directorio que git no ignore (`git check-ignore -q`); así una ruta mal puesta nunca deja sprites de MUGEN listos para commitear.
-  - Empaqueta los frames en hojas de ≤ 2048×2048 (algoritmo de estantes, sin dependencias), con el pivote desde el eje de MUGEN, `frame_ms = round(ticks × 1000 / 60)` y `ticks = -1` como último frame sostenido (`loop: false`). Si el pivote de MUGEN (eje menos desplazamiento del AIR) cae fuera del sprite, el frame se rellena con píxeles transparentes hasta contenerlo; el formato no cambia (`convert.pivot_too_far` si el frame supera 1024 px por lado).
+  - Empaqueta los frames en hojas de ≤ 2048×2048 (algoritmo de estantes, sin dependencias), con el pivote desde el eje de MUGEN, `frame_ms = round(ticks × 1000 / 60)` y `ticks = -1` como último frame sostenido (`loop: false`). Si el pivote de MUGEN (eje menos desplazamiento del AIR) cae fuera del sprite, el frame se rellena con píxeles transparentes hasta contenerlo; el formato no cambia (`convert.pivot_too_far` si el frame supera 1024 px por lado). Un frame de `knockdown` cuyo dibujo termina por encima del pivote se baja hasta que su fila visible más baja toque el pivote (nota `convert.grounded`), porque en MUGEN la altura de una caída la pone la física y el renderer no tiene física. El pivote horizontal y los píxeles no cambian, y las demás animaciones no se tocan (desviación 18 de `plan-b.md`).
   - Valida su propia salida con `validateManifest` antes de escribir y falla con los códigos si no pasa.
 
   → Vitest: conversión de un SFF/AIR sintético a un directorio temporal ignorado por un `.gitignore` de prueba; negativa con uno no ignorado; la salida pasa `validateManifest`.
@@ -486,3 +486,9 @@ Nota del owner, transcrita por la sesión de 002 a partir de lo que dijo en el c
 | iPhone 17, Safari (LAN temporal, con OK del owner) | 3410 | 60.6 | 17.0 ms | 17.0 ms | 21.0 ms | 9 |
 
 Las dos corridas cumplen el umbral (p95 ≤ 18.2 ms y FPS medio ≥ 58). El iPhone 17 es gama alta: el dispositivo de referencia de la RNF ("Rendimiento") es un Android de gama media, y esa medición sigue **pendiente**. Hay una sola corrida por dispositivo, no tres.
+
+### architect — 2026-10-28 — Enmienda técnica (TA-24, después del cierre)
+- Al revisar el PR #47 admití dos precisiones del convertidor local, registradas como desviación 18 de `plan-b.md`:
+  1. RF-B2: el `knockdown` por defecto pasa de `5050` a la cadena `[5050, 5100, 5110]` (caída en el aire, golpe contra el suelo y tendido). Solo `knockdown` acepta una lista, de 1 a 8 acciones, que se reproducen una detrás de otra; las demás animaciones siguen con una sola acción. Con `5050` sola, el renderer sostenía hasta el fin del `knockdown` un frame en el aire, como manda la regla 1 de "Coreografía". En MUGEN la altura de esa caída la pone la física, no el frame.
+  2. RF-B5: los frames de `knockdown` cuyo dibujo termina por encima del pivote se bajan hasta el suelo (nota `convert.grounded`). Las demás animaciones no se tocan, porque un ataque puede despegar del suelo.
+- No reabro la revisión de product-owner y game-designer. Es una herramienta de desarrollo que no entra en ninguna imagen (RF-B1). No cambian el formato de assets, la Timeline v1, el renderer, el guion, los umbrales ni el vocabulario de cues, y los placeholders ya tenían el `knockdown` apoyado en el suelo. La misma limitación puede afectar a `ko` si el owner lo mapea a una acción de caída; queda anotada en la revisión del PR.

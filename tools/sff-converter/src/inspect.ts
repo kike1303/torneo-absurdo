@@ -52,13 +52,13 @@ export function inspect(input: InspectInput): InspectReport {
   const unsupported: { animation: string; sprite: number; compression: string }[] = [];
   let missingSprites = 0;
   for (const [animation, chain] of Object.entries(input.map.actions)) {
+    const seen = new Set<number>();
     for (const action of chain ?? []) {
       const found = air.actions.get(action);
       if (found === undefined) {
         missing.push({ animation, action });
         continue;
       }
-      const seen = new Set<number>();
       for (const frame of found.frames) {
         if (frame.group === -1) continue;
         const index = find(frame.group, frame.image);

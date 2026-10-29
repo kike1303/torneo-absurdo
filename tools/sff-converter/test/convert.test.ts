@@ -265,6 +265,29 @@ describe('convert (RF-B5)', () => {
       ).toBeUndefined();
     });
 
+    it('a chain over 3 s is cut before its last frame, the one the renderer holds', () => {
+      const actions = ACTIONS.map((act) =>
+        act.id === 5050
+          ? {
+              id: 5050,
+              frames: [
+                { group: 0, image: 5, y: -30, ticks: 90 },
+                { group: 0, image: 2, y: -20, ticks: 90 },
+                { group: 0, image: 1, y: -10, ticks: 90 },
+              ],
+            }
+          : act,
+      );
+      const result = ok(
+        convert({ sff: fixtureSffV1(), air: writeAir(actions), map: fixtureMap() }),
+      );
+      const knockdown = result.manifest.animations.knockdown!;
+      expect(knockdown.frame_ms).toEqual([1500, 333]);
+      const last = result.manifest.frames[knockdown.frames[1]!]!;
+      expect(last.pivot_y).toBe(AXIS.y - 2); // 5110, lying down
+      expect(result.report.notes.map((n) => n.code)).toContain('convert.animation_truncated');
+    });
+
     it('a single action still works', () => {
       const map = parseMap({ ...MAP_JSON, actions: { ...MAP_JSON.actions, knockdown: 5110 } });
       const result = ok(convert({ sff: fixtureSffV1(), air: fixtureAir(), map }));

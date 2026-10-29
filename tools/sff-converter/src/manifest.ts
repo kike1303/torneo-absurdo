@@ -30,7 +30,8 @@ export function isLooping(code: AnimationCode): boolean {
 
 /**
  * The frames of one of our animations from its MUGEN actions, played one after the other, with
- * every adjustment noted.
+ * every adjustment noted. A truncated chain keeps its last frame: it is the pose the renderer
+ * holds (the fighter lying down, in a knockdown).
  */
 export function timedFrames(
   code: AnimationCode,
@@ -38,22 +39,26 @@ export function timedFrames(
   notes: Note[],
 ): TimedFrame[] {
   let timed = actions.flatMap((action) => actionFrames(code, action, notes));
-  if (timed.length > LIMITS.animationFramesMax) {
+  const last = actions.length > 1 ? timed.pop() : undefined;
+  const room = last === undefined ? 0 : 1;
+  if (timed.length + room > LIMITS.animationFramesMax) {
     notes.push({
       code: 'convert.animation_truncated',
-      data: { animation: code, frames: timed.length },
+      data: { animation: code, frames: timed.length + room },
     });
-    timed = timed.slice(0, LIMITS.animationFramesMax);
+    timed = timed.slice(0, LIMITS.animationFramesMax - room);
   }
   if (!isLooping(code)) {
-    let total = timed.reduce((sum, t) => sum + t.ms, 0);
+    const reserved = last?.ms ?? 0;
+    let total = timed.reduce((sum, t) => sum + t.ms, 0) + reserved;
     if (total > LIMITS.nonLoopingTotalMaxMs) {
       notes.push({ code: 'convert.animation_truncated', data: { animation: code, ms: total } });
-      while (timed.length > 1 && total > LIMITS.nonLoopingTotalMaxMs) {
+      while (timed.length > 1 - room && total > LIMITS.nonLoopingTotalMaxMs) {
         total -= timed.pop()?.ms ?? 0;
       }
     }
   }
+  if (last !== undefined) timed.push(last);
   return timed;
 }
 
