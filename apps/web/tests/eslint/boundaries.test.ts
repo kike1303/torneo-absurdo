@@ -30,6 +30,7 @@ const svelte = (script: string, markup = '<div></div>') =>
 
 const IMPORTS = '@typescript-eslint/no-restricted-imports';
 const SYNTAX = 'no-restricted-syntax';
+const DYNAMIC = 'torneo/no-restricted-dynamic-imports';
 
 describe('import boundaries that fail', () => {
   it.each([
@@ -300,7 +301,7 @@ describe('dynamic imports of the renderer (002 plan-a2 decision 11, TA-11)', () 
       "export const load = () => import('../../../../../packages/renderer/src/index.ts');\n",
     ],
   ])('%s fails', async (_name, file, code) => {
-    expect(await rules(file, code)).toContain(SYNTAX);
+    expect(await rules(file, code)).toContain(DYNAMIC);
   });
 
   it('import() in FightStage.svelte passes', async () => {
@@ -318,6 +319,108 @@ describe('dynamic imports of the renderer (002 plan-a2 decision 11, TA-11)', () 
     expect(
       await rules('src/routes/+page.ts', "export const load = () => import('./other.js');\n"),
     ).toEqual([]);
+  });
+});
+
+describe('dynamic imports follow every import boundary (TA-11)', () => {
+  it.each([
+    ['$lib', 'src/routes/+page.ts', "export const load = () => import('$lib/utils');\n"],
+    [
+      '$env/dynamic/private',
+      'src/hooks.server.ts',
+      "export const env = () => import('$env/dynamic/private');\n",
+    ],
+    [
+      '$app/environment',
+      'src/routes/+layout.ts',
+      "export const env = () => import('$app/environment');\n",
+    ],
+    [
+      'feature value in a domain component (#lib)',
+      'src/lib/components/fight/Hud.svelte',
+      svelte("  void import('#lib/features/system/health.js');"),
+    ],
+    [
+      'feature value in a domain component (relative)',
+      'src/lib/components/fight/Hud.svelte',
+      svelte("  void import('../../features/x.js');"),
+    ],
+    [
+      'domain component in ui (#lib)',
+      'src/lib/components/ui/card/card.svelte',
+      svelte("  void import('#lib/components/chat/Chat.svelte');"),
+    ],
+    [
+      'domain component in ui (relative)',
+      'src/lib/components/ui/card/card.svelte',
+      svelte("  void import('../../chat/Chat.svelte');"),
+    ],
+    [
+      'Paraglide messages in ui (#lib)',
+      'src/lib/components/ui/dialog/x.svelte',
+      svelte("  void import('#lib/paraglide/messages.js');"),
+    ],
+    [
+      'Paraglide messages in ui (relative)',
+      'src/lib/components/ui/dialog/x.svelte',
+      svelte("  void import('../../../paraglide/messages.js');"),
+    ],
+    [
+      'the runtime, which exposes setLocale (#lib)',
+      'src/routes/+page.ts',
+      "export const load = async () => (await import('#lib/paraglide/runtime.js')).setLocale;\n",
+    ],
+    [
+      'the runtime, which exposes setLocale (relative)',
+      'src/routes/+page.ts',
+      "export const load = () => import('../lib/paraglide/runtime.js');\n",
+    ],
+    [
+      'a template literal without expressions',
+      'src/routes/+page.ts',
+      'export const load = () => import(`$lib/utils`);\n',
+    ],
+    [
+      'a source that is not a string literal',
+      'src/routes/+page.ts',
+      'export const load = (name: string) => import(`./x/${name}.js`);\n',
+    ],
+    [
+      'a variable as the source',
+      'src/routes/+page.ts',
+      "const path = '$lib/utils';\nexport const load = () => import(path);\n",
+    ],
+  ])('%s fails', async (_name, file, code) => {
+    expect(await rules(file, code)).toContain(DYNAMIC);
+  });
+
+  it.each([
+    [
+      'src/lib/components/fight/Hud.svelte',
+      svelte("  void import('#lib/features/system/health.js');"),
+    ],
+    [
+      'src/lib/components/ui/card/card.svelte',
+      svelte("  void import('#lib/components/chat/Chat.svelte');"),
+    ],
+    ['src/routes/+page.ts', "export const load = () => import('#lib/paraglide/runtime.js');\n"],
+    ['src/routes/+page.ts', "export const load = () => import('@torneo/renderer');\n"],
+  ])('each #lib pattern works alone: %s', async (file, code) => {
+    expect(await rules(file, code, aliasOnly)).toContain(DYNAMIC);
+  });
+
+  it.each([
+    [
+      'src/routes/+page.ts',
+      "export const load = () => import('#lib/features/system/health.js');\n",
+    ],
+    [
+      'src/lib/components/ui/card/card.svelte',
+      svelte("  void import('#lib/components/ui/button/index.js');"),
+    ],
+    ['src/routes/+page.ts', 'export const load = () => import(`./other.js`);\n'],
+  ])('allowed elsewhere: %s', async (file, code) => {
+    expect(await rules(file, code)).toEqual([]);
   });
 });
 

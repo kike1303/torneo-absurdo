@@ -16,7 +16,12 @@ export const TRUNCATED = '[truncated]';
 export const REDACTED = '[redacted]';
 export const REDACTED_IP = '[ip]';
 
-const HEADER_NAMES = 'cookie|authorization|x-forwarded-for|x-internal-secret|x-client-ip';
+/**
+ * Sensitive header names. `forwarded`, `x-real-ip` and every `x-client-*` come from ADR-0012
+ * (TA-11); the `x-client-` suffix is bounded so a long run of them stays linear.
+ */
+const HEADER_NAMES =
+  'cookie|authorization|forwarded|x-forwarded-for|x-real-ip|x-internal-secret|x-client-[a-z-]{1,64}';
 
 /**
  * A sensitive header name, an optional closing quote (also escaped, `\"`, as in JSON inside a

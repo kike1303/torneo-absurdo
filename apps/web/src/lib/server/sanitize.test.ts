@@ -296,6 +296,8 @@ describe('sanitize: every pattern is linear on 8 KB, the worst real case (PR #2 
       "cookie: {'",
       "name: 'cookie', ",
       'cookie,',
+      'x-client-',
+      'forwarded:',
     ].map((s) => [s]),
   )('%j', (s) => {
     const input = unit(s);
@@ -347,6 +349,20 @@ describe('sanitize: IPv6 after a key that looks like hex (TA-11)', () => {
   it('removes an embedded IPv4 that ends a sentence', () => {
     const out = sanitize('from ::ffff:203.0.113.77. Then');
     expect(out).toBe('from [ip]. Then');
+  });
+});
+
+describe('sanitize: headers added by ADR-0012 (TA-11)', () => {
+  it.each([
+    ['X-Real-IP: client-SECRET', 'X-Real-IP: [redacted]'],
+    ['forwarded: for=SECRET;proto=https', 'forwarded: [redacted]'],
+    ['{"Forwarded":"for=\\"[2001:db8::1]\\";by=SECRET"}', '{"Forwarded":"[redacted]"}'],
+    ["{ 'x-client-cert': 'MIIB-SECRET' }", "{ 'x-client-cert': '[redacted]' }"],
+    ['X-Client-Geo-Country=SECRET', 'X-Client-Geo-Country=[redacted]'],
+  ])('%s', (input, expected) => {
+    const out = sanitize(input);
+    expect(out).toBe(expected);
+    expect(out).not.toContain('SECRET');
   });
 });
 
