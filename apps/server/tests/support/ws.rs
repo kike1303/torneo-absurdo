@@ -21,6 +21,26 @@ pub async fn connect(addr: SocketAddr, origin: &str) -> Result<Client, Error> {
         .map(|(client, _)| client)
 }
 
+/// Like [`connect`], with extra request headers (`X-Forwarded-For`, …).
+pub async fn connect_with(
+    addr: SocketAddr,
+    origin: &str,
+    headers: &[(&str, &str)],
+) -> Result<Client, Error> {
+    let mut request = format!("ws://{addr}/ws").into_client_request()?;
+    let map = request.headers_mut();
+    map.insert("origin", origin.parse().unwrap());
+    for (name, value) in headers {
+        map.append(
+            tokio_tungstenite::tungstenite::http::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+            value.parse().unwrap(),
+        );
+    }
+    tokio_tungstenite::connect_async(request)
+        .await
+        .map(|(client, _)| client)
+}
+
 pub async fn send_text(client: &mut Client, text: &str) {
     client.send(Message::Text(text.into())).await.unwrap();
 }

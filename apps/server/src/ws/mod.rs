@@ -1,6 +1,7 @@
 //! WebSocket `/ws` (RF-B13, plan-b decision 10).
 
 mod handshake;
+pub mod ip_slots;
 pub mod rate;
 mod session;
 
@@ -12,6 +13,8 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 pub use handshake::handler;
+use ip_slots::IpSlots;
+pub use ip_slots::WS_ANON_PER_IP;
 
 /// Largest message and frame the server reads, fixed in the protocol (RF-B13).
 pub const MAX_MESSAGE_BYTES: usize = 4096;
@@ -44,6 +47,7 @@ pub struct WsState {
     public_origin: String,
     echo: bool,
     permits: Arc<Semaphore>,
+    ip_slots: Arc<IpSlots>,
     config: WsConfig,
     tracker: TaskTracker,
     shutdown: CancellationToken,
@@ -56,15 +60,28 @@ impl WsState {
             public_origin,
             echo,
             permits: Arc::new(Semaphore::new(permits)),
+            ip_slots: Arc::new(IpSlots::new(WS_ANON_PER_IP)),
             config,
             tracker: TaskTracker::new(),
             shutdown: CancellationToken::new(),
         }
     }
 
+    /// Replaces the anonymous sockets per `IpKey` limit ([`WS_ANON_PER_IP`]); the tests
+    /// shorten it.
+    pub fn with_ip_limit(mut self, limit: u32) -> Self {
+        self.ip_slots = Arc::new(IpSlots::new(limit));
+        self
+    }
+
     /// The exact `Origin` the handshake accepts (`PUBLIC_ORIGIN`).
     pub fn public_origin(&self) -> &str {
         &self.public_origin
+    }
+
+    /// `IpKey`s with at least one anonymous socket.
+    pub fn ip_keys_in_use(&self) -> usize {
+        self.ip_slots.keys()
     }
 
     /// Cancelled at shutdown: every socket closes with 1012.

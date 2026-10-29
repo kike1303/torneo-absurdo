@@ -30,6 +30,32 @@ fn canary(name: &str) -> String {
     format!("canary-{name}-{}", uuid::Uuid::new_v4().simple())
 }
 
+/// A random IPv6 in the documentation range, as a canary that is also a valid IP.
+fn canary_ipv6() -> String {
+    let bytes = uuid::Uuid::new_v4().into_bytes();
+    let group = |i: usize| u16::from_be_bytes([bytes[i], bytes[i + 1]]);
+    format!(
+        "2001:db8:{:x}:{:x}::{:x}",
+        group(0) | 1,
+        group(2) | 1,
+        group(4) | 1
+    )
+}
+
+/// A test-only `INTERNAL_API_SECRET` (32 random bytes, base64url without padding).
+fn test_secret() -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let a = uuid::Uuid::new_v4().into_bytes();
+    let b = uuid::Uuid::new_v4().into_bytes();
+    // 44 characters of 6 bits: 33 bytes once decoded.
+    a.iter()
+        .chain(&b)
+        .cycle()
+        .take(44)
+        .map(|byte| char::from(ALPHABET[usize::from(byte % 64)]))
+        .collect()
+}
+
 fn json_lines(finished: &Finished) -> Vec<serde_json::Map<String, serde_json::Value>> {
     finished
         .stdout
@@ -54,6 +80,7 @@ fn assert_no_canary(finished: &Finished, secrets: &[&str]) {
 async fn run_canaries(rust_log: &str) {
     let db = TestDb::create().await;
     let url = db.url();
+    let secret = test_secret();
     let server = bin::spawn(
         &[],
         &[
@@ -63,6 +90,8 @@ async fn run_canaries(rust_log: &str) {
             ("PORT", "0"),
             ("BIND_ADDR", "127.0.0.1"),
             ("RUST_LOG", rust_log),
+            ("TRUSTED_PROXIES", "127.0.0.1/32"),
+            ("INTERNAL_API_SECRET", &secret),
         ],
     );
     let port = server.wait_listening(Duration::from_secs(10)).await;
@@ -129,7 +158,60 @@ async fn run_canaries(rust_log: &str) {
     // 6. /ws with a valid Origin and no upgrade.
     let no_upgrade = http::send(addr, "GET", "/ws", &[("origin", ORIGIN)]).await;
     assert!(no_upgrade.status.is_client_error());
-    const HTTP_REQUESTS: usize = 6;
+
+    // 008 RF-A9. 7. An IPv6 canary in X-Forwarded-For (from the trusted 127.0.0.1): ten
+    // accepted upgrades of its /64 and the eleventh with 429.
+    let forwarded_ip = canary_ipv6();
+    let mut headers = upgrade_headers(ORIGIN);
+    headers.push(("x-forwarded-for", &forwarded_ip));
+    for _ in 0..10 {
+        assert_eq!(http::send(addr, "GET", "/ws", &headers).await.status, 101);
+    }
+    assert_eq!(http::send(addr, "GET", "/ws", &headers).await.status, 429);
+    // 8. Another one in X-Client-Ip with the valid secret.
+    let internal_ip = canary_ipv6();
+    let mut headers = upgrade_headers(ORIGIN);
+    headers.push(("x-internal-secret", &secret));
+    headers.push(("x-client-ip", &internal_ip));
+    assert_eq!(http::send(addr, "GET", "/ws", &headers).await.status, 101);
+    // 9. X-Client-Origin and X-Client-Fetch-Site canaries with the valid secret (403).
+    let client_origin = canary("clientorigin");
+    let client_fetch_site = canary("clientfetchsite");
+    let headers = [
+        ("x-internal-secret", secret.as_str()),
+        ("x-client-origin", client_origin.as_str()),
+    ];
+    assert_eq!(
+        http::send(addr, "POST", "/api/health", &headers)
+            .await
+            .status,
+        403
+    );
+    let headers = [
+        ("x-internal-secret", secret.as_str()),
+        ("x-client-origin", ORIGIN),
+        ("x-client-fetch-site", client_fetch_site.as_str()),
+    ];
+    assert_eq!(
+        http::send(addr, "POST", "/api/health", &headers)
+            .await
+            .status,
+        403
+    );
+    // 10. A Sec-Fetch-Site canary without Origin (403).
+    let fetch_site = canary("fetchsite");
+    assert_eq!(
+        http::send(
+            addr,
+            "POST",
+            "/api/health",
+            &[("sec-fetch-site", &fetch_site)]
+        )
+        .await
+        .status,
+        403
+    );
+    const HTTP_REQUESTS: usize = 6 + 11 + 1 + 3;
 
     server.signal("TERM");
     let finished = server.finish(Duration::from_secs(10)).await;
@@ -149,6 +231,13 @@ async fn run_canaries(rust_log: &str) {
             &origin_host,
             &payload,
             "no-existe",
+            &forwarded_ip,
+            &internal_ip,
+            "2001:db8",
+            &client_origin,
+            &client_fetch_site,
+            &fetch_site,
+            &secret,
         ],
     );
     assert!(finished.stderr.is_empty(), "stderr: {:?}", finished.stderr);
@@ -205,6 +294,14 @@ async fn run_canaries(rust_log: &str) {
     assert!(routes.contains(&("GET".into(), "/ws".into(), 403)));
     assert!(routes.contains(&("GET".into(), "/ws".into(), 101)));
     assert!(routes.contains(&("other".into(), "/api/health".into(), 405)));
+    assert!(routes.contains(&("GET".into(), "/ws".into(), 429)));
+    assert_eq!(
+        routes
+            .iter()
+            .filter(|(m, _, s)| m == "POST" && *s == 403)
+            .count(),
+        3
+    );
     assert!(
         routes
             .iter()
