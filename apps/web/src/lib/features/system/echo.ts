@@ -1,11 +1,14 @@
-import type { ClientMessage, ServerMessage, WsErrorCode } from '@torneo/protocol';
+import type { AuthErrorCode, ClientMessage, ServerMessage, WsErrorCode } from '@torneo/protocol';
 
 // Development echo over /ws for /dev/status (RF-B7). The URL is relative (WHATWG allows it), so
 // no absolute URL is built here (plan-a decision 20).
 
 export type EchoStatus = 'connecting' | 'connected' | 'sent' | 'received' | 'closed';
 
-/** Paraglide keys of the close reasons: one per `WsErrorCode`, plus `unknown`. */
+/**
+ * Paraglide keys of the close reasons: one per `WsErrorCode`, `auth.unauthenticated` (the session
+ * ended while the socket was open) and `unknown`.
+ */
 export type CloseReasonKey =
   | 'ws_close_reason_origin_forbidden'
   | 'ws_close_reason_capacity'
@@ -15,10 +18,17 @@ export type CloseReasonKey =
   | 'ws_close_reason_pong_timeout'
   | 'ws_close_reason_idle_timeout'
   | 'ws_close_reason_ip_capacity'
+  | 'ws_close_reason_user_capacity'
+  | 'ws_close_reason_forbidden_channel'
+  | 'ws_close_reason_too_many_subscriptions'
+  | 'ws_close_reason_unauthenticated'
   | 'ws_close_reason_unknown';
+
+const UNAUTHENTICATED: AuthErrorCode = 'auth.unauthenticated';
 
 /** Maps a close reason to its key. Fails to compile if a `WsErrorCode` has no case. */
 export function closeReasonKey(reason: string): CloseReasonKey {
+  if (reason === UNAUTHENTICATED) return 'ws_close_reason_unauthenticated';
   const code = reason as WsErrorCode;
   switch (code) {
     case 'ws.origin_forbidden':
@@ -37,6 +47,12 @@ export function closeReasonKey(reason: string): CloseReasonKey {
       return 'ws_close_reason_idle_timeout';
     case 'ws.ip_capacity':
       return 'ws_close_reason_ip_capacity';
+    case 'ws.user_capacity':
+      return 'ws_close_reason_user_capacity';
+    case 'ws.forbidden_channel':
+      return 'ws_close_reason_forbidden_channel';
+    case 'ws.too_many_subscriptions':
+      return 'ws_close_reason_too_many_subscriptions';
     default: {
       // `code` is `never` here only while every WsErrorCode has a case above. At runtime an
       // empty or unknown reason (1003, 1009, 1012 have none) lands here.
@@ -99,7 +115,8 @@ export function openEcho(
   socket.onopen = () => events.onStatus('connected');
   socket.onmessage = (event) => {
     const message = parseServerMessage(event.data);
-    if (message === null) return;
+    // The echo page only shows echoes; subscriptions are not used here.
+    if (message === null || message.type !== 'echo') return;
     events.onMessage(message.payload);
     events.onStatus('received');
   };

@@ -99,13 +99,22 @@ describe('closeReasonKey', () => {
     ['ws.pong_timeout', 'ws_close_reason_pong_timeout'],
     ['ws.idle_timeout', 'ws_close_reason_idle_timeout'],
     ['ws.ip_capacity', 'ws_close_reason_ip_capacity'],
+    ['ws.user_capacity', 'ws_close_reason_user_capacity'],
+    ['ws.forbidden_channel', 'ws_close_reason_forbidden_channel'],
+    ['ws.too_many_subscriptions', 'ws_close_reason_too_many_subscriptions'],
   ];
   it.each(cases)('%s → %s', (code, key) => {
     expect(closeReasonKey(code)).toBe(key);
   });
-  it.each(['', 'ws.unknown', 'http.not_found', 'Going away'])('%j → unknown', (reason) => {
-    expect(closeReasonKey(reason)).toBe('ws_close_reason_unknown');
+  it('auth.unauthenticated → unauthenticated', () => {
+    expect(closeReasonKey('auth.unauthenticated')).toBe('ws_close_reason_unauthenticated');
   });
+  it.each(['', 'ws.unknown', 'http.not_found', 'auth.csrf_origin', 'Going away'])(
+    '%j → unknown',
+    (reason) => {
+      expect(closeReasonKey(reason)).toBe('ws_close_reason_unknown');
+    },
+  );
 });
 
 describe('parseServerMessage', () => {

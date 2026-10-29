@@ -5,9 +5,9 @@ import type { AuthErrorCode } from './AuthErrorCode.js';
 import type { WsErrorCode } from './WsErrorCode.js';
 
 /**
- * Any error code the server can put in an HTTP body. Untagged, so in TypeScript it is
- * `ApiErrorCode | WsErrorCode | AuthErrorCode`. The string sets of the variants never overlap (each enum
- * owns one prefix), which keeps deserialization unambiguous. A new domain (for example
- * `auth.*`) gets a new enum and a new variant here, never codes inside the existing ones.
+ * Any error code the server can put in an HTTP body or a WebSocket message. Untagged, so in
+ * TypeScript it is the union of the domain enums. Each enum owns one prefix and their string
+ * sets never overlap, which keeps deserialization unambiguous. A new domain gets a new enum
+ * and a new variant here, never codes inside an existing enum.
  */
 export type ErrorCode = ApiErrorCode | WsErrorCode | AuthErrorCode;
