@@ -1,15 +1,19 @@
 //! In-memory rate limiter per `IpKey` (008 RF-A4, ADR-0008 D7), on `governor` (GCRA).
 //!
-//! Each limiter has an exact cap of keys: a new key only enters with the admission mutex
-//! held, and the sweep takes the same mutex, so the table never goes over [`MAX_KEYS`] and
-//! no live key is ever evicted (evicting it would reset the bucket of whoever drained it).
+//! Each limiter has an exact cap of keys. A check of an existing key holds the admission
+//! lock shared, so the sweep (exclusive) cannot drop the key between the lookup and the
+//! measurement; a new key only enters with the lock held exclusively, after the cap check.
+//! So the table never goes over [`MAX_KEYS`] and no live key is ever evicted (evicting it
+//! would reset the bucket of whoever drained it).
 
 pub mod clock;
 pub mod http;
 pub mod quotas;
 pub mod store;
 
-use std::sync::{Arc, Mutex, PoisonError};
+#[cfg(test)]
+use std::sync::Mutex;
+use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
 use governor::clock::Clock;
@@ -72,7 +76,10 @@ pub struct KeyedLimiter {
     store: CappedStore,
     clock: ServerClock,
     max_keys: usize,
-    admission: Mutex<()>,
+    admission: RwLock<()>,
+    /// Runs once between the existence check and the measurement (race tests only).
+    #[cfg(test)]
+    hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl KeyedLimiter {
@@ -83,24 +90,45 @@ impl KeyedLimiter {
             store,
             clock: settings.clock.clone(),
             max_keys: settings.max_keys,
-            admission: Mutex::new(()),
+            admission: RwLock::new(()),
+            #[cfg(test)]
+            hook: Mutex::new(None),
         }
     }
 
     pub fn check(&self, key: &IpKey) -> Decision {
-        if self.store.contains(key) {
-            // If a sweep drops the key in between, it was indistinguishable from a fresh one
-            // and the table just shrank by it, so re-inserting it keeps the cap.
-            return self.measure(key);
+        {
+            let _shared = self
+                .admission
+                .read()
+                .unwrap_or_else(PoisonError::into_inner);
+            if self.store.contains(key) {
+                #[cfg(test)]
+                self.run_hook();
+                // No sweep can run while the shared lock is held: the key is still there.
+                return self.measure(key);
+            }
         }
-        let _admission = self
+        let _exclusive = self
             .admission
-            .lock()
+            .write()
             .unwrap_or_else(PoisonError::into_inner);
         if !self.store.contains(key) && self.limiter.len() >= self.max_keys {
             return Decision::Full;
         }
         self.measure(key)
+    }
+
+    #[cfg(test)]
+    fn run_hook(&self) {
+        let hook = self
+            .hook
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(hook) = hook {
+            hook();
+        }
     }
 
     fn measure(&self, key: &IpKey) -> Decision {
@@ -118,9 +146,9 @@ impl KeyedLimiter {
 
     /// Drops the keys whose bucket is full again, and gives the memory back.
     pub fn sweep(&self) {
-        let _admission = self
+        let _exclusive = self
             .admission
-            .lock()
+            .write()
             .unwrap_or_else(PoisonError::into_inner);
         self.limiter.retain_recent();
         self.limiter.shrink_to_fit();
@@ -298,6 +326,36 @@ mod tests {
         clock.advance(Duration::from_secs(60));
         limiter.sweep();
         assert!(limiter.is_empty());
+    }
+
+    /// QA race: a sweep drops K and a new key L takes the free slot while K's check is in
+    /// flight; re-inserting K must not take the table over the cap.
+    #[test]
+    fn a_swept_key_in_flight_never_takes_the_table_over_the_cap() {
+        let (settings, clock) = manual(1);
+        let limiter = Arc::new(KeyedLimiter::new(AUTH_IP, &settings));
+        assert_eq!(limiter.check(&key(1)), Decision::Allow);
+        // K is indistinguishable from fresh: the next sweep would drop it.
+        clock.advance(Duration::from_secs(12));
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let racer = limiter.clone();
+        let handle: Arc<Mutex<Option<std::thread::JoinHandle<Decision>>>> = Arc::default();
+        let slot = handle.clone();
+        *limiter.hook.lock().unwrap() = Some(Box::new(move || {
+            let thread = std::thread::spawn(move || {
+                racer.sweep();
+                let decision = racer.check(&key(2));
+                let _ = done_tx.send(());
+                decision
+            });
+            // Old code: the racer finishes here. Fixed code: it blocks until K's check ends.
+            let _ = done_rx.recv_timeout(Duration::from_millis(200));
+            *slot.lock().unwrap() = Some(thread);
+        }));
+        assert_eq!(limiter.check(&key(1)), Decision::Allow);
+        let thread = handle.lock().unwrap().take().unwrap();
+        assert_eq!(thread.join().unwrap(), Decision::Full);
+        assert_eq!(limiter.len(), 1);
     }
 
     #[test]
