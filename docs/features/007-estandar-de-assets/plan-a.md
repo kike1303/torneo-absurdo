@@ -283,7 +283,11 @@ Sin advertencias de `svelte-check` ni de clippy, y `_check-gen` sin diferencias 
 Sin cambios en workflows. El PR dispara `policy`, `rust` (por `crates/content`) y `web` (por `packages/renderer`), y probablemente `e2e` según sus filtros de rutas. El costo agregado es de unos segundos: la propiedad de RF-A1 (< 2 s) y un test de Rust que recorre 65 536 versiones `const`.
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+1. **Corte de errores de `parseRulesetTiming`.** `RulesetError` solo admite `ruleset.invalid`, así que el corte de `ErrorSink` en `LIMITS.maxErrors` es un `ruleset.invalid` más con `path: ''`, no un código `ruleset.too_many_errors` nuevo. No agrega códigos a la spec; lo cubre un caso de `guide-ruleset.test.ts`.
+2. **Pivote de las reglas de píxeles.** `feet_off_pivot` e `impact_short` miden contra el pivote estándar (96, 184), no contra el que declara el frame. Un frame con `guide.pivot_position` sigue pasando por las reglas de píxeles (no mide mal la celda ni está vacío) sin errores en cascada.
+3. **`idle_distinct` sin `Buffer`.** Compara los bytes de las celdas de a pares (≤ 12 frames) en lugar de armar una llave: el núcleo puro no usa globals de Node (`tsc` de `src/` no tiene tipos de Node).
+4. **Orden rojo → verde de RF-A1.** `reaction-window.test.ts` pasó contra el código anterior al refactor (corrido con una constante local de 200, porque `REACTION_WINDOW_MS` aún no existía). En `windup-derivation.test.ts`, los casos de `REACTION_WINDOW_MS`, de la derivación y de "sin literal `= 400`" fallaban antes del refactor por definición y pasaron después; los otros tres pasaron en ambos estados. Además, la propiedad corre el guion del spike y las tres doradas con **los tres** juegos de manifests (reapuntando los `asset`), no solo con los placeholders, y se comprobó que falla con una ventana de 201 ms sobre `MAX` (el borde es exacto).
+5. **Verificación manual de RF-A5 (hecha).** Con `windup_strike_ms: 390` en local en `ruleset.rs`, `cargo test -p content --test ruleset_timing` falla con `ruleset-timing.json: bytes differ (first difference at Some(169)); a ruleset version changed or was added: regenerate with UPDATE_GOLDEN=1 …`. Revertido sin commitear; `crates/engine` no cambia en el diff.
 
 ## Revisión
 ### architect — 2026-10-28 — APPROVE
