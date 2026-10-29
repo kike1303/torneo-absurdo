@@ -63,8 +63,11 @@ export function closeReasonKey(reason: string): CloseReasonKey {
   }
 }
 
-/** Type guard for messages from the server. */
-export function parseServerMessage(data: unknown): ServerMessage | null {
+/** The only server message the echo page reads. */
+export type EchoMessage = Extract<ServerMessage, { type: 'echo' }>;
+
+/** Parses an echo from the server; any other message (or anything invalid) is `null`. */
+export function parseServerMessage(data: unknown): EchoMessage | null {
   if (typeof data !== 'string') return null;
   let value: unknown;
   try {
@@ -115,8 +118,8 @@ export function openEcho(
   socket.onopen = () => events.onStatus('connected');
   socket.onmessage = (event) => {
     const message = parseServerMessage(event.data);
-    // The echo page only shows echoes; subscriptions are not used here.
-    if (message === null || message.type !== 'echo') return;
+    // `parseServerMessage` only accepts echoes, the only messages this page shows.
+    if (message === null) return;
     events.onMessage(message.payload);
     events.onStatus('received');
   };

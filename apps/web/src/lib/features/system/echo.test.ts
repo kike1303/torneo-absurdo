@@ -124,6 +124,9 @@ describe('parseServerMessage', () => {
       payload: 'x',
     });
     expect(parseServerMessage('{"type":"echo"}')).toBeNull();
+    // Only echoes: the other server messages are not for this page.
+    expect(parseServerMessage('{"type":"subscribed","channel":"self"}')).toBeNull();
+    expect(parseServerMessage('{"type":"error","code":"ws.forbidden_channel"}')).toBeNull();
     expect(parseServerMessage('[]')).toBeNull();
   });
 });

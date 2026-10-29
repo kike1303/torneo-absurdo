@@ -137,10 +137,11 @@ impl AuthErrorCode {
     }
 }
 
-/// The closed list of codes the OAuth callback may put in `/login?error=<code>` (ADR-0008,
-/// amendment 2026-10-28). A subset of [`AuthErrorCode`] with the same strings; it is the only
-/// type the server writes into that `Location`, so nothing from the request or the provider
-/// is ever reflected. Not part of [`ErrorCode`]: it never appears in a body.
+/// The closed list of codes for `/login?error=<code>` (ADR-0008, amendment 2026-10-28): the
+/// errors of the OAuth callback and a logout that could not revoke. A subset of
+/// [`AuthErrorCode`] with the same strings; it is the only type the server writes into that
+/// `Location`, so nothing from the request or the provider is ever reflected. Not part of
+/// [`ErrorCode`]: it never appears in a body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum CallbackErrorCode {
