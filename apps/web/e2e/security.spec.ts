@@ -15,14 +15,41 @@ function expectSecurityHeaders(res: RawResponse, label: string): void {
   );
 }
 
+// ADR-0012 B1 as the browser receives it, with Kit's per-request nonce as `'nonce-*'`. The
+// static check (scripts/check-kit-config.mjs) can only read vite.config.ts; this compares what Kit
+// actually emits, so a policy assembled some other way still fails (security-reviewer on #50).
+// A B4 extension changes this table in its own PR.
+const CSP_B1: Record<string, string[]> = {
+  'default-src': ["'self'"],
+  'script-src': ["'self'", "'nonce-*'"],
+  'style-src': ["'self'", "'unsafe-inline'"],
+  'img-src': ["'self'", 'data:', 'blob:'],
+  'font-src': ["'self'"],
+  'connect-src': ["'self'"],
+  'object-src': ["'none'"],
+  'base-uri': ["'self'"],
+  'form-action': ["'self'"],
+  'frame-ancestors': ["'none'"],
+};
+
+/** Directive → sorted sources; a repeated directive is kept as its own key so it fails. */
+function effectiveCsp(value: string): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const part of value.split(';')) {
+    const [name, ...sources] = part.trim().split(/\s+/);
+    if (!name) continue;
+    const key = name in out ? `${name} (repeated)` : name;
+    out[key] = sources.map((s) => s.replace(/^'nonce-[A-Za-z0-9+/_=-]+'$/, "'nonce-*'")).sort();
+  }
+  return out;
+}
+
 test('RF-A10: security headers on 200, 307, 403 and 404, and a CSP with nonce', async () => {
   const ok = await raw(CATALOG, '/es/');
   expect(ok.status).toBe(200);
   expectSecurityHeaders(ok, '200');
-  const csp = header(ok, 'content-security-policy') ?? '';
-  expect(csp).toContain("script-src 'self' 'nonce-");
-  expect(csp).toContain("frame-ancestors 'none'");
-  expect(csp).not.toMatch(/script-src[^;]*'(unsafe-inline|unsafe-eval|strict-dynamic)'/);
+  const b1 = Object.fromEntries(Object.entries(CSP_B1).map(([k, v]) => [k, [...v].sort()]));
+  expect(effectiveCsp(header(ok, 'content-security-policy') ?? '')).toEqual(b1);
 
   const redirect = await raw(CATALOG, '/');
   expect(redirect.status).toBe(307);

@@ -133,7 +133,7 @@ Scheduled ─▶ BettingOpen ─▶ BettingClosed ─▶ Live ─▶ Settled
   - `torneo-*-http` redirigen a HTTPS con `torneo-https-redirect`;
   - los cuatro routers llevan `observability.accesslogs=false`.
 
-  El router `torneo-web` lleva además el middleware `torneo-web-headers` (`nosniff`, `Referrer-Policy: strict-origin-when-cross-origin` y HSTS `max-age=31536000` **sin** `includeSubDomains` ni `preload`). Así cubre las respuestas que no pasan por el `handle` de SvelteKit: los estáticos y la 308 de `/healthz/`. axum ya pone las suyas.
+  El router `torneo-web` lleva además el middleware `torneo-web-headers` (`nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, HSTS `max-age=31536000` **sin** `includeSubDomains` ni `preload`, `Cross-Origin-Opener-Policy: same-origin` y `Permissions-Policy`; valores en ADR-0012 B2). Así cubre las respuestas que no pasan por el `handle` de SvelteKit: los estáticos y la 308 de `/healthz/`. axum ya pone las suyas.
 
 ### Release con gate manual (ADR-0006 D5 y D6)
 1. El owner empuja un tag `vX.Y.Z` (un ruleset de tags se lo reserva). `release.yml/build` valida el tag con `^v[0-9]+\.[0-9]+\.[0-9]+$` antes de construir y comprueba que ni `vX.Y.Z` ni `sha-<7>` existen ya, porque una etiqueta publicada nunca se mueve. Después publica `server` y `web` con las dos etiquetas sobre el mismo digest, sin `latest`, y con un manifiesto de imagen por etiqueta (`provenance` y `sbom` apagados, comprobado con `imagetools inspect --raw`). Al final aplica la retención: conserva las 10 versiones más recientes de cada paquete.

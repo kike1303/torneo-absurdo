@@ -9,8 +9,9 @@ import { chunkModules } from './vite/chunk-modules.js';
 import { localSprites } from './vite/local-sprites.js';
 
 // Kit 3 has no svelte.config.js: all Kit options live here (plan-a, decision 17).
-// Never add `csrf.trustedOrigins`, `csrf.checkOrigin` or `paths.origin`
-// (enforced by scripts/check-kit-config.mjs).
+// Never add `csrf.trustedOrigins`, `csrf.checkOrigin` or `paths.origin`, and keep `csp` exactly
+// ADR-0012 B1 plus, at most, its B4 extensions, written as a literal in `sveltekit({ … })`
+// (both enforced by scripts/check-kit-config.mjs).
 export default defineConfig({
   plugins: [
     // First, so /__local-sprites/ is answered before Kit; only in `vite dev` (002 RF-B7).

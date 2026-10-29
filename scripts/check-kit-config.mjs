@@ -149,6 +149,148 @@ function parseLiteral(tokens) {
 }
 
 /**
+ * Masks comments, template literals, regular expression literals and the contents of strings with
+ * spaces (offsets are kept), so a `csp` or `sveltekit(` written as text never counts as code.
+ * Strings keep their quotes, so a quoted key is still visible as `'   '`.
+ * @param {string} source
+ * @returns {string}
+ */
+export function maskNonCode(source) {
+  const out = source.split('');
+  const blank = (from, to) => {
+    for (let k = from; k < to; k++) if (out[k] !== '\n') out[k] = ' ';
+  };
+  let i = 0;
+  /** Last significant code character, to tell a regex literal from a division. */
+  let prev = '';
+  while (i < source.length) {
+    const ch = source[i];
+    if (source.startsWith('//', i)) {
+      const end = source.indexOf('\n', i);
+      const stop = end === -1 ? source.length : end;
+      blank(i, stop);
+      i = stop;
+    } else if (source.startsWith('/*', i)) {
+      const end = source.indexOf('*/', i + 2);
+      const stop = end === -1 ? source.length : end + 2;
+      blank(i, stop);
+      i = stop;
+    } else if (ch === "'" || ch === '"' || ch === '`') {
+      let j = i + 1;
+      while (j < source.length && source[j] !== ch) j += source[j] === '\\' ? 2 : 1;
+      if (ch === '`') blank(i, j + 1);
+      else blank(i + 1, j);
+      i = j + 1;
+      prev = ch;
+    } else if (ch === '/' && (prev === '' || /[(,=:[!&|?{};]/.test(prev))) {
+      let j = i + 1;
+      let inClass = false;
+      while (j < source.length && source[j] !== '\n') {
+        if (source[j] === '\\') j++;
+        else if (source[j] === '[') inClass = true;
+        else if (source[j] === ']') inClass = false;
+        else if (source[j] === '/' && !inClass) break;
+        j++;
+      }
+      blank(i, j + 1);
+      i = j + 1;
+      prev = '/';
+    } else {
+      if (!/\s/.test(ch)) prev = ch;
+      i++;
+    }
+  }
+  return out.join('');
+}
+
+/**
+ * Finds the `{` of the `csp` value and proves it is the policy Kit receives: `sveltekit(` is called
+ * once, with one object literal whose top-level keys are all plain (no spread, no computed key, no
+ * duplicate), `csp` is one of them, and `csp` appears nowhere else in the code.
+ * @param {string} source
+ * @returns {{ open: number, error?: undefined, at?: undefined } | { error: string, at: number }}
+ */
+function locateCsp(source) {
+  const code = maskNonCode(source);
+  const calls = [...code.matchAll(/\bsveltekit\s*\(/g)];
+  if (calls.length !== 1) {
+    return { error: '`sveltekit(` must be called exactly once', at: calls[1]?.index ?? 0 };
+  }
+  // A quoted key is masked to `'   '`; the source tells whether it spells csp.
+  const mentions = [...code.matchAll(/\bcsp\b|(['"]) {3}\1/g)].filter(
+    (m) => m[0] === 'csp' || source.slice(m.index + 1, m.index + 4) === 'csp',
+  );
+  if (mentions.length === 0) return { error: 'the `csp` option is missing', at: 0 };
+  if (mentions.length > 1) {
+    return { error: '`csp` must appear exactly once', at: mentions[1].index };
+  }
+  let i = calls[0].index + calls[0][0].length;
+  while (/\s/.test(code[i] ?? '')) i++;
+  if (code[i] !== '{') return { error: '`sveltekit(` must receive an object literal', at: i };
+  /** @type {{ key: string, at: number, value: number }[]} */
+  const keys = [];
+  let depth = 0;
+  let segmentStart = i + 1;
+  const closers = { '(': ')', '[': ']', '{': '}' };
+  /** @type {string[]} */
+  const stack = [];
+  const readKey = (from, to) => {
+    const text = code.slice(from, to);
+    const lead = text.length - text.trimStart().length;
+    const at = from + lead;
+    const m = /^(?:([A-Za-z_$][\w$]*)|(['"])\s*\2)\s*(:)?/.exec(text.trimStart());
+    if (!m || text.trim() === '')
+      return text.trim() === '' ? null : { error: 'not a plain key', at };
+    const key = m[1] ?? source.slice(at + 1, at + m[0].indexOf(m[2], 1));
+    if (!m[3] && (m[2] || /\S/.test(text.trim().slice(m[0].length)))) {
+      return { error: 'not a plain key', at };
+    }
+    return { key, at, value: at + m[0].length };
+  };
+  for (let j = i; j < code.length; j++) {
+    const ch = code[j];
+    if (ch in closers) {
+      stack.push(closers[ch]);
+      depth++;
+    } else if (ch === ')' || ch === ']' || ch === '}') {
+      if (stack.pop() !== ch) return { error: 'unbalanced brackets', at: j };
+      depth--;
+    }
+    if ((ch === ',' && depth === 1) || depth === 0) {
+      const found = readKey(segmentStart, j);
+      if (found?.error) {
+        return {
+          error: `\`sveltekit({ … })\` keys must be plain (no spread or computed key)`,
+          at: found.at,
+        };
+      }
+      if (found) {
+        if (keys.some((k) => k.key === found.key)) {
+          return { error: `\`sveltekit({ … })\` repeats \`${found.key}\``, at: found.at };
+        }
+        keys.push(found);
+      }
+      segmentStart = j + 1;
+    }
+    if (depth === 0) {
+      let k = j + 1;
+      while (/\s/.test(code[k] ?? '')) k++;
+      if (code[k] === ',') k++;
+      while (/\s/.test(code[k] ?? '')) k++;
+      if (code[k] !== ')') return { error: '`sveltekit(` must receive one argument', at: k };
+      const csp = keys.find((k2) => k2.key === 'csp');
+      if (!csp)
+        return { error: '`csp` must be a key of `sveltekit({ … })`', at: mentions[0].index };
+      let v = csp.value;
+      while (/\s/.test(code[v] ?? '')) v++;
+      if (code[v] !== '{') return { error: 'must be written `csp: { … }`', at: csp.at };
+      return { open: v };
+    }
+  }
+  return { error: 'unterminated `sveltekit({ … })`', at: i };
+}
+
+/**
  * ADR-0012 consequence 6: compares the `csp` option of vite.config.ts with B1 plus, at most, the
  * B4 extensions. Every other option, directive or source fails, whether or not B3 names it.
  * @param {string} source contents of vite.config.ts
@@ -157,28 +299,10 @@ function parseLiteral(tokens) {
  */
 export function checkCspSource(source, file) {
   const rule = 'csp (ADR-0012 B1/B4)';
-  // Blank line comments as checkViteConfigSource strips them, keeping every offset, so a `csp` in
-  // a comment does not count.
-  const stripped = source
-    .split('\n')
-    .map((l) =>
-      l.replace(/(^|[^:])(\/\/.*)$/, (_, pre, comment) => pre + ' '.repeat(comment.length)),
-    )
-    .join('\n');
-  const mentions = [...stripped.matchAll(/\bcsp\b/g)];
   const lineOf = (index) => source.slice(0, index).split('\n').length;
-  if (mentions.length === 0) return [`${file}:1: ${rule}: the \`csp\` option is missing`];
-  if (mentions.length > 1) {
-    return mentions
-      .slice(1)
-      .map((m) => `${file}:${lineOf(m.index)}: ${rule}: \`csp\` must appear exactly once`);
-  }
-  const key = /\bcsp\s*:\s*\{/y;
-  key.lastIndex = mentions[0].index;
-  if (!key.test(stripped)) {
-    return [`${file}:${lineOf(mentions[0].index)}: ${rule}: must be written \`csp: { … }\``];
-  }
-  const open = key.lastIndex - 1;
+  const located = locateCsp(source);
+  if (located.error) return [`${file}:${lineOf(located.at)}: ${rule}: ${located.error}`];
+  const open = located.open;
   const { tokens, error: tokenError } = tokenize(source, open, lineOf(open));
   const parsed = tokenError ? { value: null, error: tokenError } : parseLiteral(tokens);
   if (parsed.error) return [`${file}: ${rule}: ${parsed.error}`];
@@ -207,7 +331,11 @@ export function checkCspSource(source, file) {
     }
   }
   for (const [name, entry] of directives.object) {
-    const base = CSP_BASE[name] ?? CSP_EXTENSIONS.extraDirectives[name];
+    const base = Object.hasOwn(CSP_BASE, name)
+      ? CSP_BASE[name]
+      : Object.hasOwn(CSP_EXTENSIONS.extraDirectives, name)
+        ? CSP_EXTENSIONS.extraDirectives[name]
+        : undefined;
     if (!base) {
       problems.push(`${at(entry.keyLine)}: directive \`${name}\` is not allowed`);
       continue;
@@ -216,7 +344,10 @@ export function checkCspSource(source, file) {
       problems.push(`${at(entry.keyLine)}: \`${name}\` must be an array of sources`);
       continue;
     }
-    const allowed = new Set([...base, ...(CSP_EXTENSIONS.extraSources[name] ?? [])]);
+    const extra = Object.hasOwn(CSP_EXTENSIONS.extraSources, name)
+      ? CSP_EXTENSIONS.extraSources[name]
+      : [];
+    const allowed = new Set([...base, ...extra]);
     const seen = new Set();
     for (const source of entry.array) {
       if (seen.has(source.value)) {

@@ -246,7 +246,8 @@ jobs:
         env:
           PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
         run: |
-          set -uo pipefail
+          # GitHub runs bash with -e; turn it off so every path is checked and reported.
+          set +e -uo pipefail
           nosniff='x-content-type-options=nosniff'
           hsts='strict-transport-security=max-age=31536000'
           web=("$nosniff" "$hsts"
@@ -257,12 +258,14 @@ jobs:
             'cross-origin-resource-policy=same-origin'
             "content-security-policy=default-src 'none'; frame-ancestors 'none'")
           fail=0
-          # check <path> <status> <name=value>...: a value of `*` only requires the header once.
+          headers="$(mktemp)"
+          trap 'rm -f "$headers"' EXIT
+          # check <path> <status> <name=value>...: a value of `*` only requires the header once,
+          # and `-` requires it to be absent.
           check() {
-            local path="$1" want="$2" url="https://$PUBLIC_HOST$1" file status pair name value got
+            local path="$1" want="$2" url="https://$PUBLIC_HOST$1" status pair name value got count
             shift 2
-            file="$(mktemp)"
-            status="$(curl -sS -I --proto '=https' --max-time 10 -o "$file" -w '%{http_code}' "$url")"
+            status="$(curl -sS -I --proto '=https' --max-time 10 -o "$headers" -w '%{http_code}' "$url")"
             if [ "$status" != "$want" ]; then
               echo "$path answers $status, expected $want" >&2
               fail=1
@@ -271,9 +274,15 @@ jobs:
             for pair in "$@"; do
               name="${pair%%=*}"
               value="${pair#*=}"
-              got="$(grep -i "^$name:" "$file" | sed 's/^[^:]*:[[:space:]]*//' | tr -d '\r')"
-              if [ "$(grep -ci "^$name:" "$file")" != 1 ]; then
-                echo "$path sends $name $(grep -ci "^$name:" "$file") times, expected once" >&2
+              count="$(grep -ci "^$name:" "$headers")"
+              got="$(grep -i "^$name:" "$headers" | sed 's/^[^:]*:[[:space:]]*//' | tr -d '\r')"
+              if [ "$value" = '-' ]; then
+                if [ "$count" != 0 ]; then
+                  echo "$path sends $name, expected none" >&2
+                  fail=1
+                fi
+              elif [ "$count" != 1 ]; then
+                echo "$path sends $name $count times, expected once" >&2
                 fail=1
               elif [ "$value" != '*' ] && [ "$got" != "$value" ]; then
                 echo "$path sends $name: $got, expected $value" >&2
@@ -287,5 +296,6 @@ jobs:
           check /es/ 200 "${web[@]}" 'content-security-policy=*'
           check /_app/version.json 200 "${web[@]}"
           check /healthz/ 308 "${web[@]}"
-          check /api/health 200 "${server[@]}"
+          # torneo-web-headers belongs to web only (RF-C4).
+          check /api/health 200 "${server[@]}" 'cross-origin-opener-policy=-' 'permissions-policy=-'
           exit "$fail"

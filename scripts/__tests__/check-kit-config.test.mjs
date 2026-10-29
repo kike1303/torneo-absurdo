@@ -190,13 +190,76 @@ describe('check-kit-config: csp is the exact B1 allowlist (ADR-0012 consequence 
     ['a template literal', config().replace("'auto'", '`auto`'), /``` is not allowed/],
     [
       'a computed directive',
-      config().replace("'default-src': [", "'default-src': sources(["),
+      config().replace("'default-src': [", "'default-src': sources() || ["),
       /`\(` is not allowed/,
     ],
     ['an escaped string', config().replace("'self'", "'\\x73elf'"), /plain string literals/],
   ])('fails on %s', (_, source, pattern) => {
     const problems = csp(source);
     expect(problems.join('\n')).toMatch(pattern);
+  });
+  // security-reviewer and architect on #50: the literal must be the policy Kit receives.
+  const RELAXED = "{ mode: 'auto', directives: { 'script-src': ['self', 'unsafe-inline'] } }";
+  it.each([
+    [
+      'a computed key after csp',
+      config().replace('})],', `, ['c' + 'sp']: ${RELAXED} })],`),
+      /keys must be plain/,
+    ],
+    ['a spread after csp', config().replace('})],', ', ...kitExtra })],'), /keys must be plain/],
+    [
+      'a spread before csp',
+      config().replace('sveltekit({ csp', 'sveltekit({ ...kitExtra, csp'),
+      /keys must be plain/,
+    ],
+    [
+      'a decoy B1 in a template literal and the real csp computed',
+      `const decoy = \`${config()}\`;\n` +
+        config().replace('sveltekit({ csp: ', `sveltekit({ ['c' + 'sp']: ${RELAXED}, x: `),
+      /keys must be plain|`csp` option is missing/,
+    ],
+    [
+      'a decoy B1 in a block comment',
+      `/* ${config()} */\n` + config().replace('sveltekit({ csp: ', `sveltekit({ ['csp']: `),
+      /keys must be plain|`csp` option is missing/,
+    ],
+    [
+      'a decoy B1 in a string',
+      `const decoy = ${JSON.stringify(config())};\n` +
+        config().replace('sveltekit({ csp: ', `sveltekit({ ['csp']: `),
+      /keys must be plain|`csp` option is missing/,
+    ],
+    [
+      'Object.assign around the options',
+      config()
+        .replace('sveltekit({ csp', 'sveltekit(Object.assign({ csp')
+        .replace('})],', '}, extra))],'),
+      /must receive an object literal/,
+    ],
+    ['a second argument', config().replace('})],', '}, extra)],'), /one argument/],
+    ['a second sveltekit call', `${config()}sveltekit({});\n`, /called exactly once/],
+    [
+      'a quoted csp key repeated',
+      config().replace('})],', `, 'csp': ${RELAXED} })],`),
+      /exactly once|repeats `csp`/,
+    ],
+    [
+      'csp nested in another key',
+      config().replace('sveltekit({ csp', 'sveltekit({ kit: { csp').replace('})],', '} })],'),
+      /must be a key of/,
+    ],
+  ])('fails on %s', (_, source, pattern) => {
+    const problems = csp(source);
+    expect(problems.join('\n')).toMatch(pattern);
+  });
+  it('accepts a quoted csp key, shorthand keys and a regex literal elsewhere', () => {
+    const source = `const adapter = {};\nconst re = /'"\`/;\n${config().replace('sveltekit({ csp', "sveltekit({ adapter, 'csp'")}`;
+    expect(csp(source)).toEqual([]);
+  });
+  it('fails cleanly on a prototype name as a directive', () => {
+    expect(csp(config((d) => ({ ...d, constructor: ['self'] })))).toContainEqual(
+      expect.stringContaining('directive `constructor` is not allowed'),
+    );
   });
   it('reports the line of the offending source', () => {
     const source = config(add('connect-src', 'https:'));
