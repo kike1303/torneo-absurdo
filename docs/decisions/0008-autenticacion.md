@@ -17,11 +17,15 @@ approvals:
     date: 2026-10-22
   - by: security-reviewer
     date: 2026-10-22
+  - by: security-reviewer
+    date: 2026-10-28
+  - by: owner
+    date: 2026-10-28
 supersedes: null
 linear: TA-5
 depends_on: ["0002", "0003", "0005", "0006", "0007"]
 created: 2026-10-20
-updated: 2026-10-22
+updated: 2026-10-28
 ---
 
 # ADR-0008: Autenticación y sesiones
@@ -294,6 +298,33 @@ El owner aprobó el 2026-10-22 usar **SvelteKit 3** desde la feature 001. Kit 3 
 - **Origen de confianza.** Kit 3 compara contra `paths.origin`, que es de build, o contra el origen de la petición. adapter-node 6 ya no lee la variable `ORIGIN`. `web` no define `paths.origin` (la imagen es la misma para cualquier host), así que el origen de la petición es `https://` + `Host`, sin `PROTOCOL_HEADER`, `HOST_HEADER` ni `PORT_HEADER`.
 - **Guard de `Origin` propio en `web`.** Como el chequeo de Kit no cubre JSON ni otros tipos y compara contra el `Host`, `web` aplica en `handle` la misma regla que el middleware de axum para peticiones del navegador: en todo método distinto de `GET`, `HEAD` y `OPTIONS`, `Origin` debe ser exactamente `PUBLIC_ORIGIN` (variable de runtime de `web`, con el mismo valor que la del server). Si `Origin` falta, se acepta solo con `Sec-Fetch-Site: same-origin`. Si no, 403 `auth.csrf_origin` sin ejecutar la ruta. El requisito verificable es RF-A23 de la spec 001.
 - **D5 no cambia.** `X-Client-Origin` y `X-Client-Fetch-Site` siguen siendo copia literal de los headers del navegador, y el middleware de axum sigue siendo la defensa de las mutaciones del API. `ADDRESS_HEADER=X-Forwarded-For` y `XFF_DEPTH=1` siguen existiendo en adapter-node 6 con el mismo comportamiento (lo verifiqué en su código).
+
+## Nota (2026-10-28): reparto de tests por feature
+Ninguna decisión de D1 a D10 cambia, y ningún número fijado tampoco. Esta nota solo precisa **qué feature tiene que pasar cada test mínimo antes de mergear**. Donde "Tests mínimos" dice "bloquean el merge de la feature de auth", ahora vale este reparto. Cada test sigue bloqueando el merge de la feature que tiene el código que prueba, y está como criterio bloqueante en el issue de Linear de esa feature. El owner aceptó el reparto el 2026-10-28 desde la revisión del intent de la feature 008. El owner confirmó la nota en chat el 2026-10-28.
+
+| Feature | Tests |
+|---|---|
+| 008, autenticación (TA-26) | 1–6, 9–11, 13–17, 19–22. De 18: mensaje de más de 4 KB, suscripción número 9 y socket con sesión número 201 desde la misma `/64`. De 28: "dos direcciones IPv6 del mismo `/64` producen el mismo `ip_hash`". |
+| Apuestas (TA-27) | 7, 8, 23, 24, 26. De 18: la reserva de capacidad de D6 (con el 80 % ocupado, un anónimo o una cuenta en carencia recibe 503 y una cuenta fuera de carencia pasa). Criterio bloqueante adicional: `bets.ranked_stake` se registra al crear cada apuesta (D8), con un test que lo verifica para una cuenta en carencia y otra fuera de ella. |
+| Peleas en vivo y commit-reveal (TA-13) | 12. |
+| Temporadas (TA-28) | De 27: la parte de temporada (la pelea que cierra antes de `ends_at` y se liquida después, y la carencia que cruza el cambio de temporada). 28, salvo el caso del `/64`. El término `temporada + 7 días` de la retención de `ip_hash` (D8), que se aplica antes de abrir la primera temporada. |
+
+- **Tests 25 y la parte de carencia de 27** (el `RankedProfit` acumulado durante la carencia aparece completo al salir de ella) bloquean a **la primera feature que escriba `season_stats`**, sea TA-27 o TA-28. Sin `ranked_stake` desde la primera apuesta, las apuestas anteriores a TA-28 no se podrían clasificar después, y una granja en carencia contaría para el primer ranking.
+- **Reserva de capacidad de D6:** se implementa con la feature de apuestas. Sin apuestas liquidadas, toda cuenta sigue en carencia, y la reserva solo bajaría el tope útil al 80 % de `WS_MAX_CONNECTIONS`. Hasta entonces el tope es `WS_MAX_CONNECTIONS` para todos.
+- **Retención de `ip_hash`:** hasta la feature de temporadas se aplica el piso de 30 días de D8.
+
+## Enmienda 2026-10-28: errores del callback OAuth
+Aprobada por el owner el 2026-10-28 (transmitida por la sesión coordinadora). Revisada y aprobada por security-reviewer el 2026-10-28. Solo reemplaza **cómo responde** `GET /api/auth/{provider}/callback` cuando falla. Las condiciones de rechazo de D2 y el resto de D1 a D10 no cambian.
+
+- **Por qué.** El callback es una navegación top-level que vuelve del proveedor. Un 400 con cuerpo JSON deja al usuario del celular ante un texto crudo, sin salida. La web no puede intervenir, porque `/api` va directo al server.
+- **Respuesta.** En vez de 400 `auth.invalid_state` (y de los otros errores del callback), el server responde **303** con `Location: /login?error=<code>`. Vale para los flujos `login` y `link` por igual: con sesión, `/login` muestra el error y enlaza a la cuenta. Además:
+  - no crea ni rota ninguna sesión;
+  - expira siempre la cookie del flujo y consume la fila de `oauth_flows` si existía;
+  - lleva `Cache-Control: no-store`;
+  - nunca usa `next`.
+- **Lista cerrada de códigos.** `error` solo puede valer `auth.invalid_state`, `auth.banned`, `auth.provider_error`, `auth.try_again`, `auth.already_linked` o `auth.provider_already_linked`. Es un enum de `crates/protocol`, y el server nunca copia al `Location` nada que venga de la petición ni del proveedor.
+- **En la web.** `/login` resuelve `error` a una llave i18n solo si está en la lista. Un valor desconocido se muestra con un texto genérico, y **nunca se refleja** en la página, en un atributo ni en un log.
+- **T4 adaptado.** Un callback sin `state`, con `state` reusado, expirado o de otra cookie responde 303 a `/login?error=auth.invalid_state`, sin `Set-Cookie` de sesión y con la cookie del flujo expirada. Un flujo `link` de otra sesión no vincula. T4 suma un caso nuevo: con un `error` ajeno a la lista en la query de `/login`, la página no contiene ese valor.
 
 ## Revisión
 ### security-reviewer — 2026-10-20 — REQUEST_CHANGES
