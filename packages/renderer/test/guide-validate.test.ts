@@ -457,3 +457,43 @@ describe('the placeholders stay out of the guide (plan-a decision 8)', () => {
     expect(cells.map((e) => e.path)).toEqual(manifest.frames.map((_, i) => `/frames/${i}`));
   });
 });
+
+describe('guide.idle_distinct after the counts and before the durations (007 plan-b decisions 6 and 7)', () => {
+  it('reports idle_distinct before idle_frame_long', () => {
+    expect(
+      run({
+        ops: [set('/animations/idle/frames', [0, 1, 0, 1]), ms('idle', [300, 200, 200, 200])],
+      }),
+    ).toEqual({
+      ok: false,
+      errors: [
+        { code: 'guide.idle_distinct', path: '/animations/idle/frames', data: { count: 2 } },
+        { code: 'guide.idle_frame_long', path: '/animations/idle/frame_ms/0', data: { ms: 300 } },
+      ],
+    });
+  });
+
+  it('is not evaluated when an idle cell is empty (no cascade)', () => {
+    expect(
+      run({
+        pixels: (sheets) => {
+          paint(sheets, 1, (p) => p.clear());
+          paint(sheets, 2, (p) => p.clear());
+        },
+      }),
+    ).toEqual({
+      ok: false,
+      errors: [
+        { code: 'guide.frame_empty', path: '/frames/1' },
+        { code: 'guide.frame_empty', path: '/frames/2' },
+      ],
+    });
+  });
+
+  it('is not evaluated when an idle cell has another size', () => {
+    expect(run({ ops: [set('/frames/1/w', 190)] })).toEqual({
+      ok: false,
+      errors: [{ code: 'guide.cell_size', path: '/frames/1', data: { w: 190, h: 192 } }],
+    });
+  });
+});

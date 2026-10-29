@@ -22,12 +22,10 @@ import {
   type StrikeCue,
   type Timeline,
 } from '../timeline/types.ts';
-import { FACING, MARK_X } from './types.ts';
+import { CONTACT_PX, FACING, MARK_X } from './types.ts';
 
 /** Return to the mark. */
 export const RETURN_MS = 300;
-/** Distance between the two pivots when a strike connects. */
-export const CONTACT_PX = 64;
 /** Cap for reactions and recoveries (the longest non-looping animation of the format). */
 export const MAX_ACTION_MS = 3000;
 /**
