@@ -9,9 +9,14 @@ use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 
+use base64::Engine as _;
+use base64::alphabet;
+use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 use sqlx::postgres::PgConnectOptions;
 use tracing_subscriber::EnvFilter;
 use url::{Host, Url};
+
+use crate::net::{InternalSecret, TrustedProxies};
 
 pub const DEFAULT_PORT: u16 = 8080;
 pub const DEFAULT_WS_MAX_CONNECTIONS: u32 = 2000;
@@ -20,6 +25,14 @@ pub const DEFAULT_RUST_LOG: &str = "info";
 /// `127.0.0.1`, so it assumes `BIND_ADDR` is `0.0.0.0` or `127.0.0.1`: with any other address
 /// (or `::1`) the healthcheck fails. The production compose never sets `BIND_ADDR` (phase C).
 pub const DEFAULT_BIND_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+/// Smallest decoded length of `INTERNAL_API_SECRET` (008 RF-A6, RF-B18).
+pub const INTERNAL_SECRET_MIN_BYTES: usize = 32;
+
+/// base64url, with or without padding.
+const BASE64URL: GeneralPurpose = GeneralPurpose::new(
+    &alphabet::URL_SAFE,
+    GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
+);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigError {
@@ -62,18 +75,25 @@ impl EchoDecision {
     }
 }
 
-/// Decides the echo from the raw `ENABLE_WS_ECHO` and the already validated origin.
-pub fn decide_echo(flag: Option<&str>, origin: &Url) -> EchoDecision {
-    if flag != Some("1") {
-        return EchoDecision::Off;
-    }
+/// Whether the origin is `http` on a loopback host (`localhost`, `127.0.0.1` or `[::1]`):
+/// the development and e2e origins. The echo, the loopback in `TRUSTED_PROXIES` and, in
+/// phase B, the dev provider depend on it.
+pub fn is_loopback_http_origin(origin: &Url) -> bool {
     let loopback = match origin.host() {
         Some(Host::Domain(domain)) => domain == "localhost",
         Some(Host::Ipv4(ip)) => ip == Ipv4Addr::LOCALHOST,
         Some(Host::Ipv6(ip)) => ip == Ipv6Addr::LOCALHOST,
         None => false,
     };
-    if origin.scheme() == "http" && loopback {
+    origin.scheme() == "http" && loopback
+}
+
+/// Decides the echo from the raw `ENABLE_WS_ECHO` and the already validated origin.
+pub fn decide_echo(flag: Option<&str>, origin: &Url) -> EchoDecision {
+    if flag != Some("1") {
+        return EchoDecision::Off;
+    }
+    if is_loopback_http_origin(origin) {
         EchoDecision::Enabled
     } else {
         EchoDecision::Refused
@@ -101,9 +121,14 @@ pub struct Config {
     pub ws_max_connections: u32,
     pub rust_log: String,
     pub echo: EchoDecision,
+    /// Proxies whose `X-Forwarded-For` is read (008 RF-A3). Empty by default.
+    pub trusted_proxies: TrustedProxies,
+    /// Optional in phase A: without it no request is internal (008 plan-a decision 17).
+    pub internal_secret: Option<InternalSecret>,
 }
 
-// Hand-written so the connection options (with the password) are never formatted.
+// Hand-written so the connection options (with the password), the internal secret and the
+// proxy addresses are never formatted.
 impl fmt::Debug for Config {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Config")
@@ -114,6 +139,15 @@ impl fmt::Debug for Config {
             .field("ws_max_connections", &self.ws_max_connections)
             .field("rust_log", &self.rust_log)
             .field("echo", &self.echo)
+            .field("trusted_proxies", &self.trusted_proxies.len())
+            .field(
+                "internal_secret",
+                &if self.internal_secret.is_some() {
+                    "<redacted>"
+                } else {
+                    "<unset>"
+                },
+            )
             .finish()
     }
 }
@@ -196,6 +230,31 @@ impl Config {
         const ENABLE_WS_ECHO: &str = "ENABLE_WS_ECHO";
         let echo = decide_echo(text(ENABLE_WS_ECHO)?.as_deref(), &origin);
 
+        const TRUSTED_PROXIES: &str = "TRUSTED_PROXIES";
+        let trusted_proxies = match text(TRUSTED_PROXIES)? {
+            None => TrustedProxies::default(),
+            Some(value) => TrustedProxies::parse(&value, is_loopback_http_origin(&origin))
+                .map_err(|_| ConfigError::Invalid {
+                    var: TRUSTED_PROXIES,
+                })?,
+        };
+
+        const INTERNAL_API_SECRET: &str = "INTERNAL_API_SECRET";
+        let internal_secret = match text(INTERNAL_API_SECRET)? {
+            None => None,
+            Some(value) => {
+                let long_enough = BASE64URL
+                    .decode(&value)
+                    .is_ok_and(|bytes| bytes.len() >= INTERNAL_SECRET_MIN_BYTES);
+                if !long_enough {
+                    return Err(ConfigError::Invalid {
+                        var: INTERNAL_API_SECRET,
+                    });
+                }
+                Some(InternalSecret::new(&value))
+            }
+        };
+
         Ok(Self {
             database,
             public_origin: origin_text,
@@ -204,6 +263,8 @@ impl Config {
             ws_max_connections,
             rust_log,
             echo,
+            trusted_proxies,
+            internal_secret,
         })
     }
 }
@@ -247,6 +308,8 @@ mod tests {
         assert_eq!(config.ws_max_connections, 2000);
         assert_eq!(config.rust_log, "info");
         assert_eq!(config.echo, EchoDecision::Off);
+        assert!(config.trusted_proxies.is_empty());
+        assert!(config.internal_secret.is_none());
     }
 
     #[test]
@@ -420,6 +483,123 @@ mod tests {
         );
         assert_eq!(EchoDecision::Off.startup_event(), None);
         assert!(!EchoDecision::Refused.is_enabled());
+    }
+
+    #[test]
+    fn trusted_proxies() {
+        assert!(
+            with(&[("TRUSTED_PROXIES", "")])
+                .unwrap()
+                .trusted_proxies
+                .is_empty()
+        );
+        let config = with(&[(
+            "TRUSTED_PROXIES",
+            " 10.250.0.2/32 , 10.250.0.3,2001:db8::1/128 ,2001:db8::2",
+        )])
+        .unwrap();
+        assert_eq!(config.trusted_proxies.len(), 4);
+        assert!(
+            config
+                .trusted_proxies
+                .contains("10.250.0.2".parse().unwrap())
+        );
+        for value in [
+            "10.250.0.0/24",
+            "2001:db8::/64",
+            "10.250.0.2/0",
+            "10.250.0.2/032",
+            "10.250.0.2/33",
+            "10.250.0.2,,10.250.0.3",
+            "canary-proxy",
+            "0.0.0.0",
+            "::",
+            "224.0.0.1",
+            "ff02::1",
+            "255.255.255.255",
+        ] {
+            let err = with(&[("TRUSTED_PROXIES", value)]).unwrap_err();
+            assert_eq!(err.var(), "TRUSTED_PROXIES", "{value:?}");
+            assert!(!err.to_string().contains(value), "{value:?}");
+            assert!(!format!("{err:?}").contains(value), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn loopback_proxies_need_a_loopback_http_origin() {
+        for proxy in ["127.0.0.1/32", "::1"] {
+            assert_eq!(
+                with(&[("TRUSTED_PROXIES", proxy)])
+                    .unwrap()
+                    .trusted_proxies
+                    .len(),
+                1
+            );
+            for origin in ["https://torneo.example", "http://torneo.example"] {
+                let err =
+                    with(&[("TRUSTED_PROXIES", proxy), ("PUBLIC_ORIGIN", origin)]).unwrap_err();
+                assert_eq!(err.var(), "TRUSTED_PROXIES", "{proxy} {origin}");
+            }
+        }
+    }
+
+    #[test]
+    fn loopback_http_origin_predicate() {
+        for (origin, expected) in [
+            ("http://localhost:5173", true),
+            ("http://127.0.0.1:8080", true),
+            ("http://[::1]:5173", true),
+            ("https://localhost:5173", false),
+            ("http://torneo.example", false),
+            ("http://127.0.0.2:8080", false),
+        ] {
+            let url = Url::parse(origin).unwrap();
+            assert_eq!(is_loopback_http_origin(&url), expected, "{origin}");
+        }
+    }
+
+    #[test]
+    fn internal_api_secret() {
+        // 32 bytes, unpadded and padded; 33 bytes.
+        let unpadded = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let padded = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        let url_chars = "-_8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        for value in [unpadded, padded, url_chars] {
+            assert!(
+                with(&[("INTERNAL_API_SECRET", value)])
+                    .unwrap()
+                    .internal_secret
+                    .is_some(),
+                "{value}"
+            );
+        }
+        for value in [
+            // 31 bytes.
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            // Standard alphabet.
+            "+/8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "canary secret with spaces and more than enough characters",
+            "",
+        ] {
+            let err = with(&[("INTERNAL_API_SECRET", value)]).unwrap_err();
+            assert_eq!(err.var(), "INTERNAL_API_SECRET", "{value:?}");
+            assert!(!err.to_string().contains("canary"));
+        }
+    }
+
+    #[test]
+    fn debug_never_shows_the_secret_nor_the_proxies() {
+        let secret = "Y2FuYXJ5LWNhbmFyeS1jYW5hcnktY2FuYXJ5LWNhbmFyeQ";
+        let config = with(&[
+            ("INTERNAL_API_SECRET", secret),
+            ("TRUSTED_PROXIES", "10.250.0.2"),
+        ])
+        .unwrap();
+        let shown = format!("{config:?}");
+        assert!(!shown.contains(secret), "{shown}");
+        assert!(!shown.contains("10.250"), "{shown}");
+        assert!(shown.contains("<redacted>"), "{shown}");
+        assert!(format!("{:?}", with(&[]).unwrap()).contains("<unset>"));
     }
 
     #[test]

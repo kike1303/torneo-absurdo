@@ -9,6 +9,7 @@ pub mod config;
 pub mod db;
 pub mod healthcheck;
 pub mod http;
+pub mod net;
 pub mod shutdown;
 pub mod telemetry;
 pub mod version;
