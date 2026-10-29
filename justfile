@@ -30,7 +30,7 @@ dev: _web-prepare db-up
     done
     trap 'trap - INT TERM; kill 0' INT TERM
     # The server .env is loaded only in this subshell: DATABASE_URL is never exported globally.
-    (set -a; . apps/server/.env; set +a; exec cargo run -p server --locked) &
+    (set -a; . apps/server/.env; set +a; exec cargo run -p server --features dev-auth --locked) &
     pnpm --filter web dev &
     wait
 
@@ -83,10 +83,11 @@ check-rust:
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cargo clippy -p protocol --features ts --all-targets --locked -- -D warnings
+    cargo clippy -p server --features dev-auth --all-targets --locked -- -D warnings
     {{just_executable()}} _check-engine
     {{just_executable()}} _check-wasm
     {{just_executable()}} db-up
-    DATABASE_URL='{{test_db_url}}' cargo test --workspace --locked
+    {{just_executable()}} _test-rust
     {{just_executable()}} _check-gen
     {{just_executable()}} _check-ts-rs-graph
 
@@ -99,7 +100,40 @@ test: _web-prepare
     pnpm -s --filter @torneo/sprite-importer check
     pnpm exec vitest run --config scripts/vitest.config.mjs
     {{just_executable()}} db-up
+    {{just_executable()}} _test-rust
+
+# The Rust tests with Postgres (008 plan-b decision 15): the workspace without `dev-auth` (the
+# production cookie policy and routes), the server with it, then the A9 check of the Postgres
+# log of the run.
+_test-rust:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     DATABASE_URL='{{test_db_url}}' cargo test --workspace --locked
+    DATABASE_URL='{{test_db_url}}' cargo test -p server --features dev-auth --locked
+    {{just_executable()}} _check-pg-log "$since"
+
+# ADR-0012 A9: the canary of tests/pg_log.rs never reaches the Postgres log, and the log of the
+# run has at least one ERROR line (positive control, so an empty log never passes)
+_check-pg-log since:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    file=target/tmp/pglog-canary.txt
+    if [ ! -s "$file" ]; then
+        echo "check-pg-log: no canary (did apps/server/tests/pg_log.rs run?)" >&2
+        exit 1
+    fi
+    canary="$(cat "$file")"
+    logs="$(docker compose -f infra/compose.dev.yml logs --no-log-prefix --since "{{since}}" postgres 2>&1)"
+    if grep -qF "$canary" <<<"$logs"; then
+        echo "check-pg-log: a value of a failed statement reached the Postgres log" >&2
+        exit 1
+    fi
+    if ! grep -q ' ERROR: ' <<<"$logs"; then
+        echo "check-pg-log: no ERROR line in the Postgres log of the run (positive control)" >&2
+        exit 1
+    fi
+    echo "check-pg-log: ok"
 
 # End-to-end tests against `node build` (Chromium and WebKit)
 e2e: _web-prepare
