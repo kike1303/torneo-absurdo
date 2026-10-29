@@ -50,7 +50,7 @@ describe('cli', () => {
     expect(run.stderr).toBe('');
     expect(run.status).toBe(0);
     const report = JSON.parse(run.stdout);
-    expect(report).toMatchObject({ id: 'local_test', sff_version: '1.01', frames: 15 });
+    expect(report).toMatchObject({ id: 'local_test', sff_version: '1.01', frames: 19 });
     expect(run.stdout).not.toContain(path.basename(repo.root));
     expect(run.stdout).not.toContain('ignored/');
     expect(run.stdout).not.toContain('c1.sff');
@@ -131,7 +131,7 @@ describe('cli', () => {
       sprites: 6,
       palettes: 1,
       compression: { raw: 1, rle8: 1, lz5: 1, png8: 1, png24: 1, png32: 1 },
-      actions: 12,
+      actions: 14,
       missing_actions: [],
       missing_sprites: 0,
       unsupported_sprites: [],

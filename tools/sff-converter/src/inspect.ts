@@ -51,26 +51,27 @@ export function inspect(input: InspectInput): InspectReport {
   const missing: { animation: string; action: number }[] = [];
   const unsupported: { animation: string; sprite: number; compression: string }[] = [];
   let missingSprites = 0;
-  for (const [animation, action] of Object.entries(input.map.actions)) {
-    if (action === undefined) continue;
-    const found = air.actions.get(action);
-    if (found === undefined) {
-      missing.push({ animation, action });
-      continue;
-    }
-    const seen = new Set<number>();
-    for (const frame of found.frames) {
-      if (frame.group === -1) continue;
-      const index = find(frame.group, frame.image);
-      if (index === -1) {
-        missingSprites++;
+  for (const [animation, chain] of Object.entries(input.map.actions)) {
+    for (const action of chain ?? []) {
+      const found = air.actions.get(action);
+      if (found === undefined) {
+        missing.push({ animation, action });
         continue;
       }
-      if (seen.has(index)) continue;
-      seen.add(index);
-      const info = spriteInfo(sff, index);
-      if (!info.supported)
-        unsupported.push({ animation, sprite: index, compression: info.compression });
+      const seen = new Set<number>();
+      for (const frame of found.frames) {
+        if (frame.group === -1) continue;
+        const index = find(frame.group, frame.image);
+        if (index === -1) {
+          missingSprites++;
+          continue;
+        }
+        if (seen.has(index)) continue;
+        seen.add(index);
+        const info = spriteInfo(sff, index);
+        if (!info.supported)
+          unsupported.push({ animation, sprite: index, compression: info.compression });
+      }
     }
   }
   return {
