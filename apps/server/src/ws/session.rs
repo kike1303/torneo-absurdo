@@ -53,9 +53,10 @@ fn policy(code: impl Into<ErrorCode>) -> End {
     End::Close(CLOSE_POLICY_VIOLATION, code.into().as_str())
 }
 
-/// Closes a socket whose session failed the second validation.
-pub async fn reject(socket: &mut WebSocket, config: WsConfig) {
-    let reason = AuthErrorCode::Unauthenticated.as_str();
+/// Closes a socket whose session failed the second validation (`auth.unauthenticated`), or
+/// whose second validation could not be done (`auth.try_again`).
+pub async fn reject(socket: &mut WebSocket, config: WsConfig, code: AuthErrorCode) {
+    let reason = code.as_str();
     tracing::debug!(event = "ws.closed", close_code = CLOSE_POLICY_VIOLATION);
     close(socket, CLOSE_POLICY_VIOLATION, reason, config.close_grace).await;
 }

@@ -111,6 +111,16 @@ async fn listener_ready(pool: &PgPool) -> i32 {
     }
 }
 
+/// An echo round trip: the socket is past its handshake (second validation included) and in
+/// its loop.
+async fn loop_started(client: &mut ws::Client) {
+    ws::send_text(client, r#"{"type":"echo","payload":"ready"}"#).await;
+    assert_eq!(
+        ws::next_data(client, Duration::from_secs(5)).await,
+        Some(Message::Text(r#"{"type":"echo","payload":"ready"}"#.into()))
+    );
+}
+
 async fn revoke(pool: &PgPool, filter: RevokeFilter) {
     let mut tx = pool.begin().await.unwrap();
     sessions::revoke(&mut tx, filter).await.unwrap();
@@ -216,6 +226,43 @@ async fn a_revoke_between_registration_and_validation_closes_the_socket() {
     closes_unauthenticated(&mut client, Duration::from_secs(5)).await;
 }
 
+/// Round 3 of #54, the root cause of the flaky revalidation tests: the second validation of
+/// the handshake runs after the client already has its 101, and it had no timeout. If it hangs
+/// (here `users` is locked right before it), the socket never reached its loop: no frames, no
+/// shutdown, no revocation. Now it is bounded by the revalidation timeout and fails closed with
+/// `auth.try_again`, so the client reconnects.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_hung_second_validation_closes_the_socket_with_try_again() {
+    let db = TestDb::create().await;
+    let gate = Arc::new(Gate {
+        registered: Notify::new(),
+        go: Notify::new(),
+    });
+    let held = gate.clone();
+    let settings = Settings {
+        ws: WsConfig {
+            revalidate_timeout: Duration::from_millis(300),
+            ..WsConfig::default()
+        },
+        ..Settings::default()
+    };
+    let (app, pool, _ws) =
+        support::app::start_db_ws(&db, &[], &settings, move |ws| ws.with_validation_gate(held))
+            .await;
+    let (_, token) = support::app::user_with_session(&pool).await;
+    let mut client = connect(app.addr, Some(&token), None).await.unwrap();
+    gate.registered.notified().await;
+    let mut lock = pool.begin().await.unwrap();
+    sqlx::query("LOCK TABLE users IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *lock)
+        .await
+        .unwrap();
+    gate.go.notify_one();
+    let ending = ws::ending(&mut client, Duration::from_secs(3)).await;
+    lock.rollback().await.unwrap();
+    assert_eq!(ending, Ending::Close(1008, "auth.try_again".into()));
+}
+
 /// RF-B14, pinned: the socket is held after the first validation and before its registration,
 /// and the session is revoked there. Its NOTIFY finds nothing registered, so only the second
 /// validation, which must come after the registration, can close it. A registration moved
@@ -305,6 +352,7 @@ async fn a_hung_revalidation_does_not_freeze_the_socket() {
     let (app, pool, _ws) = support::app::start_db_ws(&db, &[], &settings, |ws| ws).await;
     let (_, token) = support::app::user_with_session(&pool).await;
     let mut client = connect(app.addr, Some(&token), None).await.unwrap();
+    loop_started(&mut client).await;
     let mut lock = pool.begin().await.unwrap();
     sqlx::query("LOCK TABLE users IN ACCESS EXCLUSIVE MODE")
         .execute(&mut *lock)
@@ -336,13 +384,18 @@ async fn the_revalidation_runs_outside_the_socket_loop() {
     let (app, pool, _ws) = support::app::start_db_ws(&db, &[], &settings, |ws| ws).await;
     let (_, token) = support::app::user_with_session(&pool).await;
     let mut client = connect(app.addr, Some(&token), None).await.unwrap();
+    loop_started(&mut client).await;
     let mut lock = pool.begin().await.unwrap();
     sqlx::query("LOCK TABLE users IN ACCESS EXCLUSIVE MODE")
         .execute(&mut *lock)
         .await
         .unwrap();
-    // A check is now hanging on the lock (it started within the 100 ms interval).
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Wait until a revalidation is really hanging on the lock (architect on #54).
+    let admin = db_admin(&db).await;
+    assert!(
+        hung_checks_reach(&admin, 1).await,
+        "no revalidation ever waited on the lock"
+    );
     ws::send_text(&mut client, r#"{"type":"echo","payload":"vivo"}"#).await;
     let reply = ws::next_data(&mut client, Duration::from_secs(2)).await;
     lock.rollback().await.unwrap();
@@ -368,34 +421,40 @@ async fn a_hung_revalidation_times_out_and_the_next_one_starts() {
     };
     let (app, pool, _ws) = support::app::start_db_ws(&db, &[], &settings, |ws| ws).await;
     let (_, token) = support::app::user_with_session(&pool).await;
-    let _client = connect(app.addr, Some(&token), None).await.unwrap();
+    let mut _client = connect(app.addr, Some(&token), None).await.unwrap();
+    loop_started(&mut _client).await;
     let mut lock = pool.begin().await.unwrap();
     sqlx::query("LOCK TABLE users IN ACCESS EXCLUSIVE MODE")
         .execute(&mut *lock)
         .await
         .unwrap();
     let admin = db_admin(&db).await;
-    let waiting = || async {
-        let row: (i64,) = sqlx::query_as(
+    let started_again = hung_checks_reach(&admin, 2).await;
+    lock.rollback().await.unwrap();
+    assert!(
+        started_again,
+        "a timed-out revalidation was never followed by a new one"
+    );
+}
+
+/// Polls `pg_stat_activity` (up to 5 s) until at least `n` revalidation queries of the app wait
+/// on the lock of `users`.
+async fn hung_checks_reach(admin: &PgPool, n: i64) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        let (waiting,): (i64,) = sqlx::query_as(
             "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() \
              AND wait_event_type = 'Lock' AND query LIKE '%FROM sessions s JOIN users%'",
         )
-        .fetch_one(&admin)
+        .fetch_one(admin)
         .await
         .unwrap();
-        row.0
-    };
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let mut seen = 0;
-    while Instant::now() < deadline {
-        seen = waiting().await;
-        if seen >= 2 {
-            break;
+        if waiting >= n {
+            return true;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    lock.rollback().await.unwrap();
-    assert!(seen >= 2, "only {seen} revalidation queries ever waited");
+    false
 }
 
 /// A connection outside the app's pool (the app's may be all waiting on the lock).
