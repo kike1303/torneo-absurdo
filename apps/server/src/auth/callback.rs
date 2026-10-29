@@ -85,7 +85,7 @@ pub async fn handler(
     };
     let flow = cookies.read_flow(&headers).map(flow_hash);
     match run(&state, provider, flow, query.ok().map(|q| q.0), context).await {
-        Ok((issued, next)) => success(&cookies, &issued, &next),
+        Ok((issued, location)) => success(&cookies, &issued, location),
         Err(code) => error_redirect(&cookies, code),
     }
 }
@@ -97,10 +97,14 @@ struct Context {
     local: Option<std::net::SocketAddr>,
 }
 
-fn success(cookies: &CookiePolicy, issued: &Issued, next: &str) -> Response {
-    let Ok(location) = HeaderValue::from_str(next) else {
-        return error_redirect(cookies, CallbackErrorCode::TryAgain);
-    };
+/// `next` as a `Location`, built before the login commits so the response cannot fail after
+/// it. `sanitize` already refuses what a header cannot carry; a flow stored before that rule
+/// falls back to `/`.
+fn location_of(next: &str) -> HeaderValue {
+    HeaderValue::from_str(next).unwrap_or(HeaderValue::from_static("/"))
+}
+
+fn success(cookies: &CookiePolicy, issued: &Issued, location: HeaderValue) -> Response {
     let mut response = (
         StatusCode::SEE_OTHER,
         [
@@ -133,7 +137,7 @@ async fn run(
     flow: Option<[u8; 32]>,
     query: Option<CallbackQuery>,
     context: Context,
-) -> Result<(Issued, String), CallbackErrorCode> {
+) -> Result<(Issued, HeaderValue), CallbackErrorCode> {
     use CallbackErrorCode::{InvalidState, ProviderError};
     let flow = flow.ok_or(InvalidState)?;
     let row = sqlx::query(
@@ -168,6 +172,7 @@ async fn run(
         return Err(ProviderError);
     }
     let code = query.code.ok_or(ProviderError)?;
+    let location = location_of(&flow.next);
     let subject = identity(state, provider, code, flow.code_verifier, context.local).await?;
     let identity = Identity { provider, subject };
     let issued = login::login(
@@ -183,7 +188,7 @@ async fn run(
         LoginError::Banned => CallbackErrorCode::Banned,
         LoginError::TryAgain => CallbackErrorCode::TryAgain,
     })?;
-    Ok((issued, flow.next))
+    Ok((issued, location))
 }
 
 #[derive(Deserialize)]
