@@ -47,6 +47,79 @@ fn control_bidi_and_zero_width_are_refused() {
     }
 }
 
+/// security-reviewer on #54: every Default_Ignorable_Code_Point (an invisible name, or a name
+/// that looks like another) and U+2800, the braille blank.
+#[test]
+fn invisible_characters_are_refused() {
+    // The cases security confirmed slipped through.
+    let confirmed = [
+        '\u{2063}',
+        '\u{3164}',
+        '\u{FFA0}',
+        '\u{115F}',
+        '\u{034F}',
+        '\u{00AD}',
+        '\u{180E}',
+        '\u{17B4}',
+        '\u{FE0F}',
+        '\u{E0061}',
+        '\u{2800}',
+    ];
+    // Both ends of every range of the property.
+    let table_ends = [
+        '\u{00AD}',
+        '\u{034F}',
+        '\u{061C}',
+        '\u{115F}',
+        '\u{1160}',
+        '\u{17B4}',
+        '\u{17B5}',
+        '\u{180B}',
+        '\u{180F}',
+        '\u{200B}',
+        '\u{200F}',
+        '\u{202A}',
+        '\u{202E}',
+        '\u{2060}',
+        '\u{206F}',
+        '\u{3164}',
+        '\u{FE00}',
+        '\u{FE0F}',
+        '\u{FEFF}',
+        '\u{FFA0}',
+        '\u{FFF0}',
+        '\u{FFF8}',
+        '\u{1BCA0}',
+        '\u{1BCA3}',
+        '\u{1D173}',
+        '\u{1D17A}',
+        '\u{E0000}',
+        '\u{E0FFF}',
+    ];
+    for c in confirmed.iter().chain(&table_ends) {
+        assert!(is_invisible(*c), "U+{:04X}", u32::from(*c));
+        for input in [
+            format!("Ana{c}Bel"),
+            format!("{c}{c}{c}"),
+            format!("Ana{c}"),
+        ] {
+            assert_eq!(
+                validate(&input),
+                Err(NameError::Invalid),
+                "U+{:04X}",
+                u32::from(*c)
+            );
+        }
+    }
+    // Just outside the ranges: ordinary characters.
+    for c in [
+        '\u{00AE}', '\u{1161}', '\u{180A}', '\u{2070}', '\u{FE10}', '\u{FFF9}', '\u{2801}',
+    ] {
+        assert!(!is_invisible(c), "U+{:04X}", u32::from(c));
+    }
+    assert!(validate("Año⠁Ñu").is_ok());
+}
+
 #[test]
 fn reserved_names_are_refused_by_key() {
     for input in [
@@ -93,6 +166,19 @@ fn reserved_names_ignore_separators_and_cover_authorities() {
         "Deleted User",
         "deleted_user",
         "a.d.m.i.n",
+        // security-reviewer on #54: any punctuation, not only four separators.
+        "Torneo·Absurdo",
+        "Torneo/Absurdo",
+        "Torneo,Absurdo",
+        "Torneo'Absurdo",
+        "Torneo—Absurdo",
+        "Torneo:Absurdo",
+        "Torneo*Absurdo",
+        "Torneo~Absurdo",
+        "Torneo–Absurdo",
+        "Torneo\u{3000}Absurdo",
+        "¡Torneo Absurdo!",
+        "Ano\u{301}nimo",
     ] {
         assert_eq!(validate(input), Err(NameError::Reserved), "{input:?}");
     }

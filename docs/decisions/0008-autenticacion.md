@@ -51,6 +51,7 @@ updated: 2026-10-28
   - Se rechazan caracteres de control (`Cc`), de formato bidi (U+061C, U+200E–U+200F, U+202A–U+202E, U+2066–U+2069) y de ancho cero (U+200B–U+200D, U+2060, U+FEFF).
   - **Llave de comparación `display_name_key`** = skeleton de confusables de UTS #39 (p. ej. crate `unicode-security`) aplicado sobre NFKC + casefold. Así `Tоrneo_King` con `о` cirílica y `Torneo_King` con `o` latina dan la misma llave.
   - Lista de reservados (`admin`, `moderador`, `system`, la marca y sus variantes), comparada por `display_name_key`.
+  - *Ver la "Enmienda 2026-10-29: caracteres invisibles y comparación de reservados" (pendiente de firma): se rechazan todos los caracteres invisibles, y los reservados se comparan solo por letras y dígitos.*
   - **Único por `display_name_key`**, garantizado por la BD: columna `users.display_name_key` con `UNIQUE`. La aplicación no hace un "¿existe?" previo; si el `INSERT`/`UPDATE` viola el índice, responde `profile.display_name_taken`. Dos renombres concurrentes al mismo nombre: gana exactamente uno.
   - **Alias generado:** pasa por la misma validación. Si choca con un reservado o con el índice único, se genera otro, hasta 10 intentos; si se agotan, el login responde 503 `auth.try_again` y no crea el usuario.
   - Errores: `profile.display_name_invalid`, `profile.display_name_reserved`, `profile.display_name_taken`.
@@ -325,6 +326,12 @@ Aprobada por el owner el 2026-10-28 (transmitida por la sesión coordinadora). R
 - **Lista cerrada de códigos.** `error` solo puede valer `auth.invalid_state`, `auth.banned`, `auth.provider_error`, `auth.try_again`, `auth.already_linked` o `auth.provider_already_linked`. Es un enum de `crates/protocol`, y el server nunca copia al `Location` nada que venga de la petición ni del proveedor.
 - **En la web.** `/login` resuelve `error` a una llave i18n solo si está en la lista. Un valor desconocido se muestra con un texto genérico, y **nunca se refleja** en la página, en un atributo ni en un log.
 - **T4 adaptado.** Un callback sin `state`, con `state` reusado, expirado o de otra cookie responde 303 a `/login?error=auth.invalid_state`, sin `Set-Cookie` de sesión y con la cookie del flujo expirada. Un flujo `link` de otra sesión no vincula. T4 suma un caso nuevo: con un `error` ajeno a la lista en la query de `/login`, la página no contiene ese valor.
+
+## Enmienda 2026-10-29: caracteres invisibles y comparación de reservados
+**Pendiente de la firma de architect y security-reviewer** (la firman en la revisión del PR #54, no quien la escribe). Viene del hallazgo de security-reviewer en esa revisión: con la letra de D1, un nombre podía ser invisible o hacerse pasar por la marca. Cambia dos viñetas de la validación de `display_name` de D1; el resto no cambia.
+
+- **Caracteres rechazados.** Además de `Cc`, se rechaza todo `Default_Ignorable_Code_Point` de Unicode (la tabla completa de `DerivedCoreProperties.txt`, que incluye los de formato bidi y de ancho cero que nombraba D1, además de U+00AD, U+034F, U+115F–U+1160, U+17B4–U+17B5, U+180B–U+180F, U+2060–U+206F, U+3164, U+FE00–U+FE0F, U+FFA0, U+FFF0–U+FFF8, U+1BCA0–U+1BCA3, U+1D173–U+1D17A y U+E0000–U+E0FFF) y U+2800 (el blanco del braille). Ninguno se ve, así que permitían un nombre en blanco o uno que se lee como otro.
+- **Comparación con los reservados.** No es por `display_name_key` tal cual, sino por la llave de **solo las letras y los dígitos** del nombre, sin acentos (NFD y `char::is_alphanumeric`, y luego la misma llave). Así ningún signo, espacio o acento entre las letras (`Torneo Absurdo`, `Torneo·Absurdo`, `Torneo—Absurdo`, `Anónimo`) esquiva la lista. La llave del `UNIQUE` no cambia: "Ana Bel" y "AnaBel" siguen siendo dos nombres.
 
 ## Revisión
 ### security-reviewer — 2026-10-20 — REQUEST_CHANGES

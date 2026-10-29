@@ -1,8 +1,9 @@
 //! `display_name` validation and `display_name_key` (ADR-0008 D1, 008 RF-B7).
 //!
-//! In this order: NFC, trim, refuse control (`Cc`), bidi and zero-width characters, 3 to 24
-//! graphemes, then the key (UTS #39 skeleton over full case folding over NFKC) and the
-//! reserved names by key, ignoring spaces, `_`, `-` and `.`. Uniqueness is the database's `UNIQUE` on the key, never a prior
+//! In this order: NFC, trim, refuse control (`Cc`) and invisible characters (every
+//! `Default_Ignorable_Code_Point` and U+2800), 3 to 24 graphemes, then the key (UTS #39
+//! skeleton over full case folding over NFKC) and the reserved names, compared on the letters
+//! and digits of the name only. Uniqueness is the database's `UNIQUE` on the key, never a prior
 //! check here.
 
 use std::collections::HashSet;
@@ -44,18 +45,18 @@ impl DisplayName {
 /// The reserved names of `content/names/reserved.txt`, as [`reserved_form`]s.
 static RESERVED: LazyLock<HashSet<String>> = LazyLock::new(|| {
     words(include_str!("../../../../content/names/reserved.txt"))
-        .map(|word| reserved_form(&key_of(word)))
+        .map(reserved_form)
         .collect()
 });
 
-/// The form compared against the reserved list: the key without spaces, `_`, `-` or `.`, so
-/// "Torneo Absurdo", "torneo.absurdo" and "Torneo_Absurdo" are all the brand (review of #54).
-/// Only for the reserved list: the `UNIQUE` key keeps them, so "Ana Bel" and "AnaBel" are
-/// still two names.
-fn reserved_form(key: &str) -> String {
-    key.chars()
-        .filter(|c| !matches!(c, ' ' | '_' | '-' | '.'))
-        .collect()
+/// The form compared against the reserved list: only the letters and digits of the name, without
+/// accents (NFD, then `char::is_alphanumeric`), keyed like `display_name_key`. So any
+/// punctuation, space or accent between the letters ("Torneo Absurdo", "Torneo·Absurdo",
+/// "Torneo—Absurdo", "Anónimo") does not get around the list (review of #54). Only for the
+/// reserved list: the `UNIQUE` key keeps them, so "Ana Bel" and "AnaBel" are still two names.
+fn reserved_form(text: &str) -> String {
+    let letters: String = text.nfd().filter(|c| c.is_alphanumeric()).collect();
+    key_of(&letters)
 }
 
 /// The non-comment, non-empty lines of a word list.
@@ -65,20 +66,41 @@ pub(crate) fn words(text: &'static str) -> impl Iterator<Item = &'static str> {
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
 }
 
-/// Bidi formatting (U+061C, U+200E–U+200F, U+202A–U+202E, U+2066–U+2069) and zero-width
-/// (U+200B–U+200D, U+2060, U+FEFF) characters of D1, plus every `Cc`.
+/// Every `Default_Ignorable_Code_Point` of Unicode (`DerivedCoreProperties.txt`, complete as of
+/// Unicode 16): characters that render as nothing, so a name made of them is blank, and one with
+/// them looks like another. It contains the bidi formatting and zero-width characters of D1.
+const DEFAULT_IGNORABLE: &[(char, char)] = &[
+    ('\u{00AD}', '\u{00AD}'),
+    ('\u{034F}', '\u{034F}'),
+    ('\u{061C}', '\u{061C}'),
+    ('\u{115F}', '\u{1160}'),
+    ('\u{17B4}', '\u{17B5}'),
+    ('\u{180B}', '\u{180F}'),
+    ('\u{200B}', '\u{200F}'),
+    ('\u{202A}', '\u{202E}'),
+    ('\u{2060}', '\u{206F}'),
+    ('\u{3164}', '\u{3164}'),
+    ('\u{FE00}', '\u{FE0F}'),
+    ('\u{FEFF}', '\u{FEFF}'),
+    ('\u{FFA0}', '\u{FFA0}'),
+    ('\u{FFF0}', '\u{FFF8}'),
+    ('\u{1BCA0}', '\u{1BCA3}'),
+    ('\u{1D173}', '\u{1D17A}'),
+    ('\u{E0000}', '\u{E0FFF}'),
+];
+
+/// A character that shows nothing: a `Default_Ignorable_Code_Point`, or U+2800 (the braille
+/// blank, a visible "space" that is not one) (security-reviewer on #54).
+pub fn is_invisible(c: char) -> bool {
+    c == '\u{2800}'
+        || DEFAULT_IGNORABLE
+            .iter()
+            .any(|(first, last)| (*first..=*last).contains(&c))
+}
+
+/// Every `Cc` and every invisible character.
 fn forbidden(c: char) -> bool {
-    c.is_control()
-        || matches!(
-            c,
-            '\u{061C}'
-                | '\u{200E}'..='\u{200F}'
-                | '\u{202A}'..='\u{202E}'
-                | '\u{2066}'..='\u{2069}'
-                | '\u{200B}'..='\u{200D}'
-                | '\u{2060}'
-                | '\u{FEFF}'
-        )
+    c.is_control() || is_invisible(c)
 }
 
 /// `display_name_key`: the UTS #39 skeleton of the full case folding of the NFKC form. So
@@ -119,7 +141,7 @@ pub fn validate(input: &str) -> Result<DisplayName, NameError> {
         return Err(NameError::Invalid);
     }
     let key = key_of(text);
-    if RESERVED.contains(&reserved_form(&key)) {
+    if RESERVED.contains(&reserved_form(text)) {
         return Err(NameError::Reserved);
     }
     Ok(DisplayName {
