@@ -7,7 +7,8 @@ export type EchoStatus = 'connecting' | 'connected' | 'sent' | 'received' | 'clo
 
 /**
  * Paraglide keys of the close reasons: one per `WsErrorCode`, `auth.unauthenticated` (the session
- * ended while the socket was open) and `unknown`.
+ * ended while the socket was open), `auth.try_again` (the server could not check the session when
+ * the socket opened) and `unknown`.
  */
 export type CloseReasonKey =
   | 'ws_close_reason_origin_forbidden'
@@ -22,13 +23,16 @@ export type CloseReasonKey =
   | 'ws_close_reason_forbidden_channel'
   | 'ws_close_reason_too_many_subscriptions'
   | 'ws_close_reason_unauthenticated'
+  | 'ws_close_reason_try_again'
   | 'ws_close_reason_unknown';
 
 const UNAUTHENTICATED: AuthErrorCode = 'auth.unauthenticated';
+const TRY_AGAIN: AuthErrorCode = 'auth.try_again';
 
 /** Maps a close reason to its key. Fails to compile if a `WsErrorCode` has no case. */
 export function closeReasonKey(reason: string): CloseReasonKey {
   if (reason === UNAUTHENTICATED) return 'ws_close_reason_unauthenticated';
+  if (reason === TRY_AGAIN) return 'ws_close_reason_try_again';
   const code = reason as WsErrorCode;
   switch (code) {
     case 'ws.origin_forbidden':

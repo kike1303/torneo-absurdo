@@ -55,6 +55,7 @@
   "ws_close_reason_forbidden_channel": "That channel is not available.",
   "ws_close_reason_too_many_subscriptions": "Too many subscriptions on this connection.",
   "ws_close_reason_unauthenticated": "Your session ended. Sign in again.",
+  "ws_close_reason_try_again": "The server could not check your session. Try again in a moment.",
   "ws_close_reason_unknown": "The connection was closed.",
   "arena_title": "Test arena",
   "arena_canvas_label": "Animated fight between {a} and {b}",

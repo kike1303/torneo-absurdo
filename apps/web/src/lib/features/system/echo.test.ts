@@ -109,6 +109,9 @@ describe('closeReasonKey', () => {
   it('auth.unauthenticated → unauthenticated', () => {
     expect(closeReasonKey('auth.unauthenticated')).toBe('ws_close_reason_unauthenticated');
   });
+  it('auth.try_again → try_again', () => {
+    expect(closeReasonKey('auth.try_again')).toBe('ws_close_reason_try_again');
+  });
   it.each(['', 'ws.unknown', 'http.not_found', 'auth.csrf_origin', 'Going away'])(
     '%j → unknown',
     (reason) => {
