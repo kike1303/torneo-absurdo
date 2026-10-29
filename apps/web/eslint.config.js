@@ -129,7 +129,9 @@ function restrictedImports(relative, extra) {
   return { '@typescript-eslint/no-restricted-imports': entry, [DYNAMIC_IMPORTS]: entry };
 }
 
-const restrictedImportsRule = ts.plugin.rules['no-restricted-imports'];
+// `ts.plugin` is typed as a loose `CompatiblePlugin`, without `rules`.
+/** @type {{ meta: import('eslint').Rule.RuleMetaData, create: import('eslint').Rule.RuleModule['create'] }} */
+const restrictedImportsRule = /** @type {any} */ (ts.plugin).rules['no-restricted-imports'];
 
 /**
  * `no-restricted-imports` does not see `import()` (TA-11). This rule takes the same options and
