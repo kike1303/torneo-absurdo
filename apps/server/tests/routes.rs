@@ -12,16 +12,12 @@ use support::http;
 #[tokio::test]
 async fn every_manifest_entry_is_routed_and_only_by_its_method() {
     assert_eq!(check_manifest(ROUTES), Ok(()));
-    let app = support::app::start(support::app::state_with(
-        support::app::net(Default::default(), false),
-        &Settings::default(),
-    ))
-    .await;
+    let app = support::app::start(support::app::state(&[], &Settings::default())).await;
     for route in ROUTES {
         assert!(!route.path.contains('{'), "add a sample path for {route:?}");
         let response = http::send(
             app.addr,
-            route.method.as_str(),
+            route.method.http().as_str(),
             route.path,
             &[("origin", ORIGIN)],
         )
@@ -32,7 +28,7 @@ async fn every_manifest_entry_is_routed_and_only_by_its_method() {
             response.status
         );
         for method in ["POST", "PUT", "PATCH", "DELETE"] {
-            if method == route.method.as_str() {
+            if method == route.method.http().as_str() {
                 continue;
             }
             let response = http::send(app.addr, method, route.path, &[("origin", ORIGIN)]).await;

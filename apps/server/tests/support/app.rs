@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use server::app::{AppState, HttpConfig, Settings, serve_listener};
 use server::db::{DbProbe, PingFuture};
-use server::net::{InternalSecret, NetState, TrustedProxies};
 use server::ws::{WsConfig, WsState};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -69,21 +68,28 @@ impl DbProbe for AlwaysUp {
 pub const SECRET: &str = "dGVzdC1vbmx5LXNlY3JldC10ZXN0LW9ubHktc2VjcmV0";
 
 /// `TRUSTED_PROXIES` with the loopback, so `X-Forwarded-For` simulates other clients.
-pub fn trusting_loopback() -> TrustedProxies {
-    TrustedProxies::parse("127.0.0.1/32", true).unwrap()
+pub const TRUST_LOOPBACK: (&str, &str) = ("TRUSTED_PROXIES", "127.0.0.1/32");
+
+/// `INTERNAL_API_SECRET` set to [`SECRET`].
+pub const WITH_SECRET: (&str, &str) = ("INTERNAL_API_SECRET", SECRET);
+
+/// The state from the config of `vars`, a lazy pool and a database that is always up.
+pub fn state(vars: &[(&str, &str)], settings: &Settings) -> AppState {
+    state_with_probe(vars, settings, Arc::new(AlwaysUp))
 }
 
-/// The client context settings: trusted proxies and, optionally, the test secret.
-pub fn net(trusted: TrustedProxies, secret: bool) -> NetState {
-    NetState::new(trusted, secret.then(|| InternalSecret::new(SECRET)))
+/// Like [`state`], with another health probe.
+pub fn state_with_probe(
+    vars: &[(&str, &str)],
+    settings: &Settings,
+    probe: Arc<dyn DbProbe>,
+) -> AppState {
+    let config = super::config::config(vars);
+    let pool = super::config::lazy_pool(&config);
+    AppState::from_config(&config, settings, pool, probe)
 }
 
-/// The state with `net`, `settings` and `ws`.
-pub fn state_with_ws(net: NetState, settings: &Settings, ws: WsState) -> AppState {
-    AppState::new(Arc::new(AlwaysUp), settings, ws).with_net(net)
-}
-
-/// The state with `net` and `settings`, and the default WebSocket state.
-pub fn state_with(net: NetState, settings: &Settings) -> AppState {
-    state_with_ws(net, settings, ws_state())
+/// Like [`state`], with a WebSocket state below what the config allows.
+pub fn state_with_ws(vars: &[(&str, &str)], settings: &Settings, ws: WsState) -> AppState {
+    state(vars, settings).with_ws(ws)
 }

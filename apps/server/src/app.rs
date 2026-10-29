@@ -10,6 +10,7 @@ use std::time::Duration;
 use axum::extract::{ConnectInfo, FromRef};
 use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::service::TowerToHyperService;
+use sqlx::PgPool;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -62,6 +63,7 @@ pub struct Settings {
 
 #[derive(Clone)]
 pub struct AppState {
+    pub db: PgPool,
     pub health: Arc<HealthState>,
     pub ws: Arc<WsState>,
     pub net: Arc<NetState>,
@@ -70,21 +72,28 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// The state with no trusted proxy and no internal secret (see [`AppState::with_net`]).
-    /// The `Origin` policy uses the WebSocket's `PUBLIC_ORIGIN`.
-    pub fn new(probe: Arc<dyn DbProbe>, settings: &Settings, ws: WsState) -> Self {
+    /// The whole state from the configuration (008 plan-b decision 3.2): the `Origin`
+    /// policy, the client context, the limiters and the WebSocket all come from `config`.
+    /// `probe` is the health check of `pool` in production; the tests pass a fake one.
+    pub fn from_config(
+        config: &Config,
+        settings: &Settings,
+        pool: PgPool,
+        probe: Arc<dyn DbProbe>,
+    ) -> Self {
         Self {
+            db: pool,
             health: Arc::new(HealthState::new(probe, settings.health)),
-            origin: Arc::new(OriginPolicy::new(ws.public_origin().to_owned())),
-            ws: Arc::new(ws),
-            net: Arc::new(NetState::default()),
+            origin: Arc::new(OriginPolicy::new(config.public_origin.clone())),
+            ws: Arc::new(Self::ws_from_config(config, settings)),
+            net: Arc::new(Self::net_from_config(config)),
             rate: Arc::new(RateLimits::new(&settings.rate)),
         }
     }
 
-    /// Replaces the trusted proxies and the internal secret.
-    pub fn with_net(mut self, net: NetState) -> Self {
-        self.net = Arc::new(net);
+    /// Replaces the WebSocket state (the tests shorten its caps below what the config allows).
+    pub fn with_ws(mut self, ws: WsState) -> Self {
+        self.ws = Arc::new(ws);
         self
     }
 
@@ -157,9 +166,8 @@ pub async fn serve(
         .map_err(|_| StartupError::Bind)?
         .port();
     tracing::info!(event = "server.listening", port);
-    let ws = AppState::ws_from_config(config, &settings);
-    let state = AppState::new(Arc::new(PgProbe::new(pool)), &settings, ws)
-        .with_net(AppState::net_from_config(config));
+    let probe = Arc::new(PgProbe::new(pool.clone()));
+    let state = AppState::from_config(config, &settings, pool, probe);
     run_until_shutdown(listener, state, settings.http, shutdown).await
 }
 

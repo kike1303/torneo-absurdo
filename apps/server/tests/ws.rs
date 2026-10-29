@@ -10,20 +10,11 @@ use std::time::{Duration, Instant};
 use futures_util::{SinkExt, StreamExt};
 use server::app::{AppState, Settings};
 use server::config::Config;
-use server::db::{DbProbe, PingFuture};
 use server::ws::{WsConfig, WsState};
 use support::app::{ORIGIN, RunningApp};
 use support::http;
 use support::ws::{self, Ending};
 use tokio_tungstenite::tungstenite::Message;
-
-struct AlwaysUp;
-
-impl DbProbe for AlwaysUp {
-    fn ping(&self) -> PingFuture<'_> {
-        Box::pin(async { true })
-    }
-}
 
 const SLOW: WsConfig = WsConfig {
     ping_interval: Duration::from_secs(30),
@@ -33,7 +24,7 @@ const SLOW: WsConfig = WsConfig {
 };
 
 async fn start(ws: WsState) -> (RunningApp, Arc<WsState>) {
-    let state = AppState::new(Arc::new(AlwaysUp), &Settings::default(), ws);
+    let state = support::app::state_with_ws(&[], &Settings::default(), ws);
     let ws = state.ws.clone();
     (support::app::start(state).await, ws)
 }
@@ -387,11 +378,7 @@ async fn start_limited(ws: WsState, max_keys: usize) -> (RunningApp, Arc<WsState
         },
         ..Settings::default()
     };
-    let state = support::app::state_with_ws(
-        support::app::net(support::app::trusting_loopback(), false),
-        &settings,
-        ws,
-    );
+    let state = support::app::state_with_ws(&[support::app::TRUST_LOOPBACK], &settings, ws);
     let ws = state.ws.clone();
     (support::app::start(state).await, ws, clock)
 }

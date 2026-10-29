@@ -3,31 +3,16 @@
 
 mod support;
 
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use server::app::{AppState, HttpConfig, Settings};
-use server::db::{DbProbe, PingFuture};
+use server::app::{HttpConfig, Settings};
 use support::app::{ORIGIN, SECRET};
 use support::http::{self, Response};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-struct AlwaysUp;
-
-impl DbProbe for AlwaysUp {
-    fn ping(&self) -> PingFuture<'_> {
-        Box::pin(async { true })
-    }
-}
-
 async fn app() -> support::app::RunningApp {
-    support::app::start(AppState::new(
-        Arc::new(AlwaysUp),
-        &Settings::default(),
-        support::app::ws_state(),
-    ))
-    .await
+    support::app::start(support::app::state(&[], &Settings::default())).await
 }
 
 /// ADR-0012 B2: each header once, with its exact value.
@@ -71,8 +56,8 @@ const UNSAFE: [&str; 5] = ["POST", "PUT", "PATCH", "DELETE", "PURGE"];
 const PATHS: [&str; 2] = ["/api/health", "/cualquier"];
 
 async fn app_with_secret() -> support::app::RunningApp {
-    support::app::start(support::app::state_with(
-        support::app::net(Default::default(), true),
+    support::app::start(support::app::state(
+        &[support::app::WITH_SECRET],
         &Settings::default(),
     ))
     .await
@@ -290,11 +275,7 @@ async fn security_headers_on_a_200_and_head_works() {
 #[tokio::test]
 async fn slow_headers_are_cut_after_the_header_read_timeout() {
     let app = support::app::start_with(
-        AppState::new(
-            Arc::new(AlwaysUp),
-            &Settings::default(),
-            support::app::ws_state(),
-        ),
+        support::app::state(&[], &Settings::default()),
         HttpConfig {
             header_read_timeout: Duration::from_millis(300),
         },

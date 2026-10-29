@@ -119,6 +119,15 @@ impl KeyedLimiter {
         self.measure(key)
     }
 
+    /// Whether a sweep or the admission of a new key would have to wait right now.
+    #[cfg(test)]
+    fn exclusive_would_block(&self) -> bool {
+        matches!(
+            self.admission.try_write(),
+            Err(std::sync::TryLockError::WouldBlock)
+        )
+    }
+
     #[cfg(test)]
     fn run_hook(&self) {
         let hook = self
@@ -337,25 +346,25 @@ mod tests {
         assert_eq!(limiter.check(&key(1)), Decision::Allow);
         // K is indistinguishable from fresh: the next sweep would drop it.
         clock.advance(Duration::from_secs(12));
-        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        // Inside K's in-flight check (between the lookup and the measurement), neither a sweep
+        // nor the admission of a new key can take the lock: checked without threads.
+        let blocked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let seen = blocked.clone();
         let racer = limiter.clone();
-        let handle: Arc<Mutex<Option<std::thread::JoinHandle<Decision>>>> = Arc::default();
-        let slot = handle.clone();
         *limiter.hook.lock().unwrap() = Some(Box::new(move || {
-            let thread = std::thread::spawn(move || {
-                racer.sweep();
-                let decision = racer.check(&key(2));
-                let _ = done_tx.send(());
-                decision
-            });
-            // Old code: the racer finishes here. Fixed code: it blocks until K's check ends.
-            let _ = done_rx.recv_timeout(Duration::from_millis(200));
-            *slot.lock().unwrap() = Some(thread);
+            seen.store(
+                racer.exclusive_would_block(),
+                std::sync::atomic::Ordering::SeqCst,
+            );
         }));
         assert_eq!(limiter.check(&key(1)), Decision::Allow);
-        let thread = handle.lock().unwrap().take().unwrap();
-        assert_eq!(thread.join().unwrap(), Decision::Full);
+        assert!(blocked.load(std::sync::atomic::Ordering::SeqCst));
+        // What the racer would do once K's check ends: K was measured again, so it stays,
+        // and the new key finds the table full.
+        limiter.sweep();
+        assert_eq!(limiter.check(&key(2)), Decision::Full);
         assert_eq!(limiter.len(), 1);
+        assert!(!limiter.exclusive_would_block());
     }
 
     #[test]
