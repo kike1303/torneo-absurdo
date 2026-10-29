@@ -46,6 +46,7 @@ pub fn error_kind(error: &sqlx::Error) -> &'static str {
         match code.as_ref() {
             "TA001" => return "ledger_immutable",
             "TA002" => return "ledger_unbalanced",
+            "TA003" => return "ledger_closed",
             _ => {}
         }
     }

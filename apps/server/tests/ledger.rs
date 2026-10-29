@@ -240,30 +240,114 @@ async fn amounts_are_never_zero() {
     assert_eq!(sqlstate(&error).as_deref(), Some("23514"));
 }
 
-/// An entry that already balanced cannot be unbalanced later by appending a posting: the
-/// deferred check runs again for the entry the new posting touches.
+/// Deviation 25 of plan-b, closed on #54: a committed entry takes no new postings at all. Not
+/// even an offsetting pair on accounts it did not have (a retried payout reusing an entry id
+/// would otherwise pay twice). Refused at insert with `TA003`.
+async fn append(pool: &PgPool, entry: Uuid, postings: &[(Uuid, i64)]) -> sqlx::Error {
+    let mut tx = pool.begin().await.unwrap();
+    for (account, amount) in postings {
+        let inserted = sqlx::query(
+            "INSERT INTO ledger_postings (entry_id, account_id, amount) VALUES ($1, $2, $3)",
+        )
+        .bind(entry)
+        .bind(account)
+        .bind(amount)
+        .execute(&mut *tx)
+        .await;
+        if let Err(error) = inserted {
+            return error;
+        }
+    }
+    tx.commit().await.unwrap_err()
+}
+
 #[tokio::test]
-async fn appending_an_unbalanced_posting_to_an_existing_entry_never_commits() {
+async fn a_committed_entry_takes_no_new_postings() {
     let db = TestDb::create().await;
     let pool = db.migrated_pool().await;
     let a = user(&pool).await;
     let b = user(&pool).await;
+    let c = user(&pool).await;
     let mut tx = pool.begin().await.unwrap();
     let entry = ledger::grant(&mut tx, a, Coins(100))
         .await
         .unwrap()
         .unwrap();
     tx.commit().await.unwrap();
-    let account_b = account_of(&pool, b).await;
+    let (account_b, account_c) = (account_of(&pool, b).await, account_of(&pool, c).await);
+    for postings in [vec![(account_b, 5), (account_c, -5)], vec![(account_b, 50)]] {
+        let error = append(&pool, entry, &postings).await;
+        assert_eq!(sqlstate(&error).as_deref(), Some("TA003"), "{postings:?}");
+        assert_eq!(server::db::error_kind(&error), "ledger_closed");
+    }
+    assert_eq!(ledger::balance(&pool, b).await.unwrap(), Coins(0));
+    assert_eq!(ledger::balance(&pool, c).await.unwrap(), Coins(0));
+    assert_eq!(total(&pool).await, 0);
+}
+
+/// `created_xact` is the top-level transaction id, so an entry built inside a savepoint (a
+/// nested sqlx transaction), or finished after it, is still open in its own transaction.
+#[tokio::test]
+async fn an_entry_built_inside_a_savepoint_commits() {
+    use sqlx::Connection;
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let a = user(&pool).await;
+    let b = user(&pool).await;
+    let (account_a, account_b) = (account_of(&pool, a).await, account_of(&pool, b).await);
     let mut tx = pool.begin().await.unwrap();
-    sqlx::query("INSERT INTO ledger_postings (entry_id, account_id, amount) VALUES ($1, $2, 50)")
+    let entry = Uuid::new_v4();
+    {
+        let mut savepoint = (*tx).begin().await.unwrap();
+        sqlx::query("INSERT INTO ledger_entries (id, kind, user_id) VALUES ($1, 'grant', $2)")
+            .bind(entry)
+            .bind(a)
+            .execute(&mut *savepoint)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO ledger_postings (entry_id, account_id, amount) VALUES ($1, $2, 7)",
+        )
+        .bind(entry)
+        .bind(account_a)
+        .execute(&mut *savepoint)
+        .await
+        .unwrap();
+        savepoint.commit().await.unwrap();
+    }
+    // The other half after the savepoint, in the same top-level transaction.
+    sqlx::query("INSERT INTO ledger_postings (entry_id, account_id, amount) VALUES ($1, $2, -7)")
         .bind(entry)
         .bind(account_b)
         .execute(&mut *tx)
         .await
         .unwrap();
-    let error = tx.commit().await.unwrap_err();
-    assert_eq!(sqlstate(&error).as_deref(), Some("TA002"));
-    assert_eq!(ledger::balance(&pool, b).await.unwrap(), Coins(0));
-    assert_eq!(total(&pool).await, 0);
+    tx.commit().await.unwrap();
+    assert_eq!(ledger::balance(&pool, a).await.unwrap(), Coins(7));
+}
+
+/// Security nit on #54: the accounts are immutable too (an UPDATE of `user_id` would move a
+/// whole balance to another user).
+#[tokio::test]
+async fn ledger_accounts_cannot_be_updated_or_deleted() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let a = user(&pool).await;
+    user(&pool).await;
+    for statement in [
+        "UPDATE ledger_accounts SET user_id = $1 WHERE user_id IS NOT NULL",
+        "DELETE FROM ledger_accounts WHERE user_id = $1",
+    ] {
+        let error = sqlx::query(statement)
+            .bind(a)
+            .execute(&pool)
+            .await
+            .unwrap_err();
+        assert_eq!(sqlstate(&error).as_deref(), Some("TA001"), "{statement}");
+    }
+    let error = sqlx::query("TRUNCATE ledger_accounts CASCADE")
+        .execute(&pool)
+        .await
+        .unwrap_err();
+    assert_eq!(sqlstate(&error).as_deref(), Some("TA001"));
 }

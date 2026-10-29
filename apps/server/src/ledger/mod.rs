@@ -79,6 +79,38 @@ mod tests {
         assert!(migration.contains(&format!("'{ISSUANCE_ACCOUNT}', 'issuance'")));
     }
 
+    /// Only this module writes ledger rows (review of #54): elsewhere there is no
+    /// `INSERT INTO ledger_…` at all.
+    #[test]
+    fn only_the_ledger_module_inserts_ledger_rows() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let here = src.join("ledger");
+        let needle = ["INSERT INTO", " LEDGER", "_"].concat();
+        let mut stack = vec![src];
+        let mut checked = 0;
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.starts_with(&here) {
+                    continue;
+                }
+                checked += 1;
+                let text = std::fs::read_to_string(&path).unwrap().to_ascii_uppercase();
+                let text: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                assert!(
+                    !text.contains(&needle),
+                    "{} inserts ledger rows",
+                    path.display()
+                );
+            }
+        }
+        assert!(checked > 20, "{checked}");
+    }
+
     /// No module updates or deletes ledger rows (the database refuses it, but the code must
     /// not even try).
     #[test]
