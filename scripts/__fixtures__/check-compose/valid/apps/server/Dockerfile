@@ -61,6 +61,8 @@ ARG APP_VERSION=dev
 COPY Cargo.toml Cargo.lock ./
 COPY apps/server apps/server
 COPY crates crates
+# The alias word lists and the reserved names, embedded with include_str! (spec 008 RF-B7).
+COPY content/names content/names
 RUN cargo zigbuild --release --locked --target x86_64-unknown-linux-musl -p server
 
 # distroless/static-debian13:nonroot, index digest (uid 65532, no shell).

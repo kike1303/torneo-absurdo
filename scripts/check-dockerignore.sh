@@ -75,6 +75,12 @@ if [ -n "$leaks" ]; then
     failed=1
 fi
 
+# The server image embeds the alias lists (spec 008 RF-B7).
+if [ ! -f "$ctx/content/names/nouns.txt" ]; then
+    echo "missing from build context: content/names/nouns.txt" >&2
+    failed=1
+fi
+
 if [ ! -f "$ctx/apps/server/.env.example" ]; then
     echo "missing from build context: apps/server/.env.example (the !**/.env.example rule)" >&2
     failed=1

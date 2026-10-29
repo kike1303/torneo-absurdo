@@ -11,6 +11,7 @@ pub mod healthcheck;
 pub mod http;
 pub mod ledger;
 pub mod net;
+pub mod profile;
 pub mod rate;
 pub mod shutdown;
 pub mod telemetry;
