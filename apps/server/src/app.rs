@@ -15,11 +15,13 @@ use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
+use crate::auth::AuthState;
 use crate::config::Config;
 use crate::db::{self, DbProbe, PgProbe, RetryConfig};
 use crate::http::origin::OriginPolicy;
 use crate::http::{self, health::HealthConfig, health::HealthState};
-use crate::net::NetState;
+use crate::net::{LocalAddr, NetState};
+use crate::profile::alias::AliasConfig;
 use crate::rate::{self, RateLimits, RateSettings};
 use crate::ws::{WsConfig, WsState};
 
@@ -59,6 +61,7 @@ pub struct Settings {
     pub http: HttpConfig,
     pub ws: WsConfig,
     pub rate: RateSettings,
+    pub alias: AliasConfig,
 }
 
 #[derive(Clone)]
@@ -69,6 +72,7 @@ pub struct AppState {
     pub net: Arc<NetState>,
     pub origin: Arc<OriginPolicy>,
     pub rate: Arc<RateLimits>,
+    pub auth: Arc<AuthState>,
 }
 
 impl AppState {
@@ -88,6 +92,7 @@ impl AppState {
             ws: Arc::new(Self::ws_from_config(config, settings)),
             net: Arc::new(Self::net_from_config(config)),
             rate: Arc::new(RateLimits::new(&settings.rate)),
+            auth: Arc::new(AuthState::from_config(config, settings)),
         }
     }
 
@@ -244,6 +249,7 @@ pub async fn serve_listener(
     let closing = CancellationToken::new();
     let mut shutdown = pin!(shutdown);
     loop {
+        let local = listener.local_addr().ok();
         let (stream, peer) = tokio::select! {
             biased;
             () = &mut shutdown => break,
@@ -263,6 +269,9 @@ pub async fn serve_listener(
                 request
                     .extensions_mut()
                     .insert(ConnectInfo::<SocketAddr>(peer));
+                if let Some(local) = local {
+                    request.extensions_mut().insert(LocalAddr(local));
+                }
                 request
             },
         );

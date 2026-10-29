@@ -6,6 +6,7 @@ pub mod health;
 pub mod origin;
 pub mod request_log;
 pub mod routes;
+pub mod session;
 
 use axum::Router;
 use axum::http::{HeaderName, HeaderValue, header};

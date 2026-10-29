@@ -4,6 +4,7 @@
 //! build the router and the state in process.
 
 pub mod app;
+pub mod auth;
 mod cli;
 pub mod config;
 pub mod db;

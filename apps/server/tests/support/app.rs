@@ -103,3 +103,18 @@ pub fn state_with_probe(
 pub fn state_with_ws(vars: &[(&str, &str)], settings: &Settings, ws: WsState) -> AppState {
     state(vars, settings).with_ws(ws)
 }
+
+/// The app on a real, migrated database; returns the pool too.
+pub async fn start_db(
+    db: &super::db::TestDb,
+    vars: &[(&str, &str)],
+    settings: &Settings,
+) -> (RunningApp, sqlx::PgPool) {
+    let url = db.url();
+    let mut all = vec![("DATABASE_URL", url.as_str())];
+    all.extend_from_slice(vars);
+    let config = super::config::config(&all);
+    let pool = db.migrated_pool().await;
+    let state = AppState::from_config(&config, settings, pool.clone(), Arc::new(AlwaysUp));
+    (start(state).await, pool)
+}

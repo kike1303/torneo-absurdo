@@ -11,6 +11,7 @@ pub mod http;
 pub mod quotas;
 pub mod store;
 
+use std::hash::Hash;
 #[cfg(test)]
 use std::sync::Mutex;
 use std::sync::{Arc, PoisonError, RwLock};
@@ -24,10 +25,14 @@ use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
 pub use clock::ServerClock;
-pub use quotas::{AUTH_IP, FULL_RETRY_AFTER_SECS, MAX_KEYS, WS_ANON_UPGRADE_IP};
+pub use quotas::{
+    AUTH_IP, FULL_RETRY_AFTER_SECS, MAX_KEYS, MUTATION_IP, MUTATION_USER, WS_ANON_UPGRADE_IP,
+    WS_SESSION_UPGRADE_IP, WS_SESSION_UPGRADE_USER,
+};
 use store::CappedStore;
 
 use crate::net::IpKey;
+use uuid::Uuid;
 
 /// How often the sweeper drops keys that are indistinguishable from fresh ones.
 pub const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
@@ -71,9 +76,10 @@ impl Default for RateSettings {
     }
 }
 
-pub struct KeyedLimiter {
-    limiter: RateLimiter<IpKey, CappedStore, ServerClock, NoOpMiddleware<Nanos>>,
-    store: CappedStore,
+/// A limiter over keys `K`: `IpKey` (the default) or a user id.
+pub struct KeyedLimiter<K: Hash + Eq + Clone = IpKey> {
+    limiter: RateLimiter<K, CappedStore<K>, ServerClock, NoOpMiddleware<Nanos>>,
+    store: CappedStore<K>,
     clock: ServerClock,
     max_keys: usize,
     admission: RwLock<()>,
@@ -82,7 +88,7 @@ pub struct KeyedLimiter {
     hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
-impl KeyedLimiter {
+impl<K: Hash + Eq + Clone> KeyedLimiter<K> {
     pub fn new(quota: Quota, settings: &RateSettings) -> Self {
         let store = CappedStore::default();
         Self {
@@ -96,7 +102,7 @@ impl KeyedLimiter {
         }
     }
 
-    pub fn check(&self, key: &IpKey) -> Decision {
+    pub fn check(&self, key: &K) -> Decision {
         {
             let _shared = self
                 .admission
@@ -140,7 +146,7 @@ impl KeyedLimiter {
         }
     }
 
-    fn measure(&self, key: &IpKey) -> Decision {
+    fn measure(&self, key: &K) -> Decision {
         match self.limiter.check_key(key) {
             Ok(()) => Decision::Allow,
             Err(not_until) => {
@@ -183,6 +189,12 @@ pub struct RateLimits {
     pub auth_ip: Arc<KeyedLimiter>,
     /// `WS_ANON_UPGRADE_IP`, checked in the `/ws` handshake (RF-A7).
     pub ws_upgrade_ip: Arc<KeyedLimiter>,
+    /// "Other mutations" of D7 (logout, logout-all): per user and per IP.
+    pub mutation_user: Arc<KeyedLimiter<Uuid>>,
+    pub mutation_ip: Arc<KeyedLimiter>,
+    /// The upgrade of a `/ws` with a session (RF-B14): per user and per IP.
+    pub ws_session_user: Arc<KeyedLimiter<Uuid>>,
+    pub ws_session_ip: Arc<KeyedLimiter>,
 }
 
 impl RateLimits {
@@ -190,12 +202,20 @@ impl RateLimits {
         Self {
             auth_ip: Arc::new(KeyedLimiter::new(AUTH_IP, settings)),
             ws_upgrade_ip: Arc::new(KeyedLimiter::new(WS_ANON_UPGRADE_IP, settings)),
+            mutation_user: Arc::new(KeyedLimiter::new(MUTATION_USER, settings)),
+            mutation_ip: Arc::new(KeyedLimiter::new(MUTATION_IP, settings)),
+            ws_session_user: Arc::new(KeyedLimiter::new(WS_SESSION_UPGRADE_USER, settings)),
+            ws_session_ip: Arc::new(KeyedLimiter::new(WS_SESSION_UPGRADE_IP, settings)),
         }
     }
 
     pub fn sweep(&self) {
         self.auth_ip.sweep();
         self.ws_upgrade_ip.sweep();
+        self.mutation_user.sweep();
+        self.mutation_ip.sweep();
+        self.ws_session_user.sweep();
+        self.ws_session_ip.sweep();
     }
 }
 

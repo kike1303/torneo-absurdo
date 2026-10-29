@@ -1,12 +1,14 @@
 //! The route manifest (008 T1, RF-A5): every route is registered from [`ROUTES`] and nowhere
 //! else, and no safe method may mutate except the declared exceptions.
 
-use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::http::Method;
 use axum::routing::{MethodFilter, MethodRouter, on};
+use axum::{Router, middleware};
 
 use super::{errors, health};
 use crate::app::AppState;
+use crate::rate;
 
 /// What a route does to the server state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +65,18 @@ impl RouteMethod {
 pub enum Handler {
     Health,
     Ws,
+    AuthStart,
+    AuthCallback,
+    AuthProviders,
+    Logout,
+    LogoutAll,
+    Me,
+    #[cfg(feature = "dev-auth")]
+    DevAuthorize,
+    #[cfg(feature = "dev-auth")]
+    DevToken,
+    #[cfg(feature = "dev-auth")]
+    DevUserinfo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,12 +101,77 @@ pub const ROUTES: &[RouteSpec] = &[
         effect: Effect::Read,
         handler: Handler::Ws,
     },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/auth/{provider}/start",
+        effect: Effect::Mutate,
+        handler: Handler::AuthStart,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/auth/{provider}/callback",
+        effect: Effect::Mutate,
+        handler: Handler::AuthCallback,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/auth/providers",
+        effect: Effect::Read,
+        handler: Handler::AuthProviders,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/auth/logout",
+        effect: Effect::Mutate,
+        handler: Handler::Logout,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/auth/logout-all",
+        effect: Effect::Mutate,
+        handler: Handler::LogoutAll,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/me",
+        effect: Effect::Read,
+        handler: Handler::Me,
+    },
+    #[cfg(feature = "dev-auth")]
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/auth/dev/oauth/authorize",
+        effect: Effect::Mutate,
+        handler: Handler::DevAuthorize,
+    },
+    #[cfg(feature = "dev-auth")]
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/auth/dev/oauth/token",
+        effect: Effect::Mutate,
+        handler: Handler::DevToken,
+    },
+    #[cfg(feature = "dev-auth")]
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/auth/dev/oauth/userinfo",
+        effect: Effect::Read,
+        handler: Handler::DevUserinfo,
+    },
 ];
+
+/// Largest body of the form routes (008 plan-b decision 10).
+pub const MAX_FORM_BYTES: usize = 4096;
 
 /// Safe-method routes allowed to mutate (ADR-0008 D4): the OAuth callback, a top-level
 /// redirect the provider makes with `GET`.
-pub const SAFE_METHOD_EXCEPTIONS: &[(RouteMethod, &str)] =
-    &[(RouteMethod::Get, "/api/auth/{provider}/callback")];
+pub const SAFE_METHOD_EXCEPTIONS: &[(RouteMethod, &str)] = &[
+    (RouteMethod::Get, "/api/auth/{provider}/callback"),
+    // The authorize endpoint of the dev provider stores a code in memory, as real providers do
+    // on their side of a GET (008 plan-b question 7). Only with `dev-auth`.
+    #[cfg(feature = "dev-auth")]
+    (RouteMethod::Get, "/api/auth/dev/oauth/authorize"),
+];
 
 /// `Err` with the first entry that mutates with `GET`, `HEAD` or `OPTIONS` without being an
 /// exception.
@@ -109,11 +188,29 @@ pub fn check_manifest(routes: &[RouteSpec]) -> Result<(), RouteSpec> {
 }
 
 /// The method router of a manifest entry, with its per-route layers.
-fn route_for(spec: &RouteSpec, _state: &AppState) -> MethodRouter<AppState> {
+fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
+    use crate::auth;
     let filter = spec.method.filter();
+    let body = DefaultBodyLimit::max(MAX_FORM_BYTES);
+    // `start`, `link` (phase C) and `callback` share the AUTH_IP bucket (D7).
+    let auth_ip = || middleware::from_fn_with_state(state.rate.auth_ip.clone(), rate::http::layer);
     match spec.handler {
         Handler::Health => on(filter, health::handler).fallback(errors::method_not_allowed),
         Handler::Ws => on(filter, crate::ws::handler),
+        Handler::AuthStart => on(filter, auth::start::handler)
+            .layer(body)
+            .layer(auth_ip()),
+        Handler::AuthCallback => on(filter, auth::callback::handler).layer(auth_ip()),
+        Handler::AuthProviders => on(filter, auth::providers),
+        Handler::Logout => on(filter, auth::logout::logout).layer(body),
+        Handler::LogoutAll => on(filter, auth::logout::logout_all).layer(body),
+        Handler::Me => on(filter, crate::profile::me::handler),
+        #[cfg(feature = "dev-auth")]
+        Handler::DevAuthorize => on(filter, auth::dev::authorize),
+        #[cfg(feature = "dev-auth")]
+        Handler::DevToken => on(filter, auth::dev::token).layer(body),
+        #[cfg(feature = "dev-auth")]
+        Handler::DevUserinfo => on(filter, auth::dev::userinfo),
     }
 }
 
@@ -154,6 +251,31 @@ mod tests {
             };
             assert!(check_manifest(std::slice::from_ref(&bad)).is_err());
         }
+    }
+
+    #[test]
+    fn the_safe_method_exceptions_per_variant() {
+        #[cfg(not(feature = "dev-auth"))]
+        assert_eq!(
+            SAFE_METHOD_EXCEPTIONS,
+            &[(RouteMethod::Get, "/api/auth/{provider}/callback")]
+        );
+        #[cfg(feature = "dev-auth")]
+        assert_eq!(
+            SAFE_METHOD_EXCEPTIONS,
+            &[
+                (RouteMethod::Get, "/api/auth/{provider}/callback"),
+                (RouteMethod::Get, "/api/auth/dev/oauth/authorize"),
+            ]
+        );
+    }
+
+    /// Without the feature no `dev` route exists (RF-D9 is checked on the release binary in
+    /// phase D).
+    #[cfg(not(feature = "dev-auth"))]
+    #[test]
+    fn no_dev_route_without_the_feature() {
+        assert!(ROUTES.iter().all(|r| !r.path.starts_with("/api/auth/dev/")));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 use std::net::SocketAddr;
 
-use http_body_util::{BodyExt, Empty};
+use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::{HeaderMap, Method, Request, StatusCode};
 use hyper_util::rt::TokioIo;
@@ -22,6 +22,37 @@ impl Response {
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers.get(name).map(|v| v.to_str().unwrap())
     }
+
+    /// Every `Set-Cookie` line.
+    pub fn set_cookies(&self) -> Vec<&str> {
+        self.headers
+            .get_all("set-cookie")
+            .iter()
+            .map(|v| v.to_str().unwrap())
+            .collect()
+    }
+
+    /// The value a `Set-Cookie` gives to `name` (`Some("")` if it expires it).
+    pub fn cookie(&self, name: &str) -> Option<&str> {
+        let prefix = format!("{name}=");
+        self.set_cookies().into_iter().find_map(|line| {
+            line.strip_prefix(&prefix)
+                .map(|rest| rest.split(';').next().unwrap_or_default())
+        })
+    }
+
+    /// The `Location` without the scheme and host (the tests follow redirects to the app).
+    pub fn location_path(&self) -> String {
+        let location = self.header("location").expect("no location");
+        match location.find("://") {
+            Some(i) => {
+                let rest = &location[i + 3..];
+                rest.find('/')
+                    .map_or("/".to_owned(), |j| rest[j..].to_owned())
+            }
+            None => location.to_owned(),
+        }
+    }
 }
 
 /// Sends one request on a new connection. `Host` is added unless given.
@@ -30,6 +61,17 @@ pub async fn send(
     method: &str,
     path: &str,
     headers: &[(&str, &str)],
+) -> Response {
+    send_body(addr, method, path, headers, "").await
+}
+
+/// Like [`send`], with a body.
+pub async fn send_body(
+    addr: SocketAddr,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &str,
 ) -> Response {
     let stream = TcpStream::connect(addr).await.unwrap();
     let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
@@ -46,7 +88,11 @@ pub async fn send(
         builder = builder.header(*name, *value);
     }
     let response = sender
-        .send_request(builder.body(Empty::<Bytes>::new()).unwrap())
+        .send_request(
+            builder
+                .body(Full::new(Bytes::from(body.to_owned())))
+                .unwrap(),
+        )
         .await
         .unwrap();
     let status = response.status();

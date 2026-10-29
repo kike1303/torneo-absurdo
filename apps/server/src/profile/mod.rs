@@ -2,4 +2,5 @@
 //! `GET /api/me`.
 
 pub mod alias;
+pub mod me;
 pub mod name;

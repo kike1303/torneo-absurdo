@@ -26,6 +26,29 @@ pub trait AliasSource: Send + Sync {
     fn next(&self) -> Option<String>;
 }
 
+/// The alias source of the server, in `Settings` (not an environment variable): [`OsAlias`] by
+/// default, a fixed list in the tests.
+#[derive(Clone)]
+pub struct AliasConfig(pub std::sync::Arc<dyn AliasSource>);
+
+impl AliasConfig {
+    pub fn new(source: std::sync::Arc<dyn AliasSource>) -> Self {
+        Self(source)
+    }
+}
+
+impl Default for AliasConfig {
+    fn default() -> Self {
+        Self(std::sync::Arc::new(OsAlias))
+    }
+}
+
+impl std::fmt::Debug for AliasConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AliasConfig(..)")
+    }
+}
+
 /// Aliases from `OsRng` (never the engine's PRNG, ADR-0001).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OsAlias;

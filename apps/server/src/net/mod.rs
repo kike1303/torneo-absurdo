@@ -38,6 +38,11 @@ impl fmt::Debug for ClientContext {
     }
 }
 
+/// The local address of the connection (008 plan-b: the dev provider is called back on it, so
+/// it never depends on a configured port). Inserted by `serve_listener` next to `ConnectInfo`.
+#[derive(Debug, Clone, Copy)]
+pub struct LocalAddr(pub SocketAddr);
+
 /// What the layer needs from the configuration.
 #[derive(Debug, Clone, Default)]
 pub struct NetState {
