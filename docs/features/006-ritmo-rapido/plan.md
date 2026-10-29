@@ -2,7 +2,7 @@
 id: "006"
 title: Ritmo rápido del motor
 type: plan
-status: approved
+status: done
 risk: high
 author: backend-engineer
 reviewers: [architect]
@@ -10,7 +10,7 @@ approvals: [{by: architect, date: 2026-10-27}]
 linear: TA-21
 depends_on: ["002", "003", "005"]
 created: 2026-10-27
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # Plan: ritmo rápido del motor (desde spec.md 2026-10-27)

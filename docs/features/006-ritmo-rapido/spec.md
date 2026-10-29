@@ -2,7 +2,7 @@
 id: "006"
 title: Ritmo rápido del motor
 type: spec
-status: approved
+status: done
 risk: high
 author: architect
 reviewers: [product-owner, security-reviewer, game-designer]
@@ -10,7 +10,7 @@ approvals: [{by: product-owner, date: 2026-10-27}, {by: game-designer, date: 202
 linear: TA-21
 depends_on: ["002", "003", "005"]
 created: 2026-10-27
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # Spec: ritmo rápido del motor
@@ -375,3 +375,6 @@ Barrido de calibración (motor prototipo fuera del repo, `content/` real, 10 000
 - Al revisar `plan.md` admití una precisión de firma en RF15 y RF16: `paceMin(timeline, isValid): number | null` y `resolvePace(requested, timeline, isValid)` reciben el validador como función `(t: Timeline) => boolean`, y la prop `retime` de `FightStage` pasa a `(timeline, isValid) => Timeline`. `FightStage`, que ya carga el renderer con `import()`, pasa `(t) => validateTimeline(t).ok` sin manifests; los Vitest pasan el validador real. Motivo: `retime.ts` no puede importar valores del renderer (`rendererRestriction` de ESLint, ADR-0009 D4, y `check-renderer-split`, 002 RF-A17). La regla sigue teniendo una sola fuente (`TIMELINE_LIMITS` y `validateTimeline`), y el algoritmo, el piso, el techo, el clamp y el caso `null` no cambian.
 - No reabro la revisión de product-owner, security-reviewer ni game-designer: no cambia lo que ve el usuario, el ritmo, los criterios ni la superficie de `?pace`.
 
+
+### owner — 2026-10-28 — RF20: sí
+- Revisé en `/dev/arena` (rama del PR, puerto 5174) `log-ko-clutch` y `log-ko-knockdown` con `pace=1` y `pace=0` (ajustado al mínimo). Se notan los dos ritmos y el resultado queda aprobado tal como está; por ahora los valores `breather_*` e `interval_*` se quedan así.
