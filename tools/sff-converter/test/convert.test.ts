@@ -48,6 +48,17 @@ function trimmed(k: number, opaque = false): Uint8Array {
   return out;
 }
 
+/** Rows between the lowest visible pixel of frame `i` and its pivot (> 0: it floats). */
+function groundGap(result: ReturnType<typeof ok>, i: number): number {
+  const f = result.manifest.frames[i]!;
+  const pixels = framePixels(result, i);
+  let bottom = 0;
+  for (let k = 3; k < pixels.length; k += 4) {
+    if (pixels[k] !== 0) bottom = Math.floor((k - 3) / 4 / f.w) + 1;
+  }
+  return f.pivot_y - bottom;
+}
+
 describe('convert (RF-B5)', () => {
   for (const [name, sff] of [
     ['v1', fixtureSffV1()],
@@ -205,5 +216,82 @@ describe('convert (RF-B5)', () => {
     expect(code(() => convert({ sff, air, map: fixtureMap() }))).toBe(
       'sff.unsupported_compression',
     );
+  });
+
+  describe('knockdown (TA-24)', () => {
+    it('chains fall, ground hit and lying down, and every frame touches the ground', () => {
+      const result = ok(convert({ sff: fixtureSffV1(), air: fixtureAir(), map: fixtureMap() }));
+      const knockdown = result.manifest.animations.knockdown!;
+      expect(knockdown).toMatchObject({ loop: false, frame_ms: [200, 200, 100, 333] });
+      for (const i of knockdown.frames) expect(groundGap(result, i)).toBeLessThanOrEqual(0);
+      // The held frame is the fighter lying down (5110), not the fall in the air (5050).
+      const last = result.manifest.frames[knockdown.frames[3]!]!;
+      expect([last.pivot_x, last.pivot_y]).toEqual([AXIS.x - 1, AXIS.y - 2]);
+      expect(result.report.notes).toContainEqual(
+        expect.objectContaining({ code: 'convert.grounded', count: 2 }),
+      );
+    });
+
+    it('a grounded frame keeps its pixels and its horizontal pivot', () => {
+      const result = ok(convert({ sff: fixtureSffV1(), air: fixtureAir(), map: fixtureMap() }));
+      const i = result.manifest.animations.knockdown!.frames[0]!;
+      const f = result.manifest.frames[i]!;
+      expect(framePixels(result, i)).toEqual(trimmed(5));
+      expect([f.w, f.h, f.pivot_x, f.pivot_y]).toEqual([12, 12, AXIS.x - 1, 12]);
+    });
+
+    it('only the knockdown is grounded: an attack may still leave the ground', () => {
+      const result = ok(convert({ sff: fixtureSffV1(), air: fixtureAir(), map: fixtureMap() }));
+      expect(groundGap(result, result.manifest.animations.special.frames[1]!)).toBeGreaterThan(0);
+    });
+
+    it('a missing action of the chain is a note; a chain with none falls back to hit', () => {
+      const air = fixtureAir();
+      const map = parseMap({
+        ...MAP_JSON,
+        actions: { ...MAP_JSON.actions, knockdown: [5050, 9999, 5110] },
+      });
+      const result = ok(convert({ sff: fixtureSffV1(), air, map }));
+      expect(result.manifest.animations.knockdown!.frames).toHaveLength(3);
+      expect(result.report.notes).toContainEqual(
+        expect.objectContaining({
+          code: 'convert.optional_missing',
+          data: [{ animation: 'knockdown', action: 9999 }],
+        }),
+      );
+      const none = parseMap({ ...MAP_JSON, actions: { ...MAP_JSON.actions, knockdown: [9998] } });
+      expect(
+        ok(convert({ sff: fixtureSffV1(), air, map: none })).manifest.animations.knockdown,
+      ).toBeUndefined();
+    });
+
+    it('a chain over 3 s is cut before its last frame, the one the renderer holds', () => {
+      const actions = ACTIONS.map((act) =>
+        act.id === 5050
+          ? {
+              id: 5050,
+              frames: [
+                { group: 0, image: 5, y: -30, ticks: 90 },
+                { group: 0, image: 2, y: -20, ticks: 90 },
+                { group: 0, image: 1, y: -10, ticks: 90 },
+              ],
+            }
+          : act,
+      );
+      const result = ok(
+        convert({ sff: fixtureSffV1(), air: writeAir(actions), map: fixtureMap() }),
+      );
+      const knockdown = result.manifest.animations.knockdown!;
+      expect(knockdown.frame_ms).toEqual([1500, 333]);
+      const last = result.manifest.frames[knockdown.frames[1]!]!;
+      expect(last.pivot_y).toBe(AXIS.y - 2); // 5110, lying down
+      expect(result.report.notes.map((n) => n.code)).toContain('convert.animation_truncated');
+    });
+
+    it('a single action still works', () => {
+      const map = parseMap({ ...MAP_JSON, actions: { ...MAP_JSON.actions, knockdown: 5110 } });
+      const result = ok(convert({ sff: fixtureSffV1(), air: fixtureAir(), map }));
+      expect(result.manifest.animations.knockdown!.frame_ms).toEqual([333]);
+    });
   });
 });

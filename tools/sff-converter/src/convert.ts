@@ -12,7 +12,7 @@ import {
   type SpriteFrame,
   type SpriteManifest,
 } from '@torneo/renderer/manifest';
-import { parseAir } from './air.ts';
+import { parseAir, type AirAction } from './air.ts';
 import { fail, type ErrorData, type Note } from './errors.ts';
 import { buildFrame, EMPTY_FRAME, type FrameImage } from './frames.ts';
 import { INPUT_LIMITS } from './limits.ts';
@@ -80,6 +80,8 @@ export type ConvertResult =
 const ORDER: readonly AnimationCode[] = [...REQUIRED_ANIMATIONS, ...OPTIONAL_ANIMATIONS];
 const OPTIONAL: readonly AnimationCode[] = OPTIONAL_ANIMATIONS;
 const ATTACKS: readonly AnimationCode[] = ATTACK_ANIMATIONS;
+/** Animations played lying on the ground: their frames never float (TA-24). */
+const GROUNDED: readonly AnimationCode[] = ['knockdown'];
 
 export function summarize(notes: readonly Note[]): NoteSummary[] {
   const byCode = new Map<string, { count: number; data: ErrorData[] }>();
@@ -104,22 +106,28 @@ export function convert(input: ConvertInput): ConvertResult {
   // 1. Animations: which AIR frames each one plays.
   const timed = new Map<AnimationCode, TimedFrame[]>();
   for (const code of ORDER) {
-    const actionId = map.actions[code];
-    if (actionId === undefined) continue;
-    const action = air.actions.get(actionId);
-    if (action === undefined) {
-      if (OPTIONAL.includes(code)) {
-        notes.push({
-          code: 'convert.optional_missing',
-          data: { animation: code, action: actionId },
-        });
-        continue;
+    const actionIds = map.actions[code];
+    if (actionIds === undefined) continue;
+    const actions: AirAction[] = [];
+    for (const actionId of actionIds) {
+      const action = air.actions.get(actionId);
+      if (action === undefined) {
+        if (OPTIONAL.includes(code)) {
+          notes.push({
+            code: 'convert.optional_missing',
+            data: { animation: code, action: actionId },
+          });
+          continue;
+        }
+        fail('air.missing_action', { animation: code, action: actionId });
       }
-      fail('air.missing_action', { animation: code, action: actionId });
+      if (action.badLines > 0) fail('air.bad_frame', { animation: code, action: actionId });
+      if (action.frames.length === 0)
+        fail('air.empty_action', { animation: code, action: actionId });
+      actions.push(action);
     }
-    if (action.badLines > 0) fail('air.bad_frame', { animation: code, action: actionId });
-    if (action.frames.length === 0) fail('air.empty_action', { animation: code, action: actionId });
-    timed.set(code, timedFrames(code, action, notes));
+    // An optional animation whose actions are all missing falls back in the renderer (RF-A5).
+    if (actions.length > 0) timed.set(code, timedFrames(code, actions, notes));
   }
 
   // 2. The sprites they use: supported, and bounded in memory before any decoding.
@@ -172,6 +180,7 @@ export function convert(input: ConvertInput): ConvertResult {
   const decoded = new Set<number>();
   const animationFrames = new Map<AnimationCode, number[]>();
   for (const [code, frames] of timed) {
+    const ground = GROUNDED.includes(code);
     const indices: number[] = [];
     for (const { frame } of frames) {
       const sprite = frame.group === -1 ? -1 : (used.get(`${frame.group},${frame.image}`) ?? -1);
@@ -179,7 +188,7 @@ export function convert(input: ConvertInput): ConvertResult {
       const key =
         node === undefined
           ? 'empty'
-          : `${resolveSprite(sff, sprite)}|${sprite}|${frame.flipH ? 1 : 0}${frame.flipV ? 1 : 0}|${node.axisX - frame.x},${node.axisY - frame.y}`;
+          : `${resolveSprite(sff, sprite)}|${sprite}|${frame.flipH ? 1 : 0}${frame.flipV ? 1 : 0}|${node.axisX - frame.x},${node.axisY - frame.y}|${ground ? 1 : 0}`;
       let at = indexOf.get(key);
       if (at === undefined) {
         let image = EMPTY_FRAME;
@@ -193,7 +202,10 @@ export function convert(input: ConvertInput): ConvertResult {
             y: frame.y,
             flipH: frame.flipH,
             flipV: frame.flipV,
+            ground,
           });
+          if (image.grounded === true)
+            notes.push({ code: 'convert.grounded', data: { animation: code } });
         }
         at = order.length;
         order.push(key);

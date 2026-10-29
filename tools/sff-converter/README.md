@@ -36,7 +36,8 @@ Lo escribes tú, junto a los archivos de MUGEN. Dice qué acción de MUGEN es ca
   "palette_sprite": [0, 0]
 }
 ```
-- Por defecto: `idle: 0`, `walk: 20`, `hit: 5000`, `knockdown: 5050`, `intro: 190` y `win: 180`. Puedes sobrescribirlos en `actions`.
+- Por defecto: `idle: 0`, `walk: 20`, `hit: 5000`, `knockdown: [5050, 5100, 5110]`, `intro: 190` y `win: 180`. Puedes sobrescribirlos en `actions`.
+- `knockdown` es la única que acepta una lista (de 1 a 8 acciones), que se reproducen una detrás de otra. En MUGEN la caída se reparte en varias acciones: la 5050 cae en el aire (la altura la pone la física, no el frame), la 5100 golpea el suelo y la 5110 queda tendido, que es el frame que el renderer sostiene hasta que se levanta. Si a tu personaje le falta alguna, el reporte lo anota y la cadena sigue con las demás.
 - Obligatorias (dependen del personaje): `attack_light`, `attack_heavy`, `special`, `block`, `dodge` y `ko`. `impact_frames` da, para cada ataque, el índice del frame del AIR en el que golpea; el windup (la suma de los frames anteriores) no puede pasar de 400 ms.
 - `scale` (0.25 a 4, por defecto 1) iguala alturas entre personajes. `palette_sprite` (grupo, imagen) solo cuenta en SFF v1 con paleta compartida: es el sprite que trae la paleta (si ves colores raros, prueba otro, por ejemplo `[9000, 0]`).
 - Si `intro`, `walk` o `knockdown` no existen en el AIR, el reporte lo anota y el renderer usa su fallback.
@@ -44,6 +45,7 @@ Lo escribes tú, junto a los archivos de MUGEN. Dice qué acción de MUGEN es ca
 ## Qué hace con las animaciones
 - `frame_ms = round(ticks × 1000 / 60)`, recortado a 16–2000 ms; `ticks = -1` es el último frame, sostenido (100 ms nominales). `idle` y `walk` hacen bucle desde `Loopstart`.
 - El pivote es el eje del sprite (espejado con él si el AIR pide `H` o `V`) menos el desplazamiento del AIR. Se recortan los bordes transparentes y, si el pivote queda fuera, se rellena con transparente.
+- Un frame de `knockdown` cuyo dibujo queda por encima de los pies se baja hasta el suelo (nota `convert.grounded`): el renderer no tiene física. Las demás animaciones no se tocan.
 - Animaciones de más de 64 frames, o sin bucle de más de 3 s, se recortan con una nota. `Clsn*`, `Interpolate`, mezclas, escala y ángulo se ignoran y se cuentan en el reporte.
 - Las hojas son de ≤ 2048×2048 (como mucho 4), con 1 px de margen.
 
