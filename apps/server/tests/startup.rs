@@ -83,13 +83,13 @@ async fn the_port_opens_only_after_the_database_and_the_migrations() {
     assert_eq!(logged_port, port);
 
     let pool = sqlx::PgPool::connect_with(db.options()).await.unwrap();
-    let rows = sqlx::query("SELECT version, success FROM _sqlx_migrations")
+    let rows = sqlx::query("SELECT version, success FROM _sqlx_migrations ORDER BY version")
         .fetch_all(&pool)
         .await
         .unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].get::<i64, _>("version"), 20_261_023_000_000);
-    assert!(rows[0].get::<bool, _>("success"));
+    let versions: Vec<i64> = rows.iter().map(|r| r.get::<i64, _>("version")).collect();
+    assert_eq!(versions, [20_261_023_000_000, 20_261_028_000_000]);
+    assert!(rows.iter().all(|r| r.get::<bool, _>("success")));
     pool.close().await;
     process.kill().await;
 }
