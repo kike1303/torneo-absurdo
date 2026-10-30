@@ -24,6 +24,7 @@ use uuid::Uuid;
 
 use super::link::{self, LinkRequest};
 use super::login::{self, Identity, LoginError};
+use super::reauth::{self, ReauthRequest};
 use super::{client, flow_hash, providers};
 use crate::app::AppState;
 use crate::http::cookies::CookiePolicy;
@@ -164,17 +165,20 @@ struct Flow {
     link_user_id: Option<Uuid>,
 }
 
-/// What the flow is for. Exhaustive: a `login` flow never links, a `link` flow never logs in,
-/// and any other text (the `CHECK` forbids it) is `auth.invalid_state`.
+/// What the flow is for. Exhaustive: a `login` flow never links, a `link` flow never logs in, a
+/// `reauth` flow never creates anything (009 RF12), and any other text or a user where it does
+/// not belong (the `CHECK`s forbid both) is `auth.invalid_state`.
 enum FlowPurpose {
     Login,
     Link(Uuid),
+    Reauth(Uuid),
 }
 
 fn purpose_of(flow: &Flow) -> Option<FlowPurpose> {
     match (flow.purpose.as_str(), flow.link_user_id) {
         ("login", None) => Some(FlowPurpose::Login),
         ("link", Some(user)) => Some(FlowPurpose::Link(user)),
+        ("reauth", Some(user)) => Some(FlowPurpose::Reauth(user)),
         _ => None,
     }
 }
@@ -271,6 +275,30 @@ async fn run(
             )
             .await?
         }
+        FlowPurpose::Reauth(user) => {
+            // As a link: a first check of the session, and the rotation inside the transaction.
+            let hash = context.previous.ok_or(InvalidState)?;
+            let session = sessions::validate(&state.db, &hash)
+                .await
+                .map_err(|_| CallbackErrorCode::TryAgain)?
+                .filter(|info| info.user_id == user)
+                .ok_or(InvalidState)?;
+            let subject =
+                identity(state, provider, code, flow.code_verifier, context.local).await?;
+            let identity = Identity { provider, subject };
+            state.auth.link_gate.0.before_link().await;
+            reauth::reauth(
+                state,
+                ReauthRequest {
+                    user,
+                    session: session.id,
+                    identity: &identity,
+                    ip_hash: context.ip_hash,
+                    ua: context.ua,
+                },
+            )
+            .await?
+        }
     };
     Ok((issued, location))
 }
@@ -342,4 +370,52 @@ async fn identity(
     }
     providers::identity(provider, response.body())
         .ok_or_else(|| provider_failed("userinfo_invalid"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flow(purpose: &str, user: Option<Uuid>) -> Flow {
+        Flow {
+            provider: "google".to_owned(),
+            purpose: purpose.to_owned(),
+            state: String::new(),
+            code_verifier: String::new(),
+            next: "/".to_owned(),
+            live: true,
+            link_user_id: user,
+        }
+    }
+
+    /// 009 RF4, RF12: a `reauth` flow always names its user, and only `link` and `reauth` do. The
+    /// `CHECK` of the database forbids the rest, so this is where a mistake would show.
+    #[test]
+    fn every_purpose_needs_exactly_its_user() {
+        let user = Uuid::from_u128(7);
+        assert!(matches!(
+            purpose_of(&flow("login", None)),
+            Some(FlowPurpose::Login)
+        ));
+        assert!(matches!(
+            purpose_of(&flow("link", Some(user))),
+            Some(FlowPurpose::Link(u)) if u == user
+        ));
+        assert!(matches!(
+            purpose_of(&flow("reauth", Some(user))),
+            Some(FlowPurpose::Reauth(u)) if u == user
+        ));
+        for (purpose, user) in [
+            ("reauth", None),
+            ("link", None),
+            ("login", Some(user)),
+            ("other", Some(user)),
+            ("other", None),
+        ] {
+            assert!(
+                purpose_of(&flow(purpose, user)).is_none(),
+                "{purpose} {user:?}"
+            );
+        }
+    }
 }

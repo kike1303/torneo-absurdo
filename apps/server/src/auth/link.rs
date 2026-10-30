@@ -247,6 +247,7 @@ mod tests {
             assert!(
                 ![
                     "link",
+                    "reauth",
                     "unlink",
                     "start",
                     "callback",

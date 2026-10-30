@@ -97,3 +97,41 @@ async fn the_routes_of_phase_c() {
     assert_eq!(link.status, 303);
     assert_eq!(link.header("location"), Some("/login"));
 }
+
+/// 009 decision 9 (T1 extended): `reauth` is a mutation of the manifest, a `POST` without
+/// `Origin` is refused, and `/api/auth/reauth/start` falls in `reauth` with the provider `start`:
+/// a 404, never `start`.
+#[tokio::test]
+async fn the_reauth_route_of_009() {
+    let route = ROUTES
+        .iter()
+        .find(|r| r.path == "/api/auth/reauth/{provider}")
+        .expect("reauth is not in the manifest");
+    assert_eq!(route.method.http().as_str(), "POST");
+    assert_eq!(route.effect, Effect::Mutate);
+    let mut vars: Vec<(&str, &str)> = support::config::PROVIDER_VARS.to_vec();
+    vars.push(("DATABASE_URL", support::config::UNUSED_DB));
+    let app = support::app::start(support::app::state(&vars, &Settings::default())).await;
+    let forbidden = http::send(app.addr, "POST", "/api/auth/reauth/google", &[]).await;
+    assert_eq!(forbidden.status, 403);
+    assert_eq!(forbidden.text(), r#"{"error":"auth.csrf_origin"}"#);
+    let start = http::send(
+        app.addr,
+        "POST",
+        "/api/auth/reauth/start",
+        &[("origin", ORIGIN)],
+    )
+    .await;
+    assert_eq!(start.status, 404);
+    assert_eq!(start.text(), r#"{"error":"http.not_found"}"#);
+    // No session: 303 to the login page, as `link`.
+    let reauth = http::send(
+        app.addr,
+        "POST",
+        "/api/auth/reauth/google",
+        &[("origin", ORIGIN)],
+    )
+    .await;
+    assert_eq!(reauth.status, 303);
+    assert_eq!(reauth.header("location"), Some("/login"));
+}

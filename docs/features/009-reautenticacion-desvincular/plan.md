@@ -652,6 +652,7 @@ Sin cambios en los workflows.
    - `tests/oauth_providers.rs`, `the_redirect_to_a_real_provider_is_a_303_to_its_authorize_constant`, empezaba `link` con una sesión sin autenticación. Usa `support::app::user_with_dev_account`, el mismo helper del test de los dos callbacks.
 
    El 303 sin cookies de RF8 es `callback::code_redirect(code, cache_control)`, y `try_again_redirect` pasa a usarlo. El mutante de plan-c (ignorar el resultado de `revoke(One)`) sobrevive, como prevé el paso 4, y lo reemplaza el mutante "sin fila es una autenticación que sirve".
+7. **Paso 5: la ruta `reauth-status` entra en el paso 8, no en el 5.** El paso 5 suma al manifiesto, a `no_provider_is_called_like_a_route_word` y a `tests/routes.rs` solo `POST /api/auth/reauth/{provider}`. `GET /api/auth/reauth-status` y la palabra `reauth-status` van con su handler en el paso 8. El mutante "insertar la identidad si no existe" muere con el caso "no existe" de 33, pero también lo frena `oauth_accounts_user_provider_uq`: el inicio exige una cuenta de ese proveedor, así que el `INSERT` choca con ella.
 
 ## Revisión
 

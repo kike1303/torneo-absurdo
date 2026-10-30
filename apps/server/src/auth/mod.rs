@@ -1,5 +1,6 @@
 //! Authentication (ADR-0008, 008 phase B): the OAuth flow (`start` and `callback`), the login
-//! transaction, logout and, with the `dev-auth` feature only, the dev provider.
+//! transaction, link, reauth (009), unlink, logout and, with the `dev-auth` feature only, the dev
+//! provider.
 
 pub mod callback;
 pub mod client;
@@ -10,6 +11,7 @@ pub mod login;
 pub mod logout;
 pub mod next;
 pub mod providers;
+pub mod reauth;
 pub mod start;
 pub mod unlink;
 
