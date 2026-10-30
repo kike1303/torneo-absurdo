@@ -67,16 +67,16 @@ Scheduled ─▶ BettingOpen ─▶ BettingClosed ─▶ Live ─▶ Settled
 - `character_ratings`, `seasons`, `season_stats`
 
 ## Autenticación y monedas (feature 008)
-Detalle en la [spec de 008](features/008-autenticacion/spec.md) y en [ADR-0008](decisions/0008-autenticacion.md); aquí, solo la forma.
+Detalle en la [spec de 008](features/008-autenticacion/spec.md), en la [spec de 009](features/009-reautenticacion-desvincular/spec.md) (reautenticación) y en [ADR-0008](decisions/0008-autenticacion.md); aquí, solo la forma.
 
 ### Tablas
 | Tabla | Qué guarda |
 |---|---|
-| `users` | Alias (`display_name`) y su llave de comparación (`display_name_key`, `UNIQUE`), si el alias es el generado, rol (`user` o `admin`), `locale` y `theme` del perfil (`NULL` = sin preferencia) y `banned_at`. |
-| `oauth_accounts` | Una cuenta por proveedor (`google`, `discord`, `dev`) e identidad: llave `(provider, provider_user_id)` y, como mucho, una de cada proveedor por usuario. |
-| `oauth_flows` | Un flujo OAuth en curso (10 min): el `SHA-256` del id de la cookie del flujo, `state`, `code_verifier` (PKCE), `next` y, si es `link`, el usuario que vincula. El callback lo consume con `DELETE … RETURNING`. |
-| `sessions` | El `SHA-256` del token de la cookie (nunca el token), usuario, expiración absoluta, última actividad, `ip_hash` (HMAC con `IP_HASH_KEY`) y familia de navegador. |
-| `auth_events` | `login`, `link`, `unlink` y `grant`, con `ip_hash`; nunca la IP. |
+| `users` | Alias (`display_name`) y su llave de comparación (`display_name_key`, `UNIQUE`), si el alias es el generado, rol (`user` o `admin`), `locale` y `theme` del perfil (`NULL` = sin preferencia), `banned_at` y `admin_account_cutoff` (el corte de `server admin grant`: el mayor `oauth_accounts.id` del usuario al correrlo; `NULL` sin corte). `role`, `banned_at` y `admin_account_cutoff` solo los escribe la CLI (`users_privileged_guard`, `TA004`). |
+| `oauth_accounts` | Una cuenta por proveedor (`google`, `discord`, `dev`) e identidad: llave `(provider, provider_user_id)` y, como mucho, una de cada proveedor por usuario. `id` (`GENERATED ALWAYS AS IDENTITY`, único) es el orden de vínculo: un `id` menor es una cuenta vinculada antes. Nada lo reescribe: `oauth_accounts_identity_guard` (`TA005`) rechaza cambiar `id` o `user_id`. |
+| `oauth_flows` | Un flujo OAuth en curso (10 min): el `SHA-256` del id de la cookie del flujo, `state`, `code_verifier` (PKCE), `next`, el `purpose` (`login`, `link` o `reauth`) y, si es `link` o `reauth`, el usuario de la sesión que lo empezó (`link_user_id`). El callback lo consume con `DELETE … RETURNING`. |
+| `sessions` | El `SHA-256` del token de la cookie (nunca el token), usuario, expiración absoluta, última actividad, `ip_hash` (HMAC con `IP_HASH_KEY`), familia de navegador, y qué autenticó a la sesión: cuándo (`authenticated_at`), con qué cuenta (`auth_account_id`, FK a `oauth_accounts.id` con `ON DELETE SET NULL`, `NULL` después de un `unlink`, que consume la confirmación) y el mayor `oauth_accounts.id` del usuario en ese momento (`auth_link_seq`). Vincular copia los tres en la sesión rotada, sin alargar `expires_at`. |
+| `auth_events` | `login`, `link`, `unlink`, `grant` y `reauth`, con `ip_hash`; nunca la IP. |
 | `admin_audit` | Lo que hace la CLI de admin (`grant`, `revoke`, `ban`, `unban`), solo inserción. |
 
 ### Ledger de doble entrada
@@ -88,14 +88,31 @@ Detalle en la [spec de 008](features/008-autenticacion/spec.md) y en [ADR-0008](
 ### Revocación entre procesos
 Revocar una sesión (logout, logout-all, `unlink`, el ban de la CLI) hace `pg_notify('session_revoked', <id>)` en la misma transacción. El server escucha con `LISTEN session_revoked` en una conexión propia y cierra en el acto los WebSocket de cada sesión notificada. Si esa conexión se pierde, revalida todos los sockets con sesión, vuelve a escuchar y revalida otra vez. La CLI corre en otro proceso (`docker exec … server admin ban`) y llega por el mismo camino.
 
+`link`, `reauth`, `unlink`, la CLI y `logout-all` bloquean la fila del usuario (`SELECT … FROM users … FOR UPDATE`) antes de tocar sus sesiones, así que quedan en serie, y un `unlink` que tiene su sesión y revoca las demás no forma un ciclo con un `logout-all` desde otra sesión (feature 009).
+- `logout-all` no filtra por `banned_at`, a diferencia de los otros tres del server: un ban que se confirma mientras espera el bloqueo no le impide revocar todo.
+- `logout-all` solo toma el bloqueo si la cookie es de una sesión válida. Sin ella, también la de un usuario que ya estaba baneado, revoca por token solo la fila de esa cookie, igual que `logout`.
+- `logout` no toma el bloqueo (una fila no forma un ciclo), ni el login, ni la limpieza de sesiones vencidas.
+
 ### `web` y el API interno (ADR-0008 D5)
 - `web` llama al server directo por `INTERNAL_API_URL` (en producción `http://torneo-server:8080`, el alias del server en la red `torneo-edge`) con `X-Internal-Secret` (`INTERNAL_API_SECRET`, el mismo de los dos procesos).
 - **Ninguna cookie del navegador llega al server por el `fetch` interno, salvo la de sesión.** El `fetch` de Kit, después de `handleFetch`, reemplaza `cookie` por todas las cookies del navegador si el hostname del destino es `event.url.hostname` (que sale de `Host`, no de `PUBLIC_ORIGIN`) o un subdominio suyo. La barrera es `credentials: 'omit'` en las dos ramas de `handleFetch`: con `omit`, Kit no agrega nada y sale solo la cookie que puso el hook. Lo prueba `apps/web/e2e/internal-fetch.spec.ts` sobre el `fetch` real de Kit, con varios `Host`. Que `INTERNAL_API_URL` no pueda estar en el host de `PUBLIC_ORIGIN` ni en un subdominio suyo (validado al arrancar) es una defensa más, no la barrera.
 - `handleFetch` (`apps/web/src/lib/server/hooks/handle-fetch.ts`) agrega, **solo** si la URL empieza por `INTERNAL_API_URL` más `/`: la cookie de sesión de la política (`__Host-session`; `ta_dev_session` solo en loopback), el secreto, `X-Client-Ip` (`getClientAddress()`), y `X-Client-Origin` y `X-Client-Fetch-Site` copiados del navegador. Todo otro `fetch` sale sin cookie, secreto ni `x-client-*`.
 - En cada petición con cookie de sesión, el hook de sesión hace un `GET /api/me` y deja `locals.user`; esas respuestas van con `Cache-Control: private, no-store` y `Vary: Cookie`. Ningún `load` llama a una mutación: las mutaciones (`lib/server/api/mutations.ts`) solo se importan en un `+page.server.ts` y se llaman desde sus `actions` (ESLint y un test).
-- **Qué postea el navegador directo a `/api`** (el server tiene que poner o expirar una cookie en el navegador, y responde con un 303, nunca con JSON, por la Enmienda 2026-10-30 de RF-B5, salvo el 404 de un proveedor desconocido o apagado y el 403 `auth.csrf_origin`, que solo produce una petición armada a mano): `POST /api/auth/{p}/start`, `POST /api/auth/link/{p}`, `POST /api/auth/logout` y `POST /api/auth/logout-all`. El callback (`GET /api/auth/{p}/callback`) también es una navegación.
+- **La lectura `GET /api/auth/reauth-status`** (feature 009) la hace el `load` de `/account`, y la web no repite la regla. Responde 200 con `ReauthStatus` y `private, no-store`: `link_ready` (la sesión tiene una confirmación) y `unlink`, una entrada por cuenta vinculada, en orden de vínculo, con `provider`, `ready` (se podría quitar ahora) y `reauth_with` (los proveedores habilitados con los que una reautenticación dejaría quitarla, en el orden de los botones de login). No expone fechas, ids ni el proveedor de la autenticación. Sin sesión da 401 con la cookie expirada, y con la base caída, 503. Si falla, `/account` muestra la fila sin esos datos y decide la acción: es una lectura, y cada acción vuelve a evaluar la regla en su transacción.
+- **Qué postea el navegador directo a `/api`** (el server tiene que poner o expirar una cookie en el navegador, y responde con un 303, nunca con JSON, por la Enmienda 2026-10-30 de RF-B5, salvo el 404 de un proveedor desconocido o, en `start` y `link`, apagado, y el 403 `auth.csrf_origin`, que solo produce una petición armada a mano): `POST /api/auth/{p}/start`, `POST /api/auth/link/{p}`, `POST /api/auth/reauth/{p}`, `POST /api/auth/logout` y `POST /api/auth/logout-all`. En `reauth` solo el proveedor desconocido da 404: sin sesión, cualquier otro da 303 a `/login`, y con sesión, uno apagado o no vinculado da 303 a `/login?error=auth.reauth_mismatch`, sin flujo ni cambios de cookies. El callback (`GET /api/auth/{p}/callback`) también es una navegación.
 - **Qué va por una form action de `web`** (sus errores son JSON y la página los muestra como texto): el renombre (`PUT /api/me/display-name`), las preferencias (`PUT /api/me/preferences`, acciones de `/preferences`) y desvincular (`POST /api/auth/unlink/{p}`).
 - Cada login pasa por `/<locale>/welcome`, que reescribe las cookies de tema e idioma con el perfil y manda al onboarding mientras el alias sea el generado.
+
+### Admin por CLI (ADR-0008 D9, feature 009)
+`server admin grant|revoke|ban|unban <user_id>` (`ban` con `--reason <texto>`) lee solo `DATABASE_URL` y `RUST_LOG`, y cada comando revoca todas las sesiones del usuario. `server admin --help` y `server admin <acción> --help` imprimen la ayuda por stdout y salen con 0, sin leer `DATABASE_URL` ni conectar. Uso y salidas: [`apps/server/README.md`](../apps/server/README.md).
+
+`grant` guarda en `admin_account_cutoff` el mayor `oauth_accounts.id` del usuario, y `revoke` lo pone en `NULL`. `RecentAdmin` deja pasar a un `admin` con una autenticación vigente (la cuenta sigue vinculada y no se vinculó nada después), de los últimos 60 min y con `auth_account_id <= admin_account_cutoff`.
+
+**Cuándo volver a correr `grant`:**
+- después de migrar a 009: ningún admin tiene corte todavía, así que ninguna sesión pasa como admin;
+- después de vincular un proveedor nuevo como admin: no da admin hasta otro `grant`.
+
+Antes de correr `grant`, revisa los proveedores vinculados en `/account`: todo lo vinculado hasta ese momento pasa a dar admin. `grant` imprime por stdout, nunca en un log, los proveedores dentro del corte, en orden de vínculo y sin ids (`providers within the admin cutoff: google, dev`, o `none` si el usuario no tiene cuentas). Si muestra uno que no reconoces, corre `revoke`, quítalo desde `/account` y vuelve a correr `grant`.
 
 ## Tipos compartidos
 `crates/protocol` define los mensajes WS, los DTOs del API y el log de pelea (`FightLog`, `FightEvent` y sus enums, feature 003) con serde. Es una librería pura: sin I/O, sin `tokio`, sin reloj y sin texto para humanos (ADR-0007).

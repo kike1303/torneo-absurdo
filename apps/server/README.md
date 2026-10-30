@@ -69,7 +69,25 @@ server admin unban  <user_id>
 - En la imagen: `docker exec <contenedor> /server admin ban <user_id> --reason <texto>`.
 - Para encontrar un `user_id`, por ejemplo por su nombre visible: `psql "$DATABASE_URL" -c "SELECT id FROM users WHERE display_name = '…'"`.
 - Sale con 0 si aplicó el cambio, con 1 y `admin.user_not_found` si el usuario no existe (sin cambios), y con 2 y `cli.invalid` si el comando no se entiende.
+- `server admin --help` y `server admin <acción> --help` imprimen la ayuda por stdout y salen con 0, sin leer `DATABASE_URL` ni conectar. Cualquier otra forma (`-h`, o `--help` después del `user_id`) es un comando que no se entiende.
 - Los logs de la CLI llevan solo el evento. Ni el `user_id` ni el motivo aparecen en ellos: el motivo queda en `admin_audit.payload`.
 - **El `--reason` queda en el historial de la shell y, con `docker exec`, en los eventos `exec_create` del daemon de Docker, junto con el `user_id`. Por eso nunca lleva datos personales:** basta con algo como `spam en el chat`.
-- Un `UPDATE users SET role …` o `banned_at …` a mano por `psql` falla con `TA004` (`users_privileged_guard`). El camino es la CLI, así el cambio queda en `admin_audit`.
-- Un admin tiene sesiones de 12 h, y las rutas de admin (TA-13) piden haberse autenticado hace menos de 60 min.
+- Un `UPDATE users SET role …`, `banned_at …` o `admin_account_cutoff …` a mano por `psql` falla con `TA004` (`users_privileged_guard`). El camino es la CLI, así el cambio queda en `admin_audit`.
+- Un admin tiene sesiones de 12 h. Las rutas de admin (TA-13) piden una autenticación vigente (la cuenta sigue vinculada y no se vinculó nada después), de hace menos de 60 min y con una cuenta dentro del corte de `grant` (`admin_account_cutoff`).
+
+### Cuándo volver a correr `grant`
+
+`grant` guarda como corte la cuenta vinculada más reciente del usuario, y `revoke` lo borra. Hay que volver a correr `grant`:
+
+- después de migrar a 009: ningún admin tiene corte todavía, así que ninguna sesión pasa como admin;
+- después de vincular un proveedor nuevo como admin: no da admin hasta otro `grant`.
+
+Antes de correrlo, revisa los proveedores vinculados en `/account`: todo lo vinculado hasta ese momento pasa a dar admin. Como cada comando cierra todas las sesiones del usuario, después hay que volver a entrar.
+
+Al terminar, `grant` imprime por stdout (no es un log) los proveedores dentro del corte, en orden de vínculo y sin ids:
+
+```
+providers within the admin cutoff: google, dev
+```
+
+Si el usuario no tiene cuentas, la línea dice `none`. Si muestra un proveedor que no reconoces, corre `revoke`, quítalo desde `/account` y vuelve a correr `grant`.

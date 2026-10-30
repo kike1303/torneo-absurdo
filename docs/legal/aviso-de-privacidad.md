@@ -12,7 +12,7 @@ approvals:
 linear: TA-5
 depends_on: ["0005", "0006", "0007", "0008"]
 created: 2026-10-21
-updated: 2026-10-26
+updated: 2026-10-30
 ---
 
 # Aviso de privacidad integral — Torneo Absurdo (borrador)
@@ -37,9 +37,9 @@ Solo tratamos los datos necesarios para que el Servicio funcione. **No pedimos n
 | Identificación de cuenta | Identificador único que te asigna Google (`sub`) o Discord (`id`) al iniciar sesión | Reconocer tu cuenta cada vez que entras |
 | Perfil público | Alias (`display_name`), generado al azar o elegido por ti | Mostrarte en el ranking y en el juego |
 | Actividad en el juego | Saldo y movimientos de monedas ficticias, apuestas, resultados, posición en el ranking, preferencias de idioma y de tema | Operar el juego y el ranking |
-| Sesiones | Fechas de inicio y último uso de cada sesión, familia de navegador y sistema operativo (p. ej. "Chrome en Android", sin versión exacta) y un seudónimo de tu IP | Mantener tu sesión segura y dejarte ver y cerrar tus sesiones |
-| Historial de eventos de seguridad | Tipo de evento (inicio de sesión, vinculación de proveedor, bono, rescate, apuesta), fecha y un seudónimo de tu IP | Limitar abusos y relacionar cuentas entre sí para detectar granjas de cuentas |
-| Datos temporales de inicio de sesión | Proveedor elegido, página a la que volver y, si vinculas un proveedor, tu identificador interno | Completar el inicio de sesión de forma segura; se borran en 10 minutos o al completarlo |
+| Sesiones | Fechas de inicio y último uso de cada sesión, el proveedor con el que iniciaste sesión o confirmaste tu identidad, y cuándo, familia de navegador y sistema operativo (p. ej. "Chrome en Android", sin versión exacta) y un seudónimo de tu IP | Mantener tu sesión segura y dejarte ver y cerrar tus sesiones |
+| Historial de eventos de seguridad | Tipo de evento (inicio de sesión, vinculación de proveedor, desvinculación de proveedor, confirmación de identidad, bono, rescate, apuesta), fecha y un seudónimo de tu IP | Limitar abusos y relacionar cuentas entre sí para detectar granjas de cuentas |
+| Datos temporales de inicio de sesión | Proveedor elegido, página a la que volver y, si vinculas un proveedor o confirmas tu identidad, tu identificador interno | Completar el inicio de sesión de forma segura; se borran en 10 minutos o al completarlo |
 | Registros técnicos del servidor | Por cada petición: método, ruta genérica (por ejemplo `/api/health`, sin parámetros ni consulta), código de resultado, duración, fecha y hora, y un identificador aleatorio de la petición que no tiene relación contigo. **Sin IP, cookies, cabeceras, navegador ni identificadores de usuario** | Diagnosticar fallas y mantener el Servicio |
 | Registros de moderación | Sanciones y acciones de administración que te afecten, con su motivo | Aplicar las reglas del juego y poder revisar decisiones |
 
