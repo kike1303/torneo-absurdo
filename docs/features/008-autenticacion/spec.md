@@ -18,7 +18,7 @@ approvals:
 linear: TA-26
 depends_on: ["001"]
 created: 2026-10-28
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Spec: Autenticación y sesiones
@@ -166,20 +166,27 @@ Cada RF dice cómo se verifica (→). "T<n>" es el test mínimo número n de ADR
 ### Fase C: proveedores reales, cuenta, CLI de admin y ban
 
 - **RF-C1. Google y Discord (D1, D2).**
-  - Crate `oauth2` con un cliente HTTP `reqwest`, `rustls` con el proveedor `ring` (`cargo deny` prohíbe `aws-lc`) y raíces `webpki-roots`.
+  - Crate `oauth2` con un cliente HTTP `reqwest`, `rustls` con el proveedor `ring` (`cargo deny` prohíbe `aws-lc`) y raíces `webpki-roots`. *(Texto original; el cliente lo reemplaza la Enmienda 2026-10-29 de abajo.)*
   - Scopes `openid` (Google) e `identify` (Discord), y `redirect_uri` `${PUBLIC_ORIGIN}/api/auth/{provider}/callback`.
   - La identidad sale de `userinfo` (Google `sub`, Discord `id`).
   - Un proveedor se habilita solo si tiene `*_CLIENT_ID` y `*_CLIENT_SECRET`. Fuera de loopback, los dos son obligatorios.
   - En el test, la URL base de cada proveedor es inyectable.
+  - **Enmienda 2026-10-29 (fase C, preguntas 1 y 2 de plan-c).** Escrita por architect como autor de la spec, tras su revisión de plan-c. security-reviewer la firmó el 2026-10-29 (es la primera conexión TLS saliente): ver "security-reviewer — 2026-10-29 — APPROVE (ronda 4)" en la sección Revisión de esta spec. La misma enmienda toca RF-C3, RF-C5, la tabla de API y los RNF de i18n y de costo.
+    - **Cliente HTTP.** No se usa `reqwest`. El cliente es el propio de la fase B (`hyper::client::conn::http1`, desviación 1 de plan-b) con `tokio-rustls` encima (`default-features = false`, features `ring` y `tls12`), `rustls` como dependencia directa sin `logging` y con el proveedor `ring`, y raíces `webpki-roots`. Ofrece solo `http/1.1` por ALPN. `https` va solo a nombres DNS, con validación `webpki` y SNI; `http` sigue limitado a una IP de loopback (el proveedor `dev` y los proveedores falsos de los tests). Se conservan las reglas de B: sin redirecciones, timeout total de 10 s (DNS, conexión, TLS y respuesta), respuesta de 64 KB como máximo y `User-Agent` genérico. No entran `reqwest`, `hyper-rustls`, `native-tls`, `openssl` ni `aws-lc`. Motivo: es la capa con menos superficie, y `rustls`, `ring` y `webpki-roots` ya están en el lock por `sqlx`.
+    - **Credenciales fuera de loopback.** "Los dos son obligatorios" se lee así: fuera de loopback (el predicado único de la fase B), el server no arranca sin las cuatro variables `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `DISCORD_CLIENT_ID` y `DISCORD_CLIENT_SECRET` (`config.invalid` con la variable que falta). `just prod-local` y el job `images` de CI, que corren la imagen de release fuera de loopback, pasan valores de relleno que no son credenciales reales. Ahí los botones de Google y Discord aparecen y no funcionan contra el proveedor real; se acepta, porque en esos entornos no hay login posible.
   → T19 con un servidor HTTP de prueba que imita a cada proveedor (sin red): la URL de autorización pide solo su scope y el alias no coincide con ningún campo devuelto, aunque el falso devuelva `name`, `email`, `username` y `global_name`.
 - **RF-C2. Vincular (D1).** `POST /api/auth/link/{provider}` con sesión, mismo flujo con `purpose = link`. En el callback, la sesión actual tiene que ser la de `link_user_id`.
   - Si `(provider, id)` es de otro usuario, el callback responde 303 a `/login?error=auth.already_linked` (RF-B5), sin fusión.
   - Si el usuario ya tiene ese proveedor, 303 a `/login?error=auth.provider_already_linked` (`UNIQUE (user_id, provider)`).
   - Al vincular, el token se rota y se escribe `auth_events` de `link`.
+  - **Enmienda 2026-10-29: cuerpo rechazado (la pidió security-reviewer en la ronda 4, ver Revisión).** `link` toma `Result<Form<_>, FormRejection>`, como `start` en la fase B, y convierte todo rechazo del formulario, incluido un cuerpo de más de 4 KB, en 303 a `/login?error=auth.invalid_state`. El texto plano de axum nunca llega al cliente (ADR-0007). → IT con un formulario de 4097 bytes: 303 a `/login?error=auth.invalid_state` y sin el texto de axum.
   → T4 (flujo `link` de otra sesión), T6 e IT.
 - **RF-C3. Desvincular (D1).** `POST /api/auth/unlink/{provider}` exige que quede otro proveedor (si no, 409 `auth.last_provider`). Revoca todas las demás sesiones del usuario y escribe `auth_events` de `unlink`. → IT.
+  - **Enmienda 2026-10-29 (fase C, pregunta 5 de plan-c; firmada por security-reviewer en la ronda 4, ver Revisión).** Si el usuario no tiene vinculado ese proveedor, 404 `http.not_found`. "Que quede otro proveedor" cuenta solo los proveedores que siguen vinculados **y** están habilitados en la config del proceso: uno apagado no deja entrar al usuario. Desvincular un proveedor apagado se permite, siempre que quede uno habilitado. El conjunto habilitado es config estática, así que no abre una carrera. → IT de los dos casos.
+  - **Enmienda 2026-10-29: cuerpo (la pidió security-reviewer en la ronda 4, ver Revisión).** `unlink` no lee el cuerpo (como `logout`), así que `DefaultBodyLimit` no tiene nada que cortar y no hay rechazo posible; nunca responde con el texto de axum. Si alguna vez lee un formulario, lo mapea igual que `link` (RF-C2). → IT con un formulario de 4097 bytes: ninguna respuesta lleva el texto de axum.
 - **RF-C4. Renombre.** `PUT /api/me/display-name` con `{ "display_name": … }`. Responde 200 con el perfil, 422 `profile.display_name_invalid`, 422 `profile.display_name_reserved` o 409 `profile.display_name_taken` (por la violación del índice, sin un "¿existe?" previo). Publica `SelfEvent::ProfileChanged`. → T20 (concurrencia: de dos renombres simultáneos, exactamente uno gana) y A9 (RF-C9).
 - **RF-C5. Preferencias (ADR-0009 D3, ADR-0007).** `PUT /api/me/preferences` con `{ "locale"?: "en"|"es", "theme"?: "dark"|"light"|"system" }`. `null` borra la preferencia. Ver la UI en RF-D4. → IT.
+  - **Enmienda 2026-10-29: cuerpo rechazado (fase C, pregunta 3 de plan-c; vale también para RF-C4; firmada por security-reviewer en la ronda 4, ver Revisión).** Toda ruta de la fase C que lee un cuerpo JSON (`PUT /api/me/display-name` y `PUT /api/me/preferences`) responde **422 `http.invalid_body`** ante cualquier rechazo del cuerpo: JSON mal formado, `Content-Type` que no es JSON, un campo desconocido (p. ej. `role` o `banned_at`; RF-C8 se cumple igual, porque no cambian), un tipo equivocado, un valor fuera del enum (`"locale": "fr"`) y un cuerpo de más de 4 KB. El mapeo cubre todas las variantes del rechazo de `Json` de axum y el del límite de tamaño, así que el texto plano de axum nunca llega al cliente. Un `display_name` que es un string pero no pasa la validación sigue dando `profile.display_name_invalid` o `profile.display_name_reserved`. `http.invalid_body` es un `ApiErrorCode` de `crates/protocol`; su texto en/es llega en la fase D. → IT por variante (incluido el cuerpo de más de 4 KB): 422, `{ "error": "http.invalid_body" }` y nada más en el cuerpo.
 - **RF-C6. CLI de admin (D9, D10).**
   - Subcomandos `server admin grant|revoke|ban|unban <user_id>`. `ban` exige `--reason <texto>`.
   - Cada uno, en una transacción: cambia `role` o `banned_at`, revoca todas las sesiones con `sessions::revoke` (la notificación cierra los sockets del proceso que sirve) y escribe una fila en `admin_audit` (`actor = 'cli'`, `admin_id` nulo, `action`, `target`, `payload` con el motivo).
@@ -244,9 +251,11 @@ Cada RF dice cómo se verifica (→). "T<n>" es el test mínimo número n de ADR
 - **CPU:** no hay hashing costoso en caliente (SHA-256 y HMAC). La validación UTS #39 corre solo en el renombre y al generar el alias.
 - **Determinismo:** no toca el motor (ADR-0001). `OsRng` solo para tokens, `state`, `code_verifier` y el alias, todo fuera de `crates/engine`.
 - **i18n (ADR-0007):** el server responde solo códigos. Códigos nuevos: `auth.csrf_origin`, `auth.invalid_state`, `auth.banned`, `auth.provider_error`, `auth.try_again`, `auth.unauthenticated`, `auth.already_linked`, `auth.provider_already_linked`, `auth.last_provider`, `auth.reauth_required`, `profile.display_name_invalid`, `profile.display_name_reserved`, `profile.display_name_taken`, `http.rate_limited`, `ws.rate_limited`, `ws.ip_capacity`, `ws.user_capacity`, `ws.forbidden_channel` y `ws.too_many_subscriptions`. Cada uno tiene su texto en en y es.
+  - **Enmienda 2026-10-29 (firmada por security-reviewer en la ronda 4, ver Revisión):** se suma `http.invalid_body` (RF-C5), también con texto en en y es (fase D).
 - **Accesibilidad:** los botones de proveedor son `<button>` con texto visible, y los errores de formulario van con `aria-describedby`. Objetivo táctil ≥ 44 px.
 - **Seguridad:** todo ADR-0008 dentro del alcance, ADR-0012 (A4, A8 y A9) y el repo público (sin secretos).
 - **Costo:** sin servicios de pago. Las dependencias nuevas (`oauth2`, `reqwest` con `rustls` y `ring`, `governor`/`tower-governor`, `sha2`, `hmac`, `subtle`, `rand`, `base64`, `unicode-normalization`, `unicode-segmentation`, `unicode-security`, un crate de casefold completo) pasan `just crate-age` y `just deny`.
+  - **Enmienda 2026-10-29 (firmada por security-reviewer en la ronda 4, ver Revisión):** sale `reqwest` con `rustls` y `ring`, y entra `tokio-rustls` (`default-features = false`, `ring` y `tls12`) como único crate nuevo de producción de la fase C. `rustls` (sin `logging`) y `webpki-roots` pasan a dependencias directas, en las versiones que ya están en el lock. Sin `aws-lc`, con una sola versión de `rustls`, verificado con `just deny` y `cargo tree -d -p server`.
 
 ## Diseño
 
@@ -355,11 +364,11 @@ admin_audit (                             -- fase C; solo inserción (mismo trig
 | `GET /api/auth/{provider}/callback` | opcional | 303 a `next` y cookie de sesión; si falla, 303 a `/login?error=<code>` | B, C |
 | `GET /api/auth/providers` | no | `["google","discord","dev"]` (los habilitados) | B |
 | `POST /api/auth/link/{provider}` | sí | 303 al proveedor | C |
-| `POST /api/auth/unlink/{provider}` | sí | 303 a `/` (desde form) | C |
+| `POST /api/auth/unlink/{provider}` | sí | 303 a `/` (desde form); 404 `http.not_found` si no está vinculado (Enmienda 2026-10-29) | C |
 | `POST /api/auth/logout`, `/logout-all` | opcional | 303 a `/` | B |
 | `GET /api/me` | sí | `Me` | B |
-| `PUT /api/me/display-name` | sí | `Me` o error de `profile.*` | C |
-| `PUT /api/me/preferences` | sí | `Me` | C |
+| `PUT /api/me/display-name` | sí | `Me`, error de `profile.*` o 422 `http.invalid_body` (Enmienda 2026-10-29) | C |
+| `PUT /api/me/preferences` | sí | `Me` o 422 `http.invalid_body` (Enmienda 2026-10-29) | C |
 | `GET /api/auth/dev/oauth/{authorize,userinfo}`, `POST …/token` | no | OAuth de prueba | B, solo `dev-auth` |
 
 Todos los errores son `{ "error": "<code>" }` (como `http.*` hoy). Toda mutación pasa por RF-A5.
@@ -394,7 +403,7 @@ Mobile-first a 375 px, con los tokens y las primitivas de ADR-0009 y sin colores
 5. **`TRUSTED_PROXIES` con loopback.** El e2e necesita `127.0.0.1/32`. RF-A3 lo permite solo con un origen de loopback, para que un error de configuración en producción no convierta a cualquier proceso local en proxy de confianza.
 6. **`dev` en el `CHECK` de `oauth_accounts.provider`.** La migración es la misma en todos los entornos, así que la BD de producción acepta `dev`. No es explotable: el binario de release no tiene el proveedor y nadie puede insertar esa fila sin acceso a la BD. Separar la migración por entorno costaría más de lo que protege. Lo dejo explícito para security-reviewer.
 7. **Memoria del rate limiter frente a la rotación de `/64`.** Desde un `/48` o un `/32` de IPv6, un atacante crea llaves nuevas más rápido de lo que `retain_recent` las limpia. Por diseño, el tope fijo de RF-A4 acota la memoria. El costo: con el tope lleno, un usuario legítimo con una IP nueva recibe 429 hasta que `retain_recent` libere llaves. Es preferible a un OOM que tire todos los sockets.
-8. **`rustls` y `cargo deny`.** El proveedor por defecto de `rustls` es `aws-lc-rs`, que `just deny` prohíbe. El plan-c fija `ring` y `webpki-roots` (la imagen distroless no trae un bundle de CA que mantengamos).
+8. **`rustls` y `cargo deny`.** El proveedor por defecto de `rustls` es `aws-lc-rs`, que `just deny` prohíbe. El plan-c fija `ring` y `webpki-roots` (la imagen distroless no trae un bundle de CA que mantengamos). Con la Enmienda 2026-10-29 de RF-C1, la pieza TLS es `tokio-rustls` sin features por defecto (las suyas traen `aws_lc_rs`), así que el riesgo de unificación de features se revisa con `cargo tree -d` al agregarla.
 9. **El contexto de build del Dockerfile.** Hoy solo copia `apps/server` y `crates`. `include_str!` de `content/names/` obliga a copiarlo, y `content/` tiene todos los derechos reservados. Va dentro del binario igual que va en el repo público, así que no cambia nada de licencia, pero `check-dockerignore` tiene que seguir dejando fuera `content/_local/`.
 10. **`B = 100`.** `DAILY_GRANT` no tiene valor por defecto en el código. La fase B agrega `DAILY_GRANT=100` a `apps/server/.env.example`. Cuando TA-27 fije el valor definitivo, solo cambian los ejemplos y la configuración.
 11. **Sesión anónima y CGNAT.** Los 50 sockets anónimos por IP pueden quedarse cortos en el main event detrás de un CGNAT grande. Es el número que fijó ADR-0008, así que esta spec no lo cambia. La prueba de carga es de TA-6 y TA-8.
@@ -534,3 +543,22 @@ Mobile-first a 375 px, con los tokens y las primitivas de ADR-0009 y sin colores
 ### owner
 
 - **APPROVE** (2026-10-28, en chat): aprueba la spec (`risk: high`), `B = 100`, la enmienda del callback y la nota de ADR-0008 sobre el reparto de tests. Sigue plan-a.
+
+### security-reviewer — 2026-10-29 — APPROVE (ronda 4: Enmienda 2026-10-29 de RF-C1, RF-C3, RF-C5 y RNF)
+**🤖 security-reviewer**
+
+- Verifiqué el diff de la enmienda contra ADR-0008 (D1, D2, D7), ADR-0012 (A3, A8), plan-c (decisiones 3, 4, 5, 7 y 8) y el código de `eb832be` (`auth/start.rs`, `http/routes.rs`, `telemetry.rs`, `deny.toml` y `Cargo.lock`):
+  - **Cliente TLS (RF-C1).** `tokio-rustls` sin features por defecto quita sus `aws_lc_rs` y `logging`. `rustls 0.23.46` del lock ya está sin `log` ni `aws-lc-rs`, y `deny.toml` prohíbe `aws-lc-sys`, `openssl` y `openssl-sys`, así que una unificación de features que traiga `aws-lc` rompe `just deny`. Validación `webpki` con SNI y nombre del host, sin verificador `dangerous` en producción y raíces de `webpki-roots` solamente. Las URLs de los proveedores son constantes del código y la inyección es solo por `Settings` (tests), así que ni el `client_secret` ni el `code` pueden ir a un host que elija la config o un atacante. Con DNS controlado, el atacante no pasa la validación del certificado. Sin redirecciones, 10 s en total (con 3 s por intento en plan-c), 64 KB y solo `as_code()` en el log: ni el texto de rustls ni los nombres del certificado llegan al log ni al cliente. Solo `http/1.1` por ALPN, sin h2. El camino `http` sigue limitado a una IP de loopback, y en el binario de release ninguna URL constante es `http`.
+  - **Credenciales obligatorias fuera de loopback.** Falla cerrado. Los rellenos de `prod-local` y de `images` no son credenciales: si llegaran a producción, el login fallaría con `auth.provider_error` y no se abriría ningún acceso. Los de `prod-local` son aleatorios y van a `infra/local.secrets.env` (ignorado). El `Debug` redactado de `ClientSecret` y de `Config` evita que el secreto termine en un log.
+  - **RF-C3.** El 404 por un proveedor no vinculado solo le dice al usuario lo que ya sabe de su propia cuenta: no es un oráculo. Contar solo los proveedores vinculados **y** habilitados evita dejar una cuenta sin forma de entrar. `SELECT … FOR UPDATE` sobre `users` pone en serie dos desvincular concurrentes (Google y Discord a la vez: el segundo ve 0 y da 409) y un vincular contra un desvincular. El conjunto habilitado es config estática del proceso, así que no hay carrera.
+  - **RF-C5.** Un solo código para todo rechazo, sin texto de axum ni de serde (`` unknown variant `fr` `` copia el valor), `deny_unknown_fields` y un IT por variante con 4097 bytes. RF-C8 no depende de eso. Además, el formatter de `telemetry.rs` no escribe campos de targets de terceros, así que el `body_text` del evento `axum::rejection` tampoco llega al log.
+- **Punto abierto del architect (cuerpos de más de 4 KB en `link` y `unlink`).** Sí, el texto de axum tiene que quedar bloqueado también ahí, por ADR-0007 (el server responde solo códigos) y por coherencia del contrato. El impacto de seguridad es bajo: el texto le vuelve solo a quien mandó el cuerpo, como `text/plain` con `nosniff`, y no es un hallazgo. Condición para plan-c, que no bloquea esta firma:
+  - `link` toma `Result<Form<_>, FormRejection>` igual que `start` en B, y todo rechazo (incluido el de 4 KB) da 303 a `/login?error=auth.invalid_state`.
+  - `unlink` no extrae el cuerpo (como `logout`), así que `DefaultBodyLimit` no tiene nada que cortar y no hay rechazo posible. Si alguna vez lee un formulario, lo mapea igual que `link`.
+  - Un IT por ruta con un formulario de 4097 bytes: ninguna respuesta lleva el texto de axum.
+  - Conviene que architect lo escriba en una línea de RF-C2 y RF-C3, y que cambie el "Pendiente de la firma de security-reviewer" de la enmienda por un enlace a esta ronda.
+- No bloquean:
+  - Sumar `rustls` y `tokio_rustls` a `CAPPED_TARGETS` de `telemetry.rs`, por si un bump o un cambio de features vuelve a encender `logging`. El contenido ya no llegaría al log, porque de un target de terceros `JsonLine` escribe solo `target` y `"external"`, pero el tope evita el volumen de un handshake por evento en `trace`.
+  - `webpki-roots` queda fijado en el binario. Dependabot lo sube, y un CA que se retira solo se refleja tras rebuild y deploy. Se acepta, porque la imagen distroless no tiene otro bundle.
+  - **Fuera del alcance de la enmienda, para el owner** (es diseño de ADR-0008 D1): con una sesión robada o un navegador desatendido, alguien puede vincular **su** Google a la cuenta (vincular cuenta como reautenticación) y después desvincular el Discord de la víctima. `unlink` revoca las demás sesiones y la víctima ya no tiene con qué entrar: es una toma de cuenta persistente. Las monedas son ficticias y el requisito previo es fuerte (la cookie es `__Host-`, `HttpOnly` y `Secure`), así que no bloquea esta fase. Propongo un issue: `unlink` exige una autenticación reciente hecha con un proveedor que ya estaba vinculado antes de la sesión actual, o un período de espera para desvincular después de vincular algo nuevo.
+- **Sobre `docker exec server admin ban <user_id> --reason …` (contexto de plan-c):** no hace falta que plan-c lo resuelva en el código. Quien ve los argumentos en `docker events`, en `ps` o en el historial del shell ya es root o del grupo `docker` en el VPS, y eso le da acceso a la BD. Basta una línea en la sección "Admin y ban por CLI" de `apps/server/README.md`: el motivo queda en el historial del shell y en los eventos de Docker, así que nunca lleva datos personales.

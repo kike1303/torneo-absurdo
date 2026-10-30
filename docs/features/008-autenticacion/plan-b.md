@@ -2,7 +2,7 @@
 id: "008"
 title: "Autenticación y sesiones, fase B: esquema, ledger, sesiones, proveedor dev y /ws con sesión"
 type: plan
-status: approved
+status: done
 risk: high
 author: backend-engineer
 reviewers: [architect]
@@ -12,7 +12,7 @@ approvals:
 linear: TA-26
 depends_on: ["001"]
 created: 2026-10-28
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Plan: Autenticación y sesiones, fase B (desde spec.md 2026-10-28)
