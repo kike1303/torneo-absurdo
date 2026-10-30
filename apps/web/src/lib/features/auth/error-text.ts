@@ -8,7 +8,7 @@ export type MessageKey = keyof typeof m;
 // over the generated unions: a variant that `just gen` adds without its entry, or an entry the
 // protocol does not have, fails `svelte-check`. `ws.*` reuse the close reason texts.
 
-export const ERROR_TEXT: { readonly [K in ErrorCode]: MessageKey } = {
+export const ERROR_TEXT = {
   'http.not_found': 'error_http_not_found',
   'http.method_not_allowed': 'error_http_method_not_allowed',
   'http.rate_limited': 'error_http_rate_limited',
@@ -37,26 +37,32 @@ export const ERROR_TEXT: { readonly [K in ErrorCode]: MessageKey } = {
   'profile.display_name_invalid': 'error_profile_display_name_invalid',
   'profile.display_name_reserved': 'error_profile_display_name_reserved',
   'profile.display_name_taken': 'error_profile_display_name_taken',
-};
+} as const satisfies { readonly [K in ErrorCode]: MessageKey };
 
 /** The closed list of `/login?error=` (ADR-0008, amendment 2026-10-28). */
-export const CALLBACK_ERROR_TEXT: { readonly [K in CallbackErrorCode]: MessageKey } = {
+export const CALLBACK_ERROR_TEXT = {
   'auth.invalid_state': 'error_auth_invalid_state',
   'auth.banned': 'error_auth_banned',
   'auth.provider_error': 'error_auth_provider_error',
   'auth.try_again': 'error_auth_try_again',
   'auth.already_linked': 'error_auth_already_linked',
   'auth.provider_already_linked': 'error_auth_provider_already_linked',
-};
+} as const satisfies { readonly [K in CallbackErrorCode]: MessageKey };
 
-export const GENERIC_ERROR: MessageKey = 'error_generic';
+export const GENERIC_ERROR = 'error_generic' satisfies MessageKey;
+
+/** The key of an error text: what `AuthErrorNotice` receives, never a code. */
+export type ErrorTextKey =
+  | (typeof ERROR_TEXT)[ErrorCode]
+  | (typeof CALLBACK_ERROR_TEXT)[CallbackErrorCode]
+  | typeof GENERIC_ERROR;
 
 /**
  * The key of `/login?error=`: `null` without the parameter, the code's key only if it is one of
  * `CallbackErrorCode` (own keys only, so `__proto__` or `toString` never match), and
  * `error_generic` for anything else. The value itself never leaves this function.
  */
-export function resolveCallbackError(value: string | null): MessageKey | null {
+export function resolveCallbackError(value: string | null): ErrorTextKey | null {
   if (value === null) return null;
   return Object.hasOwn(CALLBACK_ERROR_TEXT, value)
     ? CALLBACK_ERROR_TEXT[value as CallbackErrorCode]
@@ -64,7 +70,7 @@ export function resolveCallbackError(value: string | null): MessageKey | null {
 }
 
 /** The key of the `code` of a form action's `fail()`, with the same rule over every code. */
-export function resolveApiError(code: unknown): MessageKey {
+export function resolveApiError(code: unknown): ErrorTextKey {
   return typeof code === 'string' && Object.hasOwn(ERROR_TEXT, code)
     ? ERROR_TEXT[code as ErrorCode]
     : GENERIC_ERROR;

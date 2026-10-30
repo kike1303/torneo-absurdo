@@ -1,5 +1,6 @@
 <script lang="ts">
   import ArenaSection from './_sections/ArenaSection.svelte';
+  import AuthSection from './_sections/AuthSection.svelte';
   import ButtonSection from './_sections/ButtonSection.svelte';
   import DisplaySection from './_sections/DisplaySection.svelte';
   import FormSection from './_sections/FormSection.svelte';
@@ -22,4 +23,5 @@
   <DisplaySection />
   <OverlaySection />
   <ArenaSection />
+  <AuthSection />
 </div>
