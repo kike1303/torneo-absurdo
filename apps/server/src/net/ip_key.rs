@@ -37,6 +37,30 @@ impl From<IpAddr> for IpKey {
     }
 }
 
+impl IpKey {
+    /// `ip_hash = HMAC-SHA256(ip_key, IP_HASH_KEY)` (ADR-0008 D8) over a family byte plus the
+    /// bytes of the key. The bytes never leave this module; only the hash does.
+    pub fn hash(&self, key: &super::IpHashKey) -> [u8; 32] {
+        use hmac::{KeyInit, Mac};
+        let mut mac = match hmac::Hmac::<sha2::Sha256>::new_from_slice(key.bytes()) {
+            Ok(mac) => mac,
+            // HMAC accepts keys of any length; this arm never runs.
+            Err(_) => return [0; 32],
+        };
+        match self.0 {
+            Repr::V4(octets) => {
+                mac.update(&[4]);
+                mac.update(&octets);
+            }
+            Repr::V6(prefix) => {
+                mac.update(&[6]);
+                mac.update(&prefix);
+            }
+        }
+        mac.finalize().into_bytes().into()
+    }
+}
+
 impl fmt::Debug for IpKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("IpKey(..)")
@@ -94,6 +118,28 @@ mod tests {
         assert_eq!(
             normalize(IpAddr::V6(Ipv6Addr::LOCALHOST)),
             IpAddr::V6(Ipv6Addr::LOCALHOST)
+        );
+    }
+
+    /// T28 (the `/64` part): two IPv6 of the same `/64` give the same `ip_hash`.
+    #[test]
+    fn ip_hash_follows_the_key() {
+        let k = crate::net::IpHashKey::new(vec![7; 32]);
+        let other = crate::net::IpHashKey::new(vec![8; 32]);
+        assert_eq!(
+            key("2001:db8:1:2::a").hash(&k),
+            key("2001:db8:1:2:ffff::1").hash(&k)
+        );
+        assert_ne!(
+            key("2001:db8:1:2::a").hash(&k),
+            key("2001:db8:1:3::a").hash(&k)
+        );
+        assert_ne!(key("203.0.113.7").hash(&k), key("203.0.113.7").hash(&other));
+        // The family byte keeps an IPv4 apart from an IPv6 whose prefix starts with its octets.
+        assert_ne!(key("32.1.13.184").hash(&k), key("2001:db8::").hash(&k));
+        assert_eq!(
+            key("::ffff:203.0.113.7").hash(&k),
+            key("203.0.113.7").hash(&k)
         );
     }
 

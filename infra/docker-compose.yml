@@ -1,7 +1,8 @@
 # Production stack that Coolify deploys (RF-C4, ADR-0006 D1 to D4). Only `web` and `server`:
 # Postgres is a standalone Coolify resource, reached through the external `torneo-db` network.
-# IMAGE_TAG, PUBLIC_HOST and DATABASE_URL come from Coolify; locally, `just prod-local` exports
-# IMAGE_TAG and reads infra/local.env. No `name:` (Coolify sets its own), no `build:`, no `ports:`.
+# IMAGE_TAG, PUBLIC_HOST, DATABASE_URL, INTERNAL_API_SECRET and IP_HASH_KEY come from Coolify;
+# locally, `just prod-local` exports IMAGE_TAG and reads infra/local.env and the generated
+# infra/local.secrets.env. No `name:` (Coolify sets its own), no `build:`, no `ports:`.
 # scripts/check-compose.mjs enforces the exact shape of this file.
 
 services:
@@ -22,6 +23,11 @@ services:
       # The fixed IP of coolify-proxy in torneo-edge (ADR-0006 D2): only its X-Forwarded-For
       # is read (ADR-0008 D7). Not the subnet: web is in it too and is not a proxy.
       TRUSTED_PROXIES: 10.250.0.2/32
+      # Shared with web (ADR-0008 D5) and the key of ip_hash (D8): only from Coolify, never in git.
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required}
+      IP_HASH_KEY: ${IP_HASH_KEY:?IP_HASH_KEY is required}
+      # Coins of the first-login grant (spec 008, provisional; TA-27 fixes it). 1 to 10 000.
+      DAILY_GRANT: '100'
     healthcheck:
       test: ['CMD', '/server', 'healthcheck']
       interval: 15s

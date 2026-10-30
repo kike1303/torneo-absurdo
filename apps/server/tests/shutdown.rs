@@ -99,25 +99,17 @@ async fn new_connections_are_refused_right_after_the_signal() {
 }
 
 mod in_process {
-    use std::sync::Arc;
+
     use std::time::Duration;
 
-    use server::app::{AppState, HttpConfig, Settings, run_until_shutdown};
-    use server::db::{DbProbe, PingFuture};
+    use server::app::{HttpConfig, Settings, run_until_shutdown};
+
     use server::ws::{WsConfig, WsState};
     use tokio::net::TcpListener;
     use tokio::sync::oneshot;
 
     use super::ORIGIN;
     use super::support::ws::{self, Ending};
-
-    struct AlwaysUp;
-
-    impl DbProbe for AlwaysUp {
-        fn ping(&self) -> PingFuture<'_> {
-            Box::pin(async { true })
-        }
-    }
 
     /// A signal right after the handshake: the socket upgraded at that moment must still
     /// get 1012 (it is in the tracker from the handshake on), never a bare TCP close.
@@ -131,7 +123,7 @@ mod in_process {
                 ..WsConfig::default()
             };
             let ws_state = WsState::new(ORIGIN.to_owned(), true, 10, config);
-            let state = AppState::new(Arc::new(AlwaysUp), &Settings::default(), ws_state);
+            let state = super::support::app::state_with_ws(&[], &Settings::default(), ws_state);
             let (signal, signalled) = oneshot::channel::<()>();
             let server = tokio::spawn(run_until_shutdown(
                 listener,

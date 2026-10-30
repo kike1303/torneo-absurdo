@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 775b395a3046658ac2c49200dc663d6433f8a144ab854ec277e853bb86704623 # shrinks to input = Some("/¡\u{7f}")

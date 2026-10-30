@@ -11,7 +11,7 @@ set -eu
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-subjects="infra/.env apps/server/.env apps/web/.env tools/sff-converter/input/canary.sff"
+subjects="infra/.env infra/local.secrets.env apps/server/.env apps/web/.env tools/sff-converter/input/canary.sff content/_local/canary.txt"
 created=""
 created_dirs=""
 tmp=""
@@ -61,7 +61,7 @@ if [ ! -d "$ctx" ]; then
 fi
 
 failed=0
-for path in infra/.env apps/server/.env apps/web/.env private .git content/_local tools; do
+for path in infra/.env infra/local.secrets.env apps/server/.env apps/web/.env private .git content/_local tools; do
     if [ -e "$ctx/$path" ] || [ -L "$ctx/$path" ]; then
         echo "leaked into build context: $path" >&2
         failed=1
@@ -72,6 +72,12 @@ done
 leaks="$(cd "$ctx" && find . -type d \( -name node_modules -o -name target \) -prune -print)"
 if [ -n "$leaks" ]; then
     printf '%s\n' "$leaks" | sed 's|^\./|leaked into build context: |' >&2
+    failed=1
+fi
+
+# The server image embeds the alias lists (spec 008 RF-B7).
+if [ ! -f "$ctx/content/names/nouns.txt" ]; then
+    echo "missing from build context: content/names/nouns.txt" >&2
     failed=1
 fi
 

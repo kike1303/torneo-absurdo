@@ -3,6 +3,7 @@
 
 pub mod client_ip;
 pub mod internal;
+pub mod ip_hash;
 pub mod ip_key;
 pub mod trusted;
 
@@ -16,6 +17,7 @@ use axum::response::Response;
 
 pub use client_ip::client_ip;
 pub use internal::{InternalSecret, is_internal};
+pub use ip_hash::IpHashKey;
 pub use ip_key::IpKey;
 pub use trusted::{InvalidTrustedProxies, TrustedProxies};
 
@@ -35,6 +37,11 @@ impl fmt::Debug for ClientContext {
             .finish_non_exhaustive()
     }
 }
+
+/// The local address of the connection (008 plan-b: the dev provider is called back on it, so
+/// it never depends on a configured port). Inserted by `serve_listener` next to `ConnectInfo`.
+#[derive(Debug, Clone, Copy)]
+pub struct LocalAddr(pub SocketAddr);
 
 /// What the layer needs from the configuration.
 #[derive(Debug, Clone, Default)]

@@ -2,7 +2,9 @@
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used)]
 
 pub mod app;
+pub mod auth;
 pub mod bin;
+pub mod config;
 pub mod db;
 pub mod http;
 pub mod pg_proxy;

@@ -16,7 +16,9 @@ use sqlx::postgres::PgConnectOptions;
 use tracing_subscriber::EnvFilter;
 use url::{Host, Url};
 
-use crate::net::{InternalSecret, TrustedProxies};
+use crate::http::cookies::CookiePolicy;
+use crate::ledger::Coins;
+use crate::net::{InternalSecret, IpHashKey, TrustedProxies};
 
 pub const DEFAULT_PORT: u16 = 8080;
 pub const DEFAULT_WS_MAX_CONNECTIONS: u32 = 2000;
@@ -25,8 +27,15 @@ pub const DEFAULT_RUST_LOG: &str = "info";
 /// `127.0.0.1`, so it assumes `BIND_ADDR` is `0.0.0.0` or `127.0.0.1`: with any other address
 /// (or `::1`) the healthcheck fails. The production compose never sets `BIND_ADDR` (phase C).
 pub const DEFAULT_BIND_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-/// Smallest decoded length of `INTERNAL_API_SECRET` (008 RF-A6, RF-B18).
+/// Smallest decoded length of `INTERNAL_API_SECRET` and `IP_HASH_KEY` (008 RF-A6, RF-B18).
 pub const INTERNAL_SECRET_MIN_BYTES: usize = 32;
+/// Range of `DAILY_GRANT` (008 RF-B18): a typo would inflate the economy from the first login,
+/// and entries cannot be undone.
+pub const DAILY_GRANT_RANGE: std::ops::RangeInclusive<i64> = 1..=10_000;
+/// Public development values of `apps/server/.env.example` (and of `apps/web/.env.example` for
+/// the first). Outside a loopback `http` origin the server refuses them (RF-B18).
+pub const DEV_INTERNAL_API_SECRET: &str = "Y3NJpi4_9UAo8Kx01a81pv33Dleek_Ax2e1xq4kLJpk";
+pub const DEV_IP_HASH_KEY: &str = "mtPdFLwnW5YGomZ3cu58sF-v6WhmO0aQRTksx_Ypr90";
 
 /// base64url, with or without padding.
 const BASE64URL: GeneralPurpose = GeneralPurpose::new(
@@ -100,6 +109,50 @@ pub fn decide_echo(flag: Option<&str>, origin: &Url) -> EchoDecision {
     }
 }
 
+/// A base64url secret (padding optional) of at least [`INTERNAL_SECRET_MIN_BYTES`] decoded
+/// bytes. Outside loopback its decoded bytes must differ from those of the public development
+/// value, whatever the padding. Returns the text and the decoded bytes. The comparison is
+/// constant-time, so the pattern is safe to copy.
+fn secret(text: &str, dev_value: &str, loopback: bool) -> Option<(String, Vec<u8>)> {
+    use subtle::ConstantTimeEq;
+    let bytes = BASE64URL.decode(text).ok()?;
+    if bytes.len() < INTERNAL_SECRET_MIN_BYTES {
+        return None;
+    }
+    // Decoded bytes, not text: with or without padding, the same secret is the same secret.
+    let dev_bytes = BASE64URL.decode(dev_value).unwrap_or_default();
+    let is_dev_value = bool::from(bytes.as_slice().ct_eq(dev_bytes.as_slice()));
+    if is_dev_value && !loopback {
+        return None;
+    }
+    Some((text.to_owned(), bytes))
+}
+
+/// `DAILY_GRANT`: ASCII digits only (no sign, spaces or exponent), inside [`DAILY_GRANT_RANGE`].
+fn parse_daily_grant(text: &str) -> Option<Coins> {
+    if text.is_empty() || text.len() > 5 || !text.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let value: i64 = text.parse().ok()?;
+    DAILY_GRANT_RANGE.contains(&value).then_some(Coins(value))
+}
+
+/// The cookie policy (RF-B9): the development names only with the feature (whose gate already
+/// required a loopback origin).
+#[cfg(feature = "dev-auth")]
+fn cookie_policy(loopback: bool) -> CookiePolicy {
+    if loopback {
+        CookiePolicy::loopback_dev()
+    } else {
+        CookiePolicy::production()
+    }
+}
+
+#[cfg(not(feature = "dev-auth"))]
+fn cookie_policy(_loopback: bool) -> CookiePolicy {
+    CookiePolicy::production()
+}
+
 /// Validates `PUBLIC_ORIGIN`: `http(s)://host[:port]` exactly as a browser serializes the
 /// `Origin` header (no path, query, fragment, credentials, trailing slash, uppercase host or
 /// default port). Same rule as the `web` validator (plan-a decision 19).
@@ -123,8 +176,14 @@ pub struct Config {
     pub echo: EchoDecision,
     /// Proxies whose `X-Forwarded-For` is read (008 RF-A3). Empty by default.
     pub trusted_proxies: TrustedProxies,
-    /// Optional in phase A: without it no request is internal (008 plan-a decision 17).
-    pub internal_secret: Option<InternalSecret>,
+    /// Shared with `web` (ADR-0008 D5). Required since phase B.
+    pub internal_secret: InternalSecret,
+    /// HMAC key of `ip_hash` (ADR-0008 D8).
+    pub ip_hash_key: IpHashKey,
+    /// Coins of the first-login `grant` (008 RF-B3).
+    pub daily_grant: Coins,
+    /// Cookie names and attributes (RF-B9).
+    pub cookies: CookiePolicy,
 }
 
 // Hand-written so the connection options (with the password), the internal secret and the
@@ -140,14 +199,10 @@ impl fmt::Debug for Config {
             .field("rust_log", &self.rust_log)
             .field("echo", &self.echo)
             .field("trusted_proxies", &self.trusted_proxies.len())
-            .field(
-                "internal_secret",
-                &if self.internal_secret.is_some() {
-                    "<redacted>"
-                } else {
-                    "<unset>"
-                },
-            )
+            .field("internal_secret", &"<redacted>")
+            .field("ip_hash_key", &"<redacted>")
+            .field("daily_grant", &self.daily_grant.0)
+            .field("cookies", &self.cookies)
             .finish()
     }
 }
@@ -239,21 +294,43 @@ impl Config {
                 })?,
         };
 
+        // "On loopback" is one predicate for every rule that depends on it (008 plan-b
+        // decision 5): RF-A3, RF-B6, RF-B9 and RF-B18.
+        let loopback = is_loopback_http_origin(&origin);
+
         const INTERNAL_API_SECRET: &str = "INTERNAL_API_SECRET";
-        let internal_secret = match text(INTERNAL_API_SECRET)? {
-            None => None,
-            Some(value) => {
-                let long_enough = BASE64URL
-                    .decode(&value)
-                    .is_ok_and(|bytes| bytes.len() >= INTERNAL_SECRET_MIN_BYTES);
-                if !long_enough {
-                    return Err(ConfigError::Invalid {
-                        var: INTERNAL_API_SECRET,
-                    });
-                }
-                Some(InternalSecret::new(&value))
+        let internal_text = secret(
+            &required(INTERNAL_API_SECRET)?,
+            DEV_INTERNAL_API_SECRET,
+            loopback,
+        )
+        .ok_or(ConfigError::Invalid {
+            var: INTERNAL_API_SECRET,
+        })?;
+        let internal_secret = InternalSecret::new(&internal_text.0);
+
+        const IP_HASH_KEY: &str = "IP_HASH_KEY";
+        let (_, ip_hash_bytes) = secret(&required(IP_HASH_KEY)?, DEV_IP_HASH_KEY, loopback)
+            .ok_or(ConfigError::Invalid { var: IP_HASH_KEY })?;
+        let ip_hash_key = IpHashKey::new(ip_hash_bytes);
+
+        const DAILY_GRANT: &str = "DAILY_GRANT";
+        let daily_grant = parse_daily_grant(&required(DAILY_GRANT)?)
+            .ok_or(ConfigError::Invalid { var: DAILY_GRANT })?;
+
+        // RF-B6: the dev provider only on a loopback http origin and a loopback BIND_ADDR.
+        // `Origin` is a CSRF defense, not authentication: without this gate anyone on the
+        // local network could ask for a session of any `dev_identity`.
+        #[cfg(feature = "dev-auth")]
+        {
+            if !loopback {
+                return Err(ConfigError::Invalid { var: "DEV_AUTH" });
             }
-        };
+            if !bind_addr.is_loopback() || bind_addr.is_unspecified() {
+                return Err(ConfigError::Invalid { var: BIND_ADDR });
+            }
+        }
+        let cookies = cookie_policy(loopback);
 
         Ok(Self {
             database,
@@ -265,6 +342,9 @@ impl Config {
             echo,
             trusted_proxies,
             internal_secret,
+            ip_hash_key,
+            daily_grant,
+            cookies,
         })
     }
 }
@@ -286,8 +366,28 @@ mod tests {
         Config::from_lookup(|name| map.get(name).cloned())
     }
 
+    /// The variables every valid config needs, on a loopback origin (and, with `dev-auth`, a
+    /// loopback `BIND_ADDR`, which the gate requires).
+    fn base() -> Vec<(&'static str, &'static str)> {
+        let mut vars = vec![
+            ("DATABASE_URL", DB),
+            ("PUBLIC_ORIGIN", ORIGIN),
+            ("INTERNAL_API_SECRET", OTHER_SECRET),
+            ("IP_HASH_KEY", OTHER_KEY),
+            ("DAILY_GRANT", "100"),
+        ];
+        if cfg!(feature = "dev-auth") {
+            vars.push(("BIND_ADDR", "127.0.0.1"));
+        }
+        vars
+    }
+
+    /// A 32-byte base64url secret that is not a development value.
+    const OTHER_SECRET: &str = "b3RoZXItc2VjcmV0LW90aGVyLXNlY3JldC1vdGhlcis";
+    const OTHER_KEY: &str = "b3RoZXIta2V5LW90aGVyLWtleS1vdGhlci1rZXktb3RoZXI";
+
     fn with<'a>(extra: &[(&'a str, &'a str)]) -> Result<Config, ConfigError> {
-        let mut vars = vec![("DATABASE_URL", DB), ("PUBLIC_ORIGIN", ORIGIN)];
+        let mut vars = base();
         for (k, v) in extra {
             vars.retain(|(name, _)| name != k);
             vars.push((*k, *v));
@@ -304,12 +404,284 @@ mod tests {
         let config = with(&[]).unwrap();
         assert_eq!(config.public_origin, ORIGIN);
         assert_eq!(config.port, 8080);
+        #[cfg(not(feature = "dev-auth"))]
         assert_eq!(config.bind_addr, DEFAULT_BIND_ADDR);
         assert_eq!(config.ws_max_connections, 2000);
         assert_eq!(config.rust_log, "info");
         assert_eq!(config.echo, EchoDecision::Off);
         assert!(config.trusted_proxies.is_empty());
-        assert!(config.internal_secret.is_none());
+        assert_eq!(config.daily_grant, Coins(100));
+    }
+
+    #[test]
+    fn phase_b_variables_are_required_in_order() {
+        // Each missing variable is reported by name, in the fixed order of `from_lookup`.
+        for (missing, var) in [
+            ("INTERNAL_API_SECRET", "INTERNAL_API_SECRET"),
+            ("IP_HASH_KEY", "IP_HASH_KEY"),
+            ("DAILY_GRANT", "DAILY_GRANT"),
+        ] {
+            let vars: Vec<_> = base().into_iter().filter(|(k, _)| *k != missing).collect();
+            assert_eq!(load(&vars).unwrap_err().var(), var);
+        }
+    }
+
+    #[test]
+    fn daily_grant_is_an_integer_from_1_to_10000() {
+        for (value, coins) in [("1", 1), ("100", 100), ("10000", 10_000)] {
+            assert_eq!(
+                with(&[("DAILY_GRANT", value)]).unwrap().daily_grant,
+                Coins(coins)
+            );
+        }
+        for value in [
+            "0",
+            "10001",
+            "1.5",
+            "+5",
+            "-1",
+            "",
+            " 5",
+            "5 ",
+            "1e3",
+            "abc",
+            "99999999999",
+        ] {
+            assert_eq!(
+                with(&[("DAILY_GRANT", value)]).unwrap_err().var(),
+                "DAILY_GRANT",
+                "{value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ip_hash_key_follows_the_secret_rule() {
+        let config = with(&[("IP_HASH_KEY", OTHER_SECRET)]).unwrap();
+        assert_eq!(config.ip_hash_key.len(), 32);
+        for value in [
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "+/8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "canary key",
+            "",
+        ] {
+            let err = with(&[("IP_HASH_KEY", value)]).unwrap_err();
+            assert_eq!(err.var(), "IP_HASH_KEY", "{value:?}");
+            assert!(!err.to_string().contains("canary"));
+        }
+    }
+
+    #[test]
+    fn development_secrets_only_on_a_loopback_origin() {
+        // Loopback: the .env.example values are fine.
+        assert!(
+            with(&[
+                ("INTERNAL_API_SECRET", DEV_INTERNAL_API_SECRET),
+                ("IP_HASH_KEY", DEV_IP_HASH_KEY),
+            ])
+            .is_ok()
+        );
+        for origin in [
+            "https://torneo.example",
+            "http://torneo.example",
+            "https://localhost",
+        ] {
+            let public = [
+                ("PUBLIC_ORIGIN", origin),
+                ("INTERNAL_API_SECRET", OTHER_SECRET),
+                ("IP_HASH_KEY", OTHER_SECRET),
+            ];
+            #[cfg(not(feature = "dev-auth"))]
+            assert!(with(&public).is_ok(), "{origin}");
+            let mut dev_secret = public.to_vec();
+            dev_secret[1] = ("INTERNAL_API_SECRET", DEV_INTERNAL_API_SECRET);
+            assert_eq!(
+                with(&dev_secret).unwrap_err().var(),
+                "INTERNAL_API_SECRET",
+                "{origin}"
+            );
+            let mut dev_key = public.to_vec();
+            dev_key[2] = ("IP_HASH_KEY", DEV_IP_HASH_KEY);
+            assert_eq!(with(&dev_key).unwrap_err().var(), "IP_HASH_KEY", "{origin}");
+        }
+    }
+
+    /// The padded form of a development value decodes to the same bytes: refused too.
+    #[test]
+    fn padded_development_secrets_are_refused_outside_loopback() {
+        for origin in ["https://torneo.example", "https://localhost"] {
+            let internal = format!("{DEV_INTERNAL_API_SECRET}=");
+            let err = with(&[
+                ("PUBLIC_ORIGIN", origin),
+                ("INTERNAL_API_SECRET", &internal),
+            ])
+            .unwrap_err();
+            assert_eq!(err.var(), "INTERNAL_API_SECRET", "{origin}");
+            let key = format!("{DEV_IP_HASH_KEY}=");
+            let err = with(&[
+                ("PUBLIC_ORIGIN", origin),
+                ("INTERNAL_API_SECRET", OTHER_SECRET),
+                ("IP_HASH_KEY", &key),
+            ])
+            .unwrap_err();
+            assert_eq!(err.var(), "IP_HASH_KEY", "{origin}");
+        }
+    }
+
+    #[test]
+    fn the_env_example_carries_the_development_secrets() {
+        let example = include_str!("../.env.example");
+        assert!(example.contains(&format!(
+            "\nINTERNAL_API_SECRET={DEV_INTERNAL_API_SECRET}\n"
+        )));
+        assert!(example.contains(&format!("\nIP_HASH_KEY={DEV_IP_HASH_KEY}\n")));
+        assert!(example.contains("\nDAILY_GRANT=100\n"));
+        // The example must itself be a valid development config.
+        for line in example
+            .lines()
+            .filter(|l| !l.starts_with('#') && l.contains('='))
+        {
+            let (name, _) = line.split_once('=').unwrap();
+            assert!(!name.is_empty(), "{line}");
+        }
+    }
+
+    #[test]
+    fn the_loopback_table_is_shared_with_web() {
+        let table: Vec<(String, bool)> = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../scripts/__fixtures__/loopback-origins.json"
+        )))
+        .unwrap();
+        assert!(table.len() >= 9);
+        for (origin, expected) in table {
+            // An origin `parse_public_origin` rejects is never "on loopback".
+            let actual =
+                parse_public_origin(&origin).is_some_and(|url| is_loopback_http_origin(&url));
+            assert_eq!(actual, expected, "{origin}");
+        }
+    }
+
+    /// RF-B18 and the security note of the spec: one predicate decides "on loopback".
+    #[test]
+    fn no_other_module_reimplements_the_loopback_rule() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut stack = vec![src.clone()];
+        let needles = [
+            ["Host::", "Domain"].concat(),
+            ["\"local", "host\""].concat(),
+        ];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path == src.join("config.rs") || path.extension().is_none_or(|e| e != "rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap();
+                // Only production code: the test modules may use loopback origins as data.
+                let code = text.split("#[cfg(test)]").next().unwrap_or_default();
+                for needle in &needles {
+                    assert!(
+                        !code.contains(needle.as_str()),
+                        "{} uses {needle}",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
+
+    /// The Debug of the config never shows the decoded key bytes either, in any form.
+    #[test]
+    fn debug_never_shows_the_raw_key_bytes() {
+        let config = with(&[
+            ("IP_HASH_KEY", OTHER_KEY),
+            ("INTERNAL_API_SECRET", OTHER_SECRET),
+        ])
+        .unwrap();
+        let shown = format!("{config:?}");
+        for text in [OTHER_KEY, OTHER_SECRET] {
+            let bytes = BASE64URL.decode(text).unwrap();
+            let list = format!("{bytes:?}");
+            let inner = list.trim_start_matches('[').trim_end_matches(']');
+            let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+            // Both test keys decode to ASCII ("other-key-…", "other-secret-…").
+            let ascii = String::from_utf8(bytes.clone()).unwrap();
+            for raw in [inner.to_owned(), hex, ascii, inner[..12].to_owned()] {
+                assert!(!shown.contains(&raw), "{raw} in {shown}");
+            }
+        }
+        assert!(!shown.contains("other-"), "{shown}");
+    }
+
+    #[test]
+    fn debug_redacts_every_secret() {
+        let config = with(&[
+            ("INTERNAL_API_SECRET", OTHER_SECRET),
+            ("IP_HASH_KEY", OTHER_SECRET),
+            ("DATABASE_URL", "postgres://u:pw-canary@127.0.0.1/db"),
+        ])
+        .unwrap();
+        let shown = format!("{config:?}");
+        assert!(!shown.contains(OTHER_SECRET), "{shown}");
+        assert!(!shown.contains("pw-canary"), "{shown}");
+        assert!(!shown.contains(DEV_IP_HASH_KEY), "{shown}");
+        assert!(shown.contains("daily_grant"), "{shown}");
+    }
+
+    #[test]
+    fn the_cookie_policy_follows_the_feature_and_the_origin() {
+        let production = with(&[]).unwrap().cookies;
+        #[cfg(not(feature = "dev-auth"))]
+        assert_eq!(production, CookiePolicy::production());
+        #[cfg(feature = "dev-auth")]
+        assert_eq!(production, CookiePolicy::loopback_dev());
+        assert_eq!(CookiePolicy::production().session_name(), "__Host-session");
+        assert_eq!(CookiePolicy::production().flow_name(), "__Host-oauth");
+        assert!(CookiePolicy::production().secure());
+    }
+
+    #[cfg(feature = "dev-auth")]
+    #[test]
+    fn the_dev_auth_gate() {
+        // A non-loopback origin stops the start with `var = DEV_AUTH`.
+        for origin in [
+            "https://torneo.example",
+            "http://torneo.example",
+            "https://localhost",
+        ] {
+            let err = with(&[
+                ("PUBLIC_ORIGIN", origin),
+                ("INTERNAL_API_SECRET", OTHER_SECRET),
+                ("IP_HASH_KEY", OTHER_SECRET),
+            ])
+            .unwrap_err();
+            assert_eq!(err.var(), "DEV_AUTH", "{origin}");
+        }
+        // A non-loopback BIND_ADDR (the default included) stops it with `var = BIND_ADDR`.
+        let vars: Vec<_> = base()
+            .into_iter()
+            .filter(|(k, _)| *k != "BIND_ADDR")
+            .collect();
+        assert_eq!(load(&vars).unwrap_err().var(), "BIND_ADDR");
+        for addr in ["0.0.0.0", "192.0.2.1", "::"] {
+            assert_eq!(
+                with(&[("BIND_ADDR", addr)]).unwrap_err().var(),
+                "BIND_ADDR",
+                "{addr}"
+            );
+        }
+        for addr in ["127.0.0.1", "::1"] {
+            assert!(with(&[("BIND_ADDR", addr)]).is_ok(), "{addr}");
+        }
+        let dev = CookiePolicy::loopback_dev();
+        assert_eq!(dev.session_name(), "ta_dev_session");
+        assert_eq!(dev.flow_name(), "ta_dev_oauth");
+        assert!(!dev.secure());
     }
 
     #[test]
@@ -331,6 +703,8 @@ mod tests {
         assert!(!err.to_string().contains("secret-canary"));
     }
 
+    // Non-loopback origins never start with `dev-auth` (see `the_dev_auth_gate`).
+    #[cfg(not(feature = "dev-auth"))]
     #[test]
     fn valid_public_origins() {
         for origin in [
@@ -435,6 +809,8 @@ mod tests {
         }
     }
 
+    // Non-loopback origins never start with `dev-auth` (see `the_dev_auth_gate`).
+    #[cfg(not(feature = "dev-auth"))]
     #[test]
     fn echo_decision_table() {
         let cases: [(&[(&'static str, &'static str)], EchoDecision); 7] = [
@@ -565,13 +941,7 @@ mod tests {
         let padded = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
         let url_chars = "-_8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
         for value in [unpadded, padded, url_chars] {
-            assert!(
-                with(&[("INTERNAL_API_SECRET", value)])
-                    .unwrap()
-                    .internal_secret
-                    .is_some(),
-                "{value}"
-            );
+            assert!(with(&[("INTERNAL_API_SECRET", value)]).is_ok(), "{value}");
         }
         for value in [
             // 31 bytes.
@@ -599,7 +969,6 @@ mod tests {
         assert!(!shown.contains(secret), "{shown}");
         assert!(!shown.contains("10.250"), "{shown}");
         assert!(shown.contains("<redacted>"), "{shown}");
-        assert!(format!("{:?}", with(&[]).unwrap()).contains("<unset>"));
     }
 
     #[test]

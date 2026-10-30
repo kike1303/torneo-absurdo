@@ -12,33 +12,39 @@ use support::http;
 #[tokio::test]
 async fn every_manifest_entry_is_routed_and_only_by_its_method() {
     assert_eq!(check_manifest(ROUTES), Ok(()));
-    let app = support::app::start(support::app::state_with(
-        support::app::net(Default::default(), false),
-        &Settings::default(),
-    ))
-    .await;
+    let app = support::app::start(support::app::state(&[], &Settings::default())).await;
     for route in ROUTES {
-        assert!(!route.path.contains('{'), "add a sample path for {route:?}");
-        let response = http::send(
-            app.addr,
-            route.method.as_str(),
-            route.path,
-            &[("origin", ORIGIN)],
-        )
-        .await;
-        assert!(
-            response.status != 404 && response.status != 405,
-            "{route:?}: {}",
-            response.status
-        );
-        for method in ["POST", "PUT", "PATCH", "DELETE"] {
-            if method == route.method.as_str() {
+        // A sample value for the path parameters.
+        let path = route.path.replace("{provider}", "dev");
+        assert!(!path.contains('{'), "add a sample value for {route:?}");
+        let method = route.method.http();
+        let response = http::send(app.addr, method.as_str(), &path, &[("origin", ORIGIN)]).await;
+        // Without `dev-auth` no provider is enabled yet (Google and Discord are phase C), so
+        // the provider routes answer the handler's 404; the router still matches them, as the
+        // 405 below shows.
+        let provider_route = route.path.contains("{provider}");
+        if cfg!(feature = "dev-auth") || !provider_route {
+            assert!(
+                response.status != 404 && response.status != 405,
+                "{route:?}: {}",
+                response.status
+            );
+        }
+        for other in ["POST", "PUT", "PATCH", "DELETE"] {
+            if other == method.as_str() {
                 continue;
             }
-            let response = http::send(app.addr, method, route.path, &[("origin", ORIGIN)]).await;
-            assert_eq!(response.status, 405, "{method} {}", route.path);
+            let response = http::send(app.addr, other, &path, &[("origin", ORIGIN)]).await;
+            assert_eq!(response.status, 405, "{other} {path}");
         }
-        // Phase A has no mutation at all.
-        assert_eq!(route.effect, Effect::Read, "{route:?}");
+        // A safe method that mutates is one of the declared exceptions (check_manifest).
+        if route.effect == Effect::Mutate && matches!(method.as_str(), "GET" | "HEAD") {
+            assert!(
+                server::http::routes::SAFE_METHOD_EXCEPTIONS
+                    .iter()
+                    .any(|(m, p)| *m == route.method && *p == route.path),
+                "{route:?}"
+            );
+        }
     }
 }

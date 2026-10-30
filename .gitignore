@@ -19,6 +19,7 @@ target/
 .env
 .env.*
 !.env.example
+infra/local.secrets.env
 
 # Local-only assets (MUGEN sprites, franchise material) — NEVER commit
 content/_local/

@@ -10,15 +10,18 @@ use std::time::Duration;
 use axum::extract::{ConnectInfo, FromRef};
 use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::service::TowerToHyperService;
+use sqlx::PgPool;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
+use crate::auth::AuthState;
 use crate::config::Config;
 use crate::db::{self, DbProbe, PgProbe, RetryConfig};
 use crate::http::origin::OriginPolicy;
 use crate::http::{self, health::HealthConfig, health::HealthState};
-use crate::net::NetState;
+use crate::net::{LocalAddr, NetState};
+use crate::profile::alias::AliasConfig;
 use crate::rate::{self, RateLimits, RateSettings};
 use crate::ws::{WsConfig, WsState};
 
@@ -58,33 +61,44 @@ pub struct Settings {
     pub http: HttpConfig,
     pub ws: WsConfig,
     pub rate: RateSettings,
+    pub alias: AliasConfig,
 }
 
 #[derive(Clone)]
 pub struct AppState {
+    pub db: PgPool,
     pub health: Arc<HealthState>,
     pub ws: Arc<WsState>,
     pub net: Arc<NetState>,
     pub origin: Arc<OriginPolicy>,
     pub rate: Arc<RateLimits>,
+    pub auth: Arc<AuthState>,
 }
 
 impl AppState {
-    /// The state with no trusted proxy and no internal secret (see [`AppState::with_net`]).
-    /// The `Origin` policy uses the WebSocket's `PUBLIC_ORIGIN`.
-    pub fn new(probe: Arc<dyn DbProbe>, settings: &Settings, ws: WsState) -> Self {
+    /// The whole state from the configuration (008 plan-b decision 3.2): the `Origin`
+    /// policy, the client context, the limiters and the WebSocket all come from `config`.
+    /// `probe` is the health check of `pool` in production; the tests pass a fake one.
+    pub fn from_config(
+        config: &Config,
+        settings: &Settings,
+        pool: PgPool,
+        probe: Arc<dyn DbProbe>,
+    ) -> Self {
         Self {
+            db: pool,
             health: Arc::new(HealthState::new(probe, settings.health)),
-            origin: Arc::new(OriginPolicy::new(ws.public_origin().to_owned())),
-            ws: Arc::new(ws),
-            net: Arc::new(NetState::default()),
+            origin: Arc::new(OriginPolicy::new(config.public_origin.clone())),
+            ws: Arc::new(Self::ws_from_config(config, settings)),
+            net: Arc::new(Self::net_from_config(config)),
             rate: Arc::new(RateLimits::new(&settings.rate)),
+            auth: Arc::new(AuthState::from_config(config, settings)),
         }
     }
 
-    /// Replaces the trusted proxies and the internal secret.
-    pub fn with_net(mut self, net: NetState) -> Self {
-        self.net = Arc::new(net);
+    /// Replaces the WebSocket state (the tests shorten its caps below what the config allows).
+    pub fn with_ws(mut self, ws: WsState) -> Self {
+        self.ws = Arc::new(ws);
         self
     }
 
@@ -92,7 +106,7 @@ impl AppState {
     pub fn net_from_config(config: &Config) -> NetState {
         NetState::new(
             config.trusted_proxies.clone(),
-            config.internal_secret.clone(),
+            Some(config.internal_secret.clone()),
         )
     }
 
@@ -157,9 +171,8 @@ pub async fn serve(
         .map_err(|_| StartupError::Bind)?
         .port();
     tracing::info!(event = "server.listening", port);
-    let ws = AppState::ws_from_config(config, &settings);
-    let state = AppState::new(Arc::new(PgProbe::new(pool)), &settings, ws)
-        .with_net(AppState::net_from_config(config));
+    let probe = Arc::new(PgProbe::new(pool.clone()));
+    let state = AppState::from_config(config, &settings, pool, probe);
     run_until_shutdown(listener, state, settings.http, shutdown).await
 }
 
@@ -231,11 +244,22 @@ pub async fn serve_listener(
     http_config: HttpConfig,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
+    // The revocation listener lives as long as this server (008 RF-B10).
+    let background = CancellationToken::new();
+    tokio::spawn(crate::sessions::listener::run(
+        state.db.clone(),
+        state.ws.registry(),
+        background.clone(),
+    ));
+    // Retention (008 RF-B16): a pass at startup, then daily.
+    tokio::spawn(crate::jobs::run(state.db.clone(), background.clone()));
+    let _stop_background = background.drop_guard();
     let router = http::router(state);
     let connections = TaskTracker::new();
     let closing = CancellationToken::new();
     let mut shutdown = pin!(shutdown);
     loop {
+        let local = listener.local_addr().ok();
         let (stream, peer) = tokio::select! {
             biased;
             () = &mut shutdown => break,
@@ -255,6 +279,9 @@ pub async fn serve_listener(
                 request
                     .extensions_mut()
                     .insert(ConnectInfo::<SocketAddr>(peer));
+                if let Some(local) = local {
+                    request.extensions_mut().insert(LocalAddr(local));
+                }
                 request
             },
         );

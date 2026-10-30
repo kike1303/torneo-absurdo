@@ -1,10 +1,12 @@
 //! HTTP router and its layers (RF-B12, RF-B15; plan-b decision 6; 008 RF-A5).
 
+pub mod cookies;
 pub mod errors;
 pub mod health;
 pub mod origin;
 pub mod request_log;
 pub mod routes;
+pub mod session;
 
 use axum::Router;
 use axum::http::{HeaderName, HeaderValue, header};
@@ -50,7 +52,7 @@ const SENSITIVE_REQUEST_HEADERS: [HeaderName; 10] = [
 pub fn router(state: AppState) -> Router {
     let net = state.net.clone();
     let origin = state.origin.clone();
-    routes::register(Router::new())
+    routes::register(Router::new(), &state)
         .fallback(errors::not_found)
         .method_not_allowed_fallback(errors::method_not_allowed)
         .with_state(state)

@@ -30,7 +30,7 @@ dev: _web-prepare db-up
     done
     trap 'trap - INT TERM; kill 0' INT TERM
     # The server .env is loaded only in this subshell: DATABASE_URL is never exported globally.
-    (set -a; . apps/server/.env; set +a; exec cargo run -p server --locked) &
+    (set -a; . apps/server/.env; set +a; exec cargo run -p server --features dev-auth --locked) &
     pnpm --filter web dev &
     wait
 
@@ -83,10 +83,11 @@ check-rust:
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cargo clippy -p protocol --features ts --all-targets --locked -- -D warnings
+    cargo clippy -p server --features dev-auth --all-targets --locked -- -D warnings
     {{just_executable()}} _check-engine
     {{just_executable()}} _check-wasm
     {{just_executable()}} db-up
-    DATABASE_URL='{{test_db_url}}' cargo test --workspace --locked
+    {{just_executable()}} _test-rust
     {{just_executable()}} _check-gen
     {{just_executable()}} _check-ts-rs-graph
 
@@ -99,7 +100,51 @@ test: _web-prepare
     pnpm -s --filter @torneo/sprite-importer check
     pnpm exec vitest run --config scripts/vitest.config.mjs
     {{just_executable()}} db-up
+    {{just_executable()}} _test-rust
+
+# The Rust tests with Postgres (008 plan-b decision 15): the workspace without `dev-auth` (the
+# production cookie policy and routes), the server with it, then the A9 check of the Postgres
+# log of the run.
+_test-rust:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Stale canaries of earlier runs must not count: each run of tests/pg_log.rs writes its own.
+    rm -f target/tmp/pglog-canary-*.txt
+    # The clock of the Postgres container, not the host's: `logs --since` filters by the daemon's
+    # clock, which drifts inside a VM (Colima, Docker Desktop).
+    since="$(docker compose -f infra/compose.dev.yml exec -T postgres date -u +%Y-%m-%dT%H:%M:%SZ)"
     DATABASE_URL='{{test_db_url}}' cargo test --workspace --locked
+    DATABASE_URL='{{test_db_url}}' cargo test -p server --features dev-auth --locked
+    {{just_executable()}} _check-pg-log "$since"
+
+# ADR-0012 A9: the canary of tests/pg_log.rs never reaches the Postgres log, and the log of the
+# run has at least one ERROR line (positive control, so an empty log never passes)
+_check-pg-log since:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    shopt -s nullglob
+    files=(target/tmp/pglog-canary-*.txt)
+    if [ "${#files[@]}" -eq 0 ]; then
+        echo "check-pg-log: no canary (did apps/server/tests/pg_log.rs run?)" >&2
+        exit 1
+    fi
+    logs="$(docker compose -f infra/compose.dev.yml logs --no-log-prefix --since "{{since}}" postgres 2>&1)"
+    for file in "${files[@]}"; do
+        canary="$(cat "$file")"
+        if [ -z "$canary" ]; then
+            echo "check-pg-log: an empty canary file" >&2
+            exit 1
+        fi
+        if grep -qF "$canary" <<<"$logs"; then
+            echo "check-pg-log: a value of a failed statement reached the Postgres log" >&2
+            exit 1
+        fi
+    done
+    if ! grep -q ' ERROR: ' <<<"$logs"; then
+        echo "check-pg-log: no ERROR line in the Postgres log of the run (positive control)" >&2
+        exit 1
+    fi
+    echo "check-pg-log: ok"
 
 # End-to-end tests against `node build` (Chromium and WebKit)
 e2e: _web-prepare
@@ -301,21 +346,27 @@ prod-local tag="": _prod-local-preflight
 _prod-local-up: _prod-local-preflight
     {{just_executable()}} _prod-local-start
 
-# DATABASE_URL and PUBLIC_HOST of the shell are dropped: only infra/local.env feeds the compose.
+# DATABASE_URL, PUBLIC_HOST and the secrets of the shell are dropped: only infra/local.env and the
+# generated infra/local.secrets.env feed the compose.
 # Networks and `compose up`, without the preflight (shared by prod-local and _prod-local-up)
 _prod-local-start:
     #!/usr/bin/env bash
     set -euo pipefail
     : "${IMAGE_TAG:?IMAGE_TAG is required}"
     bash scripts/local-networks.sh up
-    env -u DATABASE_URL -u PUBLIC_HOST IMAGE_TAG="$IMAGE_TAG" docker compose -p torneo-local \
-        --env-file infra/local.env -f infra/docker-compose.yml -f infra/compose.local.yml \
+    # The two secrets of the server, generated once into a file git ignores (008 plan-b decision 6).
+    bash scripts/local-secrets.sh
+    env -u DATABASE_URL -u PUBLIC_HOST -u INTERNAL_API_SECRET -u IP_HASH_KEY IMAGE_TAG="$IMAGE_TAG" \
+        docker compose -p torneo-local \
+        --env-file infra/local.env --env-file infra/local.secrets.env \
+        -f infra/docker-compose.yml -f infra/compose.local.yml \
         up -d --wait --wait-timeout 180
     docker compose -p torneo-local ps
 
 # Keeps the Postgres volume. Never removes a network without the torneo.local=1 label.
 # Stop `prod-local` and remove the networks it created
 prod-local-down:
-    env -u DATABASE_URL -u PUBLIC_HOST IMAGE_TAG=unused docker compose -p torneo-local \
+    env -u DATABASE_URL -u PUBLIC_HOST IMAGE_TAG=unused INTERNAL_API_SECRET=unused IP_HASH_KEY=unused \
+        docker compose -p torneo-local \
         --env-file infra/local.env -f infra/docker-compose.yml -f infra/compose.local.yml down
     bash scripts/local-networks.sh down

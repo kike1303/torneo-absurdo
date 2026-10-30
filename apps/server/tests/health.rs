@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use server::app::{AppState, Settings};
+use server::app::Settings;
 use server::db::{self, DbProbe, PgProbe, PingFuture, RetryConfig};
 use server::http::health::HealthConfig;
 use support::db::TestDb;
@@ -63,10 +63,10 @@ async fn health_follows_the_database_without_restarting() {
     let db = TestDb::create().await;
     let proxy = PgProxy::start(db.server_addr()).await;
     let probe = counting_probe(&db, &proxy).await;
-    let app = support::app::start(AppState::new(
-        probe.clone(),
+    let app = support::app::start(support::app::state_with_probe(
+        &[],
         &settings(Duration::from_millis(100)),
-        support::app::ws_state(),
+        probe.clone(),
     ))
     .await;
 
@@ -96,10 +96,10 @@ async fn fifty_concurrent_requests_make_one_query() {
     let proxy = PgProxy::start(db.server_addr()).await;
     let probe = counting_probe(&db, &proxy).await;
     // A long TTL so every request of the burst lands inside it; the cache starts empty.
-    let app = support::app::start(AppState::new(
-        probe.clone(),
+    let app = support::app::start(support::app::state_with_probe(
+        &[],
         &settings(Duration::from_secs(5)),
-        support::app::ws_state(),
+        probe.clone(),
     ))
     .await;
 
@@ -111,10 +111,10 @@ async fn fifty_concurrent_requests_make_one_query() {
 
 #[tokio::test]
 async fn a_slow_database_answers_503_at_the_timeout() {
-    let app = support::app::start(AppState::new(
-        Arc::new(Slow),
+    let app = support::app::start(support::app::state_with_probe(
+        &[],
         &settings(Duration::from_millis(100)),
-        support::app::ws_state(),
+        Arc::new(Slow),
     ))
     .await;
     let started = Instant::now();

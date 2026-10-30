@@ -13,4 +13,7 @@ export type WsErrorCode =
   | 'ws.rate_limited'
   | 'ws.pong_timeout'
   | 'ws.idle_timeout'
-  | 'ws.ip_capacity';
+  | 'ws.ip_capacity'
+  | 'ws.user_capacity'
+  | 'ws.forbidden_channel'
+  | 'ws.too_many_subscriptions';

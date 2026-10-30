@@ -11,6 +11,7 @@ pub mod http;
 pub mod quotas;
 pub mod store;
 
+use std::hash::Hash;
 #[cfg(test)]
 use std::sync::Mutex;
 use std::sync::{Arc, PoisonError, RwLock};
@@ -24,10 +25,14 @@ use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
 pub use clock::ServerClock;
-pub use quotas::{AUTH_IP, FULL_RETRY_AFTER_SECS, MAX_KEYS, WS_ANON_UPGRADE_IP};
+pub use quotas::{
+    AUTH_IP, FULL_RETRY_AFTER_SECS, MAX_KEYS, MUTATION_IP, MUTATION_USER, WS_ANON_UPGRADE_IP,
+    WS_SESSION_UPGRADE_IP, WS_SESSION_UPGRADE_USER,
+};
 use store::CappedStore;
 
 use crate::net::IpKey;
+use uuid::Uuid;
 
 /// How often the sweeper drops keys that are indistinguishable from fresh ones.
 pub const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
@@ -71,9 +76,10 @@ impl Default for RateSettings {
     }
 }
 
-pub struct KeyedLimiter {
-    limiter: RateLimiter<IpKey, CappedStore, ServerClock, NoOpMiddleware<Nanos>>,
-    store: CappedStore,
+/// A limiter over keys `K`: `IpKey` (the default) or a user id.
+pub struct KeyedLimiter<K: Hash + Eq + Clone = IpKey> {
+    limiter: RateLimiter<K, CappedStore<K>, ServerClock, NoOpMiddleware<Nanos>>,
+    store: CappedStore<K>,
     clock: ServerClock,
     max_keys: usize,
     admission: RwLock<()>,
@@ -82,7 +88,7 @@ pub struct KeyedLimiter {
     hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
-impl KeyedLimiter {
+impl<K: Hash + Eq + Clone> KeyedLimiter<K> {
     pub fn new(quota: Quota, settings: &RateSettings) -> Self {
         let store = CappedStore::default();
         Self {
@@ -96,7 +102,7 @@ impl KeyedLimiter {
         }
     }
 
-    pub fn check(&self, key: &IpKey) -> Decision {
+    pub fn check(&self, key: &K) -> Decision {
         {
             let _shared = self
                 .admission
@@ -119,6 +125,15 @@ impl KeyedLimiter {
         self.measure(key)
     }
 
+    /// Whether a sweep or the admission of a new key would have to wait right now.
+    #[cfg(test)]
+    fn exclusive_would_block(&self) -> bool {
+        matches!(
+            self.admission.try_write(),
+            Err(std::sync::TryLockError::WouldBlock)
+        )
+    }
+
     #[cfg(test)]
     fn run_hook(&self) {
         let hook = self
@@ -131,7 +146,7 @@ impl KeyedLimiter {
         }
     }
 
-    fn measure(&self, key: &IpKey) -> Decision {
+    fn measure(&self, key: &K) -> Decision {
         match self.limiter.check_key(key) {
             Ok(()) => Decision::Allow,
             Err(not_until) => {
@@ -174,6 +189,12 @@ pub struct RateLimits {
     pub auth_ip: Arc<KeyedLimiter>,
     /// `WS_ANON_UPGRADE_IP`, checked in the `/ws` handshake (RF-A7).
     pub ws_upgrade_ip: Arc<KeyedLimiter>,
+    /// "Other mutations" of D7 (logout, logout-all): per user and per IP.
+    pub mutation_user: Arc<KeyedLimiter<Uuid>>,
+    pub mutation_ip: Arc<KeyedLimiter>,
+    /// The upgrade of a `/ws` with a session (RF-B14): per user and per IP.
+    pub ws_session_user: Arc<KeyedLimiter<Uuid>>,
+    pub ws_session_ip: Arc<KeyedLimiter>,
 }
 
 impl RateLimits {
@@ -181,12 +202,20 @@ impl RateLimits {
         Self {
             auth_ip: Arc::new(KeyedLimiter::new(AUTH_IP, settings)),
             ws_upgrade_ip: Arc::new(KeyedLimiter::new(WS_ANON_UPGRADE_IP, settings)),
+            mutation_user: Arc::new(KeyedLimiter::new(MUTATION_USER, settings)),
+            mutation_ip: Arc::new(KeyedLimiter::new(MUTATION_IP, settings)),
+            ws_session_user: Arc::new(KeyedLimiter::new(WS_SESSION_UPGRADE_USER, settings)),
+            ws_session_ip: Arc::new(KeyedLimiter::new(WS_SESSION_UPGRADE_IP, settings)),
         }
     }
 
     pub fn sweep(&self) {
         self.auth_ip.sweep();
         self.ws_upgrade_ip.sweep();
+        self.mutation_user.sweep();
+        self.mutation_ip.sweep();
+        self.ws_session_user.sweep();
+        self.ws_session_ip.sweep();
     }
 }
 
@@ -337,25 +366,25 @@ mod tests {
         assert_eq!(limiter.check(&key(1)), Decision::Allow);
         // K is indistinguishable from fresh: the next sweep would drop it.
         clock.advance(Duration::from_secs(12));
-        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        // Inside K's in-flight check (between the lookup and the measurement), neither a sweep
+        // nor the admission of a new key can take the lock: checked without threads.
+        let blocked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let seen = blocked.clone();
         let racer = limiter.clone();
-        let handle: Arc<Mutex<Option<std::thread::JoinHandle<Decision>>>> = Arc::default();
-        let slot = handle.clone();
         *limiter.hook.lock().unwrap() = Some(Box::new(move || {
-            let thread = std::thread::spawn(move || {
-                racer.sweep();
-                let decision = racer.check(&key(2));
-                let _ = done_tx.send(());
-                decision
-            });
-            // Old code: the racer finishes here. Fixed code: it blocks until K's check ends.
-            let _ = done_rx.recv_timeout(Duration::from_millis(200));
-            *slot.lock().unwrap() = Some(thread);
+            seen.store(
+                racer.exclusive_would_block(),
+                std::sync::atomic::Ordering::SeqCst,
+            );
         }));
         assert_eq!(limiter.check(&key(1)), Decision::Allow);
-        let thread = handle.lock().unwrap().take().unwrap();
-        assert_eq!(thread.join().unwrap(), Decision::Full);
+        assert!(blocked.load(std::sync::atomic::Ordering::SeqCst));
+        // What the racer would do once K's check ends: K was measured again, so it stays,
+        // and the new key finds the table full.
+        limiter.sweep();
+        assert_eq!(limiter.check(&key(2)), Decision::Full);
         assert_eq!(limiter.len(), 1);
+        assert!(!limiter.exclusive_would_block());
     }
 
     #[test]

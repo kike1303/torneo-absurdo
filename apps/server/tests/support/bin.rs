@@ -65,12 +65,24 @@ pub async fn warm_up() {
     .await;
 }
 
+/// Variables every server run needs since phase B (008 RF-B18), with test-only values. The
+/// variables of each test go after them, so a test can override or check any of them. With
+/// `dev-auth`, the gate needs a loopback `BIND_ADDR`.
+pub const DEFAULT_ENV: &[(&str, &str)] = &[
+    ("INTERNAL_API_SECRET", super::app::SECRET),
+    ("IP_HASH_KEY", super::app::IP_HASH_KEY),
+    ("DAILY_GRANT", "100"),
+    #[cfg(feature = "dev-auth")]
+    ("BIND_ADDR", "127.0.0.1"),
+];
+
 pub fn spawn(args: &[&str], envs: &[(&str, &str)]) -> ServerProcess {
     let mut command = Command::new(env!("CARGO_BIN_EXE_server"));
     command
         .args(args)
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .envs(DEFAULT_ENV.iter().copied())
         .envs(envs.iter().copied())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

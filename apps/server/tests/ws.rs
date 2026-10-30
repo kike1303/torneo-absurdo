@@ -3,37 +3,29 @@
 
 mod support;
 
-use std::ffi::OsString;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
-use server::app::{AppState, Settings};
-use server::config::Config;
-use server::db::{DbProbe, PingFuture};
+use server::app::Settings;
 use server::ws::{WsConfig, WsState};
 use support::app::{ORIGIN, RunningApp};
 use support::http;
 use support::ws::{self, Ending};
 use tokio_tungstenite::tungstenite::Message;
 
-struct AlwaysUp;
-
-impl DbProbe for AlwaysUp {
-    fn ping(&self) -> PingFuture<'_> {
-        Box::pin(async { true })
-    }
-}
-
 const SLOW: WsConfig = WsConfig {
     ping_interval: Duration::from_secs(30),
     pong_timeout: Duration::from_secs(60),
     idle_timeout: Duration::from_secs(120),
     close_grace: Duration::from_secs(2),
+    revalidate_interval: Duration::from_secs(300),
+    revalidate_timeout: Duration::from_secs(5),
+    handshake_validate_timeout: Duration::from_secs(5),
 };
 
 async fn start(ws: WsState) -> (RunningApp, Arc<WsState>) {
-    let state = AppState::new(Arc::new(AlwaysUp), &Settings::default(), ws);
+    let state = support::app::state_with_ws(&[], &Settings::default(), ws);
     let ws = state.ws.clone();
     (support::app::start(state).await, ws)
 }
@@ -182,20 +174,16 @@ async fn echo_disabled_closes_with_1008() {
     );
 }
 
+// A non-loopback origin never starts with `dev-auth`.
+#[cfg(not(feature = "dev-auth"))]
 #[tokio::test]
 async fn echo_flag_with_an_https_origin_stays_off() {
-    let config = Config::from_lookup(|name| match name {
-        "DATABASE_URL" => Some(OsString::from("postgres://u:p@127.0.0.1/db")),
-        "PUBLIC_ORIGIN" => Some(OsString::from("https://torneo.example")),
-        "ENABLE_WS_ECHO" => Some(OsString::from("1")),
-        _ => None,
-    })
-    .unwrap();
+    let config = support::config::config(&[("PUBLIC_ORIGIN", "https://torneo.example")]);
     let settings = Settings {
         ws: SLOW,
         ..Settings::default()
     };
-    let (app, _) = start(AppState::ws_from_config(&config, &settings)).await;
+    let (app, _) = start(server::app::AppState::ws_from_config(&config, &settings)).await;
     let mut client = ws::connect(app.addr, "https://torneo.example")
         .await
         .unwrap();
@@ -304,6 +292,9 @@ async fn a_client_that_never_reads_is_closed_after_the_pong_timeout() {
         pong_timeout: Duration::from_millis(300),
         idle_timeout: Duration::from_secs(10),
         close_grace: Duration::from_millis(200),
+        revalidate_interval: Duration::from_secs(300),
+        revalidate_timeout: Duration::from_secs(5),
+        handshake_validate_timeout: Duration::from_secs(5),
     };
     let (app, _) = start_echo(true, 2000, config).await;
     // A client that never writes after the handshake: no pongs, no close reply. It starts
@@ -332,6 +323,9 @@ async fn a_client_that_only_answers_pings_is_closed_when_idle() {
         pong_timeout: Duration::from_millis(400),
         idle_timeout: Duration::from_millis(800),
         close_grace: Duration::from_millis(500),
+        revalidate_interval: Duration::from_secs(300),
+        revalidate_timeout: Duration::from_secs(5),
+        handshake_validate_timeout: Duration::from_secs(5),
     };
     let (app, _) = start_echo(true, 2000, config).await;
     let mut client = ws::connect(app.addr, ORIGIN).await.unwrap();
@@ -355,6 +349,9 @@ async fn accepted_messages_reset_the_idle_timer() {
         pong_timeout: Duration::from_secs(60),
         idle_timeout: Duration::from_millis(600),
         close_grace: Duration::from_millis(500),
+        revalidate_interval: Duration::from_secs(300),
+        revalidate_timeout: Duration::from_secs(5),
+        handshake_validate_timeout: Duration::from_secs(5),
     };
     let (app, _) = start_echo(true, 2000, config).await;
     let mut client = ws::connect(app.addr, ORIGIN).await.unwrap();
@@ -387,11 +384,7 @@ async fn start_limited(ws: WsState, max_keys: usize) -> (RunningApp, Arc<WsState
         },
         ..Settings::default()
     };
-    let state = support::app::state_with_ws(
-        support::app::net(support::app::trusting_loopback(), false),
-        &settings,
-        ws,
-    );
+    let state = support::app::state_with_ws(&[support::app::TRUST_LOOPBACK], &settings, ws);
     let ws = state.ws.clone();
     (support::app::start(state).await, ws, clock)
 }

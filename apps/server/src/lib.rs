@@ -4,13 +4,18 @@
 //! build the router and the state in process.
 
 pub mod app;
+pub mod auth;
 mod cli;
 pub mod config;
 pub mod db;
 pub mod healthcheck;
 pub mod http;
+pub mod jobs;
+pub mod ledger;
 pub mod net;
+pub mod profile;
 pub mod rate;
+pub mod sessions;
 pub mod shutdown;
 pub mod telemetry;
 pub mod version;

@@ -1,0 +1,52 @@
+# Reserved display names (ADR-0008 D1 and its 2026-10-29 amendment). A name is reserved if
+# either of its two forms matches either form of a line: the key (UTS #39 skeleton over NFKC +
+# full case folding) of its letters and digits without accents, or the letters and digits of its
+# key, keyed again. So case, homoglyphs, accents, punctuation and spaces do not get around
+# them. One per line.
+admin
+administrador
+administradora
+moderador
+moderadora
+moderator
+mod
+root
+system
+sistema
+soporte
+support
+staff
+oficial
+official
+server
+servidor
+narrador
+narrator
+bot
+anonimo
+anonymous
+null
+undefined
+torneo
+torneoabsurdo
+torneo_absurdo
+torneo-absurdo
+torneoabsurdooficial
+absurdo
+torneo absurdo
+torneo.absurdo
+torneo absurdo oficial
+anónimo
+anónima
+anonima
+árbitro
+arbitro
+referee
+juez
+judge
+equipo
+team
+presentador
+host
+usuario eliminado
+deleted user

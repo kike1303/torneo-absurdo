@@ -41,6 +41,15 @@ pub fn pool_options() -> PgPoolOptions {
 /// The kind of a database error, as a code from a closed set. Never the error's `Display`,
 /// which may contain the host, the user or the connection options.
 pub fn error_kind(error: &sqlx::Error) -> &'static str {
+    // The fixed SQLSTATEs of the ledger triggers (008 RF-B2): codes, never Postgres' text.
+    if let Some(code) = error.as_database_error().and_then(|e| e.code()) {
+        match code.as_ref() {
+            "TA001" => return "ledger_immutable",
+            "TA002" => return "ledger_unbalanced",
+            "TA003" => return "ledger_closed",
+            _ => {}
+        }
+    }
     match error {
         sqlx::Error::Io(_) => "io",
         sqlx::Error::Tls(_) => "tls",
@@ -174,5 +183,27 @@ mod tests {
         })
         .await;
         assert_eq!(result, Ok(3));
+    }
+}
+
+/// Every SQL of the server binds its values (008 plan-b decision 7): sqlx's assert-safe
+/// wrapper, the only way to run a formatted string, never appears in the server sources.
+#[cfg(test)]
+mod sql_guard {
+    #[test]
+    fn no_formatted_sql_in_the_server() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let needle = ["Assert", "SqlSafe"].concat();
+        let mut stack = vec![src];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if std::fs::read_to_string(&path).unwrap().contains(&needle) {
+                    panic!("{} formats SQL", path.display());
+                }
+            }
+        }
     }
 }

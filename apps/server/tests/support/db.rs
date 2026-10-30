@@ -78,6 +78,17 @@ impl TestDb {
         url.to_string()
     }
 
+    /// A pool on this database with the server migrations applied.
+    pub async fn migrated_pool(&self) -> sqlx::PgPool {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(8)
+            .connect_with(self.options())
+            .await
+            .unwrap();
+        server::db::migrate(&pool).await.unwrap();
+        pool
+    }
+
     pub fn options(&self) -> PgConnectOptions {
         PgConnectOptions::from_str(self.url.as_str()).unwrap()
     }
@@ -99,6 +110,11 @@ impl TestDb {
     }
 }
 
+// The drop blocks the thread it runs on. A test that starts the app on this database must use a
+// multi-thread runtime (`#[tokio::test(flavor = "multi_thread")]`): on a single thread, a
+// connection the app is still opening (its revocation listener, its retention job) cannot move
+// while the drop waits, Postgres keeps that half-authenticated backend until
+// `authentication_timeout` (1 min), and `DROP DATABASE … WITH (FORCE)` waits for it.
 impl Drop for TestDb {
     fn drop(&mut self) {
         if !is_test_name(&self.name) {

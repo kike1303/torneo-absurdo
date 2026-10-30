@@ -4,7 +4,12 @@
 /**
  * Message from the client over `/ws` (RF-B5).
  *
- * In 001 the only variant is the development echo, which the server rejects unless
- * `ENABLE_WS_ECHO=1` on a loopback origin (RF-B13).
+ * The development echo, which the server rejects unless `ENABLE_WS_ECHO=1` on a loopback
+ * origin (RF-B13), and subscriptions (008 RF-B15). `channel` is free text on the wire: the
+ * server converts it with [`Channel::parse`] and refuses anything else with
+ * `ws.forbidden_channel`. No message changes server state (ADR-0008 D6).
  */
-export type ClientMessage = { type: 'echo'; payload: string };
+export type ClientMessage =
+  | { type: 'echo'; payload: string }
+  | { type: 'subscribe'; channel: string }
+  | { type: 'unsubscribe'; channel: string };

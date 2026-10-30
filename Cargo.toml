@@ -24,7 +24,7 @@ content = { path = "crates/content" }
 # No default features: no `std`, `os_rng` nor `serde` in the engine (003 RF5, RF6).
 rand_chacha = { version = "=0.9.0", default-features = false }
 wasm-bindgen = "=0.2.129"
-axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "matched-path", "tokio", "ws"] }
+axum = { version = "=0.8.9", default-features = false, features = ["form", "http1", "json", "matched-path", "query", "tokio", "ws"] }
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync", "io-util"] }
 tokio-util = { version = "=0.7.20", features = ["rt"] }
 tower = { version = "=0.5.3", features = ["util"] }
@@ -32,7 +32,7 @@ tower-http = { version = "=0.7.1", features = ["sensitive-headers", "set-header"
 hyper = { version = "=1.12.0", features = ["client", "http1", "server"] }
 hyper-util = { version = "=0.1.21", features = ["tokio", "server", "service"] }
 http-body-util = "=0.1.5"
-sqlx = { version = "=0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "migrate", "macros"] }
+sqlx = { version = "=0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "migrate", "macros", "uuid"] }
 url = "=2.5.8"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
@@ -54,6 +54,18 @@ governor = { version = "=0.10.4", default-features = false, features = ["std"] }
 subtle = "=2.6.1"
 # INTERNAL_API_SECRET decoding (already in the lock via rustls).
 base64 = "=0.22.1"
+# Session token hashes and ip_hash (008 phase B; already in the lock via sqlx, digest 0.11).
+sha2 = "=0.11.1"
+hmac = "=0.13.0"
+# OsRng for tokens, state, code_verifier and the alias (008 phase B; the line of rand_chacha 0.9).
+rand_core = { version = "=0.9.5", default-features = false, features = ["os_rng"] }
+# display_name (008 RF-B7): NFC/NFKC, graphemes, UTS #39 skeleton and full case folding.
+unicode-normalization = "=0.1.26"
+unicode-segmentation = "=1.13.3"
+unicode-security = "=0.1.2"
+caseless = "=0.2.2"
+# OAuth 2.0 client (ADR-0008 D2) without reqwest, curl nor ureq: the HTTP client is ours.
+oauth2 = { version = "=5.0.0", default-features = false }
 # Property tests of the server (dev-dependency only): no fork, timeout nor tempfile.
 proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
 

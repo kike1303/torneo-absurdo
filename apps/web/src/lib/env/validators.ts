@@ -35,3 +35,20 @@ function isBrowserOrigin(value: string): boolean {
 export function validateEnableDevCatalog(value: string | undefined): '1' | undefined {
   return value === '1' ? '1' : undefined;
 }
+
+/**
+ * Whether `origin` is `http` on a loopback host (`localhost`, `127.0.0.1` or `[::1]`), written as
+ * browsers send it. The same rule as the server's `is_loopback_http_origin` (spec 008, RF-B18):
+ * both run the table of `scripts/__fixtures__/loopback-origins.json`. Anything else, `https`
+ * included, is "outside loopback". Not wired to `env.ts` until phase D of 008.
+ */
+export function isLoopbackHttpOrigin(origin: string): boolean {
+  if (!isBrowserOrigin(origin)) return false;
+  const parsed = new URL(origin);
+  return (
+    parsed.protocol === 'http:' &&
+    (parsed.hostname === 'localhost' ||
+      parsed.hostname === '127.0.0.1' ||
+      parsed.hostname === '[::1]')
+  );
+}

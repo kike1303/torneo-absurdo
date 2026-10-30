@@ -5,13 +5,14 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Request, State};
+use axum::extract::{MatchedPath, Request, State};
 use axum::http::{HeaderMap, HeaderName, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::Response;
 use protocol::AuthErrorCode;
 
 use super::errors::error_response;
+use super::routes::RouteMethod;
 use crate::net::ClientContext;
 
 pub const SEC_FETCH_SITE: HeaderName = HeaderName::from_static("sec-fetch-site");
@@ -19,6 +20,26 @@ pub const X_CLIENT_ORIGIN: HeaderName = HeaderName::from_static("x-client-origin
 pub const X_CLIENT_FETCH_SITE: HeaderName = HeaderName::from_static("x-client-fetch-site");
 
 const SAME_ORIGIN: &[u8] = b"same-origin";
+
+/// Routes exempt from the check, as exact (method, route template) pairs: a closed table, never
+/// a prefix, so a new route is never exempt by accident (008 plan-b decision 10). Empty in the
+/// release binary. With `dev-auth`, the token endpoint of the dev provider, which the server
+/// calls from its own process (no `Origin`); it is authenticated by the single-use `code` and
+/// the `code_verifier`, and the gate only lets the server listen on loopback.
+pub const ORIGIN_EXEMPT: &[(RouteMethod, &str)] = &[
+    #[cfg(feature = "dev-auth")]
+    (RouteMethod::Post, "/api/auth/dev/oauth/token"),
+];
+
+/// Whether `method` on the route template `matched` is in [`ORIGIN_EXEMPT`].
+pub fn is_exempt(method: &Method, matched: Option<&str>) -> bool {
+    let Some(matched) = matched else {
+        return false;
+    };
+    ORIGIN_EXEMPT
+        .iter()
+        .any(|(m, path)| m.http() == *method && *path == matched)
+}
 
 /// The exact `PUBLIC_ORIGIN` a request must come from.
 #[derive(Debug, Clone)]
@@ -69,7 +90,13 @@ pub async fn layer(
         .extensions()
         .get::<ClientContext>()
         .is_some_and(|context| context.internal);
-    if policy.allows(request.method(), request.headers(), internal) {
+    let matched = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(MatchedPath::as_str);
+    if is_exempt(request.method(), matched)
+        || policy.allows(request.method(), request.headers(), internal)
+    {
         next.run(request).await
     } else {
         error_response(StatusCode::FORBIDDEN, AuthErrorCode::CsrfOrigin)
@@ -197,6 +224,34 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// 008 plan-b decision 10: a closed table of exact (method, route template) pairs, never a
+    /// prefix, and empty without `dev-auth`.
+    #[test]
+    fn the_origin_exemptions_are_a_closed_table() {
+        #[cfg(not(feature = "dev-auth"))]
+        assert!(ORIGIN_EXEMPT.is_empty());
+        #[cfg(feature = "dev-auth")]
+        assert_eq!(
+            ORIGIN_EXEMPT,
+            &[(RouteMethod::Post, "/api/auth/dev/oauth/token")]
+        );
+        for (method, path) in ORIGIN_EXEMPT {
+            assert!(is_exempt(&method.http(), Some(path)));
+        }
+        // Not a prefix: another dev route or another method is still checked.
+        assert!(!is_exempt(
+            &Method::POST,
+            Some("/api/auth/dev/oauth/authorize")
+        ));
+        assert!(!is_exempt(
+            &Method::POST,
+            Some("/api/auth/dev/oauth/token/")
+        ));
+        assert!(!is_exempt(&Method::PUT, Some("/api/auth/dev/oauth/token")));
+        assert!(!is_exempt(&Method::POST, Some("/api/auth/dev/")));
+        assert!(!is_exempt(&Method::POST, None));
     }
 
     #[test]
