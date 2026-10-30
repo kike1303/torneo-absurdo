@@ -188,16 +188,43 @@ describe('checkInternalApiEnv: the cross-checks, run by `init` (008 decision 1)'
     },
   );
 
-  it.each(['http://localhost:5173', 'http://127.0.0.1:4173', 'http://[::1]:5173'])(
-    'accepts the development secret on %s',
-    (publicOrigin) =>
-      expect(() =>
-        checkInternalApiEnv({
-          publicOrigin,
-          internalApiUrl: 'http://127.0.0.1:8080',
-          internalApiSecret: `${DEV_INTERNAL_API_SECRET}=`,
-        }),
-      ).not.toThrow(),
+  it.each([
+    ['http://localhost:5173', 'http://127.0.0.1:8080'],
+    ['http://127.0.0.1:4173', 'http://localhost:8080'],
+    ['http://[::1]:5173', 'http://127.0.0.1:8080'],
+  ])('accepts the development secret on %s', (publicOrigin, internalApiUrl) =>
+    expect(() =>
+      checkInternalApiEnv({
+        publicOrigin,
+        internalApiUrl,
+        internalApiSecret: `${DEV_INTERNAL_API_SECRET}=`,
+      }),
+    ).not.toThrow(),
+  );
+
+  // Kit's server `fetch` forwards every browser cookie to a URL whose host is the site's host
+  // or a subdomain of it, whatever the port (`runtime/server/fetch.js`).
+  it.each([
+    ['https://torneo.example', 'https://torneo.example:8443'],
+    ['https://torneo.example', 'http://api.torneo.example:8080'],
+    ['http://localhost:5173', 'http://localhost:8080'],
+  ])('refuses %s with INTERNAL_API_URL %s (same host or a subdomain)', (publicOrigin, url) => {
+    const message = thrown(() =>
+      checkInternalApiEnv({ ...base, publicOrigin, internalApiUrl: url }),
+    );
+    expect(message).toMatch(/env_invalid: INTERNAL_API_URL/);
+    expect(message).not.toContain(new URL(url).hostname);
+  });
+
+  it.each([
+    ['https://torneo.example', 'http://torneo-server:8080'],
+    ['https://torneo.example', 'http://torneo.example.internal:8080'],
+    ['http://localhost:5173', 'http://127.0.0.1:8080'],
+    ['http://localhost:4173', 'http://127.0.0.1:4180'],
+  ])('accepts %s with INTERNAL_API_URL %s', (publicOrigin, url) =>
+    expect(() =>
+      checkInternalApiEnv({ ...base, publicOrigin, internalApiUrl: url, internalApiSecret: OTHER }),
+    ).not.toThrow(),
   );
 
   it('refuses INTERNAL_API_URL equal to PUBLIC_ORIGIN, without the value', () => {

@@ -35,7 +35,7 @@ export const INTERNAL_API_URL_MISSING = 'INTERNAL_API_URL is required at runtime
 export const INTERNAL_API_URL_INVALID =
   'INTERNAL_API_URL must be an http(s) origin without path, query, fragment, credentials or trailing slash';
 export const INTERNAL_API_URL_IS_PUBLIC =
-  'env_invalid: INTERNAL_API_URL must differ from PUBLIC_ORIGIN (Kit would forward every browser cookie to it)';
+  'env_invalid: INTERNAL_API_URL must not be on the host of PUBLIC_ORIGIN nor on a subdomain of it, whatever the port (Kit would forward every browser cookie to it)';
 export const INTERNAL_API_SECRET_MISSING = 'INTERNAL_API_SECRET is required at runtime';
 export const INTERNAL_API_SECRET_INVALID =
   'INTERNAL_API_SECRET must be base64url (padding optional) that decodes to at least 32 bytes';
@@ -117,6 +117,16 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return diff === 0;
 }
 
+/**
+ * Kit's server `fetch` copies the browser's cookies to a URL whose host is the site's host or a
+ * subdomain of it, ports aside (`runtime/server/fetch.js`). Both values are serialized origins.
+ */
+function sharesCookies(internalApiUrl: string, publicOrigin: string): boolean {
+  const internal = new URL(internalApiUrl).hostname;
+  const site = new URL(publicOrigin).hostname;
+  return `.${internal}`.endsWith(`.${site}`);
+}
+
 export interface InternalApiEnv {
   publicOrigin: string | undefined;
   internalApiUrl: string | undefined;
@@ -133,7 +143,7 @@ export interface InternalApiEnv {
 export function checkInternalApiEnv(env: InternalApiEnv): void {
   const { publicOrigin, internalApiUrl, internalApiSecret } = env;
   if (publicOrigin === undefined) return;
-  if (internalApiUrl !== undefined && internalApiUrl === publicOrigin) {
+  if (internalApiUrl !== undefined && sharesCookies(internalApiUrl, publicOrigin)) {
     throw new Error(INTERNAL_API_URL_IS_PUBLIC);
   }
   if (internalApiSecret !== undefined && !isLoopbackHttpOrigin(publicOrigin)) {

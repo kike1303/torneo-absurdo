@@ -4,9 +4,10 @@ import {
   INTERNAL_API_URL,
   PUBLIC_ORIGIN,
 } from '$app/env/private';
-import type { HandleServerError, ServerInit } from '@sveltejs/kit/hooks';
+import type { HandleFetch, HandleServerError, ServerInit } from '@sveltejs/kit/hooks';
 import { sequence } from '@sveltejs/kit/hooks';
 import { checkInternalApiEnv } from '#lib/env/validators.js';
+import { createHandleFetch } from '#lib/server/hooks/handle-fetch.js';
 import { createDevGuard } from '#lib/server/hooks/dev-guard.js';
 import { handleError as handleServerError } from '#lib/server/hooks/handle-error.js';
 import { localeRedirect } from '#lib/server/hooks/locale-redirect.js';
@@ -39,3 +40,10 @@ export const handle = sequence(
 );
 
 export const handleError: HandleServerError = handleServerError;
+
+// Internal headers only towards INTERNAL_API_URL; every other fetch leaves without them (RF-D1).
+export const handleFetch: HandleFetch = createHandleFetch({
+  internalApiUrl: INTERNAL_API_URL ?? '',
+  secret: INTERNAL_API_SECRET ?? '',
+  publicOrigin: PUBLIC_ORIGIN ?? '',
+});
