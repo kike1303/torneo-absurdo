@@ -2,7 +2,7 @@
 id: "008"
 title: "Autenticación y sesiones, fase C: Google y Discord, cuenta, CLI de admin y ban"
 type: plan
-status: approved
+status: done
 risk: high
 author: backend-engineer
 reviewers: [architect]
@@ -12,7 +12,7 @@ approvals:
 linear: TA-26
 depends_on: ["001"]
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Plan: Autenticación y sesiones, fase C (desde spec.md 2026-10-28, con las enmiendas del 2026-10-29)
@@ -304,6 +304,8 @@ El job `rust` de CI ya corre `just check-rust` con Docker, así que el chequeo c
 
 `apps/web` no cambia (decisión 2). El `justfile` no cambia (decisión 13).
 
+**Tabla incompleta (cierre en plan-d, nota de architect en #55).** La implementación tocó además archivos que esta tabla no lista: el `justfile` (`prod-local-down` y `_prod-local-start`, desviación 2), `apps/server/src/app.rs` y los IT que llaman a `from_config` (`tests/ws.rs`, `tests/login_race.rs`, `tests/logout_db.rs`; desviación 6), `tests/support/{logs,oauth}.rs` y `tests/{oauth_provider_failures,logs_account}.rs` (desviación 7) y `tests/banned_writes.rs` con `begin_privileged` en `tests/support/db.rs` (desviación 16). Lo que dicen esas desviaciones manda sobre esta tabla.
+
 ## Orden de trabajo
 Cada paso empieza con sus tests en rojo, y el commit lleva el test y el arreglo juntos. Con un bug encontrado en el camino, primero el test que lo reproduce.
 
@@ -453,7 +455,7 @@ Todo queda bajo los timeouts actuales.
 
     El paso 1 agregó 24 paquetes al lock. Se compilan `tokio-rustls` (producción) y nueve de dev: `rcgen`, `pem`, `base64 0.23.1`, `time`, `time-core`, `deranged`, `powerfmt`, `num-conv` y `yasna`. Los otros 14 son dependencias opcionales de `rcgen` que no se activan (`default-features = false`): están en el lock, pero no en el grafo (`cargo tree -i x509-parser` no imprime nada). Son `x509-parser`, `asn1-rs`, `asn1-rs-derive`, `asn1-rs-impl`, `der-parser`, `oid-registry`, `rusticata-macros`, `nom`, `minimal-lexical`, `num-bigint`, `num-integer`, `bit-vec`, `time-macros` y `synstructure 0.13.2` (el grafo usa la `0.14.0` que ya estaba). Todos pasan `just crate-age`. El respaldo, si no se acepta, es el de la decisión 1: un par de PEM de prueba con la firma de security-reviewer.
 16. **El ban se vuelve a comprobar dentro de la escritura (hallazgo de QA).** `link` ya leía `users` con `banned_at IS NULL FOR UPDATE`, pero `unlink` y los dos `PUT` de `profile/update.rs` no: un `ban` que hacía commit entre `current()` y su escritura no la frenaba. Ahora `unlink` lee `SELECT 1 FROM users WHERE id = $1 AND banned_at IS NULL FOR UPDATE`, y los `UPDATE` del renombre y de las preferencias llevan `AND banned_at IS NULL` en el `WHERE`. Con READ COMMITTED, la sentencia espera el lock que toma la CLI y vuelve a evaluar la fila cuando el ban hace commit. Sin fila, la respuesta es la de una sesión que ya terminó: 401 `auth.unauthenticated`, con la cookie expirada y `private, no-store`. Es lo que da `POST /api/auth/link/{provider}` a un usuario baneado. En el callback de vincular el código sigue siendo `auth.invalid_state`, porque es una redirección. IT `tests/banned_writes.rs`: el test deja el ban sin commit con la fila bloqueada, espera a que la petición espere ese lock en Postgres, hace commit y exige 401 sin cambios. Mutantes comprobados, cada uno hace fallar su caso: quitar el `banned_at IS NULL` del `unlink`, del renombre y de las preferencias. El IT necesita un ban **sin commit**, así que `tests/support/db.rs` suma `begin_privileged(&pool)`: abre la transacción con el actor local, y `privileged` la reutiliza. El actor sigue fijado en un solo lugar de `tests/`. La primera versión lo fijaba en el propio IT, y la regla de `tests/admin_audit.rs` (decisión 10) la marcó.
-17. **Barrera barata contra SQL armado con texto (nota de QA).** El UT de fuente de `admin.rs` suma `no_sql_of_the_server_is_built_from_text`: en `src/` no puede aparecer el envoltorio `AssertSqlSafe` de sqlx, ni un `format!` como SQL de una llamada `query`, `query_as`, `query_scalar`, `query_with` o `raw_sql`. Es lo que dejaría pasar un `UPDATE users SET role …` dinámico que el chequeo por tokens no ve (el trigger `users_privileged_guard` es la otra barrera). La lista de archivos permitidos, `DYNAMIC_SQL_ALLOWED`, está vacía. Repite a propósito el `sql_guard` de B en `db.rs`, junto a la regla que protege. Tiene UT por forma, y su mutante (una función en `profile/update.rs` con `sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE users SET {column} = $1")))`) hace fallar el test.
+17. **Barrera barata contra SQL armado con texto (nota de QA).** El UT de fuente de `admin.rs` suma `no_sql_of_the_server_is_built_from_text`: en `src/` no puede aparecer el envoltorio `AssertSqlSafe` de sqlx, ni un `format!` como SQL de una llamada `query`, `query_as`, `query_scalar`, `query_with` o `raw_sql`. Es lo que dejaría pasar un `UPDATE users SET role …` dinámico que el chequeo por tokens no ve (el trigger `users_privileged_guard` es la otra barrera). La lista de archivos permitidos, `DYNAMIC_SQL_ALLOWED`, está vacía. Repite a propósito el `sql_guard` de B en `db.rs`, junto a la regla que protege. Tiene UT por forma, y su mutante (una función en `profile/update.rs` con `sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE users SET {column} = $1")))`) hace fallar el test. *Nota de cierre (plan-d, paso 1; nits de architect, security-reviewer y QA en #55):* con sqlx 0.9, `query*` exige `impl SqlSafeStr` (`&'static str`, `AssertSqlSafe` o `SqlStr`), así que un `format!` pasado directo no compila y esa mitad de la regla es redundante (se conserva por si una versión futura vuelve a aceptar `String`). El hueco real era un `&'static str` armado en tiempo de ejecución con `String::leak` o `Box::leak`: la regla marca ahora también `.leak(` y `Box::leak` en `src/`, con su forma en el UT y su mutante (`sqlx::query(format!("UPDATE users SET {c} = $1").leak())` en `profile/update.rs`).
 18. **Informativo: el binario de los IT depende de las features del último build.** Los IT que lanzan el binario (`support::bin`, `CARGO_BIN_EXE_server`) usan el que dejó el último `cargo build`/`cargo test`. Dos `cargo test` en paralelo, uno con `dev-auth` y otro sin, comparten `target/debug/server`, y uno pisa el binario del otro: `tests/logs_auth.rs` (que exige el proveedor `dev`) falla sin que haya un bug. `just _test-rust` corre las dos pasadas en serie, así que `just check` no se ve afectado. Hay que tenerlo en cuenta al correr las pasadas a mano.
 
 ## Revisión
