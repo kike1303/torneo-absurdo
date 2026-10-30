@@ -1,4 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+import { login as authLogin, test as authTest } from './auth/fixtures.js';
+import { PUBLIC_ORIGIN } from './support/topology.js';
 
 // Test 8 and the 375 px RNF: artifacts for review (no pixel comparison), plus no horizontal scroll.
 const SIZES = [
@@ -127,4 +129,53 @@ for (const log of TIME_LOGS) {
       expect(overflow).toBeLessThanOrEqual(0);
     });
   }
+}
+
+// 008 plan-d step 12: login (with and without an error), onboarding and account, at 375 and
+// 1280 px, dark and light, en and es. One login per test (its own x-e2e-client, so its own
+// AUTH_IP bucket). Checked against RF-D5 and "UI" of the spec: a 28 rem column at most, 44 px
+// targets, no horizontal scroll and the alias truncated in the header at 375 px.
+for (const lang of ['es', 'en'] as const) {
+  for (const theme of THEMES) {
+    authTest(`auth screens ${lang} ${theme}`, async ({ page, identity }) => {
+      await page.context().addCookies([{ name: 'theme', value: theme, url: PUBLIC_ORIGIN }]);
+      const shoot = async (name: string) => {
+        for (const size of SIZES) {
+          await page.setViewportSize(size);
+          await page.screenshot({
+            path: `${DIR}/${name}-${lang}-${size.name}-${theme}.png`,
+            fullPage: true,
+          });
+          await expectLayout(page, size.width);
+        }
+      };
+      await page.goto(`/${lang}/login`);
+      await shoot('login');
+      await page.goto(`/${lang}/login?error=auth.invalid_state`);
+      await shoot('login-error');
+      await authLogin(page, identity, lang);
+      await shoot('onboarding');
+      await page.goto(`/${lang}/account`);
+      await shoot('account');
+    });
+  }
+}
+
+/** No horizontal scroll, the content column within 28 rem and 44 px targets in <main>. */
+async function expectLayout(page: Page, width: number): Promise<void> {
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow, `overflow at ${width}`).toBeLessThanOrEqual(0);
+  const column = await page.locator('main section').first().boundingBox();
+  expect(column?.width ?? 0).toBeLessThanOrEqual(448);
+  const small = await page.evaluate(() =>
+    [...document.querySelectorAll('main button, main a, main input')]
+      .filter((el) => (el as HTMLElement).offsetParent !== null)
+      .filter((el) => el.getBoundingClientRect().height < 44)
+      .map((el) => el.outerHTML.slice(0, 80)),
+  );
+  expect(small, `targets under 44 px at ${width}`).toEqual([]);
+  const header = await page.getByTestId('header-switchers').boundingBox();
+  expect((header?.x ?? 0) + (header?.width ?? 0)).toBeLessThanOrEqual(width);
 }
