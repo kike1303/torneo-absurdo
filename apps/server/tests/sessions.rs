@@ -292,3 +292,71 @@ async fn revoke_expired_takes_only_dead_sessions() {
             .is_some()
     );
 }
+
+/// 008 RF-C3 (plan-c decision 6): every other session of the user, each notified, and never the
+/// one to keep nor another user's.
+#[tokio::test]
+async fn revoke_others_of_user_keeps_the_given_session() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let mut notes = listener(&pool).await;
+    let a = user(&pool, "user").await;
+    let b = user(&pool, "user").await;
+    let (keep, keep_token) = issue(&pool, a, protocol::Role::User).await;
+    let (a2, _) = issue(&pool, a, protocol::Role::User).await;
+    let (a3, _) = issue(&pool, a, protocol::Role::User).await;
+    let (b1, _) = issue(&pool, b, protocol::Role::User).await;
+    let mut tx = pool.begin().await.unwrap();
+    let mut gone = sessions::revoke(&mut tx, RevokeFilter::OthersOfUser { user: a, keep })
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    gone.sort_by_key(|id| id.uuid());
+    let mut expected = vec![a2, a3];
+    expected.sort_by_key(|id| id.uuid());
+    assert_eq!(gone, expected);
+    let mut seen = vec![next_id(&mut notes).await, next_id(&mut notes).await];
+    seen.sort();
+    let mut expected: Vec<String> = expected.iter().map(|id| id.uuid().to_string()).collect();
+    expected.sort();
+    assert_eq!(seen, expected);
+    let info = sessions::validate(&pool, &keep_token.hash())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(info.id, keep);
+    assert!(sessions::validate_by_id(&pool, b1).await.unwrap().is_some());
+}
+
+/// 008 RF-C7: "authenticated in the last 60 minutes", from Postgres' clock.
+#[tokio::test]
+async fn recently_authenticated_is_the_last_sixty_minutes() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let a = user(&pool, "admin").await;
+    let (id, token) = issue(&pool, a, protocol::Role::Admin).await;
+    let fresh = sessions::validate(&pool, &token.hash())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(fresh.recently_authenticated);
+    for (sql, expected) in [
+        (
+            "UPDATE sessions SET authenticated_at = now() - interval '59 minutes' WHERE id = $1",
+            true,
+        ),
+        (
+            "UPDATE sessions SET authenticated_at = now() - interval '61 minutes' WHERE id = $1",
+            false,
+        ),
+    ] {
+        set(&pool, sql, id).await;
+        let by_hash = sessions::validate(&pool, &token.hash())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(by_hash.recently_authenticated, expected, "{sql}");
+        let by_id = sessions::validate_by_id(&pool, id).await.unwrap().unwrap();
+        assert_eq!(by_id.recently_authenticated, expected, "{sql}");
+    }
+}

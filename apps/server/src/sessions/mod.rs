@@ -103,12 +103,15 @@ pub struct SessionInfo {
     pub id: SessionId,
     pub user_id: Uuid,
     pub role: Role,
+    /// `authenticated_at` in the last 60 minutes, by Postgres' clock (RF-C7, `RecentAdmin`).
+    pub recently_authenticated: bool,
 }
 
 impl fmt::Debug for SessionInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SessionInfo")
             .field("role", &self.role)
+            .field("recently_authenticated", &self.recently_authenticated)
             .finish_non_exhaustive()
     }
 }
@@ -238,8 +241,9 @@ mod const_format_valid {
     macro_rules! lookup {
         ($by:literal) => {
             concat!(
-                "SELECT s.id, s.user_id, u.role FROM sessions s JOIN users u ON u.id = s.user_id \
-                 WHERE ",
+                "SELECT s.id, s.user_id, u.role, \
+                 s.authenticated_at > now() - interval '60 minutes' \
+                 FROM sessions s JOIN users u ON u.id = s.user_id WHERE ",
                 $by,
                 " AND u.banned_at IS NULL AND s.expires_at > now() \
                  AND s.last_seen_at > now() - interval '7 days'"
@@ -262,6 +266,7 @@ async fn finish(
         id: SessionId(row.try_get(0)?),
         user_id: row.try_get(1)?,
         role: role_from_db(row.try_get::<&str, _>(2)?),
+        recently_authenticated: row.try_get(3)?,
     };
     sqlx::query(
         "UPDATE sessions SET last_seen_at = now() \
@@ -278,6 +283,11 @@ async fn finish(
 pub enum RevokeFilter {
     One(SessionId),
     AllOfUser(Uuid),
+    /// Every session of `user` but `keep` (an unlink, RF-C3).
+    OthersOfUser {
+        user: Uuid,
+        keep: SessionId,
+    },
     Token(TokenHash),
     /// Past `expires_at` or idle for 7 days (the retention job).
     Expired,
@@ -299,6 +309,13 @@ pub async fn revoke(
         RevokeFilter::AllOfUser(user) => {
             sqlx::query("DELETE FROM sessions WHERE user_id = $1 RETURNING id")
                 .bind(user)
+                .fetch_all(&mut *tx)
+                .await?
+        }
+        RevokeFilter::OthersOfUser { user, keep } => {
+            sqlx::query("DELETE FROM sessions WHERE user_id = $1 AND id <> $2 RETURNING id")
+                .bind(user)
+                .bind(keep.0)
                 .fetch_all(&mut *tx)
                 .await?
         }
