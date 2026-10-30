@@ -92,3 +92,8 @@ jobs:
     permissions: {}
     steps:
       - run: echo verify
+      - name: Security headers (ADR-0012 B2)
+        run: |
+          # ADR-0012 B1 plus B4.6.
+          b1="default-src 'self'; script-src 'self' 'nonce-*'; form-action 'self' https://accounts.google.com/o/oauth2/v2/auth https://discord.com/oauth2/authorize; frame-ancestors 'none'"
+          echo "$b1"

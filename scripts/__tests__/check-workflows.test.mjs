@@ -770,6 +770,54 @@ const E2E_CASES = [
   ],
 ];
 
+// ADR-0012 B6.4 item 7 (2026-10-30 amendment): the b1= of images and of verify, once each and
+// identical byte for byte.
+const B1_LINE =
+  "          b1=\"default-src 'self'; script-src 'self' 'nonce-*'; form-action 'self' https://accounts.google.com/o/oauth2/v2/auth https://discord.com/oauth2/authorize; frame-ancestors 'none'\"\n";
+const VERIFY_HEADERS =
+  '      - name: Security headers (ADR-0012 B2)\n        run: |\n          # ADR-0012 B1 plus B4.6.\n';
+const IMAGES_HEADERS =
+  '      - name: Health, version and headers (RF-C7)\n        run: |\n          # ADR-0012 B1 plus B4.6.\n';
+
+/** @type {[string, Record<string, [string, string][]>, RegExp][]} */
+const CSP_CASES = [
+  [
+    'the b1= of release.yml differs from the one of images',
+    { [REL]: [[B1_LINE, B1_LINE.replace("form-action 'self' ", "form-action 'self' https: ")]] },
+    /csp-b1: the b1= of jobs\.images .* and of jobs\.verify .* must be identical byte for byte/,
+  ],
+  [
+    'the b1= of ci.yml differs only in a space',
+    { [CI]: [[B1_LINE, B1_LINE.replace("'self'; script-src", "'self';  script-src")]] },
+    /csp-b1: .* must be identical byte for byte/,
+  ],
+  [
+    'verify without b1=',
+    { [REL]: [[B1_LINE, '']] },
+    /release\.yml: csp-b1: jobs\.verify .*Security headers \(ADR-0012 B2\).* must set b1= exactly once, found 0/,
+  ],
+  [
+    'images without b1=',
+    { [CI]: [[B1_LINE, '']] },
+    /ci\.yml: csp-b1: jobs\.images .*Health, version and headers \(RF-C7\).* must set b1= exactly once, found 0/,
+  ],
+  [
+    'b1= twice in images',
+    { [CI]: [[B1_LINE, B1_LINE + B1_LINE]] },
+    /ci\.yml: csp-b1: jobs\.images .* found 2/,
+  ],
+  [
+    'the headers step of verify renamed',
+    { [REL]: [[VERIFY_HEADERS, VERIFY_HEADERS.replace('(ADR-0012 B2)', '(B2)')]] },
+    /release\.yml: csp-b1: jobs\.verify must have exactly one step named "Security headers \(ADR-0012 B2\)", found 0/,
+  ],
+  [
+    'the headers step of images twice',
+    { [CI]: [[IMAGES_HEADERS, `${IMAGES_HEADERS}${B1_LINE}      - name: x\n${IMAGES_HEADERS}`]] },
+    /ci\.yml: csp-b1: jobs\.images must have exactly one step named "Health, version and headers \(RF-C7\)", found 2/,
+  ],
+];
+
 // 008 RF-D9, plan-d decision 12: the release binary check.
 const CHECK_BUILD = '      - name: Build server for the binary check (not pushed)\n';
 const PUSH_BUILD = '      - name: Build and push server\n';
@@ -1009,12 +1057,19 @@ describe('check-workflows (RF-C12, plan-c decision 23)', () => {
     ).toBe(true);
   });
 
-  it.each(RELEASE_CASES)('fails on: %s', (_name, edits, pattern) => {
+  it.each([...CSP_CASES, ...RELEASE_CASES])('fails on: %s', (_name, edits, pattern) => {
     const problems = checkWorkflows(mutated(edits));
     expect(
       problems.some((p) => pattern.test(p)),
       problems.join('\n') || '(no problems)',
     ).toBe(true);
+  });
+
+  it('compares b1= byte for byte, also when the two copies differ only in quotes', () => {
+    const tree = mutated({
+      [REL]: [[B1_LINE, B1_LINE.replace('b1="', "b1='").replace(/"\n$/, "'\n")]],
+    });
+    expect(checkWorkflows(tree).filter((p) => p.includes('csp-b1'))).toHaveLength(1);
   });
 
   it('fails without infra/compose.dev.yml when ci.yml has a Postgres service', () => {

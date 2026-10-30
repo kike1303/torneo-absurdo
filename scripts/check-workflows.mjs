@@ -48,6 +48,13 @@ const CACHE_KEY_ENV = /^(?:CARGO_|RUST)/;
 const E2E_IF = "needs.changes.outputs.e2e == 'true'";
 const COMPOSE_DEV = 'infra/compose.dev.yml';
 
+// ADR-0012 B6.4 item 7 (2026-10-30 amendment): the two copies of the web CSP in the workflows.
+const CSP_STEPS = [
+  { workflow: 'ci.yml', job: 'images', step: 'Health, version and headers (RF-C7)' },
+  { workflow: 'release.yml', job: 'verify', step: 'Security headers (ADR-0012 B2)' },
+];
+const B1_ASSIGNMENT = /^[ \t]*b1=(.*)$/gm;
+
 // 008 RF-D9, plan-d decision 12: the server image of a release is built twice with the same
 // inputs, checked between the two builds and compared by config digest before the retention.
 const BUILD_PUSH = /^docker\/build-push-action@/i;
@@ -350,6 +357,43 @@ function checkE2e(jobs, file, problems, tree) {
         );
       }
     }
+  }
+}
+
+/**
+ * ADR-0012 B6.4 item 7: `b1=` appears once in the headers step of `images` (ci.yml) and once in
+ * the one of `verify` (release.yml), and both are identical byte for byte. `images` compares the
+ * first with the image, so the second is checked before the merge, in `policy`.
+ * @param {Map<string, any>} docs parsed workflows by file name
+ */
+function checkCspCopies(docs, problems) {
+  /** @type {{ where: string, value: string }[]} */
+  const values = [];
+  for (const { workflow, job, step } of CSP_STEPS) {
+    const doc = docs.get(workflow);
+    if (!doc) continue;
+    const file = `${WORKFLOWS_DIR}/${workflow}`;
+    const steps = Array.isArray(doc.jobs?.[job]?.steps) ? doc.jobs[job].steps : [];
+    const named = steps.filter((s) => isMap(s) && s.name === step);
+    if (named.length !== 1) {
+      problems.push(
+        `${file}: csp-b1: jobs.${job} must have exactly one step named ${show(step)}, found ${named.length}`,
+      );
+      continue;
+    }
+    const run = typeof named[0].run === 'string' ? named[0].run : '';
+    const found = [...run.matchAll(B1_ASSIGNMENT)];
+    const where = `jobs.${job} (${step})`;
+    if (found.length !== 1) {
+      problems.push(`${file}: csp-b1: ${where} must set b1= exactly once, found ${found.length}`);
+      continue;
+    }
+    values.push({ where: `${where} of ${workflow}`, value: found[0][1] });
+  }
+  if (values.length === 2 && values[0].value !== values[1].value) {
+    problems.push(
+      `${WORKFLOWS_DIR}/release.yml: csp-b1: the b1= of ${values[0].where} and of ${values[1].where} must be identical byte for byte (ADR-0012 B6.4 item 7)`,
+    );
   }
 }
 
@@ -686,6 +730,8 @@ export function checkWorkflows(tree) {
     }
   }
 
+  /** @type {Map<string, any>} */
+  const docs = new Map();
   for (const file of [...workflows, ...actions]) {
     const text = tree.read(file);
     if (text === null) continue;
@@ -693,10 +739,12 @@ export function checkWorkflows(tree) {
     checkText(text, parsed?.document, file, problems);
     if (!parsed) continue;
     checkSecrets(parsed.document, file, problems);
-    if (workflows.includes(file))
+    if (workflows.includes(file)) {
+      docs.set(path.posix.basename(file), parsed.doc);
       checkWorkflow(parsed.doc, path.posix.basename(file), file, problems, local, tree);
-    else checkAction(parsed.doc, file, problems, local);
+    } else checkAction(parsed.doc, file, problems, local);
   }
+  checkCspCopies(docs, problems);
   return problems;
 }
 

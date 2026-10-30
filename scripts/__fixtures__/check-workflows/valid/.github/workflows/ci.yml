@@ -100,6 +100,11 @@ jobs:
       - run: echo images
       - name: Server binary
         run: node scripts/check-release-binary.mjs "$RUNNER_TEMP/server"
+      - name: Health, version and headers (RF-C7)
+        run: |
+          # ADR-0012 B1 plus B4.6.
+          b1="default-src 'self'; script-src 'self' 'nonce-*'; form-action 'self' https://accounts.google.com/o/oauth2/v2/auth https://discord.com/oauth2/authorize; frame-ancestors 'none'"
+          echo "$b1"
   ci-ok:
     needs: [changes, policy, rust, web, e2e-server, e2e, images]
     if: always()
