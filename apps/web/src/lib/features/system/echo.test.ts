@@ -112,6 +112,17 @@ describe('closeReasonKey', () => {
   it('auth.try_again → try_again', () => {
     expect(closeReasonKey('auth.try_again')).toBe('ws_close_reason_try_again');
   });
+  // #53: `ws.ip_capacity` and `ws.capacity` are a 503 before the upgrade, which the browser
+  // only sees as 1006 without a reason (008 plan-d, notes closed in D).
+  it('1006 without a reason → abnormal (rejected or cut)', () => {
+    expect(closeReasonKey('', 1006)).toBe('ws_close_reason_abnormal');
+  });
+  it('1006 with a reason still decides by the reason', () => {
+    expect(closeReasonKey('ws.capacity', 1006)).toBe('ws_close_reason_capacity');
+  });
+  it('another code without a reason → unknown', () => {
+    expect(closeReasonKey('', 1012)).toBe('ws_close_reason_unknown');
+  });
   it.each(['', 'ws.unknown', 'http.not_found', 'auth.csrf_origin', 'Going away'])(
     '%j → unknown',
     (reason) => {
