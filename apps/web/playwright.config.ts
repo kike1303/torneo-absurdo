@@ -10,6 +10,7 @@ import {
   PUBLIC_ORIGIN,
   SERVER_PORT,
 } from './e2e/support/topology.js';
+import { assertE2eTarget } from './e2e/support/db.mjs';
 
 // e2e against `node build` and the server (RF-C10, ADR-0009 D5 amended, 008 RF-D7 and plan-d
 // decision 10). Everything listens on 127.0.0.1:
@@ -34,7 +35,9 @@ function required(name: string): string {
 
 const secret = required('E2E_INTERNAL_API_SECRET');
 const ipHashKey = required('E2E_IP_HASH_KEY');
+// The same guard as the seeding and the ban CLI: the dev-auth server gets this URL too.
 const databaseUrl = required('E2E_DATABASE_URL');
+assertE2eTarget(databaseUrl);
 const serverBin = required('E2E_SERVER_BIN');
 if (!path.isAbsolute(serverBin)) {
   throw new Error('E2E_SERVER_BIN must be an absolute path (Playwright runs in apps/web)');

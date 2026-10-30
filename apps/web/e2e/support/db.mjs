@@ -31,6 +31,12 @@ export function assertE2eTarget(url) {
   if (!url) throw new Error('E2E_DATABASE_URL is required');
   if (!URL.canParse(url)) throw new Error('E2E_DATABASE_URL is not a URL');
   const parsed = new URL(url);
+  // No query or fragment at all, an empty `?` or `#` included: sqlx takes `host`, `hostaddr` and
+  // `dbname` from the query and postgres.js takes `database`, so any parameter could send the
+  // server, the seeding or the ban CLI to another database behind a URL that passes the rest.
+  if (parsed.search || parsed.hash || url.includes('?') || url.includes('#')) {
+    throw new Error('E2E_DATABASE_URL must carry no query string or fragment');
+  }
   if (parsed.protocol !== 'postgres:' && parsed.protocol !== 'postgresql:') {
     throw new Error('E2E_DATABASE_URL must be a postgres:// URL');
   }

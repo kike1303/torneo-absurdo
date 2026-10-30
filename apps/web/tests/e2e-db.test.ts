@@ -50,6 +50,31 @@ describe('assertE2eTarget', () => {
     expect(text).not.toContain('example.com');
   });
 
+  // Security review of PR #56: sqlx reads `host`, `hostaddr` and `dbname` from the query and
+  // postgres.js reads `database`, so a query would retarget a URL that passes the other rules.
+  it.each([
+    `${url('127.0.0.1', 'torneo_e2e')}?host=db.example.com`,
+    `${url('127.0.0.1', 'torneo_e2e')}?hostaddr=10.0.0.5`,
+    `${url('127.0.0.1', 'torneo_e2e')}?dbname=torneo`,
+    `${url('127.0.0.1', 'torneo_e2e')}?database=torneo`,
+    `${url('127.0.0.1', 'torneo_e2e')}?sslmode=disable`,
+    `${url('127.0.0.1', 'torneo_e2e')}?`,
+    `${url('postgres', 'torneo_e2e')}#db.example.com`,
+    `${url('postgres', 'torneo_e2e')}#`,
+  ])('refuses a query or fragment: %s, without the URL', (value) => {
+    const text = message(() => assertE2eTarget(value));
+    expect(text).toMatch(/no query string or fragment/);
+    expect(text).not.toContain(PASSWORD);
+    expect(text).not.toContain('example.com');
+    expect(text).not.toContain('10.0.0.5');
+  });
+
+  it('a helper refuses a query before connecting', async () => {
+    await expect(reset(`${url('127.0.0.1', 'torneo_e2e')}?host=db.example.com`)).rejects.toThrow(
+      /no query string or fragment/,
+    );
+  });
+
   it('reset and the helpers refuse before connecting', async () => {
     await expect(reset(url('db.example.com', 'torneo_e2e'))).rejects.toThrow(/must point at/);
     await expect(reset(url('127.0.0.1', 'torneo'))).rejects.toThrow(/torneo_e2e/);
