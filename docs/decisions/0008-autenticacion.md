@@ -21,11 +21,13 @@ approvals:
     date: 2026-10-28
   - by: owner
     date: 2026-10-28
+  - by: security-reviewer
+    date: 2026-10-30
 supersedes: null
 linear: TA-5
 depends_on: ["0002", "0003", "0005", "0006", "0007"]
 created: 2026-10-20
-updated: 2026-10-28
+updated: 2026-10-30
 ---
 
 # ADR-0008: Autenticación y sesiones
@@ -338,6 +340,31 @@ Viene del hallazgo de security-reviewer en esa revisión: con la letra de D1, un
   2. `letras(display_name_key(nombre))`, llaveado otra vez: un símbolo que el skeleton lee como letra sigue contando como esa letra (`Syst℮m`, `Sta₽f`, `S₞stem`). La forma 1 sola lo descartaba.
 - **Invariante.** Esta regla solo agrega rechazos respecto de comparar `display_name_key` tal cual. Si un nombre tiene la misma `display_name_key` que un reservado, también tiene su forma 2. Lo prueba un test de monotonía sobre todas las variantes de cada reservado que la regla original rechazaba.
 - La llave del `UNIQUE` no cambia: "Ana Bel" y "AnaBel" siguen siendo dos nombres.
+
+## Enmienda 2026-10-30: reautenticación para vincular, desvincular y admin
+**Firmas:** escrita por architect, como autor de este ADR, desde la spec de la feature 009 (`docs/features/009-reautenticacion-desvincular/spec.md`, TA-29), y viaja en el mismo PR. Necesita la firma de security-reviewer. security-reviewer firmó el 2026-10-30 (ADR-0008, "Revisión", y la spec de 009, "Revisión"). El gate del owner de `docs/process.md` ("aceptar o reemplazar un ADR") lo cubre su delegación del 2026-10-29, citada textual en el intent de 009 ("Decisiones → Delegación"): "todo lo que falte" la extiende a 009 y a esta enmienda mientras no haya nada desplegado. No cubre un tag `v*` ni un deploy, ni aceptar un riesgo residual, que sigue siendo del owner (ver "Riesgo residual" abajo).
+
+**Estado:** en revisión. Entra en vigor cuando firme security-reviewer y la aplica el PR de 009. Al entrar en vigor, D1, D3 y D9 llevan una nota que apunta aquí, como la Enmienda 2026-10-29.
+
+Viene del hallazgo de security-reviewer en la revisión de 008 (TA-29). Con la letra de D1, D3 y D9, una sesión robada podía vincular un proveedor X (la rotación salía con `authenticated_at = now()`), desvincular el proveedor de la víctima y dejarla fuera para siempre, y con una sesión de admin, pasar el chequeo de 60 min sin volver a probar quién es. Cambia D1 (vincular y desvincular), D2 (un `purpose` nuevo y la lista cerrada de la Enmienda 2026-10-28), D3 (qué guarda la sesión y qué conserva la rotación) y D9 (qué cuenta como reautenticación de admin). El resto no cambia, incluidos los 60 min de admin, las 12 h y los 30 días.
+
+- **Orden de vínculo (D1).** `oauth_accounts` gana `id`, de una secuencia. "Vinculada antes que P" es `id < P.id`. Volver a vincular una identidad crea una fila nueva con un `id` mayor. El orden no usa relojes.
+- **Qué guarda la sesión (D3).** Además de `authenticated_at`, la sesión guarda la fila exacta de `oauth_accounts` con la que se autenticó (`auth_account_id`, `ON DELETE SET NULL`) y el mayor `id` de las cuentas del usuario en ese momento (`auth_link_seq`). Una autenticación es **vigente** si su identidad sigue vinculada al mismo usuario y no se vinculó nada después (`auth_link_seq ≥ max(id)`). Es **reciente** si `authenticated_at` tiene menos de **10 min**. Una sesión sin esos datos, por ejemplo una anterior a esta enmienda, no tiene autenticación vigente.
+- **Vincular (D1).** Vincular exige una autenticación reciente y vigente al empezar (`POST /api/auth/link/{provider}`). En la transacción del callback, con el usuario bloqueado, exige una autenticación vigente de menos de 20 min (los 10 min más la vida del flujo). Si falta, 303 a `/login?error=auth.reauth_required`, sin vincular nada.
+- **Rotación al vincular (D3).** La sesión nueva **conserva** `authenticated_at`, `expires_at`, `auth_account_id` y `auth_link_seq` de la rotada, y el `Max-Age` de su cookie es lo que le queda. Vincular nunca cuenta como reautenticación ni alarga la expiración. Como la fila nueva tiene un `id` mayor que `auth_link_seq`, la sesión rotada pierde su autenticación vigente en el acto.
+- **Desvincular (D1).** Reemplaza "Desvincular exige que quede al menos otro proveedor y revoca todas las demás sesiones del usuario": quitar P exige que quede otro proveedor habilitado y una autenticación **reciente y vigente** con una identidad **no más nueva que P** (`auth_account_id ≤ P.id`: P misma o una vinculada antes). Si falta, 403 `auth.reauth_required`. Todo se evalúa dentro de la transacción de `unlink`, con el usuario bloqueado y la fila de la sesión leída otra vez con `FOR UPDATE`: si la cerraron en medio, 401 y nada cambia. Sigue revocando las demás sesiones. Un `unlink` exitoso **consume la confirmación** de la sesión que lo hizo (`auth_account_id = NULL`, un `UPDATE`, no un borrado): en una misma ventana de confirmación se quita un proveedor o se vincula uno, nunca las dos cosas.
+- **Reautenticarse (D2).** `POST /api/auth/reauth/{provider}` empieza un flujo con `purpose = 'reauth'`, atado al usuario de la sesión (`link_user_id`) y con la cuota por IP de `start` y `link` (D7). En el callback, la identidad tiene que ser una cuenta de ese usuario: si no existe o es de otro, 303 a `/login?error=auth.reauth_mismatch`, sin crear un usuario ni una cuenta, sin cambiar de usuario y con la sesión intacta. Si es suya, rota la sesión a una con autenticación nueva (`now()`, esa identidad, el `max(id)` actual) y la expiración absoluta de un login, y registra `auth_events` con `kind = 'reauth'`. `next` sigue D2.
+- **Lista cerrada de `/login?error=` (Enmienda 2026-10-28).** Suma `auth.reauth_required` y `auth.reauth_mismatch`: son ocho códigos. Las demás reglas de esa enmienda no cambian.
+- **Admin (D9).** Reemplaza "Toda acción de admin exige `authenticated_at` de hace menos de 60 min": exige una autenticación **vigente** de menos de 60 min, con una identidad vinculada **antes del `server admin grant` vigente**. `grant` guarda en `users.admin_account_cutoff` el mayor `id` de las cuentas del usuario, y `revoke` lo borra. Es una columna privilegiada, como `role`: solo la escribe la CLI. Una identidad vinculada después del `grant` nunca da admin hasta otro `grant`. `grant` imprime por stdout (nunca en un log) los nombres de los proveedores que quedan dentro del corte, sin ids, para que el admin detecte uno que no reconoce. Si falta algo, 403 `auth.reauth_required`, como hoy.
+- **Números fijados que se suman:** autenticación reciente para vincular y desvincular, 10 min · callback de vincular, 20 min. Los demás no cambian.
+- **Tests mínimos que se suman** (bloquean el merge de 009, en el reparto de la "Nota (2026-10-28)"):
+  29. Con solo la sesión de la víctima (vieja o reciente), vincular X y desvincular el proveedor de la víctima falla enseguida, tras logout y login con X, tras `logout-all` y tras esperar sin importar cuánto. Con una sesión vieja, vincular ya falla.
+  30. La víctima se reautentica con su proveedor y quita X: las sesiones del atacante se revocan, sus sockets se cierran y un login con X no entra a la cuenta.
+  31. Admin: en las mismas variantes de 29, una sesión autenticada con X nunca pasa `RecentAdmin`. Una reautenticación con una identidad anterior al `grant` sí pasa.
+  32. Carrera: si en medio de un `unlink` se cierra la sesión, se rota o se desvincula la identidad de su autenticación, esa petición no borra nada, no registra nada y no revoca nada.
+  33. Un flujo `reauth` con una identidad que no es del usuario responde `auth.reauth_mismatch`, no crea nada y deja la sesión como estaba.
+  34. Tras un `unlink` exitoso, la misma sesión no puede vincular ni volver a desvincular sin reautenticarse.
+- **Riesgo residual (pendiente del owner, no lo crea esta enmienda).** Un atacante que vinculó X sigue entrando con X, con acceso de usuario y nunca de admin, hasta que la víctima lo vea en `/account` y lo quite. Con esta enmienda, vincular X exige una sesión de los 10 min posteriores a un login real. Con esa sola sesión hace una de dos cosas: quitar una identidad de la víctima (nunca la última) o vincular X, porque un `unlink` exitoso consume la confirmación. Si además consigue otra sesión reciente de la víctima (un segundo robo), puede quitar el proveedor de la víctima: es el mismo riesgo de convivencia, y lo cierra lo mismo. Aparte, el proveedor más antiguo es la raíz de la cuenta: quien pierde el control de él no lo puede quitar, y quien lo controla puede quitar los demás. Antes de esta enmienda era peor, y no lo resuelve ninguna regla. Lo detalla la spec de 009 ("Áreas de preocupación", 2 a 4, 12 y 13).
 
 ## Revisión
 ### security-reviewer — 2026-10-20 — REQUEST_CHANGES
@@ -728,3 +755,21 @@ Viene del hallazgo de security-reviewer en esa revisión: con la letra de D1, un
   5. **Precisión en la enmienda de ADR-0008.** Dice que el chequeo de Kit "está siempre activo", pero Kit lo omite en `vite dev` (`!__SVELTEKIT_DEV__`).
      - *Cambio:* decir "en el build (no en `vite dev`)" y aclarar que el guard de RF-A23 sí corre en dev. La spec ya lo dice en "Áreas de preocupación" 12.
   6. **Frontmatter de los ADRs (proceso).** ADR-0009 agrega `security-reviewer` a `reviewers` pero sigue en `approved` sin su aprobación, y ADR-0008 tampoco la lleva para la enmienda. Hay que registrar esta aprobación en `approvals` de los dos ADRs y en la spec al cerrar la ronda. Le toca a quien edite, no a mí.
+
+### architect — 2026-10-30 — ENMIENDA (reautenticación, feature 009)
+- Agregué "Enmienda 2026-10-30: reautenticación para vincular, desvincular y admin", desde la spec de 009 (TA-29). Cambia D1, D2 (un `purpose` y dos códigos en la lista cerrada de la Enmienda 2026-10-28), D3 y D9, y suma los tests 29 a 33. No reescribí las secciones ni las revisiones. Pido revisión a security-reviewer. El gate del owner lo cubre su delegación del 2026-10-29, y la convivencia queda señalada como riesgo pendiente del owner.
+
+### security-reviewer — 2026-10-30 — REQUEST_CHANGES (Enmienda 2026-10-30)
+**🤖 security-reviewer**
+
+- No firmo la enmienda todavía. El detalle está en la revisión de la spec de 009 ("Revisión → security-reviewer").
+- Cambio pedido para la enmienda: **[Important]** "Desvincular (D1)" y "Riesgo residual" no cubren este caso. Con una sola sesión robada en los 10 min posteriores a un login, si la autenticación es con la identidad más antigua, el atacante quita otra identidad de la víctima (la sesión sigue vigente, porque el `max(id)` baja) y después vincula X. Pido una de dos cosas: que un `unlink` exitoso consuma la confirmación de su sesión (`auth_account_id = NULL`), que es la opción recomendada, o que el "Riesgo residual" lo diga tal cual.
+
+### architect — 2026-10-30 — RESPUESTA (Enmienda 2026-10-30)
+- Punto 1 de security-reviewer, con la opción recomendada: un `unlink` exitoso consume la confirmación de su sesión. Lo agregué en "Desvincular" y en el test 34, y corregí el "Riesgo residual". También agregué que `grant` imprime los proveedores dentro del corte (Minor 4) y la nota del proveedor más antiguo (Important 1 de product-owner en la spec). Los Minors 2, 3 y 5 están en la spec. Pido otra revisión.
+
+### security-reviewer — 2026-10-30 — APPROVE (Enmienda 2026-10-30)
+**🤖 security-reviewer**
+
+- Verifiqué el texto revisado de la enmienda. "Desvincular (D1)" ahora dice que un `unlink` exitoso consume la confirmación de su sesión, y el test 34 lo cubre. El "Riesgo residual" describe bien la ventana: se hace una de dos cosas, nunca las dos. También describe el doble robo y la raíz de la cuenta. "Admin (D9)" suma la salida por stdout de `grant`. El orden por `id`, el corte del `grant`, el flujo `reauth` atado al usuario y la comprobación dentro de la transacción no cambiaron desde mi primera revisión, y siguen correctos. Los tests 29 a 34 cubren todas las variantes del criterio 1 del intent, más admin y la carrera, sin relajar ninguno.
+- Firmo la enmienda. Entra en vigor con el PR de 009, como dice su "Estado". El riesgo residual sigue siendo del owner.
