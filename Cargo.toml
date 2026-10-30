@@ -66,6 +66,13 @@ unicode-security = "=0.1.2"
 caseless = "=0.2.2"
 # OAuth 2.0 client (ADR-0008 D2) without reqwest, curl nor ureq: the HTTP client is ours.
 oauth2 = { version = "=5.0.0", default-features = false }
+# TLS of the OAuth client (008 plan-c decision 1): tokio-rustls without its default
+# `aws_lc_rs` and `logging`; rustls and webpki-roots were already in the lock via sqlx.
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "=1.0.10"
+# Certificates generated on the fly for the TLS unit tests (dev-dependency only).
+rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "ring", "pem"] }
 # Property tests of the server (dev-dependency only): no fork, timeout nor tempfile.
 proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
 
