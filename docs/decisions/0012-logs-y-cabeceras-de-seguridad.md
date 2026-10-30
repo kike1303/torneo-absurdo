@@ -195,7 +195,7 @@ base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 - En cualquier directiva: `*`, comodines de host (`*.ejemplo.com`), esquemas sueltos (`https:`, `http:`, `wss:`, `ws:`) y cualquier origen externo (CDN, analítica, fuentes; ADR-0009).
 - `data:` en `default-src`, `script-src`, `connect-src` y `worker-src`. `blob:` fuera de `img-src`.
 - Quitar o relajar `object-src 'none'`, `base-uri 'self'`, `form-action 'self'` o `frame-ancestors 'none'`, cambiar `mode` a algo que no sea `auto` o quitar la opción `csp`.
-  - *Ver la "Enmienda 2026-10-30: `form-action` para el login con Google y Discord" (pendiente de las firmas de security-reviewer y devops-engineer): `form-action` admite, además de `'self'`, las dos fuentes de B4.6, y nada más.*
+  - *Ver la "Enmienda 2026-10-30: `form-action` para el login con Google y Discord" (firmada por security-reviewer y devops-engineer el 2026-10-30, ver "Revisión"; en vigor desde esa fecha y aplicada en el PR #56): `form-action` admite, además de `'self'`, las dos fuentes de B4.6, y nada más.*
 - `'wasm-unsafe-eval'` en cualquier directiva que no sea `script-src`.
 - En cualquier directiva, una fuente `'nonce-…'` o `'sha256-…'`/`'sha384-…'`/`'sha512-…'` escrita en la configuración. El único nonce es el que Kit genera por petición; un nonce fijo (p. ej. `'nonce-dev'`) lo puede repetir un XSS en `<script nonce="dev">`, y un hash fijo autoriza un script en línea fuera del bundle.
 - `'unsafe-allow-redirects'` e `'inline-speculation-rules'` en cualquier directiva.
@@ -315,6 +315,8 @@ Docs que se actualizan al aprobarse (no son código):
 
 ## Enmienda 2026-10-30: `form-action` para el login con Google y Discord
 **Firmas:** escrita por architect, como autor de este ADR, tras su revisión de `docs/features/008-autenticacion/plan-d.md` (pregunta abierta 1). Necesita las firmas de security-reviewer y devops-engineer, los revisores de este ADR (ver "Revisión"). El texto incorpora, desde el 2026-10-30, las recomendaciones no bloqueantes 1 a 3 de security-reviewer y los cambios 1 y 2 de devops-engineer, marcados abajo con su origen. El gate del owner de `docs/process.md` ("aceptar o reemplazar un ADR") lo cubre la delegación del owner del 2026-10-29, registrada textual en la sección "Revisión → owner" de la spec de 008: mientras no haya nada desplegado, las aprobaciones del owner para las enmiendas de ADRs `risk: high` de 008 quedan cubiertas por las firmas de los agentes revisores. Esa delegación no cubre un tag `v*` ni un deploy. La enmienda entra en vigor cuando firmen los dos revisores, y se aplica en el PR de la fase D de 008.
+
+**Estado:** firmada por security-reviewer el 2026-10-30 (con su confirmación del texto enmendado) y por devops-engineer el 2026-10-30 (2ª ronda), ver "Revisión". En vigor desde el 2026-10-30. La aplica el PR #56 (fase D de 008): `apps/web/vite.config.ts`, `CSP_EXTENSIONS` de `scripts/check-kit-config.mjs` y las dos cadenas `b1=` de `ci.yml` y `release.yml`. El e2e de la fase D (plan-d, D35) mostró que Chromium y WebKit aplican `form-action` a las redirecciones que siguen al envío de un formulario, y que con B4.6 dejan pasar el 303 a los dos endpoints de autorización y siguen bloqueando un formulario que postea directo a un webhook de Discord.
 
 Cambia B3, B4 (punto nuevo 6), B4.5 y B6. El resto de la Parte B no cambia, y la Parte A tampoco.
 

@@ -388,6 +388,23 @@ Opción (a) del Área 4 de la spec: Postgres como service container y el binario
 | `CLAUDE.md`, `docs/architecture.md` | modificado (decisión 14; `architect` revisa `architecture.md`) |
 | `docs/features/008-autenticacion/plan-d.md` | este plan |
 
+Archivos que la implementación sumó o tocó fuera de la tabla de arriba (agregados por architect en la revisión del PR #56, sin cambiar el alcance):
+
+| Archivo | Cambio |
+|---|---|
+| `apps/web/src/lib/features/auth/codes.ts` | nuevo: la lista en tiempo de ejecución de `ErrorCode` (D23) |
+| `apps/web/src/lib/server/api/context.ts` | nuevo: el API interno sobre `event.fetch`, el punto de `vi.mock` de los tests de rutas (D26) |
+| `apps/web/src/lib/server/session-guard.ts` | nuevo: el `fail()` de una respuesta del API que no fue un éxito, con el código validado (decisión 9) |
+| `apps/web/src/lib/server/preference-cookies.ts` | nuevo: las cookies `theme` y `locale` que escribe el server, con los atributos del cliente (decisión 5) |
+| `apps/web/src/lib/server/hooks/paraglide.ts` | modificado: la firma nueva de `pickLocale` (D24) |
+| `apps/web/tests/routes/{preferences,welcome}.test.ts`, `apps/web/tests/support/{event,next-cases}.ts` | nuevos y modificado: los `load` y las actions con `vi.mock` (D26) y la tabla compartida de `next` (decisión 9) |
+| `apps/web/e2e/support/topology.ts` | nuevo: puertos y guardia de red compartidos entre `playwright.config.ts` y los specs (decisión 10) |
+| `apps/web/e2e/internal-fetch.spec.ts` | nuevo: el `fetch` real de Kit con `credentials: 'omit'` y varios `Host` (D43) |
+| `scripts/check-pushed-server.mjs`, `scripts/__tests__/check-pushed-server.test.mjs` | nuevos **[devops]**: la comparación de digests del release (D38, D42) |
+| `scripts/__fixtures__/check-compose/valid/{.dockerignore,apps/server/Cargo.toml,infra/docker-compose.yml}`, `scripts/__fixtures__/check-workflows/valid/**` | modificados y nuevo **[devops]**: los fixtures de las reglas nuevas (D11, D37, D41) |
+| `apps/server/src/auth/{mod,start,link,callback,logout}.rs`, `apps/server/src/http/routes.rs`, `apps/server/src/rate/http.rs` | modificados **[backend]**: los 303 de 9b y las reglas de fuente (D16, D19) |
+| `apps/server/tests/{navigation_errors,test_db_guard}.rs`, `apps/server/tests/{auth_flow,link,routes,oauth_providers,logs_auth}.rs`, `apps/server/tests/support/db.rs` | nuevos y modificados **[backend]** (D5, D17, D19) |
+
 No cambian `crates/protocol`, `packages/protocol-ts`, `packages/renderer`, `crates/engine*`, `crates/sim`, `crates/content`, las migraciones ni `apps/web/Dockerfile`.
 
 ## Orden de trabajo
