@@ -2,7 +2,7 @@
 id: "008"
 title: "Autenticación y sesiones, fase D: web, e2e, CI y documentación"
 type: plan
-status: approved
+status: done
 risk: high
 author: frontend-engineer
 reviewers: [architect, devops-engineer]

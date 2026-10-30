@@ -2,7 +2,7 @@
 id: "008"
 title: Autenticación y sesiones
 type: intent
-status: approved
+status: done
 risk: high
 author: product-owner
 reviewers: [architect, security-reviewer]
@@ -14,7 +14,7 @@ approvals:
 linear: TA-26
 depends_on: ["001"]
 created: 2026-10-28
-updated: 2026-10-28
+updated: 2026-10-30
 ---
 
 # Intent: Autenticación y sesiones

@@ -2,7 +2,7 @@
 id: "008"
 title: Autenticación y sesiones
 type: spec
-status: approved
+status: done
 risk: high
 author: architect
 reviewers: [product-owner, security-reviewer, game-designer]
