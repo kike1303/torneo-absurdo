@@ -662,6 +662,7 @@ Sin cambios en los workflows.
     - El mutante "usar `info` de `current()` en el paso 5" solo puede cambiar `step_up`, porque `SessionInfo` no tiene la cuenta. Lo matan las dos variantes de (e), no (c2), donde la cuenta `NULL` viene de `lock_auth`. Sigue fijando lo mismo: la vigencia se lee bajo el bloqueo.
 12. **Paso 6: `tests/logs_account.rs` se adapta aquí, no en el paso 9.** Su `unlink` final daba 403 con la sesión rotada: suma una reautenticación con Google después de vincular. El resto del flujo ampliado queda en el paso 9.
 13. **Paso 6: `error_kind = foreign_key` no se lee del log en el IT del login que se cruza.** `tests/unlink.rs` tiene varios tests, y `test_layout.rs` exige una captura de logs por binario. El IT fija la respuesta (`auth.try_again`, sin sesión) y, con una violación directa de la FK, que `db::error_kind` da `foreign_key`. `LoginError::from` ya escribe ese `error_kind`.
+14. **Paso 7: el `Router` de `RecentAdmin` va sobre un `AppState` propio.** `tests/recent_admin.rs` no usa el `AppState` de la app con los proveedores falsos (Riesgos): arma otro con `state_on`, sobre la misma base y la misma política de cookies, que es todo lo que el extractor lee. No hizo falta un accesor en `support::oauth::App`. En el test 30, la víctima tiene una segunda sesión propia y se reautentica desde ella, porque la robada ya la rotó el `link` del atacante. Sumo dos mutantes de control a los del plan, para que el ataque no pase en vacío: `unlink_allowed` sin el orden y `recent_admin` sin comparar el corte. Los dos mueren.
 
 ## Revisión
 

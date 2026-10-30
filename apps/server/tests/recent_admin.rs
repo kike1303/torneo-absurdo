@@ -166,6 +166,105 @@ async fn only_an_admin_who_authenticated_in_the_last_hour_passes() {
     assert_eq!(cache, private);
 }
 
+fn snowflake() -> String {
+    let n = u64::from_le_bytes(Uuid::new_v4().as_bytes()[..8].try_into().unwrap());
+    format!("{}", 100_000_000_000_000_000 + n % 900_000_000_000_000_000)
+}
+
+async fn post(app: &oauth::App, path: &str, token: &str) -> u16 {
+    let cookie = oauth::session_cookie(token);
+    support::http::send(
+        app.addr,
+        "POST",
+        path,
+        &[
+            ("origin", support::app::ORIGIN),
+            ("cookie", cookie.as_str()),
+        ],
+    )
+    .await
+    .status
+    .as_u16()
+}
+
+/// Test 31 (009 RF16, RF17, criterion 4): an identity linked after the grant never gives admin,
+/// whatever the attacker does with it; a reauthentication with an identity inside the cutoff
+/// does, and a second grant brings the new one in.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_identity_linked_after_the_grant_never_passes() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let state = state_on(&db, &pool);
+    let google = sub();
+    let before = oauth::session_of(&oauth::login(&app, Kind::Google, &google).await);
+    let admin = user_of(&pool, &before).await;
+    grant(&db, admin).await;
+    let token = oauth::session_of(&oauth::login(&app, Kind::Google, &google).await);
+    assert_eq!(call(&state, Some(&token)).await.0, StatusCode::NO_CONTENT);
+
+    // (i) 61 minutes later: no link, no admin.
+    oauth::age(&pool, &token, 61).await;
+    let refused = oauth::start_link(&app, Kind::Discord, &token).await;
+    assert_eq!(
+        refused.header("location"),
+        Some("/login?error=auth.reauth_required")
+    );
+    assert_eq!(call(&state, Some(&token)).await.0, StatusCode::FORBIDDEN);
+
+    // (ii) A recent session links X: forbidden right away, after a logout and a login with X,
+    // after a logout-all and a login with X, and after "waiting" and a reauth with X.
+    let recent = oauth::session_of(&oauth::login(&app, Kind::Google, &google).await);
+    let x = snowflake();
+    let linked = oauth::session_of(&oauth::link(&app, Kind::Discord, &x, &recent).await);
+    assert_eq!(
+        call(&state, Some(&linked)).await.0,
+        StatusCode::FORBIDDEN,
+        "right away"
+    );
+    assert_eq!(post(&app, "/api/auth/logout", &linked).await, 303);
+    let with_x = oauth::session_of(&oauth::login(&app, Kind::Discord, &x).await);
+    assert_eq!(
+        call(&state, Some(&with_x)).await.0,
+        StatusCode::FORBIDDEN,
+        "login with X"
+    );
+    assert_eq!(post(&app, "/api/auth/logout-all", &with_x).await, 303);
+    let with_x = oauth::session_of(&oauth::login(&app, Kind::Discord, &x).await);
+    assert_eq!(
+        call(&state, Some(&with_x)).await.0,
+        StatusCode::FORBIDDEN,
+        "after logout-all"
+    );
+    sqlx::query("UPDATE sessions SET authenticated_at = authenticated_at - interval '400 days'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let with_x = oauth::session_of(&oauth::reauth(&app, Kind::Discord, &x, &with_x).await);
+    assert_eq!(
+        call(&state, Some(&with_x)).await.0,
+        StatusCode::FORBIDDEN,
+        "reauth with X"
+    );
+
+    // (iii) A reauthentication with Google passes.
+    let with_google = oauth::session_of(&oauth::reauth(&app, Kind::Google, &google, &with_x).await);
+    assert_eq!(
+        call(&state, Some(&with_google)).await.0,
+        StatusCode::NO_CONTENT
+    );
+
+    // (iv) A second grant brings X in.
+    grant(&db, admin).await;
+    let with_x = oauth::session_of(&oauth::login(&app, Kind::Discord, &x).await);
+    assert_eq!(call(&state, Some(&with_x)).await.0, StatusCode::NO_CONTENT);
+
+    // (v) A session of before 009 (both columns NULL): 403, never a 503.
+    let old = support::app::session_for(&pool, admin).await;
+    let (status, body, _) = call(&state, Some(&old)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body, r#"{"error":"auth.reauth_required"}"#);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn with_the_database_down_it_is_try_again() {
     let db = TestDb::create().await;
