@@ -617,6 +617,9 @@ Desviaciones de la implementación:
 - **D46. La tercera barrera de la decisión 8 no cubre el `POST` de una form action.** El texto decía que un `load` siempre corre en un `GET` sin `Origin`; en un envío sin JS, Kit corre la action y después los `load` en el mismo `POST`, con `Origin`, y `handleFetch` lo pasa como `X-Client-Origin`, así que el 403 del server no frenaría ahí una mutación. Se corrigen la decisión 8 y la línea de Riesgos; no cambia el código, porque ESLint (imports) y `no-mutation-in-load.test.ts` (uso dentro de `actions`) cubren también ese caso.
 - **D47. `assertE2eTarget` rechaza toda query y todo fragmento**, también un `?` o un `#` vacíos. sqlx toma `host`, `hostaddr` y `dbname` de la query y postgres.js toma `database`, así que una URL que pasaba la guardia por host y ruta podía llevar el server de `dev-auth`, el seeding o el CLI de baneo a otra base. El mensaje nombra la regla, nunca la URL. `playwright.config.ts` aplica la misma guardia donde lee `E2E_DATABASE_URL` (el server recibe ese valor tal cual), y `tests/e2e-db.test.ts` tiene un caso por parámetro, uno para `sslmode`, los dos vacíos y el fragmento.
 
+**Tiempos de CI y notas no bloqueantes de devops-engineer y security-reviewer en el PR #56 (devops-engineer, 2026-10-30):**
+- **D48. Tiempos medidos de CI (ADR-0006 D7).** Corrida 41027661591 del PR #56: la ruta crítica es `rust`, con 6m10s; `e2e-server` seguido de `e2e` suma 6m09s; la corrida entera tarda 6m30s. Con una sola corrida, el objetivo de ≤ 8 min se cumple sin aplicar ninguna palanca. El p50 necesita tres corridas con caché caliente, así que se completa con las próximas corridas de CI de este PR.
+
 ## Revisión
 
 ### devops-engineer — 2026-10-30 — REQUEST_CHANGES
