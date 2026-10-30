@@ -67,6 +67,7 @@ pub enum Handler {
     Ws,
     AuthStart,
     AuthLink,
+    AuthUnlink,
     AuthCallback,
     AuthProviders,
     Logout,
@@ -113,6 +114,12 @@ pub const ROUTES: &[RouteSpec] = &[
         path: "/api/auth/link/{provider}",
         effect: Effect::Mutate,
         handler: Handler::AuthLink,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/auth/unlink/{provider}",
+        effect: Effect::Mutate,
+        handler: Handler::AuthUnlink,
     },
     RouteSpec {
         method: RouteMethod::Get,
@@ -208,6 +215,8 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
             .layer(body)
             .layer(auth_ip()),
         Handler::AuthLink => on(filter, auth::link::handler).layer(body).layer(auth_ip()),
+        // No body extractor (like logout): nothing for the limit to reject (RF-C3).
+        Handler::AuthUnlink => on(filter, auth::unlink::handler),
         Handler::AuthCallback => on(filter, auth::callback::handler).layer(auth_ip()),
         Handler::AuthProviders => on(filter, auth::providers),
         Handler::Logout => on(filter, auth::logout::logout).layer(body),

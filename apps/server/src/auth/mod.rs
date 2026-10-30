@@ -11,6 +11,7 @@ pub mod logout;
 pub mod next;
 pub mod providers;
 pub mod start;
+pub mod unlink;
 
 use std::fmt;
 use std::net::SocketAddr;
