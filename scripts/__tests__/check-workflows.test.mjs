@@ -1169,6 +1169,23 @@ const RELEASE_CASES = [
     { [REL]: [[CHECK_RUN, checkBlock('set -euo pipefail', 'set +e', CHECK_CMD, 'true')]] },
     new RegExp(`release-binary: ${CHECK_AT} must fail closed: set \\+ is not allowed`),
   ],
+  // Review of PR #56 (qa): every other way to switch errexit or pipefail off.
+  ...[
+    ['shopt -u -o errexit', 'shopt'],
+    ['shopt -uo errexit', 'shopt'],
+    ['shopt -u -o pipefail', 'shopt'],
+    ['shopt -o -u errexit', 'shopt'],
+    ['set +o errexit', 'set \\+'],
+    ['set +o pipefail', 'set \\+'],
+    ['set -x +e', 'set \\+'],
+    ["eval 'set +e'", 'set \\+'],
+    ['builtin set +e', 'set \\+'],
+    ['\\set +e', 'set \\+'],
+  ].map(([off, rule]) => [
+    `the binary check after ${off}`,
+    { [REL]: [[CHECK_RUN, checkBlock('set -euo pipefail', off, CHECK_CMD, 'true')]] },
+    new RegExp(`release-binary: ${CHECK_AT} must fail closed: ${rule}`),
+  ]),
   [
     'the binary check with an EXIT trap that exits 0',
     {

@@ -86,6 +86,11 @@ const RELEASE_CHECK = /node scripts\/check-release-binary\.mjs(?! --expect-dev)\
 // `|| true`, `;`, `&`, `if`), the step runs on bash -e, and the comparison is a tested script.
 const RELEASE_CHECK_LINE = /^node scripts\/check-release-binary\.mjs (?:"[^"]*"|[A-Za-z0-9_./-]+)$/;
 const PUSHED_CHECK = 'node scripts/check-pushed-server.mjs';
+// Review of PR #56 (qa): a `set` with a `+` option anywhere (`set +e`, `set -x +e`, `set +o
+// errexit`, also behind `eval '`, `builtin` or `\set`), and any `shopt -o`, which reaches errexit and
+// pipefail (`shopt -u -o errexit`, `shopt -uo pipefail`).
+const SET_PLUS = /(?:^|[^\w./-])set\s(?:[^;&|]*\s)?['"]?\+/;
+const SHOPT_O = /(?:^|[^\w./-])shopt\s(?:[^;&|]*\s)?-[a-z]*o/;
 
 const FORBIDDEN_TRIGGERS = ['pull_request_target', 'workflow_run'];
 // Data an outsider controls. Plan-c goes further: no `${{ }}` at all inside `run:` (see below).
@@ -519,7 +524,8 @@ function failOpen(step, line, job, workflowDefaults) {
   if (lines.length > 1 && lines[0] !== 'set -euo pipefail') {
     return 'a multi-line run: must start with set -euo pipefail';
   }
-  if (lines.some((l) => /(^|[\s;&|(])set\s+\+/.test(l))) return 'set + is not allowed';
+  if (lines.some((l) => SET_PLUS.test(l))) return 'set + is not allowed';
+  if (lines.some((l) => SHOPT_O.test(l))) return 'shopt -o is not allowed';
   if (lines.some((l) => /\bexit\b(?!\s+[1-9])/.test(l))) return 'exit must have a non-zero status';
   return null;
 }
