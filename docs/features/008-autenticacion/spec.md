@@ -18,7 +18,7 @@ approvals:
 linear: TA-26
 depends_on: ["001"]
 created: 2026-10-28
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Spec: Autenticación y sesiones
@@ -52,6 +52,7 @@ Cada RF dice cómo se verifica (→). "T<n>" es el test mínimo número n de ADR
 - **RF-A3. `TRUSTED_PROXIES`.** Es una lista separada por comas de direcciones `/32` o `/128`, con el prefijo explícito o sin él. Cualquier otro prefijo hace que el server no arranque (`config.invalid`, `var = TRUSTED_PROXIES`). Por defecto, vacía. Una dirección de loopback solo se acepta si `PUBLIC_ORIGIN` es `http` en loopback, porque el proxy del e2e es local (RF-D7). → UT de config.
 - **RF-A4. Rate limiter (D7).** Buckets en memoria, con llave por `IpKey` y por `user_id`, implementados con `tower-governor` o con `governor` directamente si el extractor de dos llaves no encaja (la semántica es la misma).
   - Una petición pasa solo si pasa todos sus buckets. Si no, 429 `http.rate_limited` con `Retry-After` en segundos.
+    - *Enmienda 2026-10-30 (ver la Enmienda 2026-10-30 de RF-B5): en las cinco rutas que postea o navega el navegador (`start`, `link`, `callback`, `logout` y `logout-all`), la cuota agotada responde 303 a `/login?error=auth.try_again`, sin `Retry-After`. Los buckets, los límites y el tope no cambian.*
   - Una tarea cada 60 s llama a `retain_recent` para que la memoria no crezca con llaves viejas.
   - **Tope fijo de llaves por limiter: 100 000.** Con el tope lleno, una llave **nueva** recibe 429 (`http.rate_limited`, o `ws.rate_limited` en el upgrade) sin entrar al limiter. **Nunca se desaloja una llave existente**: desalojarla le reiniciaría el bucket a quien lo agotó. El tope es una constante, no una variable de entorno.
   - Los límites son los de la tabla de D7 (la fase A monta los de auth y el upgrade anónimo de `/ws`, y la B los de usuario).
@@ -96,6 +97,18 @@ Cada RF dice cómo se verifica (→). "T<n>" es el test mínimo número n de ADR
   - **Errores del callback** (Enmienda 2026-10-28 de ADR-0008): 303 a `/login?error=<code>`. No se crea ni rota una sesión, la cookie del flujo se expira, la respuesta lleva `Cache-Control: no-store` y `next` nunca se usa. `<code>` sale de un enum cerrado de `crates/protocol` (`CallbackErrorCode`), y el server no copia al `Location` nada de la petición ni del proveedor. Los códigos son `auth.invalid_state`, `auth.banned`, `auth.provider_error` (el proveedor falló o devolvió algo inválido), `auth.try_again`, `auth.already_linked` y `auth.provider_already_linked` (estos dos, en la fase C).
   - `next` se valida con el regex de D2.
   - El proveedor `{provider}` que no existe o no está habilitado da 404.
+  - **Enmienda 2026-10-30: respuestas de navegación sin JSON (pregunta abierta 2 de plan-d).** Escrita por architect como autor de la spec, tras su revisión de plan-d. Firmada por security-reviewer el 2026-10-30 (ver "Revisión → security-reviewer — 2026-10-30 — APPROVE (ronda 5)"). La aprobación del owner la cubre su delegación del 2026-10-29 (ver "Revisión → owner"). La misma enmienda toca RF-A4, RF-B11, RF-C2, la tabla de API y el Área 13.
+    - **Por qué.** `start`, `link`, `logout` y `logout-all` son envíos de formulario que la web manda directo a `/api`, porque solo el server puede poner la cookie del flujo o expirar la de sesión, y `callback` es una navegación top-level que vuelve del proveedor. Todo JSON que respondan lo ve el usuario como texto crudo, el mismo problema que corrigieron la Enmienda 2026-10-28 de ADR-0008 y la desviación 16 de plan-b. Además, `callback` está detrás de la capa `AUTH_IP` (`http/routes.rs`), así que su 429 sale de la capa y no del handler: hasta ahora no era cierto que el callback "mapea todo error a 303".
+    - **Alcance.** `POST /api/auth/{provider}/start`, `POST /api/auth/link/{provider}`, `GET /api/auth/{provider}/callback`, `POST /api/auth/logout` y `POST /api/auth/logout-all`. Ninguna otra ruta cambia: `unlink` y las de `/api/me` las llama la web desde form actions y siguen en JSON.
+    - **429 y 503 → 303 a `/login?error=auth.try_again`.** Todo 429 de esas rutas (el bucket que sea: `AUTH_IP`, los de mutación por IP o por usuario y el tope de llaves de RF-A4) y todo 503 (la BD caída o un timeout) responde **303** con `Location: /login?error=auth.try_again`. El `Location` se arma en el mismo y único lugar que el del callback, a partir de `CallbackErrorCode`, y nunca copia nada de la petición. Además:
+      - sin `Retry-After` y sin cuerpo JSON;
+      - con `Cache-Control: no-store` (`private, no-store` en `logout` y `logout-all`, como hoy);
+      - nunca usa `next`;
+      - en la rama de la cuota, no toca la BD: no crea ni consume una fila de `oauth_flows` ni de `sessions`.
+    - **Las cookies en esas ramas.** `start` y `link` no ponen la cookie del flujo. `callback` la expira, como en todo error de RF-B5 ("la cookie del flujo siempre se expira"), y la fila de `oauth_flows`, si existía, vence por su TTL. `logout` y `logout-all` no revocan ni expiran la cookie de sesión, porque la sesión sigue viva y el usuario puede reintentar (igual que la desviación 16 de plan-b).
+    - **Lo que sigue en JSON.** El 404 de un proveedor desconocido o apagado y el 403 `auth.csrf_origin`. Solo los produce una petición armada a mano, no un formulario de nuestras páginas.
+    - **Sin cambios de tipos.** `auth.try_again` ya está en `CallbackErrorCode`, así que `crates/protocol` y `packages/protocol-ts` no cambian. La cuota sigue siendo la misma, y solo cambia la forma de la respuesta.
+    → IT por ruta, en rojo primero: con la cuota agotada (reloj controlado), 303 a `/login?error=auth.try_again` sin `Retry-After`, sin cuerpo JSON, con su `Cache-Control` y sin filas nuevas en `oauth_flows` ni en `sessions`; con la BD cortada (`PgProxy`), 303 igual en las rutas que la leen; en `logout` con la cuota agotada, la sesión sigue válida después. E2E: agotar la cuota de `start` con un solo cliente de test termina en `/login` con el texto de `auth.try_again`, sin JSON.
   → T4 adaptado (cada rechazo da 303 a `/login?error=auth.invalid_state`, sin `Set-Cookie` de sesión y con la cookie del flujo expirada), T5 e IT de cada código de la lista.
 - **RF-B6. Proveedor `dev`** (intent, Restricciones).
   - Existe solo con la feature de cargo `dev-auth`, con `PUBLIC_ORIGIN` `http` en loopback **y con `BIND_ADDR` de loopback** (`127.0.0.1` o `::1`). Con la feature activada y otro origen, el server no arranca (`config.invalid`, `var = DEV_AUTH`). Con otro `BIND_ADDR` (incluido el valor por defecto, `0.0.0.0`), tampoco (`config.invalid`, `var = BIND_ADDR`). `Origin` es defensa CSRF, no autenticación: sin este gate, cualquiera en la red local podría pedir una sesión de cualquier `dev_identity`.
@@ -129,6 +142,7 @@ Cada RF dice cómo se verifica (→). "T<n>" es el test mínimo número n de ADR
   - Usa **`try_recv()`**, no `recv()`: `recv()` reconecta en silencio y pierde las notificaciones del hueco. `try_recv()` devuelve `Ok(None)` al perder la conexión. En ese punto, y al reconectar, el server revalida contra la BD **todos** los sockets con sesión.
   → T10 (incluido el cierre del socket sin esperar la revalidación). IT: `pg_terminate_backend` sobre la conexión del listener, `revoke` durante el hueco, y el socket se cierra tras la reconexión, antes de la revalidación de 5 min. Además, un chequeo de CI que falla si `DELETE FROM sessions` aparece fuera de esa función.
 - **RF-B11. Logout (D10).** `POST /api/auth/logout` y `POST /api/auth/logout-all` revocan la sesión o todas, expiran la cookie y responden 303 a `/`. Sin sesión, también 303: el logout es idempotente. → T10.
+  - *Enmienda 2026-10-30 (ver la Enmienda 2026-10-30 de RF-B5): con la cuota agotada o la BD caída, 303 a `/login?error=auth.try_again`, sin revocar ni expirar la cookie.*
 - **RF-B12. `GET /api/me`.**
   - Devuelve `display_name`, `role`, `balance`, `providers` (lista de `provider`), `locale`, `theme` y `display_name_is_generated`.
   - No devuelve `user_id`, el id de la sesión ni ningún dato del proveedor.
@@ -180,6 +194,7 @@ Cada RF dice cómo se verifica (→). "T<n>" es el test mínimo número n de ADR
   - Si el usuario ya tiene ese proveedor, 303 a `/login?error=auth.provider_already_linked` (`UNIQUE (user_id, provider)`).
   - Al vincular, el token se rota y se escribe `auth_events` de `link`.
   - **Enmienda 2026-10-29: cuerpo rechazado (la pidió security-reviewer en la ronda 4, ver Revisión).** `link` toma `Result<Form<_>, FormRejection>`, como `start` en la fase B, y convierte todo rechazo del formulario, incluido un cuerpo de más de 4 KB, en 303 a `/login?error=auth.invalid_state`. El texto plano de axum nunca llega al cliente (ADR-0007). → IT con un formulario de 4097 bytes: 303 a `/login?error=auth.invalid_state` y sin el texto de axum.
+  - **Enmienda 2026-10-30: `link` sin JSON (ver la Enmienda 2026-10-30 de RF-B5; firmada por security-reviewer en la ronda 5 de "Revisión").** Con la cuota agotada o la BD caída, `link` responde 303 a `/login?error=auth.try_again`, sin poner la cookie del flujo. **Sin sesión** (cookie ausente, vencida o revocada), responde 303 a `/login` **sin `error`**, y conserva el `Set-Cookie` que expira la cookie de sesión. `auth.invalid_state` le daría un texto engañoso a quien solo tiene la sesión vencida: el formulario de login ya es la respuesta. El 404 de un proveedor desconocido o apagado y el 403 `auth.csrf_origin` siguen en JSON. → IT: sin cookie y con una cookie revocada, 303 a `/login`, con `Location` exacto, sin query y con la cookie de sesión expirada; con la cuota agotada y con la BD cortada, 303 a `/login?error=auth.try_again` sin cookie del flujo.
   → T4 (flujo `link` de otra sesión), T6 e IT.
 - **RF-C3. Desvincular (D1).** `POST /api/auth/unlink/{provider}` exige que quede otro proveedor (si no, 409 `auth.last_provider`). Revoca todas las demás sesiones del usuario y escribe `auth_events` de `unlink`. → IT.
   - **Enmienda 2026-10-29 (fase C, pregunta 5 de plan-c; firmada por security-reviewer en la ronda 4, ver Revisión).** Si el usuario no tiene vinculado ese proveedor, 404 `http.not_found`. "Que quede otro proveedor" cuenta solo los proveedores que siguen vinculados **y** están habilitados en la config del proceso: uno apagado no deja entrar al usuario. Desvincular un proveedor apagado se permite, siempre que quede uno habilitado. El conjunto habilitado es config estática, así que no abre una carrera. → IT de los dos casos.
@@ -360,12 +375,12 @@ admin_audit (                             -- fase C; solo inserción (mismo trig
 ### API
 | Método y ruta | Sesión | Respuesta | Fase |
 |---|---|---|---|
-| `POST /api/auth/{provider}/start` | no | 303 al proveedor y cookie del flujo | B (dev), C |
-| `GET /api/auth/{provider}/callback` | opcional | 303 a `next` y cookie de sesión; si falla, 303 a `/login?error=<code>` | B, C |
+| `POST /api/auth/{provider}/start` | no | 303 al proveedor y cookie del flujo; 429 o 503: 303 a `/login?error=auth.try_again` (Enmienda 2026-10-30) | B (dev), C |
+| `GET /api/auth/{provider}/callback` | opcional | 303 a `next` y cookie de sesión; si falla, 303 a `/login?error=<code>`, incluido el 429 de la capa (Enmienda 2026-10-30) | B, C |
 | `GET /api/auth/providers` | no | `["google","discord","dev"]` (los habilitados) | B |
-| `POST /api/auth/link/{provider}` | sí | 303 al proveedor | C |
+| `POST /api/auth/link/{provider}` | sí | 303 al proveedor; sin sesión, 303 a `/login`; 429 o 503: 303 a `/login?error=auth.try_again` (Enmienda 2026-10-30) | C |
 | `POST /api/auth/unlink/{provider}` | sí | 303 a `/` (desde form); 404 `http.not_found` si no está vinculado (Enmienda 2026-10-29) | C |
-| `POST /api/auth/logout`, `/logout-all` | opcional | 303 a `/` | B |
+| `POST /api/auth/logout`, `/logout-all` | opcional | 303 a `/`; 429 o 503: 303 a `/login?error=auth.try_again` (desviación 16 de plan-b y Enmienda 2026-10-30) | B |
 | `GET /api/me` | sí | `Me` | B |
 | `PUT /api/me/display-name` | sí | `Me`, error de `profile.*` o 422 `http.invalid_body` (Enmienda 2026-10-29) | C |
 | `PUT /api/me/preferences` | sí | `Me` o 422 `http.invalid_body` (Enmienda 2026-10-29) | C |
@@ -408,6 +423,7 @@ Mobile-first a 375 px, con los tokens y las primitivas de ADR-0009 y sin colores
 10. **`B = 100`.** `DAILY_GRANT` no tiene valor por defecto en el código. La fase B agrega `DAILY_GRANT=100` a `apps/server/.env.example`. Cuando TA-27 fije el valor definitivo, solo cambian los ejemplos y la configuración.
 11. **Sesión anónima y CGNAT.** Los 50 sockets anónimos por IP pueden quedarse cortos en el main event detrás de un CGNAT grande. Es el número que fijó ADR-0008, así que esta spec no lo cambia. La prueba de carga es de TA-6 y TA-8.
 12. **WebKit y las cookies `Secure` en `http://localhost`.** Por eso existe la política de loopback (RF-B9). `just prod-local` usa el binario de release con `__Host-` sobre `http://127.0.0.1:3000`, donde WebKit puede no guardar la sesión. En `prod-local` el login solo se garantiza en Chromium, y queda escrito en `CLAUDE.md`.
+13. **Navegaciones del navegador frente a las respuestas JSON y la CSP.** Dos reglas chocaban con el login real. (a) RF-A4 fija un 429 JSON con `Retry-After`, y `start`, `link`, `callback`, `logout` y `logout-all` son navegaciones de formulario o top-level donde ese JSON se ve crudo. La Enmienda 2026-10-30 de RF-B5 lo resuelve con un 303 a `/login?error=auth.try_again` solo en esas cinco rutas, sin cambiar la cuota. (b) ADR-0012 B1 fija `form-action 'self'`, y el 303 de `start` y de `link` a Google o a Discord sigue al envío de un formulario, así que Chromium lo bloquea. La "Enmienda 2026-10-30" de ADR-0012 (B4.6) suma exactamente las fuentes de los dos endpoints de autorización, con su ruta. La de RF-B5 la firmó security-reviewer el 2026-10-30 (ronda 5 de "Revisión"). La de ADR-0012 la firmó security-reviewer y está pendiente de devops-engineer (ver la "Revisión" de ese ADR). El riesgo que queda es que WebKit no esté verificado: lo prueba el e2e de la fase D, y el login real en móvil se prueba a mano en TA-6.
 
 ## Respuestas a preguntas abiertas del intent
 - **P: ¿Cómo inicia sesión un desarrollador en local?** → R: con las dos vías. El proveedor `dev` (RF-B6) es obligatorio para `just dev` y el e2e, y la guía de apps OAuth de desarrollo (RF-C10) permite probar Google y Discord reales en `just dev`. Decidido por el architect; security-reviewer confirma al revisar esta spec.
@@ -544,6 +560,7 @@ Mobile-first a 375 px, con los tokens y las primitivas de ADR-0009 y sin colores
 
 - **APPROVE** (2026-10-28, en chat): aprueba la spec (`risk: high`), `B = 100`, la enmienda del callback y la nota de ADR-0008 sobre el reparto de tests. Sigue plan-a.
 - **APPROVE** (2026-10-29, en chat): aprueba la Enmienda 2026-10-29 (RF-C1, RF-C2, RF-C3, RF-C5 y RNF). Sigue la implementación de la fase C.
+- **Delegación** (2026-10-29, en chat), textual: "el merge tambien lo puedes hacer y puedes continuar con todo lo que falte sin pedirme permiso, haz todo de una vez, solo ve siguiendo los procesos de los agentes y ya. No importa por ahora que sea de alto riesgo, esto todavía esta en desarrollo y no hay nada montado asi que no pasa nada. Intenta hacer todo sin pedirme las aprobaciones directas a mi". Mientras no haya nada desplegado, las aprobaciones del owner en 008 (enmiendas de la spec y de ADRs `risk: high`, merges) quedan cubiertas por las firmas de los agentes revisores que pide `docs/process.md`. No cubre un tag `v*` ni un deploy.
 
 ### security-reviewer — 2026-10-29 — APPROVE (ronda 4: Enmienda 2026-10-29 de RF-C1, RF-C3, RF-C5 y RNF)
 **🤖 security-reviewer**
@@ -563,3 +580,27 @@ Mobile-first a 375 px, con los tokens y las primitivas de ADR-0009 y sin colores
   - `webpki-roots` queda fijado en el binario. Dependabot lo sube, y un CA que se retira solo se refleja tras rebuild y deploy. Se acepta, porque la imagen distroless no tiene otro bundle.
   - **Fuera del alcance de la enmienda, para el owner** (es diseño de ADR-0008 D1): con una sesión robada o un navegador desatendido, alguien puede vincular **su** Google a la cuenta (vincular cuenta como reautenticación) y después desvincular el Discord de la víctima. `unlink` revoca las demás sesiones y la víctima ya no tiene con qué entrar: es una toma de cuenta persistente. Las monedas son ficticias y el requisito previo es fuerte (la cookie es `__Host-`, `HttpOnly` y `Secure`), así que no bloquea esta fase. Propongo un issue: `unlink` exige una autenticación reciente hecha con un proveedor que ya estaba vinculado antes de la sesión actual, o un período de espera para desvincular después de vincular algo nuevo.
 - **Sobre `docker exec server admin ban <user_id> --reason …` (contexto de plan-c):** no hace falta que plan-c lo resuelva en el código. Quien ve los argumentos en `docker events`, en `ps` o en el historial del shell ya es root o del grupo `docker` en el VPS, y eso le da acceso a la BD. Basta una línea en la sección "Admin y ban por CLI" de `apps/server/README.md`: el motivo queda en el historial del shell y en los eventos de Docker, así que nunca lleva datos personales.
+
+### security-reviewer — 2026-10-30 — APPROVE (ronda 5: Enmienda 2026-10-30 de RF-B5, con RF-A4, RF-B11, RF-C2, tabla de API y Área 13)
+**🤖 security-reviewer**
+
+- Verifiqué:
+  - El `git diff` de la spec contra RF-A4, RF-B5 y su enmienda del callback, RF-B11, RF-C2 y su enmienda del 2026-10-29, ADR-0008 (Enmienda 2026-10-28 y D2, D3, D4, D7 y D10), la desviación 16 de plan-b, `apps/server/src/auth/callback.rs` (el `Location` sale de `CallbackErrorCode::as_str()`) y las preguntas abiertas 1 y 2 de plan-d. También revisé la redacción de la delegación del owner del 2026-10-29: su texto cubre las enmiendas de la spec.
+  - **La cuota no se debilita.** El bucket se consume y la respuesta sigue siendo un rechazo. Solo cambia la forma. El 303 lleva a `/login`, una ruta de `web` que no consume los buckets de auth, así que no hay bucle de reintentos. Un cliente con script recibe el mismo "no" sin `Retry-After`, y la rama de la cuota no toca la BD, así que inundar no cuesta más que antes. El tope de llaves (sin desalojo) no cambia.
+  - **Sin reflexión.** El `Location` se arma en el único lugar y desde el enum cerrado, nunca usa `next` ni copia nada de la petición. No hay open redirect, ni inyección en el `Location`, ni un oráculo nuevo: 303 frente a 429 no le dice al atacante nada que no supiera.
+  - **Cookies.**
+    - `start` y `link` no emiten la cookie del flujo en las ramas de rechazo, así que no queda flujo a medias que fijar.
+    - `callback` expira la cookie del flujo y no consume la fila. Sin la cookie, la fila no sirve (el `state` va atado a la cookie, D2) y vence por TTL. El `code` del proveedor no se canjea.
+    - `logout` y `logout-all` no expiran la cookie de una sesión viva. Es lo correcto: expirarla sin revocar daría una falsa sensación de cierre, con la sesión todavía válida para quien tenga el token. Con la desviación 16, `/login` muestra el error y el enlace a la cuenta, así que el usuario no cree que cerró sesión.
+  - **503 tras un commit** (timeout después de que la transacción confirmó). En `callback` y `link` puede quedar una sesión sin cookie o un vínculo hecho con el texto `auth.try_again`. Las dos cosas son inocuas: la sesión huérfana no tiene token en el navegador, y el reintento de `link` da `auth.provider_already_linked`. En `logout` puede quedar la sesión revocada con la cookie viva, que ya no autentica. Ninguna rama emite una cookie de sesión en el error, como pide RF-B5.
+  - **`link` sin sesión → 303 a `/login` sin `error`.** Ni crea flujo ni vincula nada. Expirar la cookie de sesión vencida o revocada es correcto. El `Location` exacto y sin query evita un parámetro controlable.
+  - **Lo que sigue en JSON.** El 404 (proveedor desconocido o apagado) y el 403 `auth.csrf_origin` solo los produce una petición armada a mano, y no revelan nada nuevo. Que el 403 de CSRF quede JSON no debilita D4.
+  - **Alcance cerrado a cinco rutas.** `unlink`, `/api/me` y el upgrade de `/ws` no cambian. Los tests pedidos (IT por ruta en rojo primero, con reloj controlado y `PgProxy`, sin filas nuevas en `oauth_flows` ni en `sessions`, y la sesión válida tras un `logout` con la cuota agotada) verifican cada afirmación de la enmienda.
+  - El frontmatter (`updated: 2026-10-30`). Sigo el precedente de las rondas 3 y 4: la firma de una enmienda queda en esta sección y `approvals` no cambia.
+- Hallazgos de seguridad confirmados: ninguno.
+- No bloquean (para plan-d y su PR):
+  1. **`link` sin sesión, en la IT.** La enmienda dice "sin cookie del flujo" solo para la cuota y la BD. *Cambio:* la IT de "sin cookie y con una cookie revocada" también comprueba que no hay `Set-Cookie` del flujo ni fila nueva en `oauth_flows`. Así queda fijado que el chequeo de sesión corre antes de crear el flujo.
+     - *Escenario:* si un refactor creara el flujo antes de mirar la sesión, un `link` sin sesión dejaría una cookie del flujo de `link` sin `user_id`, y el callback la trataría como un login.
+  2. **El 429 del callback sale de la capa `AUTH_IP`, no del handler.** Esa capa ahora expira la cookie del flujo. *Cambio:* que use la misma función que el handler para el nombre de la cookie (`__Host-` o la política de loopback de RF-B9) y sus atributos, y una IT que compare el `Set-Cookie` de expiración de la capa con el del handler. Además, que la capa no registre la URI ni la query (ADR-0008 D3, ADR-0012 A). Hoy no lo hace ningún log, pero es código nuevo en el camino de `?code=&state=`.
+     - *Escenario:* un nombre de cookie distinto deja viva la cookie del flujo; un log de la URI escribe `code` y `state` en el log.
+  3. **El e2e que agota la cuota de `start` desde loopback** comparte el bucket `AUTH_IP` con el resto del e2e. No es de seguridad, pero un orden distinto de los specs puede dar falsos rojos. Que corra aislado (`test.describe.configure({ mode: 'serial' })` al final, o un server propio).
