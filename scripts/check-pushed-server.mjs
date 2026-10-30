@@ -83,6 +83,7 @@ function main() {
     process.exit(2);
   }
   const dir = mkdtempSync(path.join(tmpdir(), 'pushed-server-'));
+  /** @type {string[] | undefined} */
   let problems;
   try {
     const tar = path.join(dir, 'image.tar');
@@ -108,11 +109,13 @@ function main() {
         console.log(`${ref} config ${config} is the checked image`);
     }
   } catch (error) {
+    // No process.exit here: it would skip finally and leave the .tar of the server in the tmp.
     console.error(`check-pushed-server: ${error instanceof Error ? error.message : error}`);
-    process.exit(2);
+    problems = undefined;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+  if (problems === undefined) process.exit(2);
   if (problems.length > 0) {
     for (const problem of problems) console.error(`check-pushed-server: ${problem}`);
     process.exit(1);

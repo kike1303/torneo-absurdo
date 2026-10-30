@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -115,7 +115,8 @@ describe('readEnv', () => {
 
 describe('check-pushed-server.mjs (with a fake docker)', () => {
   // `docker save -o FILE TAG` writes FAKE_TAR to FILE; `docker buildx imagetools inspect --raw
-  // REF` prints FAKE_CONFIG_<last char of REF> as the config.digest. FAKE_FAIL=save fails save.
+  // REF` prints FAKE_CONFIG_<last char of REF> as the config.digest. FAKE_FAIL=save fails save,
+  // FAKE_FAIL=inspect fails imagetools (after save wrote the .tar).
   const bin = path.join(work, 'bin');
   mkdirSync(bin, { recursive: true });
   const docker = path.join(bin, 'docker');
@@ -131,6 +132,7 @@ describe('check-pushed-server.mjs (with a fake docker)', () => {
       '  exit 0',
       'fi',
       'if [ "$1 $2 $3 $4" = "buildx imagetools inspect --raw" ]; then',
+      '  [ "${FAKE_FAIL:-}" = inspect ] && { echo "not found" >&2; exit 1; }',
       '  case "$5" in',
       '    *:v1.2.3) printf \'{"config":{"digest":"%s"}}\' "$FAKE_CONFIG_TAG" ;;',
       '    *:sha-abc1234) printf \'{"config":{"digest":"%s"}}\' "$FAKE_CONFIG_SHORT" ;;',
@@ -148,11 +150,19 @@ describe('check-pushed-server.mjs (with a fake docker)', () => {
   const made = spawnSync('tar', ['-c', '-f', tar, '-C', layout, '.']);
   if (made.status !== 0) throw new Error(`tar failed: ${made.stderr}`);
 
+  let t = 0;
+  /** A fresh, empty TMPDIR for one run, so a leftover of the script is visible. */
+  const freshTmp = () => {
+    const dir = path.join(work, `tmp-${t++}`);
+    mkdirSync(dir);
+    return dir;
+  };
   const run = (env) =>
     spawnSync(process.execPath, [SCRIPT], {
       encoding: 'utf8',
       env: {
         PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+        TMPDIR: freshTmp(),
         FAKE_TAR: tar,
         FAKE_CONFIG_TAG: DIGEST,
         FAKE_CONFIG_SHORT: DIGEST,
@@ -187,6 +197,26 @@ describe('check-pushed-server.mjs (with a fake docker)', () => {
   it('exits 2 when docker save fails', () => {
     const r = run({ FAKE_FAIL: 'save' });
     expect(r.status).toBe(2);
+  });
+
+  it('exits 2 when imagetools fails', () => {
+    const r = run({ FAKE_FAIL: 'inspect' });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/check-pushed-server: /);
+  });
+
+  // Review of PR #56 (security-reviewer): process.exit inside catch skipped finally and left the
+  // .tar of the server in the runner tmp.
+  it.each([
+    ['passes', {}, 0],
+    ['the push differs', { PUSHED: OTHER }, 1],
+    ['docker save fails', { FAKE_FAIL: 'save' }, 2],
+    ['imagetools fails after the save', { FAKE_FAIL: 'inspect' }, 2],
+  ])('leaves nothing in TMPDIR when %s', (_name, env, status) => {
+    const tmp = freshTmp();
+    const r = run({ ...env, TMPDIR: tmp });
+    expect(r.status).toBe(status);
+    expect(readdirSync(tmp)).toEqual([]);
   });
 
   it('exits 2 without PUSHED', () => {
