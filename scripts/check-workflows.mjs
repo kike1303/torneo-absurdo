@@ -73,6 +73,10 @@ const SAME_INPUTS = [
 ];
 const BUILD_INPUTS = [...SAME_INPUTS, 'push', 'load', 'tags'];
 const RELEASE_CHECK = /node scripts\/check-release-binary\.mjs(?! --expect-dev)\s/;
+// QA finding 3 of phase D: a check that cannot fail is no check. The command is a whole line (no
+// `|| true`, `;`, `&`, `if`), the step runs on bash -e, and the comparison is a tested script.
+const RELEASE_CHECK_LINE = /^node scripts\/check-release-binary\.mjs (?:"[^"]*"|[A-Za-z0-9_./-]+)$/;
+const PUSHED_CHECK = 'node scripts/check-pushed-server.mjs';
 
 const FORBIDDEN_TRIGGERS = ['pull_request_target', 'workflow_run'];
 // Data an outsider controls. Plan-c goes further: no `${{ }}` at all inside `run:` (see below).
@@ -398,17 +402,53 @@ function checkCspCopies(docs, problems) {
 }
 
 /**
- * 008 RF-D9: `rust` checks its musl binary and `images` the `/server` of its image, both as a
- * release (without --expect-dev).
+ * Why a step that runs `line` could pass while `line` fails, or null when it fails closed. The
+ * effective shell is the default (bash -e) or `bash` (bash -eo pipefail); a single line is the
+ * command alone; several lines start with `set -euo pipefail` and never undo it nor exit 0.
+ * @param {any} step
+ * @param {RegExp} line
+ * @param {any} job
+ * @param {any} workflowDefaults
  */
-function checkBinaryChecks(jobs, file, problems) {
+function failOpen(step, line, job, workflowDefaults) {
+  const shell = step.shell ?? job?.defaults?.run?.shell ?? workflowDefaults?.run?.shell;
+  if (shell !== undefined && shell !== 'bash') return 'shell: must be the default or bash';
+  const lines = String(step.run ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '' && !l.startsWith('#'));
+  const hits = lines.filter((l) => line.test(l)).length;
+  if (hits !== 1) return `exactly one line must be the bare command, found ${hits}`;
+  if (lines.length > 1 && lines[0] !== 'set -euo pipefail') {
+    return 'a multi-line run: must start with set -euo pipefail';
+  }
+  if (lines.some((l) => /(^|[\s;&|(])set\s+\+/.test(l))) return 'set + is not allowed';
+  if (lines.some((l) => /\bexit\b(?!\s+[1-9])/.test(l))) return 'exit must have a non-zero status';
+  return null;
+}
+
+/** @param {any} step */
+const runsReleaseCheck = (step) => isMap(step) && RELEASE_CHECK.test(`${step.run ?? ''}\n`);
+
+/**
+ * 008 RF-D9: `rust` checks its musl binary and `images` the `/server` of its image, both as a
+ * release (without --expect-dev), with no if: and failing closed.
+ */
+function checkBinaryChecks(jobs, file, problems, workflowDefaults) {
   for (const id of ['rust', 'images']) {
     const steps = Array.isArray(jobs[id]?.steps) ? jobs[id].steps : [];
-    if (!steps.some((s) => isMap(s) && RELEASE_CHECK.test(`${s.run ?? ''}\n`))) {
+    if (!steps.some(runsReleaseCheck)) {
       problems.push(
         `${file}: release-binary: jobs.${id} must run scripts/check-release-binary.mjs without --expect-dev`,
       );
     }
+    steps.forEach((step, i) => {
+      if (!runsReleaseCheck(step)) return;
+      const at = `jobs.${id}.steps[${i}]${step.name ? ` (${step.name})` : ''}`;
+      const reason = failOpen(step, RELEASE_CHECK_LINE, jobs[id], workflowDefaults);
+      if (reason) problems.push(`${file}: release-binary: ${at} must fail closed: ${reason}`);
+      if ('if' in step) problems.push(`${file}: release-binary: ${at} must not have an if:`);
+    });
   }
 }
 
@@ -418,7 +458,7 @@ function checkBinaryChecks(jobs, file, problems) {
  * check-release-binary on it; the second pushes; and before the retention a step compares the
  * `imageid` of both builds with the `config.digest` that the registry publishes.
  */
-function checkReleaseServer(jobs, file, problems) {
+function checkReleaseServer(jobs, file, problems, workflowDefaults) {
   const rule = 'release-binary';
   const steps = Array.isArray(jobs.build?.steps) ? jobs.build.steps : [];
   const builds = steps
@@ -467,35 +507,63 @@ function checkReleaseServer(jobs, file, problems) {
   if (String(check.step.if ?? '') !== String(push.step.if ?? '')) {
     problems.push(`${file}: ${rule}: both server builds must have the same if:`);
   }
-  const between = steps.slice(check.index + 1, push.index);
-  if (!between.some((s) => isMap(s) && RELEASE_CHECK.test(`${s.run ?? ''}\n`))) {
+  const buildIf = String(check.step.if ?? '');
+  const at = (i) => `jobs.build.steps[${i}]${steps[i].name ? ` (${steps[i].name})` : ''}`;
+  /** The checks shared by the two RF-D9 steps: same if: as the builds and fail closed. */
+  const closed = (i, line) => {
+    if (String(steps[i].if ?? '') !== buildIf) {
+      problems.push(`${file}: ${rule}: ${at(i)} must have the if: of the server builds`);
+    }
+    const reason = failOpen(steps[i], line, jobs.build, workflowDefaults);
+    if (reason) problems.push(`${file}: ${rule}: ${at(i)} must fail closed: ${reason}`);
+  };
+  const between = [];
+  for (let i = check.index + 1; i < push.index; i++) {
+    if (runsReleaseCheck(steps[i])) between.push(i);
+  }
+  if (between.length === 0) {
     problems.push(
       `${file}: ${rule}: a step between the two server builds must run scripts/check-release-binary.mjs on the local image (without --expect-dev)`,
     );
   }
+  for (const i of between) closed(i, RELEASE_CHECK_LINE);
   const retention = steps.findIndex(
     (s) => isMap(s) && typeof s.uses === 'string' && RETENTION.test(s.uses),
   );
-  // The checked side comes from `docker save` (the config blob, the same with either image
-  // store) and the pushed side from the imageid of the push and the config.digest of the tags.
-  // The imageid of a `load` build is the manifest digest with the containerd image store, so it
-  // is never used (008 plan-d deviation D38).
+  // The comparison is scripts/check-pushed-server.mjs (unit-tested): the checked side comes from
+  // `docker save` (the config blob, the same with either image store) and the pushed side from
+  // the imageid of the push and the config.digest of the tags. The imageid of a `load` build is
+  // the manifest digest with the containerd image store, so it is never used (plan-d D38).
   const references = (s, id) =>
     typeof id === 'string' &&
     isMap(s.env) &&
     Object.values(s.env).some((v) => String(v).includes(`steps.${id}.outputs.imageid`));
-  const compares = (s) =>
-    isMap(s) &&
-    typeof s.run === 'string' &&
-    references(s, push.step.id) &&
-    s.run.includes(`docker save ${RELEASE_CHECK_TAG}`) &&
-    s.run.includes('imagetools inspect --raw') &&
-    s.run.includes('.config.digest');
   const end = retention === -1 ? steps.length : retention;
-  if (!steps.slice(push.index + 1, end).some(compares)) {
+  const compares = [];
+  for (let i = push.index + 1; i < end; i++) {
+    if (isMap(steps[i]) && String(steps[i].run ?? '').includes('scripts/check-pushed-server.mjs')) {
+      compares.push(i);
+    }
+  }
+  if (compares.length === 0) {
     problems.push(
-      `${file}: ${rule}: after the push and before the retention, a step must compare the config of the checked image (docker save ${RELEASE_CHECK_TAG}) with the imageid of the push and the config.digest of imagetools inspect --raw`,
+      `${file}: ${rule}: after the push and before the retention, a step must compare the config of the checked image with the push: run: ${PUSHED_CHECK}`,
     );
+  }
+  for (const i of compares) {
+    const s = steps[i];
+    if (String(s.run).trim() !== PUSHED_CHECK) {
+      problems.push(`${file}: ${rule}: ${at(i)} must run exactly ${PUSHED_CHECK}`);
+    }
+    closed(i, new RegExp(`^${PUSHED_CHECK.replace(/[.]/g, '\\.')}$`));
+    const env = isMap(s.env) ? s.env : {};
+    const imageid = `\${{ steps.${push.step.id}.outputs.imageid }}`;
+    if (typeof push.step.id !== 'string' || String(env.PUSHED ?? '').trim() !== imageid) {
+      problems.push(`${file}: ${rule}: ${at(i)} must set PUSHED: ${imageid}`);
+    }
+    if (!String(env.TAG ?? '').trim() || !String(env.SHORT ?? '').trim()) {
+      problems.push(`${file}: ${rule}: ${at(i)} must set TAG and SHORT (the two pushed tags)`);
+    }
   }
   steps.forEach((s, i) => {
     if (isMap(s) && references(s, check.step.id)) {
@@ -602,9 +670,9 @@ function checkWorkflow(doc, name, file, problems, local, tree) {
 
   if (name === 'ci.yml') {
     checkE2e(jobs, file, problems, tree);
-    checkBinaryChecks(jobs, file, problems);
+    checkBinaryChecks(jobs, file, problems, doc.defaults);
   }
-  if (name === 'release.yml') checkReleaseServer(jobs, file, problems);
+  if (name === 'release.yml') checkReleaseServer(jobs, file, problems, doc.defaults);
 
   if (name === 'ci.yml') {
     // RF-C12: policy always runs; ci-ok (the only required check) waits for every other job.

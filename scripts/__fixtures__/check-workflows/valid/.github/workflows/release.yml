@@ -62,10 +62,9 @@ jobs:
         if: github.event_name == 'push'
         env:
           PUSHED: ${{ steps.server-push.outputs.imageid }}
-        run: |
-          config="$(docker save torneo-release-check/server:local | tar -xO manifest.json | jq -r '.[0].Config')"
-          [ "$PUSHED" = "$config" ]
-          docker buildx imagetools inspect --raw ghcr.io/example/server:v1 | jq -r .config.digest
+          TAG: v1
+          SHORT: sha-0000000
+        run: node scripts/check-pushed-server.mjs
       - name: Retention of server
         if: github.event_name == 'push'
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55

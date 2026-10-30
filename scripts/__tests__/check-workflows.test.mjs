@@ -835,6 +835,18 @@ const IMAGES_CHECK =
 /** The `with:` of one of the two server builds, located by the line after its tags. */
 const inBuild = (tag, from, to) => ({ [REL]: [[`${tag}${from}`, `${tag}${to}`]] });
 const LABELS = '          labels: org.opencontainers.image.source=https://example.com/repo\n';
+// QA finding 3 of phase D: both RF-D9 steps of the release fail closed.
+const DIGEST_RUN = '        run: node scripts/check-pushed-server.mjs\n';
+const PUSHED_ENV = '          PUSHED: ${{ steps.server-push.outputs.imageid }}\n';
+const CHECK_RUN = '        run: node scripts/check-release-binary.mjs "$RUNNER_TEMP/server"\n';
+const CHECK_CMD = 'node scripts/check-release-binary.mjs "$RUNNER_TEMP/server"';
+const MUSL_RUN =
+  '        run: node scripts/check-release-binary.mjs target/x86_64-unknown-linux-musl/debug/server\n';
+const BUILD_JOB = '  build:\n    runs-on: ubuntu-24.04\n';
+/** The check step of release.yml as a block run: with the given lines. */
+const checkBlock = (...lines) => `        run: |\n${lines.map((l) => `          ${l}\n`).join('')}`;
+const DIGEST_AT = String.raw`jobs\.build\.steps\[\d+\] \(The pushed server is the checked one\)`;
+const CHECK_AT = String.raw`jobs\.build\.steps\[\d+\] \(The release binary has no dev-auth\)`;
 
 /** @type {[string, Record<string, [string, string][]>, RegExp][]} */
 const RELEASE_CASES = [
@@ -942,32 +954,20 @@ const RELEASE_CASES = [
   ],
   [
     'no imageid of the push in the digest comparison',
-    { [REL]: [['          PUSHED: ${{ steps.server-push.outputs.imageid }}\n', '']] },
-    /release-binary: .*a step must compare the config of the checked image/,
+    { [REL]: [[PUSHED_ENV, '']] },
+    /release-binary: .*\(The pushed server is the checked one\) must set PUSHED: \$\{\{ steps\.server-push\.outputs\.imageid \}\}/,
   ],
   [
-    'the digest comparison without the published config.digest',
+    'the digest comparison as inline shell instead of the script',
     {
       [REL]: [
         [
-          'docker buildx imagetools inspect --raw ghcr.io/example/server:v1 | jq -r .config.digest',
-          'echo done',
+          '        run: node scripts/check-pushed-server.mjs\n',
+          '        run: |\n          set -euo pipefail\n          node scripts/check-pushed-server.mjs\n',
         ],
       ],
     },
-    /release-binary: .*a step must compare the config of the checked image/,
-  ],
-  [
-    'the checked config from docker image inspect instead of docker save',
-    {
-      [REL]: [
-        [
-          "docker save torneo-release-check/server:local | tar -xO manifest.json | jq -r '.[0].Config'",
-          "docker image inspect -f '{{.Id}}' torneo-release-check/server:local",
-        ],
-      ],
-    },
-    /release-binary: .*a step must compare the config of the checked image/,
+    /release-binary: jobs\.build\.steps\[\d+\] \(The pushed server is the checked one\) must run exactly node scripts\/check-pushed-server\.mjs/,
   ],
   [
     'the imageid of the local build (the manifest digest with the containerd store)',
@@ -990,6 +990,152 @@ const RELEASE_CASES = [
       ],
     },
     /release-binary: after the push and before the retention, a step must compare the config of the checked image/,
+  ],
+  // The comparison step is exactly the script, unconditional within the release, and on bash -e.
+  [
+    'the comparison with || true',
+    { [REL]: [[DIGEST_RUN, '        run: node scripts/check-pushed-server.mjs || true\n']] },
+    new RegExp(
+      `release-binary: ${DIGEST_AT} must run exactly node scripts/check-pushed-server\\.mjs`,
+    ),
+  ],
+  [
+    'the comparison followed by true',
+    { [REL]: [[DIGEST_RUN, '        run: node scripts/check-pushed-server.mjs; true\n']] },
+    new RegExp(`release-binary: ${DIGEST_AT} must run exactly`),
+  ],
+  [
+    'the comparison replaced by true',
+    { [REL]: [[DIGEST_RUN, '        run: "true"\n']] },
+    /release-binary: after the push and before the retention, a step must compare the config of the checked image/,
+  ],
+  [
+    'continue-on-error: true on the comparison',
+    { [REL]: [[DIGEST_STEP_NAME, `${DIGEST_STEP_NAME}        continue-on-error: true\n`]] },
+    new RegExp(`continue-on-error: ${DIGEST_AT} must not declare it`),
+  ],
+  [
+    'continue-on-error: true on the build job',
+    { [REL]: [[BUILD_JOB, `${BUILD_JOB}    continue-on-error: true\n`]] },
+    /continue-on-error: jobs\.build must not declare it/,
+  ],
+  [
+    'the comparison with if: false',
+    {
+      [REL]: [
+        [
+          `${DIGEST_STEP_NAME}        if: github.event_name == 'push'\n`,
+          `${DIGEST_STEP_NAME}        if: false\n`,
+        ],
+      ],
+    },
+    new RegExp(`release-binary: ${DIGEST_AT} must have the if: of the server builds`),
+  ],
+  [
+    'the comparison without if: (it would also run on a rollback)',
+    { [REL]: [[`${DIGEST_STEP_NAME}        if: github.event_name == 'push'\n`, DIGEST_STEP_NAME]] },
+    new RegExp(`release-binary: ${DIGEST_AT} must have the if: of the server builds`),
+  ],
+  [
+    'the comparison with shell: bash {0} (no -e)',
+    { [REL]: [[DIGEST_RUN, `        shell: bash {0}\n${DIGEST_RUN}`]] },
+    new RegExp(`release-binary: ${DIGEST_AT} must fail closed: shell: must be the default or bash`),
+  ],
+  [
+    'the comparison without TAG',
+    { [REL]: [['          TAG: v1\n', '']] },
+    new RegExp(`release-binary: ${DIGEST_AT} must set TAG and SHORT`),
+  ],
+  [
+    'the comparison with a fixed PUSHED',
+    { [REL]: [[PUSHED_ENV, `          PUSHED: sha256:${'a'.repeat(64)}\n`]] },
+    new RegExp(`release-binary: ${DIGEST_AT} must set PUSHED`),
+  ],
+  [
+    'defaults.run.shell without -e on the build job',
+    { [REL]: [[BUILD_JOB, `${BUILD_JOB}    defaults:\n      run:\n        shell: bash {0}\n`]] },
+    new RegExp(`release-binary: ${CHECK_AT} must fail closed: shell: must be the default or bash`),
+  ],
+  [
+    'defaults.run.shell without -e on the release workflow',
+    { [REL]: [['jobs:\n', 'defaults:\n  run:\n    shell: sh {0}\njobs:\n']] },
+    new RegExp(`release-binary: ${DIGEST_AT} must fail closed: shell:`),
+  ],
+  // The binary check between the builds fails the step when the script fails.
+  [
+    'the binary check with || true',
+    { [REL]: [[CHECK_RUN, CHECK_RUN.replace('server"\n', 'server" || true\n')]] },
+    new RegExp(`release-binary: ${CHECK_AT} must fail closed: exactly one line must be the bare`),
+  ],
+  [
+    'the binary check followed by true without set -e',
+    { [REL]: [[CHECK_RUN, checkBlock(CHECK_CMD, 'true')]] },
+    new RegExp(
+      `release-binary: ${CHECK_AT} must fail closed: a multi-line run: must start with set -euo pipefail`,
+    ),
+  ],
+  [
+    'the binary check after set +e',
+    { [REL]: [[CHECK_RUN, checkBlock('set -euo pipefail', 'set +e', CHECK_CMD, 'true')]] },
+    new RegExp(`release-binary: ${CHECK_AT} must fail closed: set \\+ is not allowed`),
+  ],
+  [
+    'the binary check with an EXIT trap that exits 0',
+    {
+      [REL]: [[CHECK_RUN, checkBlock('set -euo pipefail', "trap 'exit 0' EXIT", CHECK_CMD)]],
+    },
+    new RegExp(`release-binary: ${CHECK_AT} must fail closed: exit must have a non-zero status`),
+  ],
+  [
+    'the binary check skipped by a bare exit',
+    { [REL]: [[CHECK_RUN, checkBlock('set -euo pipefail', 'exit', CHECK_CMD)]] },
+    new RegExp(`release-binary: ${CHECK_AT} must fail closed: exit must have`),
+  ],
+  [
+    'the binary check inside an if',
+    {
+      [REL]: [[CHECK_RUN, checkBlock('set -euo pipefail', `if ${CHECK_CMD}; then echo ok; fi`)]],
+    },
+    new RegExp(
+      `release-binary: ${CHECK_AT} must fail closed: exactly one line must be the bare command, found 0`,
+    ),
+  ],
+  [
+    'continue-on-error: true on the binary check',
+    { [REL]: [[CHECK_RUN, `        continue-on-error: true\n${CHECK_RUN}`]] },
+    new RegExp(`continue-on-error: ${CHECK_AT} must not declare it`),
+  ],
+  [
+    'the binary check with if: false',
+    { [REL]: [[CHECK_STEP, CHECK_STEP.replace("if: github.event_name == 'push'", 'if: false')]] },
+    new RegExp(`release-binary: ${CHECK_AT} must have the if: of the server builds`),
+  ],
+  [
+    'the binary check with shell: sh {0}',
+    { [REL]: [[CHECK_RUN, `        shell: sh {0}\n${CHECK_RUN}`]] },
+    new RegExp(`release-binary: ${CHECK_AT} must fail closed: shell:`),
+  ],
+  [
+    'rust checking its musl binary with || true',
+    { [CI]: [[MUSL_RUN, MUSL_RUN.replace('server\n', 'server || true\n')]] },
+    /ci\.yml: release-binary: jobs\.rust\.steps\[\d+\] \(The musl binary has no dev-auth\) must fail closed/,
+  ],
+  [
+    'rust checking its musl binary with if: false',
+    { [CI]: [[MUSL_RUN, `        if: false\n${MUSL_RUN}`]] },
+    /ci\.yml: release-binary: jobs\.rust\.steps\[\d+\] .* must not have an if:/,
+  ],
+  [
+    'images checking its server binary after set +e',
+    {
+      [CI]: [
+        [
+          IMAGES_CHECK,
+          `      - name: Server binary\n${checkBlock('set -euo pipefail', 'set +e', CHECK_CMD, 'true')}`,
+        ],
+      ],
+    },
+    /ci\.yml: release-binary: jobs\.images\.steps\[\d+\] \(Server binary\) must fail closed: set \+/,
   ],
   [
     'rust without the check of its musl binary',
