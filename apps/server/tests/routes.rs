@@ -85,7 +85,8 @@ async fn the_routes_of_phase_c() {
     assert_eq!(link_start.status, 404);
     assert_eq!(link_start.text(), r#"{"error":"http.not_found"}"#);
     assert!(link_start.header("location").is_none());
-    // With Google on, `link/google` is the link route (no session: 401), never a 404.
+    // With Google on, `link/google` is the link route (no session: 303 to the login page, 008
+    // "Enmienda 2026-10-30" of RF-C2), never a 404.
     let link = http::send(
         app.addr,
         "POST",
@@ -93,5 +94,6 @@ async fn the_routes_of_phase_c() {
         &[("origin", ORIGIN)],
     )
     .await;
-    assert_eq!(link.status, 401);
+    assert_eq!(link.status, 303);
+    assert_eq!(link.header("location"), Some("/login"));
 }

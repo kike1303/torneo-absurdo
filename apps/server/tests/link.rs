@@ -208,13 +208,17 @@ async fn a_link_flow_of_another_session_does_not_link() {
 async fn link_needs_a_session() {
     let db = TestDb::create().await;
     let (app, pool) = oauth::start_app(&db).await;
+    // 008 "Enmienda 2026-10-30" of RF-C2: a 303 to the login page, no JSON (the cases with a
+    // revoked cookie are in `tests/navigation_errors.rs`).
     let refused = oauth::begin(&app, "/api/auth/link/discord", "next=%2F", None).await;
-    assert_eq!(refused.status, 401);
-    assert_eq!(refused.text(), r#"{"error":"auth.unauthenticated"}"#);
+    assert_eq!(refused.status, 303);
+    assert_eq!(refused.header("location"), Some("/login"));
+    assert!(refused.body.is_empty());
     assert_eq!(refused.cookie(oauth::session_name()), Some(""));
     assert_eq!(refused.header("cache-control"), Some("private, no-store"));
     let dead = oauth::begin(&app, "/api/auth/link/discord", "next=%2F", Some("dead")).await;
-    assert_eq!(dead.status, 401);
+    assert_eq!(dead.status, 303);
+    assert_eq!(dead.header("location"), Some("/login"));
     // An unknown provider is a 404, as in `start`.
     let token = oauth::session_of(&oauth::login(&app, Kind::Google, &sub()).await);
     for provider in ["twitter", "start"] {
@@ -262,8 +266,13 @@ async fn link_with_the_database_down_is_try_again() {
         "",
     )
     .await;
-    assert_eq!(failed.status, 503);
-    assert_eq!(failed.text(), r#"{"error":"auth.try_again"}"#);
+    // 008 "Enmienda 2026-10-30" of RF-C2: a 303 to `auth.try_again`, no JSON and no cookie.
+    assert_eq!(failed.status, 303);
+    assert_eq!(
+        failed.header("location"),
+        Some("/login?error=auth.try_again")
+    );
+    assert!(failed.body.is_empty());
     assert!(failed.set_cookies().is_empty());
 }
 

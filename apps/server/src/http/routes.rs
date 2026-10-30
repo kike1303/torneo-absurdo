@@ -220,18 +220,30 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
     use crate::auth;
     let filter = spec.method.filter();
     let body = DefaultBodyLimit::max(MAX_FORM_BYTES);
-    // `start`, `link` (phase C) and `callback` share the AUTH_IP bucket (D7).
-    let auth_ip = || middleware::from_fn_with_state(state.rate.auth_ip.clone(), rate::http::layer);
+    // `start`, `link` (phase C) and `callback` share the AUTH_IP bucket (D7). They are browser
+    // navigations, so over the quota they redirect instead of answering JSON (008 "Enmienda
+    // 2026-10-30" of RF-B5).
+    let auth_ip = |on_limit| {
+        let navigation = rate::http::Navigation {
+            limiter: state.rate.auth_ip.clone(),
+            on_limit,
+        };
+        middleware::from_fn_with_state(navigation, rate::http::redirect_layer)
+    };
+    let keep = rate::http::OnLimit::KeepCookies;
     match spec.handler {
         Handler::Health => on(filter, health::handler).fallback(errors::method_not_allowed),
         Handler::Ws => on(filter, crate::ws::handler),
         Handler::AuthStart => on(filter, auth::start::handler)
             .layer(body)
-            .layer(auth_ip()),
-        Handler::AuthLink => on(filter, auth::link::handler).layer(body).layer(auth_ip()),
+            .layer(auth_ip(keep)),
+        Handler::AuthLink => on(filter, auth::link::handler)
+            .layer(body)
+            .layer(auth_ip(keep)),
         // No body extractor (like logout): nothing for the limit to reject (RF-C3).
         Handler::AuthUnlink => on(filter, auth::unlink::handler),
-        Handler::AuthCallback => on(filter, auth::callback::handler).layer(auth_ip()),
+        Handler::AuthCallback => on(filter, auth::callback::handler)
+            .layer(auth_ip(rate::http::OnLimit::ExpireFlow(state.auth.cookies))),
         Handler::AuthProviders => on(filter, auth::providers),
         Handler::Logout => on(filter, auth::logout::logout).layer(body),
         Handler::LogoutAll => on(filter, auth::logout::logout_all).layer(body),

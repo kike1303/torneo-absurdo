@@ -1,7 +1,8 @@
 //! `POST /api/auth/logout` and `POST /api/auth/logout-all` (ADR-0008 D10, 008 RF-B11). Both
 //! revoke (one session, or every session of the user), expire the cookie and answer 303 to
 //! `/`, with or without a session: logging out is idempotent. If the revoke fails, a 303 to the
-//! login page with `auth.try_again` and the cookie kept. "Other mutations" quota of D7.
+//! login page with `auth.try_again` and the cookie kept; over the "other mutations" quota of D7,
+//! the same 303 (008 "Enmienda 2026-10-30" of RF-B5).
 
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -9,12 +10,10 @@ use axum::Extension;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use protocol::{ApiErrorCode, CallbackErrorCode};
 
-use super::callback::error_location;
+use super::callback::try_again_redirect;
 
 use crate::app::AppState;
-use crate::http::errors::too_many_requests;
 use crate::http::session::{self, PRIVATE_NO_STORE};
 use crate::net::{ClientContext, IpKey};
 use crate::sessions::{self, RevokeFilter};
@@ -48,19 +47,28 @@ async fn run(
     scope: Scope,
 ) -> Response {
     let key = client.map_or(IpKey::from(IpAddr::V4(Ipv4Addr::UNSPECIFIED)), |c| c.0.key);
-    if let Some(secs) = state.rate.mutation_ip.check(&key).retry_after_secs() {
-        return too_many_requests(ApiErrorCode::RateLimited, secs);
+    // Over a quota: the session is untouched, so the answer of a logout that could not revoke
+    // (008 "Enmienda 2026-10-30" of RF-B5), never a JSON 429.
+    if state
+        .rate
+        .mutation_ip
+        .check(&key)
+        .retry_after_secs()
+        .is_some()
+    {
+        return cannot_revoke();
     }
     let hash = session::token_hash(state, headers);
     let lookup = session::current(state, headers).await.map_err(|_| ());
     if let Ok(Some(info)) = lookup
-        && let Some(secs) = state
+        && state
             .rate
             .mutation_user
             .check(&info.user_id)
             .retry_after_secs()
+            .is_some()
     {
-        return too_many_requests(ApiErrorCode::RateLimited, secs);
+        return cannot_revoke();
     }
     match decide(scope, lookup, hash) {
         Plan::CannotRevoke => return cannot_revoke(),
@@ -114,19 +122,9 @@ fn decide(
 /// The session may still be alive, so never the "logged out" answer: no cookie expiry, and the
 /// login page with `auth.try_again` (a form-post navigation must not land on raw JSON, as the
 /// callback amendment says). With the session still valid, that page shows the error and a
-/// link to the account.
+/// link to the account. Also the answer over a quota (008 "Enmienda 2026-10-30" of RF-B5).
 fn cannot_revoke() -> Response {
-    (
-        StatusCode::SEE_OTHER,
-        [
-            (
-                header::LOCATION,
-                error_location(CallbackErrorCode::TryAgain),
-            ),
-            (header::CACHE_CONTROL, PRIVATE_NO_STORE),
-        ],
-    )
-        .into_response()
+    try_again_redirect(PRIVATE_NO_STORE)
 }
 
 #[cfg(test)]

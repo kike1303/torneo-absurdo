@@ -15,18 +15,18 @@ use std::sync::Arc;
 
 use axum::extract::rejection::FormRejection;
 use axum::extract::{Form, Path, State};
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::Response;
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use protocol::{ApiErrorCode, CallbackErrorCode};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::callback::error_redirect;
+use super::callback::{login_location, try_again_redirect};
 use super::login::Identity;
-use super::start::{Purpose, StartForm, begin_flow};
+use super::start::{Purpose, StartForm, begin_flow, flow_error};
 use crate::app::AppState;
 use crate::http::errors::error_response;
-use crate::http::session;
+use crate::http::session::{self, PRIVATE_NO_STORE};
 use crate::sessions::{self, Issued, RevokeFilter, SessionId, UaFamily};
 
 /// A pause between the session check of a link callback and its transaction. Production uses
@@ -59,8 +59,9 @@ impl fmt::Debug for LinkGateConfig {
     }
 }
 
-/// `POST /api/auth/link/{provider}`: an unknown or disabled provider is 404, no session is 401,
-/// a database error is 503; with a session, the flow (a rejected form is `auth.invalid_state`).
+/// `POST /api/auth/link/{provider}`: an unknown or disabled provider is 404 (JSON); no session
+/// is a 303 to the login page and a database error a 303 to `auth.try_again` (008 "Enmienda
+/// 2026-10-30" of RF-C2); with a session, the flow (a rejected form is `auth.invalid_state`).
 pub async fn handler(
     State(state): State<AppState>,
     Path(segment): Path<String>,
@@ -70,15 +71,31 @@ pub async fn handler(
     let Some(provider) = state.auth.provider(&segment) else {
         return error_response(StatusCode::NOT_FOUND, ApiErrorCode::NotFound);
     };
+    // The session first, so a link without one never creates a flow (security-reviewer).
     let info = match session::current(&state, &headers).await {
         Ok(Some(info)) => info,
-        Ok(None) => return session::unauthenticated(&state),
-        Err(_) => return session::try_again(),
+        Ok(None) => return to_login(&state),
+        Err(_) => return try_again_redirect(PRIVATE_NO_STORE),
     };
     match begin_flow(&state, provider, form, Purpose::Link(info.user_id)).await {
         Ok(response) => response,
-        Err(code) => error_redirect(&state.auth.cookies, code),
+        Err(code) => flow_error(&state.auth.cookies, code),
     }
+}
+
+/// No session (absent, expired or revoked): 303 to the login page with no `error` (its form is
+/// the answer; `auth.invalid_state` would mislead), and the session cookie expired (008
+/// "Enmienda 2026-10-30" of RF-C2). `private, no-store`: it read the session.
+fn to_login(state: &AppState) -> Response {
+    (
+        StatusCode::SEE_OTHER,
+        [
+            (header::LOCATION, login_location()),
+            (header::SET_COOKIE, state.auth.cookies.expire_session()),
+            (header::CACHE_CONTROL, PRIVATE_NO_STORE),
+        ],
+    )
+        .into_response()
 }
 
 /// What the transaction of a link needs from the callback.

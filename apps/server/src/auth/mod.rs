@@ -281,4 +281,25 @@ mod source_rules {
         assert_eq!(hits[0].1, 1, "{hits:?}");
         assert!(hits[0].0.ends_with("auth/callback.rs"), "{hits:?}");
     }
+
+    /// Every `Location` to the login page (the errors, and the bare `/login` of a `link` without
+    /// a session) is a literal of `auth/callback.rs` and of no other code of `src/` (008
+    /// "Enmienda 2026-10-30" of RF-B5 and RF-C2). Test modules are not code.
+    #[test]
+    fn every_login_location_is_built_in_the_callback_module() {
+        let needle = ["\"", "/login"].concat();
+        let hits: Vec<_> = sources()
+            .into_iter()
+            .map(|(path, text)| {
+                let code = text.split("#[cfg(test)]").next().unwrap_or_default();
+                let count = code.matches(&needle).count();
+                (path, count)
+            })
+            .filter(|(_, count)| *count > 0)
+            .collect();
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        assert!(hits[0].0.ends_with("auth/callback.rs"), "{hits:?}");
+        // `error_location` and `login_location`.
+        assert_eq!(hits[0].1, 2, "{hits:?}");
+    }
 }
