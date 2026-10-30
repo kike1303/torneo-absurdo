@@ -638,7 +638,8 @@ Sin cambios en los workflows.
 - **Job `e2e`:** siete tests de `account.spec.ts` (los casos 1 a 6, con el 5 en dos) en los tres proyectos de `auth/`: unos 21 tests de unos 5 s, de los que 3 reemplazan al test 1 de hoy, más las capturas y axe: de 1 a 2 min, que se suman a la ruta crítica `e2e-server` más `e2e` de plan-d. Si el p50 medido supera lo que dejó plan-d, se anota aquí con los números y se aplica la palanca (b) de plan-d (las capturas de 1280 px solo en `chromium`).
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+1. **Paso 1: `tests/startup.rs`.** Fija la lista de versiones de `_sqlx_migrations`, y suma `20261030000000`. No estaba en "Archivos que cambian". No cambia lo que prueba.
+2. **Paso 1: la sonda de `oauth_flows_purpose_ck` va sin usuario.** En `tests/migration_reauth.rs`, un flujo con `purpose = 'other'` y un usuario viola primero `oauth_flows_link_ck`. La sonda del `CHECK` de `purpose` va con `link_user_id` nulo, para que el constraint que lo rechaza sea el que se prueba.
 
 ## Revisión
 

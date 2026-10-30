@@ -1,13 +1,15 @@
 //! 008 phase C, plan-c decisions 10 and 11: `admin_audit` is insert-only (the ledger trigger),
-//! its `CHECK`s hold, and `users_privileged_guard` refuses every write of `role` or `banned_at`
-//! outside a transaction that set `torneo.actor = 'cli'` locally.
+//! its `CHECK`s hold, and `users_privileged_guard` refuses every write of `role`, `banned_at`
+//! or (009 RF3) `admin_account_cutoff` outside a transaction that set `torneo.actor = 'cli'`
+//! locally. 009 RF1: `oauth_accounts_identity_guard` refuses every change of an account's `id`
+//! or `user_id`, with no exception.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod support;
 
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
-use support::db::{TestDb, privileged};
+use support::db::{TestDb, begin_privileged, privileged};
 use uuid::Uuid;
 
 async fn plain_user(pool: &PgPool) -> Uuid {
@@ -164,6 +166,115 @@ async fn role_and_banned_at_are_written_only_by_the_cli_actor() {
         .unwrap();
     assert_eq!(row.get::<String, _>(0), "admin");
     assert!(row.get::<bool, _>(1));
+}
+
+/// 009 RF3: the cutoff of `grant` is as privileged as the role. An UPDATE that touches only it
+/// fires the guard (`UPDATE OF … admin_account_cutoff`), and so does an INSERT with a value.
+#[tokio::test]
+async fn admin_account_cutoff_is_written_only_by_the_cli_actor() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let user = plain_user(&pool).await;
+    let error = sqlx::query("UPDATE users SET admin_account_cutoff = 1 WHERE id = $1")
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap_err();
+    assert_eq!(sqlstate(&error).as_deref(), Some("TA004"));
+    assert_eq!(server::db::error_kind(&error), "privileged_write");
+    let error = sqlx::query(
+        "INSERT INTO users (display_name, display_name_key, admin_account_cutoff) \
+         VALUES ('Abf', 'abf', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap_err();
+    assert_eq!(sqlstate(&error).as_deref(), Some("TA004"));
+    // Naming it with its current value passes.
+    sqlx::query("UPDATE users SET admin_account_cutoff = NULL WHERE id = $1")
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap();
+    privileged(
+        &pool,
+        sqlx::query("UPDATE users SET admin_account_cutoff = 7 WHERE id = $1").bind(user),
+    )
+    .await;
+    let cutoff: Option<i64> = sqlx::query("SELECT admin_account_cutoff FROM users WHERE id = $1")
+        .bind(user)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(cutoff, Some(7));
+}
+
+/// 009 RF1 (plan, answer 3 of architect): the link order is never rewritten. `SET id = DEFAULT`
+/// (which `GENERATED ALWAYS` allows) and a change of owner are `TA005` with a fixed message and
+/// no value, also inside a transaction of the CLI's actor; any other column can change.
+#[tokio::test]
+async fn the_id_and_the_user_of_an_oauth_account_never_change() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let owner = plain_user(&pool).await;
+    let other = plain_user(&pool).await;
+    sqlx::query(
+        "INSERT INTO oauth_accounts (provider, provider_user_id, user_id) \
+         VALUES ('dev', 'c4n4ry-subject', $1)",
+    )
+    .bind(owner)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let id_before: i64 = sqlx::query("SELECT id FROM oauth_accounts WHERE user_id = $1")
+        .bind(owner)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+    let check = |error: sqlx::Error, sql: &str| {
+        assert_eq!(sqlstate(&error).as_deref(), Some("TA005"), "{sql}");
+        assert_eq!(
+            server::db::error_kind(&error),
+            "oauth_identity_immutable",
+            "{sql}"
+        );
+        let message = error.as_database_error().unwrap().message().to_owned();
+        assert_eq!(message, "oauth account identity is immutable", "{sql}");
+    };
+    for sql in [
+        "UPDATE oauth_accounts SET id = DEFAULT WHERE user_id = $1 AND $2::uuid IS NOT NULL",
+        "UPDATE oauth_accounts SET user_id = $2 WHERE user_id = $1",
+    ] {
+        let error = sqlx::query(sql)
+            .bind(owner)
+            .bind(other)
+            .execute(&pool)
+            .await
+            .unwrap_err();
+        check(error, sql);
+        let mut tx = begin_privileged(&pool).await;
+        let error = sqlx::query(sql)
+            .bind(owner)
+            .bind(other)
+            .execute(&mut *tx)
+            .await
+            .unwrap_err();
+        check(error, sql);
+        tx.rollback().await.unwrap();
+    }
+    sqlx::query("UPDATE oauth_accounts SET created_at = now() WHERE user_id = $1")
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let row = sqlx::query("SELECT id, user_id FROM oauth_accounts WHERE provider = 'dev'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(row.get::<i64, _>(0), id_before);
+    assert_eq!(row.get::<Uuid, _>(1), owner);
 }
 
 /// The actor of the helper dies with its transaction: on the same (single) connection, the
