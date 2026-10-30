@@ -190,6 +190,22 @@ describe('an internal fetch', () => {
   });
 });
 
+// QA of phase D: Kit's own fetch adds every browser cookie (and every `event.cookies.set`) when
+// the target's hostname matches `event.url.hostname`, which comes from `Host`, unless the
+// request says `credentials: 'omit'`. The end-to-end check is e2e/internal-fetch.spec.ts.
+describe("credentials: 'omit', so Kit never adds the browser's cookies", () => {
+  it.each([
+    `${INTERNAL}/api/me`,
+    `${INTERNAL}/api/auth/providers`,
+    'https://example.com/',
+    'http://torneo-server.evil.example:8080/api/me',
+  ])('%s', async (url) => {
+    const { run } = setup();
+    const sent = await run(url, { credentials: 'include' }, browserHeaders);
+    expect(sent.credentials).toBe('omit');
+  });
+});
+
 describe('RF-D2: the session cookie the web forwards', () => {
   it.each([
     // Production policy: only __Host-session, also on a loopback origin.

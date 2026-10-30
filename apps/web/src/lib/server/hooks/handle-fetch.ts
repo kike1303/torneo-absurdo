@@ -86,6 +86,11 @@ function withoutInternalHeaders(source: Headers): Headers {
  * - Anything else: without `cookie`, the secret or any `x-client-*`, even if the caller set
  *   them (T16).
  *
+ * Both with `credentials: 'omit'`: otherwise Kit's own fetch, after this hook, replaces `cookie`
+ * with every browser cookie (and every `event.cookies.set`) whenever the target's hostname is
+ * `event.url.hostname` or a subdomain of it, and that hostname comes from `Host` (QA of phase
+ * D). undici sends the `cookie` header set here as it is: `omit` only stops Kit from adding.
+ *
  * Writes no log.
  */
 export function createHandleFetch(config: HandleFetchConfig): HandleFetch {
@@ -95,7 +100,7 @@ export function createHandleFetch(config: HandleFetchConfig): HandleFetch {
   return ({ event, request: outgoing, fetch }) => {
     const headers = withoutInternalHeaders(outgoing.headers);
     if (!isInternalUrl(outgoing.url, config.internalApiUrl)) {
-      return fetch(new Request(outgoing, { headers }));
+      return fetch(new Request(outgoing, { headers, credentials: 'omit' }));
     }
     const browser = event.request.headers;
     const cookies = sessionCookies(browser.get('cookie'), config.publicOrigin);
@@ -109,6 +114,6 @@ export function createHandleFetch(config: HandleFetchConfig): HandleFetch {
     const fetchSite = browser.get('sec-fetch-site');
     if (fetchSite !== null) headers.set(X_CLIENT_FETCH_SITE, fetchSite);
     // A form action has to see the 303 of the server; a read never redirects.
-    return fetch(new Request(outgoing, { headers, redirect: 'manual' }));
+    return fetch(new Request(outgoing, { headers, redirect: 'manual', credentials: 'omit' }));
   };
 }

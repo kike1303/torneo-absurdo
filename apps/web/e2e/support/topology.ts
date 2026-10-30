@@ -4,6 +4,8 @@ export const LOOPBACK = '127.0.0.1';
 export const EDGE_PORT = 4173;
 export const NO_CATALOG_PORT = 4174;
 export const CATALOG_PORT = 4175;
+/** The web of e2e/internal-fetch.spec.ts, against its own recording API (never the server). */
+export const INTERNAL_FETCH_WEB_PORT = 4176;
 export const SERVER_PORT = 4180;
 export const EGRESS_PORT = 4190;
 /** The origin the browser sees: the edge's (RF-D7). */
