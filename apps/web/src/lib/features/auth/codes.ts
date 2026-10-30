@@ -30,6 +30,7 @@ const ERROR_CODES: { readonly [K in ErrorCode]: true } = {
   'auth.provider_already_linked': true,
   'auth.last_provider': true,
   'auth.reauth_required': true,
+  'auth.reauth_mismatch': true,
   'profile.display_name_invalid': true,
   'profile.display_name_reserved': true,
   'profile.display_name_taken': true,
@@ -42,6 +43,8 @@ const CALLBACK_ERROR_CODES: { readonly [K in CallbackErrorCode]: true } = {
   'auth.try_again': true,
   'auth.already_linked': true,
   'auth.provider_already_linked': true,
+  'auth.reauth_required': true,
+  'auth.reauth_mismatch': true,
 };
 
 /** Only own keys: `__proto__`, `constructor` or `toString` are never codes. */

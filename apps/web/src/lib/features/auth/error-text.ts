@@ -34,6 +34,7 @@ export const ERROR_TEXT = {
   'auth.provider_already_linked': 'error_auth_provider_already_linked',
   'auth.last_provider': 'error_auth_last_provider',
   'auth.reauth_required': 'error_auth_reauth_required',
+  'auth.reauth_mismatch': 'error_auth_reauth_mismatch',
   'profile.display_name_invalid': 'error_profile_display_name_invalid',
   'profile.display_name_reserved': 'error_profile_display_name_reserved',
   'profile.display_name_taken': 'error_profile_display_name_taken',
@@ -47,6 +48,8 @@ export const CALLBACK_ERROR_TEXT = {
   'auth.try_again': 'error_auth_try_again',
   'auth.already_linked': 'error_auth_already_linked',
   'auth.provider_already_linked': 'error_auth_provider_already_linked',
+  'auth.reauth_required': 'error_auth_reauth_required',
+  'auth.reauth_mismatch': 'error_auth_reauth_mismatch',
 } as const satisfies { readonly [K in CallbackErrorCode]: MessageKey };
 
 export const GENERIC_ERROR = 'error_generic' satisfies MessageKey;

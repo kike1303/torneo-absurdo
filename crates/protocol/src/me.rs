@@ -101,6 +101,33 @@ impl Provider {
     }
 }
 
+/// `GET /api/auth/reauth-status` (009 RF18): what a reauthentication would let the session do.
+/// Computed by the server, so the web never repeats the rule. No dates, no ids and not the
+/// provider of the authentication.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(deny_unknown_fields)]
+pub struct ReauthStatus {
+    /// The session has a confirmation: linking is allowed now.
+    pub link_ready: bool,
+    /// One entry per linked account.
+    pub unlink: Vec<UnlinkStatus>,
+}
+
+/// One linked account in [`ReauthStatus`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(deny_unknown_fields)]
+pub struct UnlinkStatus {
+    pub provider: Provider,
+    /// The rule of RF13 holds now (it says nothing of the last provider: that is RF14, step 4).
+    pub ready: bool,
+    /// The enabled providers of the user a reauthentication with which would let this one go
+    /// (itself, if enabled, and those linked before it), in the order of the login buttons.
+    /// Empty: it cannot be removed while it is disabled (009 area of concern 5).
+    pub reauth_with: Vec<Provider>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "snake_case")]
@@ -207,6 +234,45 @@ mod tests {
                 serde_json::from_str::<PreferencesRequest>(bad).is_err(),
                 "{bad}"
             );
+        }
+    }
+
+    /// 009 RF18: the exact shape of `reauth-status`, no field more (no dates, no ids).
+    #[test]
+    fn reauth_status_has_the_exact_shape() {
+        let status = ReauthStatus {
+            link_ready: false,
+            unlink: vec![
+                UnlinkStatus {
+                    provider: Provider::Google,
+                    ready: true,
+                    reauth_with: vec![Provider::Google],
+                },
+                UnlinkStatus {
+                    provider: Provider::Discord,
+                    ready: false,
+                    reauth_with: vec![Provider::Google, Provider::Discord],
+                },
+            ],
+        };
+        let json = r#"{"link_ready":false,"unlink":[{"provider":"google","ready":true,"reauth_with":["google"]},{"provider":"discord","ready":false,"reauth_with":["google","discord"]}]}"#;
+        assert_eq!(serde_json::to_string(&status).unwrap(), json);
+        assert_eq!(serde_json::from_str::<ReauthStatus>(json).unwrap(), status);
+        let empty = ReauthStatus {
+            link_ready: true,
+            unlink: Vec::new(),
+        };
+        assert_eq!(
+            serde_json::to_string(&empty).unwrap(),
+            r#"{"link_ready":true,"unlink":[]}"#
+        );
+        for bad in [
+            r#"{"link_ready":true,"unlink":[],"authenticated_at":"2026-10-30"}"#,
+            r#"{"link_ready":true,"unlink":[{"provider":"google","ready":true,"reauth_with":[],"id":1}]}"#,
+            r#"{"link_ready":true}"#,
+            r#"{"link_ready":true,"unlink":[{"provider":"twitter","ready":true,"reauth_with":[]}]}"#,
+        ] {
+            assert!(serde_json::from_str::<ReauthStatus>(bad).is_err(), "{bad}");
         }
     }
 

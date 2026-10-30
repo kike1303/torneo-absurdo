@@ -14,4 +14,6 @@ export type CallbackErrorCode =
   | 'auth.provider_error'
   | 'auth.try_again'
   | 'auth.already_linked'
-  | 'auth.provider_already_linked';
+  | 'auth.provider_already_linked'
+  | 'auth.reauth_required'
+  | 'auth.reauth_mismatch';

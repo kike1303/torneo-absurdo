@@ -640,6 +640,7 @@ Sin cambios en los workflows.
 ## Desviaciones durante la implementación
 1. **Paso 1: `tests/startup.rs`.** Fija la lista de versiones de `_sqlx_migrations`, y suma `20261030000000`. No estaba en "Archivos que cambian". No cambia lo que prueba.
 2. **Paso 1: la sonda de `oauth_flows_purpose_ck` va sin usuario.** En `tests/migration_reauth.rs`, un flujo con `purpose = 'other'` y un usuario viola primero `oauth_flows_link_ck`. La sonda del `CHECK` de `purpose` va con `link_user_id` nulo, para que el constraint que lo rechaza sea el que se prueba.
+3. **Paso 2: el texto nuevo de `error_auth_reauth_required` viaja en el commit del paso 2.** La decisión 13 lo pone con las llaves de **[frontend]**. Lo adelanto porque desde este commit `/login?error=auth.reauth_required` es un código de la lista cerrada, y el texto de 008 ("Vuelve a entrar…") ya no describe la acción. Los textos son los de la decisión 13 (`es`) y su traducción (`en`).
 
 ## Revisión
 
