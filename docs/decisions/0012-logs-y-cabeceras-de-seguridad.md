@@ -494,3 +494,17 @@ Cambia B3, B4 (punto nuevo 6), B4.5 y B6. El resto de la Parte B no cambia, y la
   1. Los comentarios que acompañan a las dos cadenas dicen "ADR-0012 B1 exactly" y "ADR-0012 B1 as Kit emits it". Hay que cambiarlos por "B1 plus the B4 extensions in use (B4.6)" y que el mensaje de error de `images` no diga "is not ADR-0012 B1" cuando lo esperado ya no es B1 a secas. El nombre de la variable `b1` puede quedar, porque el chequeo del punto 7 lo busca por ese nombre.
   2. Revisé `csp_norm` (en los dos workflows) y `effectiveCsp` (en `security.spec.ts`) con fuentes que llevan ruta: parten por espacios y `;`, y la regex del nonce solo toca `'nonce-…'`, así que las URLs pasan intactas. No hace falta tocar la normalización.
   3. Para el e2e con proxy: no tengo verificado que el `proxy` de Playwright salte loopback igual en WebKit que en Chromium. Conviene fijar `bypass` con `127.0.0.1` y `localhost` en los dos motores, y que el test compruebe que en el registro del proxy solo aparecen hosts del proveedor, para que la app nunca pase por él y el negativo ("el proxy no recibe nada") siga siendo cierto.
+
+### security-reviewer — 2026-10-30 — APPROVE (confirmación del texto enmendado de la Enmienda 2026-10-30)
+**🤖 security-reviewer**
+
+- Verifiqué el texto de la enmienda en 120ab22 contra mi revisión anterior y contra 97053ae (`git diff 97053ae 120ab22`):
+  - **Recomendación 1.** B4.6 prohíbe toda redirección propia de `server` o `web` a `accounts.google.com` o `discord.com` salvo a las constantes de `providers.rs`, y nunca con 307 ni 308. Lo fijan tres pruebas: un UT (orígenes solo en `providers.rs`, sin `Redirect::temporary` ni `Redirect::permanent` en `auth/`), un IT (estado 303 de `start` y `link`) y un Vitest sobre `src/**`. Cierra el escenario del `/go?to=` con 307 hacia un webhook.
+  - **Recomendación 2.** La frase quedó precisada: con form hijacking los campos sí viajan, pero el proveedor no los reenvía sin consentimiento y solo al `redirect_uri` registrado. Además ningún formulario lleva `state`, `client_id`, `redirect_uri` ni un secreto, y lo fija un Vitest.
+  - **Recomendación 3.** La prueba nombra `CONNECT accounts.google.com:443` y `CONNECT discord.com:443`, pone loopback en `bypass` en los dos motores y tiene un teardown que falla ante un host no declarado. Con eso, el negativo del webhook ("el proxy no recibe nada") sigue siendo cierto.
+  - Los puntos 6 y 7 de devops-engineer en B6.4 no tocan la superficie de la CSP. El punto 7 la endurece: deja comprobada la cadena de `release.yml` antes del merge.
+  - Las fuentes de B4.6 siguen idénticas a `GOOGLE_AUTHORIZE` y `DISCORD_AUTHORIZE` de `apps/server/src/auth/providers.rs`.
+- Hallazgos de seguridad confirmados: ninguno. Mi APPROVE anterior se mantiene sobre este texto.
+- No bloquean (para el PR de la fase D):
+  1. El UT de "esos orígenes solo aparecen en `providers.rs`" tiene que excluir su propio módulo de test, o vivir en `providers.rs`, para no contarse a sí mismo.
+  2. Cuando firmen los dos revisores, la línea en cursiva de B3 que dice "pendiente de las firmas" queda vieja. Conviene actualizarla en el PR que aplique la enmienda.
