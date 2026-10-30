@@ -7,7 +7,9 @@ use axum::extract::{Form, Path, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use oauth2::basic::BasicClient;
-use oauth2::{AuthUrl, ClientId, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl};
+use oauth2::{
+    AuthUrl, ClientId, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
+};
 use protocol::{ApiErrorCode, CallbackErrorCode, Provider};
 use serde::Deserialize;
 
@@ -94,6 +96,10 @@ async fn start(
     let mut request = client
         .authorize_url(|| CsrfToken::new(state_text))
         .set_pkce_challenge(challenge);
+    // The only scope of the provider (RF-C1); `dev` has none and gets its `login_hint`.
+    if let Some(scope) = endpoints.scope {
+        request = request.add_scope(Scope::new(scope.to_owned()));
+    }
     if let Some(identity) = identity.as_deref() {
         request = request.add_extra_param("login_hint", identity);
     }

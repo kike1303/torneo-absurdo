@@ -8,6 +8,7 @@ pub mod dev;
 pub mod login;
 pub mod logout;
 pub mod next;
+pub mod providers;
 pub mod start;
 
 use std::fmt;
@@ -23,7 +24,7 @@ use rand_core::{OsRng, TryRngCore};
 use sha2::{Digest, Sha256};
 
 use crate::app::{AppState, Settings, StartupError};
-use crate::config::Config;
+use crate::config::{ClientSecret, Config, OAuthCredentials};
 use crate::http::cookies::CookiePolicy;
 use crate::ledger::Coins;
 use crate::net::IpHashKey;
@@ -36,6 +37,10 @@ pub struct AuthState {
     pub daily_grant: Coins,
     pub alias: Arc<dyn AliasSource>,
     pub public_origin: String,
+    /// The credentials of Google and Discord (`None`: off).
+    pub credentials: OAuthCredentials,
+    /// Their URLs (the constants, or a test's fakes).
+    pub urls: providers::OAuthSettings,
     /// The enabled providers, in the order of the login buttons.
     pub providers: Vec<Provider>,
     /// The client of the token and userinfo requests (TLS only with a real provider).
@@ -63,7 +68,9 @@ impl AuthState {
             daily_grant: config.daily_grant,
             alias: settings.alias.0.clone(),
             public_origin: config.public_origin.clone(),
-            providers: enabled_providers(),
+            credentials: config.oauth.clone(),
+            urls: settings.oauth.clone(),
+            providers: enabled_providers(&config.oauth),
             http: client::HttpClient::new(tls),
             #[cfg(feature = "dev-auth")]
             dev: dev::DevProvider::default(),
@@ -78,14 +85,30 @@ impl AuthState {
     /// The OAuth endpoints of `provider`. The browser-facing ones on `PUBLIC_ORIGIN`, the
     /// server-to-server ones (token, userinfo) on `local`, the address of this very server.
     pub fn endpoints(&self, provider: Provider, local: Option<SocketAddr>) -> Option<Endpoints> {
-        match provider {
+        let (credentials, urls) = match provider {
+            Provider::Google => (&self.credentials.google, &self.urls.google),
+            Provider::Discord => (&self.credentials.discord, &self.urls.discord),
             #[cfg(feature = "dev-auth")]
-            Provider::Dev => Some(dev::endpoints(&self.public_origin, local)),
-            _ => {
-                let _ = local;
-                None
-            }
-        }
+            Provider::Dev => return Some(dev::endpoints(&self.public_origin, local)),
+            #[cfg(not(feature = "dev-auth"))]
+            Provider::Dev => return None,
+        };
+        let _ = local;
+        let credentials = credentials.as_ref()?;
+        let urls = urls.clone().or_else(|| providers::production(provider))?;
+        Some(Endpoints {
+            client_id: credentials.id.clone(),
+            client_secret: Some(credentials.secret.clone()),
+            scope: providers::scope(provider),
+            authorize: urls.authorize,
+            token: Some(urls.token),
+            userinfo: Some(urls.userinfo),
+            redirect: format!(
+                "{}/api/auth/{}/callback",
+                self.public_origin,
+                provider.as_str()
+            ),
+        })
     }
 }
 
@@ -110,22 +133,28 @@ fn tls_for_with(
     })
 }
 
-/// Google and Discord arrive with phase C; `dev` only with the feature.
-fn enabled_providers() -> Vec<Provider> {
+/// Google and Discord with their credentials, then `dev` with the feature.
+fn enabled_providers(credentials: &OAuthCredentials) -> Vec<Provider> {
+    let mut providers = Vec::new();
+    if credentials.google.is_some() {
+        providers.push(Provider::Google);
+    }
+    if credentials.discord.is_some() {
+        providers.push(Provider::Discord);
+    }
     #[cfg(feature = "dev-auth")]
-    {
-        vec![Provider::Dev]
-    }
-    #[cfg(not(feature = "dev-auth"))]
-    {
-        Vec::new()
-    }
+    providers.push(Provider::Dev);
+    providers
 }
 
 /// The OAuth endpoints of one provider.
 #[derive(Debug, Clone)]
 pub struct Endpoints {
     pub client_id: String,
+    /// Google and Discord; the dev provider has none. `Debug` redacts it.
+    pub client_secret: Option<ClientSecret>,
+    /// The only scope asked for (none for `dev`).
+    pub scope: Option<&'static str>,
     pub authorize: String,
     pub token: Option<String>,
     pub userinfo: Option<String>,

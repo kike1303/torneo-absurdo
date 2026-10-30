@@ -65,6 +65,9 @@ pub struct Settings {
     pub ws: WsConfig,
     pub rate: RateSettings,
     pub alias: AliasConfig,
+    /// The URLs of Google and Discord: the production constants unless a test replaces them
+    /// (never an environment variable, plan-c decision 5).
+    pub oauth: crate::auth::providers::OAuthSettings,
 }
 
 #[derive(Clone)]

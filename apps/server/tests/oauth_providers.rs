@@ -1,0 +1,270 @@
+//! 008 RF-C1 and T19: Google and Discord against fake local providers (never the network). The
+//! authorization URL asks for exactly one scope, the token request carries Basic and the right
+//! `code_verifier`, the first login creates the user with the grant and an alias that has
+//! nothing of `userinfo`, and every failure of the provider is `auth.provider_error`.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+mod support;
+
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use sha2::{Digest, Sha256};
+use sqlx::{PgPool, Row};
+use support::app::ORIGIN;
+use support::db::TestDb;
+use support::fake_provider::{self as fake, Kind, Mode};
+use support::oauth;
+
+const KINDS: [Kind; 2] = [Kind::Google, Kind::Discord];
+
+async fn count(pool: &PgPool, table: &str) -> i64 {
+    sqlx::query(sqlx::AssertSqlSafe(format!("SELECT count(*) FROM {table}")))
+        .fetch_one(pool)
+        .await
+        .unwrap()
+        .get(0)
+}
+
+/// A Discord identity is a snowflake; a Google `sub` is any text.
+fn identity(kind: Kind) -> String {
+    match kind {
+        Kind::Google => format!("g-sub-{}", uuid::Uuid::new_v4().simple()),
+        Kind::Discord => format!("{}", 100_000_000_000_000_000u64 + u64::from(rand_u16())),
+    }
+}
+
+fn rand_u16() -> u16 {
+    uuid::Uuid::new_v4().as_bytes()[0].into()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_authorization_url_asks_for_one_scope_with_pkce() {
+    let db = TestDb::create().await;
+    let (app, _pool) = oauth::start_app(&db).await;
+    for kind in KINDS {
+        let started = oauth::start(&app, kind, None).await;
+        assert_eq!(started.status, 303, "{}", started.text());
+        let location = started.header("location").unwrap();
+        assert!(
+            location.starts_with(&format!("http://{}/authorize?", app.fake(kind).addr)),
+            "{location}"
+        );
+        let query = oauth::query_of(location);
+        assert_eq!(query["scope"], kind.scope(), "{kind:?}");
+        assert_eq!(query["client_id"], kind.client_id());
+        assert_eq!(query["response_type"], "code");
+        assert_eq!(query["code_challenge_method"], "S256");
+        assert_eq!(
+            query["redirect_uri"],
+            format!("{ORIGIN}/api/auth/{}/callback", kind.name())
+        );
+        assert_eq!(query["state"].len(), 22);
+        assert_eq!(query["code_challenge"].len(), 43);
+        // Only these parameters: no `login_hint`, no extra scope, no secret.
+        let mut keys: Vec<_> = query.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "client_id",
+                "code_challenge",
+                "code_challenge_method",
+                "redirect_uri",
+                "response_type",
+                "scope",
+                "state"
+            ]
+        );
+        assert!(!location.contains(kind.client_secret()));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_first_login_creates_the_user_with_the_grant_and_an_unrelated_alias() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    for kind in KINDS {
+        let id = identity(kind);
+        let started = oauth::start(&app, kind, None).await;
+        let challenge =
+            oauth::query_of(started.header("location").unwrap())["code_challenge"].clone();
+        let done = oauth::finish(&app, kind, &started, &id, None).await;
+        assert_eq!(done.header("location"), Some("/cuenta"), "{kind:?}");
+        let token = oauth::session_of(&done);
+        // The exchange sent Basic with the test credentials and the verifier of the challenge.
+        let (verifier, authorization) = app.fake(kind).last_token_request().unwrap();
+        assert_eq!(authorization, format!("Basic {}", kind.basic()));
+        assert_eq!(
+            URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes())),
+            challenge
+        );
+        let me: serde_json::Value =
+            serde_json::from_str(&oauth::me(&app, &token).await.text()).unwrap();
+        assert_eq!(me["balance"], 100, "{me}");
+        assert_eq!(me["providers"], serde_json::json!([kind.name()]));
+        let alias = me["display_name"].as_str().unwrap().to_lowercase();
+        for field in [
+            id.as_str(),
+            fake::NAME,
+            fake::EMAIL,
+            fake::USERNAME,
+            fake::GLOBAL_NAME,
+            "canary",
+        ] {
+            let field = field.to_lowercase();
+            assert!(
+                !alias.contains(&field) && !field.contains(&alias),
+                "{alias} {field}"
+            );
+        }
+        let stored: String =
+            sqlx::query("SELECT provider_user_id FROM oauth_accounts WHERE provider = $1")
+                .bind(kind.name())
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+                .get(0);
+        assert_eq!(stored, id);
+        // The same identity again is the same user.
+        let users = count(&pool, "users").await;
+        let again = oauth::login(&app, kind, &id).await;
+        oauth::session_of(&again);
+        assert_eq!(count(&pool, "users").await, users);
+    }
+    assert_eq!(count(&pool, "users").await, 2);
+    assert_eq!(count(&pool, "oauth_accounts").await, 2);
+}
+
+/// Only the identity field of `userinfo` is read; nothing else of the provider is stored.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn nothing_of_userinfo_but_the_identity_is_stored() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    for kind in KINDS {
+        oauth::session_of(&oauth::login(&app, kind, &identity(kind)).await);
+    }
+    let dump: String = sqlx::query(
+        "SELECT string_agg(t::text, ' ') FROM (SELECT row_to_json(u)::text AS t FROM users u \
+         UNION ALL SELECT row_to_json(o)::text FROM oauth_accounts o \
+         UNION ALL SELECT row_to_json(e)::text FROM auth_events e) AS rows",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    for canary in [fake::NAME, fake::EMAIL, fake::USERNAME, fake::GLOBAL_NAME] {
+        assert!(!dump.contains(canary), "{canary}");
+    }
+    for kind in KINDS {
+        assert!(!dump.contains(&kind.access_token()));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_enabled_providers_follow_the_credentials() {
+    let db = TestDb::create().await;
+    let (app, _pool) = oauth::start_app(&db).await;
+    let list = support::http::get(app.addr, "/api/auth/providers").await;
+    let expected = if cfg!(feature = "dev-auth") {
+        r#"["google","discord","dev"]"#
+    } else {
+        r#"["google","discord"]"#
+    };
+    assert_eq!(list.text(), expected);
+    // Without Discord's pair (loopback), only Google.
+    let db = TestDb::create().await;
+    let (app, _pool) = oauth::start_app_with(
+        &db,
+        &[("DISCORD_CLIENT_ID", ""), ("DISCORD_CLIENT_SECRET", "")],
+        server::app::Settings::default(),
+    )
+    .await;
+    let list = support::http::get(app.addr, "/api/auth/providers").await;
+    let expected = if cfg!(feature = "dev-auth") {
+        r#"["google","dev"]"#
+    } else {
+        r#"["google"]"#
+    };
+    assert_eq!(list.text(), expected);
+    let refused = oauth::start(&app, Kind::Discord, None).await;
+    assert_eq!(refused.status, 404);
+}
+
+/// Each way the provider can fail is `auth.provider_error`, without a user, and with
+/// `auth.provider_failed` and a code in the log.
+#[test]
+fn every_failure_of_the_provider_is_provider_error() {
+    let modes = [
+        (Mode::TokenStatus500, Kind::Google),
+        (Mode::UserinfoStatus500, Kind::Discord),
+        (Mode::InvalidJson, Kind::Google),
+        (Mode::NoIdentity, Kind::Discord),
+        (Mode::ControlIdentity, Kind::Google),
+        (Mode::TooLarge, Kind::Discord),
+        (Mode::Silent, Kind::Google),
+    ];
+    let logs = support::logs::run("info", |_| async move {
+        let db = TestDb::create().await;
+        let (app, pool) = oauth::start_app(&db).await;
+        for (mode, kind) in modes {
+            app.fake(kind).set_mode(mode);
+            let done = oauth::login(&app, kind, &identity(kind)).await;
+            assert_eq!(oauth::error_of(&done), "auth.provider_error", "{mode:?}");
+            assert_eq!(done.cookie(oauth::flow_name()), Some(""), "{mode:?}");
+            assert_eq!(count(&pool, "users").await, 0, "{mode:?}");
+            app.fake(kind).set_mode(Mode::Ok);
+        }
+        // A Discord id that is not a snowflake is refused too.
+        let done = oauth::login(&app, Kind::Discord, "not-a-snowflake").await;
+        assert_eq!(oauth::error_of(&done), "auth.provider_error");
+        let done = oauth::login(&app, Kind::Discord, "123456789012345678901").await;
+        assert_eq!(oauth::error_of(&done), "auth.provider_error");
+        assert_eq!(count(&pool, "users").await, 0);
+    });
+    let failed = logs.events("auth.provider_failed");
+    assert_eq!(failed.len(), 9, "{}", logs.text());
+    let kinds: Vec<&str> = failed
+        .iter()
+        .map(|l| l["error_kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "token_status",
+            "userinfo_status",
+            "userinfo_invalid",
+            "userinfo_invalid",
+            "userinfo_invalid",
+            "too_large",
+            "timeout",
+            "userinfo_invalid",
+            "userinfo_invalid",
+        ]
+    );
+    for line in &failed {
+        assert_eq!(line["level"], "warn");
+        let mut keys: Vec<_> = line.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["error_kind", "event", "level", "ts"], "{line}");
+    }
+}
+
+/// The provider's `error` (the user cancelled) never calls the token endpoint.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cancelled_authorization_is_provider_error_without_a_token_request() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let started = oauth::start(&app, Kind::Google, None).await;
+    let state = oauth::query_of(started.header("location").unwrap())["state"].clone();
+    let flow = started.cookie(oauth::flow_name()).unwrap().to_owned();
+    let done = oauth::callback(
+        &app,
+        &format!("/api/auth/google/callback?error=access_denied&state={state}"),
+        &flow,
+        None,
+    )
+    .await;
+    assert_eq!(oauth::error_of(&done), "auth.provider_error");
+    assert_eq!(app.google.token_requests(), 0);
+    assert_eq!(count(&pool, "users").await, 0);
+}

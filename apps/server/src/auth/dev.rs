@@ -38,6 +38,8 @@ pub fn endpoints(public_origin: &str, local: Option<SocketAddr>) -> Endpoints {
     let local = local.map(|addr| format!("http://{addr}"));
     Endpoints {
         client_id: CLIENT_ID.to_owned(),
+        client_secret: None,
+        scope: None,
         authorize: format!("{public_origin}/api/auth/dev/oauth/authorize"),
         token: local
             .as_ref()

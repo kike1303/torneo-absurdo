@@ -12,22 +12,22 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use oauth2::basic::BasicClient;
-use oauth2::{AuthorizationCode, ClientId, PkceCodeVerifier, RedirectUrl, TokenResponse, TokenUrl};
+use oauth2::{
+    AuthorizationCode, ClientId, ClientSecret, PkceCodeVerifier, RedirectUrl, RequestTokenError,
+    TokenResponse, TokenUrl,
+};
 use protocol::{ApiErrorCode, CallbackErrorCode, Provider};
 use serde::Deserialize;
 use sqlx::Row;
 use subtle::ConstantTimeEq;
 
-use super::flow_hash;
 use super::login::{self, Identity, LoginError};
+use super::{client, flow_hash, providers};
 use crate::app::AppState;
 use crate::http::cookies::CookiePolicy;
 use crate::http::errors::error_response;
 use crate::net::{ClientContext, IpKey, LocalAddr};
 use crate::sessions::{Issued, TokenHash, UaFamily};
-
-/// The longest `sub` the server accepts from a provider.
-const MAX_SUBJECT_LEN: usize = 255;
 
 /// The login page with an error code from the closed list: the only place that builds this
 /// `Location` (the callback errors and a logout that could not revoke).
@@ -191,13 +191,28 @@ async fn run(
     Ok((issued, location))
 }
 
-#[derive(Deserialize)]
-struct UserInfo {
-    sub: String,
+/// Why the provider step failed, as the `error_kind` of `auth.provider_failed` (plan-c decision
+/// 12): a code of the client, or one of these. Never the provider's text.
+fn provider_failed(kind: &'static str) -> CallbackErrorCode {
+    tracing::warn!(event = "auth.provider_failed", error_kind = kind);
+    CallbackErrorCode::ProviderError
 }
 
-/// Redeems the code with PKCE and reads `sub` from `userinfo`. The provider's tokens are
-/// dropped here and never stored (D1).
+/// The code of a failed token request: the transport error of our client, or the provider's
+/// answer (an error status or a body that is not a token).
+fn token_failure<E>(error: &RequestTokenError<client::ClientError, E>) -> &'static str
+where
+    E: oauth2::ErrorResponse + 'static,
+{
+    match error {
+        RequestTokenError::Request(error) => error.as_code(),
+        _ => "token_status",
+    }
+}
+
+/// Redeems the code with PKCE (and Basic with the client secret, for Google and Discord) and
+/// reads the identity from `userinfo`. The provider's tokens are dropped here and never stored
+/// (D1).
 async fn identity(
     state: &AppState,
     provider: Provider,
@@ -210,15 +225,19 @@ async fn identity(
     let token_url =
         TokenUrl::new(endpoints.token.ok_or(ProviderError)?).map_err(|_| ProviderError)?;
     let redirect = RedirectUrl::new(endpoints.redirect).map_err(|_| ProviderError)?;
-    let oauth = BasicClient::new(ClientId::new(endpoints.client_id))
+    let mut oauth = BasicClient::new(ClientId::new(endpoints.client_id))
         .set_token_uri(token_url)
         .set_redirect_uri(redirect);
+    if let Some(secret) = &endpoints.client_secret {
+        oauth = oauth.set_client_secret(ClientSecret::new(secret.expose().to_owned()));
+    }
+    let http = &state.auth.http;
     let token = oauth
         .exchange_code(AuthorizationCode::new(code))
         .set_pkce_verifier(PkceCodeVerifier::new(verifier))
-        .request_async(&|request| state.auth.http.send(request))
+        .request_async(&|request| http.send(request))
         .await
-        .map_err(|_| ProviderError)?;
+        .map_err(|error| provider_failed(token_failure(&error)))?;
     let userinfo = axum::http::Request::builder()
         .method("GET")
         .uri(endpoints.userinfo.ok_or(ProviderError)?)
@@ -230,21 +249,13 @@ async fn identity(
         .body(Vec::new())
         .map_err(|_| ProviderError)?;
     drop(token);
-    let response = state
-        .auth
-        .http
+    let response = http
         .send(userinfo)
         .await
-        .map_err(|_| ProviderError)?;
+        .map_err(|error| provider_failed(error.as_code()))?;
     if response.status() != StatusCode::OK {
-        return Err(ProviderError);
+        return Err(provider_failed("userinfo_status"));
     }
-    let info: UserInfo = serde_json::from_slice(response.body()).map_err(|_| ProviderError)?;
-    if info.sub.is_empty()
-        || info.sub.len() > MAX_SUBJECT_LEN
-        || info.sub.chars().any(char::is_control)
-    {
-        return Err(ProviderError);
-    }
-    Ok(info.sub)
+    providers::identity(provider, response.body())
+        .ok_or_else(|| provider_failed("userinfo_invalid"))
 }
