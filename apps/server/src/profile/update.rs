@@ -116,7 +116,7 @@ pub async fn display_name(
     // win. A violation never logs the key (ADR-0012 A9).
     let updated = sqlx::query(
         "UPDATE users SET display_name = $1, display_name_key = $2, \
-         display_name_is_generated = false WHERE id = $3",
+         display_name_is_generated = false WHERE id = $3 AND banned_at IS NULL",
     )
     .bind(name.as_str())
     .bind(name.key())
@@ -124,6 +124,8 @@ pub async fn display_name(
     .execute(&state.db)
     .await;
     match updated {
+        // Banned after the session check: the write waited for the ban and found no row.
+        Ok(done) if done.rows_affected() == 0 => return session::unauthenticated(&state),
         Ok(_) => {}
         Err(error) if crate::db::is_unique_violation(&error, NAME_KEY_INDEX) => {
             return refused(StatusCode::CONFLICT, ProfileErrorCode::DisplayNameTaken);
@@ -172,7 +174,7 @@ pub async fn preferences(
     // table are the second barrier of the enums.
     let updated = sqlx::query(
         "UPDATE users SET locale = CASE WHEN $2 THEN $3 ELSE locale END, \
-         theme = CASE WHEN $4 THEN $5 ELSE theme END WHERE id = $1",
+         theme = CASE WHEN $4 THEN $5 ELSE theme END WHERE id = $1 AND banned_at IS NULL",
     )
     .bind(info.user_id)
     .bind(request.locale.is_some())
@@ -181,8 +183,10 @@ pub async fn preferences(
     .bind(request.theme.flatten().map(theme_code))
     .execute(&state.db)
     .await;
-    if let Err(error) = updated {
-        return update_failed(&error);
+    match updated {
+        Ok(done) if done.rows_affected() == 0 => return session::unauthenticated(&state),
+        Ok(_) => {}
+        Err(error) => return update_failed(&error),
     }
     answer(&state, &info).await
 }

@@ -22,6 +22,8 @@ use crate::net::{ClientContext, IpKey};
 use crate::sessions::{self, RevokeFilter, SessionInfo};
 
 enum Refused {
+    /// Banned after the session check (the lock waited for the ban to commit).
+    Banned,
     NotLinked,
     LastProvider,
     Db,
@@ -82,6 +84,7 @@ pub async fn handler(
             ],
         )
             .into_response(),
+        Err(Refused::Banned) => session::unauthenticated(&state),
         Err(Refused::NotLinked) => private(StatusCode::NOT_FOUND, ApiErrorCode::NotFound),
         Err(Refused::LastProvider) => private(StatusCode::CONFLICT, AuthErrorCode::LastProvider),
         Err(Refused::Db) => session::try_again(),
@@ -95,12 +98,14 @@ async fn unlink(
     ip_hash: &[u8; 32],
 ) -> Result<(), Refused> {
     let mut tx = state.db.begin().await?;
-    // In series with another unlink and with a link of the same user.
-    sqlx::query("SELECT 1 FROM users WHERE id = $1 FOR UPDATE")
+    // In series with another unlink and with a link of the same user. `banned_at` again here,
+    // as in `link`: a ban that committed after `current()` stops the unlink (under READ
+    // COMMITTED the lock waits for the ban and re-reads the row).
+    sqlx::query("SELECT 1 FROM users WHERE id = $1 AND banned_at IS NULL FOR UPDATE")
         .bind(info.user_id)
         .fetch_optional(&mut *tx)
         .await?
-        .ok_or(Refused::NotLinked)?;
+        .ok_or(Refused::Banned)?;
     sqlx::query(
         "DELETE FROM oauth_accounts WHERE user_id = $1 AND provider = $2 RETURNING provider",
     )
