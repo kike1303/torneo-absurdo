@@ -4,10 +4,9 @@ import {
   ADMIN_CLI_LOG,
   CANARIES,
   DYNAMIC_CANARIES,
-  EGRESS_LOG,
-  EXPECTED_EGRESS,
   LOG_DIR,
   SERVER_LOG,
+  egressProblems,
   fileLines,
   readLines,
   whitelistProblems,
@@ -77,16 +76,6 @@ function jsonProblems(label: string, lines: string[]): string[] {
     }
   });
   return problems;
-}
-
-/** egress.log against expected-egress.txt (008 plan-d decision 10, condition 1 of devops). */
-function egressProblems(): string[] {
-  // A proxy that never started would switch the guard off silently.
-  if (!existsSync(EGRESS_LOG)) return ['egress: egress.log missing (did the proxy start?)'];
-  const expected = new Set(fileLines(EXPECTED_EGRESS));
-  return fileLines(EGRESS_LOG)
-    .filter((target) => !expected.has(target))
-    .map((target) => `egress: the browser tried to reach ${target}, which no test declared`);
 }
 
 /**

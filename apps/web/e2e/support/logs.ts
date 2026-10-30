@@ -16,6 +16,18 @@ export const EXPECTED_EGRESS = path.join(LOG_DIR, 'expected-egress.txt');
 /** Values of this run that must never reach a log. Emptied by `just _e2e-run`. */
 export const DYNAMIC_CANARIES = path.join(LOG_DIR, 'dynamic-canaries.txt');
 
+/**
+ * egress.log against expected-egress.txt (008 plan-d decision 10, condition 1 of devops). A
+ * missing egress.log fails: a proxy that never started would switch the guard off silently.
+ */
+export function egressProblems(egressLog = EGRESS_LOG, expectedFile = EXPECTED_EGRESS): string[] {
+  if (!existsSync(egressLog)) return ['egress: egress.log missing (did the proxy start?)'];
+  const expected = new Set(fileLines(expectedFile));
+  return fileLines(egressLog)
+    .filter((target) => !expected.has(target))
+    .map((target) => `egress: the browser tried to reach ${target}, which no test declared`);
+}
+
 function append(file: string, line: string): void {
   mkdirSync(LOG_DIR, { recursive: true });
   appendFileSync(file, `${line}\n`);

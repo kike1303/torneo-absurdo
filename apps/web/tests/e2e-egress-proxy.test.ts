@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import type { AddressInfo } from 'node:net';
@@ -54,6 +54,18 @@ function send(text: string): Promise<string> {
 describe('egress proxy', () => {
   it('starts with an empty log', () => {
     expect(existsSync(logFile)).toBe(true);
+  });
+
+  it('empties a log left over from an earlier run when it starts', async () => {
+    const stale = path.join(dir, 'stale', 'egress.log');
+    mkdirSync(path.dirname(stale), { recursive: true });
+    writeFileSync(stale, 'accounts.google.com:443\n');
+    const other = await startEgressProxy({ port: 0, logFile: stale });
+    try {
+      expect(readFileSync(stale, 'utf8')).toBe('');
+    } finally {
+      other.close();
+    }
   });
 
   it('listens on 127.0.0.1 only', () => {

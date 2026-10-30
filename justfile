@@ -182,13 +182,9 @@ _e2e-run: _web-prepare
     node apps/web/e2e/support/db.mjs reset
     if [ "${E2E_APPLY_A9:-}" = 1 ]; then node apps/web/e2e/support/db.mjs a9 --apply; fi
     node apps/web/e2e/support/db.mjs a9 --check
-    # A leftover of an earlier local run must not declare hosts or canaries for this one.
-    logs=apps/web/test-results/logs
-    mkdir -p "$logs"
-    rm -f "$logs/egress.log"
-    : > "$logs/expected-egress.txt"
-    : > "$logs/dynamic-canaries.txt"
-    : > "$logs/admin-cli.log"
+    # A leftover of an earlier local run must not declare hosts or canaries for this one, and an
+    # old egress.log must not stand in for a proxy that did not start.
+    node apps/web/e2e/support/reset-run.mjs
     pnpm --filter web exec playwright test
 
 # HOST is fixed to 127.0.0.1 (never read from the environment): adapter-node listens on 0.0.0.0 by
