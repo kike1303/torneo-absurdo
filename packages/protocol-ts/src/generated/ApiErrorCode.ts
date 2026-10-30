@@ -4,4 +4,5 @@
 /**
  * HTTP error codes (`http.*`) of the API (RF-B5, RF-B12).
  */
-export type ApiErrorCode = 'http.not_found' | 'http.method_not_allowed' | 'http.rate_limited';
+export type ApiErrorCode =
+  'http.not_found' | 'http.method_not_allowed' | 'http.rate_limited' | 'http.invalid_body';

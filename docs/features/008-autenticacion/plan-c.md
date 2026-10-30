@@ -422,7 +422,7 @@ Cada paso empieza con sus tests en rojo, y el commit lleva el test y el arreglo 
 Todo queda bajo los timeouts actuales.
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+1. **`PreferencesRequest` en TypeScript (decisión 2).** `#[ts(optional = nullable)]` sobre un `Option<Option<Locale>>` genera `locale?: Locale | null | null` en `ts-rs 12` (con `nullable` conserva el tipo entero, y cada `Option` suma un `| null`). Además, el deserializador de doble opción como `deserialize_with` hace que `ts-rs` imprima un aviso por campo en cada compilación con `ts`. Va como `#[serde(with = "present")]` (un módulo con `serialize` y `deserialize`), y `ts-rs` exige entonces `ts(as = …)`: queda `#[ts(as = "Option<Locale>", optional = nullable)]`, que genera exactamente `locale?: Locale | null` y sin avisos. No es un `ts(type = …)`, así que el UT de `me.rs` (una sola excepción de tipo en el crate) sigue igual.
 
 ## Revisión
 ### architect — 2026-10-29 — REQUEST_CHANGES

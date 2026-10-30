@@ -21,6 +21,51 @@ pub struct Me {
     pub display_name_is_generated: bool,
 }
 
+/// `PUT /api/me/display-name` (008 RF-C4). Nothing but the name (RF-C8).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(deny_unknown_fields)]
+pub struct DisplayNameRequest {
+    pub display_name: String,
+}
+
+/// `PUT /api/me/preferences` (008 RF-C5). A missing field leaves the preference as it is
+/// (`None`); `null` clears it (`Some(None)`). Nothing else is accepted (RF-C8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(deny_unknown_fields)]
+pub struct PreferencesRequest {
+    #[serde(default, with = "present", skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Locale>", optional = nullable))]
+    pub locale: Option<Option<Locale>>,
+    #[serde(default, with = "present", skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Theme>", optional = nullable))]
+    pub theme: Option<Option<Theme>>,
+}
+
+/// A field that is present, `null` or not: serde alone reads both a missing field and `null`
+/// as `None`. With `default`, a missing field never reaches `deserialize`, and with
+/// `skip_serializing_if`, `serialize` never sees an absent one.
+mod present {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer, T: Serialize>(
+        value: &Option<Option<T>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        value
+            .as_ref()
+            .and_then(Option::as_ref)
+            .serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Option<T>>, D::Error> {
+        Option::<T>::deserialize(deserializer).map(Some)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "snake_case")]
@@ -104,6 +149,65 @@ mod tests {
         }
         assert_eq!(Provider::parse("Google"), None);
         assert_eq!(Provider::parse(""), None);
+    }
+
+    #[test]
+    fn display_name_request_has_the_exact_shape() {
+        let body = DisplayNameRequest {
+            display_name: "Tigre".to_owned(),
+        };
+        let json = r#"{"display_name":"Tigre"}"#;
+        assert_eq!(serde_json::to_string(&body).unwrap(), json);
+        assert_eq!(
+            serde_json::from_str::<DisplayNameRequest>(json).unwrap(),
+            body
+        );
+        // RF-C8: no field but the name, and the name is required.
+        for bad in [
+            r#"{"display_name":"Tigre","role":"admin"}"#,
+            r#"{"display_name":"Tigre","banned_at":null}"#,
+            r"{}",
+            r#"{"display_name":5}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<DisplayNameRequest>(bad).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    /// Absent is "no change", `null` is "clear", a value is "set" (RF-C5).
+    #[test]
+    fn preferences_request_tells_absent_from_null() {
+        let cases = [
+            (r"{}", None, None),
+            (r#"{"locale":null}"#, Some(None), None),
+            (r#"{"locale":"es"}"#, Some(Some(Locale::Es)), None),
+            (
+                r#"{"locale":"en","theme":null}"#,
+                Some(Some(Locale::En)),
+                Some(None),
+            ),
+            (r#"{"theme":"system"}"#, None, Some(Some(Theme::System))),
+        ];
+        for (json, locale, theme) in cases {
+            let body: PreferencesRequest = serde_json::from_str(json).unwrap();
+            assert_eq!(body, PreferencesRequest { locale, theme }, "{json}");
+            // Serialization keeps the difference too.
+            assert_eq!(serde_json::to_string(&body).unwrap(), json, "{json}");
+        }
+        for bad in [
+            r#"{"locale":"fr"}"#,
+            r#"{"theme":"blue"}"#,
+            r#"{"role":"admin"}"#,
+            r#"{"banned_at":"2026-10-29T00:00:00Z"}"#,
+            r#"{"locale":5}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<PreferencesRequest>(bad).is_err(),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

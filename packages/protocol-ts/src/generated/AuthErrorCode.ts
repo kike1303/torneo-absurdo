@@ -10,4 +10,8 @@ export type AuthErrorCode =
   | 'auth.banned'
   | 'auth.provider_error'
   | 'auth.try_again'
-  | 'auth.unauthenticated';
+  | 'auth.unauthenticated'
+  | 'auth.already_linked'
+  | 'auth.provider_already_linked'
+  | 'auth.last_provider'
+  | 'auth.reauth_required';
