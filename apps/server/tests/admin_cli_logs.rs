@@ -1,0 +1,145 @@
+//! 008 RF-C6 and ADR-0012 A8: the admin CLI is a new source of logs. Its events carry only
+//! `event` (and `error_kind`), never the `user_id` nor the reason, in the three log levels, on
+//! success, with a user that does not exist and with a command line that does not parse.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+mod support;
+
+use std::time::Duration;
+
+use support::bin;
+use support::db::TestDb;
+use uuid::Uuid;
+
+const LEVELS: [&str; 3] = ["info", "debug", "debug,sqlx=trace"];
+
+async fn run(args: &[&str], envs: &[(&str, &str)]) -> bin::Finished {
+    bin::spawn(args, envs).finish(Duration::from_secs(20)).await
+}
+
+/// No line of `finished` names the user (in any form) or the reason.
+fn assert_clean(finished: &bin::Finished, user: Uuid, reason: &str, case: &str) {
+    let forms = [
+        user.to_string(),
+        user.simple().to_string(),
+        user.to_string().to_uppercase(),
+        user.as_bytes().iter().map(|b| format!("{b:02x}")).collect(),
+    ];
+    for line in finished.stdout.iter().chain(&finished.stderr) {
+        for form in &forms {
+            assert!(!line.contains(form.as_str()), "{case}: the user in {line}");
+        }
+        assert!(!line.contains(reason), "{case}: the reason in {line}");
+        assert!(!line.contains("c4n4ry"), "{case}: {line}");
+    }
+    assert!(finished.stderr.is_empty(), "{case}: {:?}", finished.stderr);
+}
+
+fn events(finished: &bin::Finished) -> Vec<serde_json::Value> {
+    finished
+        .stdout
+        .iter()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_cli_never_logs_the_user_nor_the_reason() {
+    bin::warm_up().await;
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let url = db.url();
+    let (user, _) = support::app::user_with_session(&pool).await;
+    let missing = Uuid::new_v4();
+    let reason = format!("c4n4ry reason {}", Uuid::new_v4().simple());
+    for level in LEVELS {
+        let envs = [("DATABASE_URL", url.as_str()), ("RUST_LOG", level)];
+        let user_text = user.to_string();
+        let missing_text = missing.to_string();
+        for (args, code, event, subject) in [
+            (
+                vec![
+                    "admin",
+                    "ban",
+                    user_text.as_str(),
+                    "--reason",
+                    reason.as_str(),
+                ],
+                0,
+                "admin.ban_applied",
+                user,
+            ),
+            (
+                vec!["admin", "unban", user_text.as_str()],
+                0,
+                "admin.unban_applied",
+                user,
+            ),
+            (
+                vec!["admin", "grant", user_text.as_str()],
+                0,
+                "admin.grant_applied",
+                user,
+            ),
+            (
+                vec!["admin", "revoke", user_text.as_str()],
+                0,
+                "admin.revoke_applied",
+                user,
+            ),
+            (
+                vec![
+                    "admin",
+                    "ban",
+                    missing_text.as_str(),
+                    "--reason",
+                    reason.as_str(),
+                ],
+                1,
+                "admin.user_not_found",
+                missing,
+            ),
+            // A command line that does not parse: exit 2, and the message repeats nothing.
+            (
+                vec![
+                    "admin",
+                    "ban",
+                    user_text.as_str(),
+                    "--reason",
+                    reason.as_str(),
+                    "extra",
+                ],
+                2,
+                "cli.invalid",
+                user,
+            ),
+        ] {
+            let case = format!("{level} {event}");
+            let finished = run(&args, &envs).await;
+            assert_eq!(
+                finished.status.code(),
+                Some(code),
+                "{case}: {:?}",
+                finished.stdout
+            );
+            assert_clean(&finished, subject, &reason, &case);
+            let lines = events(&finished);
+            assert!(
+                lines.iter().any(|l| l["event"] == event),
+                "{case}: {lines:?}"
+            );
+            for line in &lines {
+                let own = line.get("target").is_none();
+                let mut keys: Vec<_> = line.as_object().unwrap().keys().cloned().collect();
+                keys.sort();
+                if own {
+                    assert!(
+                        keys == ["event", "level", "ts"]
+                            || keys == ["error_kind", "event", "level", "ts"],
+                        "{case}: {line}"
+                    );
+                }
+            }
+        }
+    }
+}

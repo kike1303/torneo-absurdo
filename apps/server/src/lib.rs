@@ -3,6 +3,7 @@
 //! The binary (`main.rs`) is a thin wrapper; everything lives here so integration tests can
 //! build the router and the state in process.
 
+pub mod admin;
 pub mod app;
 pub mod auth;
 mod cli;

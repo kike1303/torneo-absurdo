@@ -153,6 +153,25 @@ fn cookie_policy(_loopback: bool) -> CookiePolicy {
     CookiePolicy::production()
 }
 
+/// `DATABASE_URL`: a Postgres URL (sqlx parses any scheme). Shared with the admin CLI, which
+/// reads only this and `RUST_LOG` (plan-c decision 10).
+pub fn parse_database_url(text: &str) -> Option<PgConnectOptions> {
+    let is_postgres =
+        Url::parse(text).is_ok_and(|url| matches!(url.scheme(), "postgres" | "postgresql"));
+    is_postgres
+        .then(|| PgConnectOptions::from_str(text).ok())
+        .flatten()
+}
+
+/// `RUST_LOG`: unset or blank is [`DEFAULT_RUST_LOG`]; otherwise a valid `EnvFilter`.
+pub fn parse_rust_log(value: Option<String>) -> Option<String> {
+    match value {
+        None => Some(DEFAULT_RUST_LOG.to_owned()),
+        Some(value) if value.trim().is_empty() => Some(DEFAULT_RUST_LOG.to_owned()),
+        Some(value) => EnvFilter::try_new(&value).ok().map(|_| value),
+    }
+}
+
 /// Validates `PUBLIC_ORIGIN`: `http(s)://host[:port]` exactly as a browser serializes the
 /// `Origin` header (no path, query, fragment, credentials, trailing slash, uppercase host or
 /// default port). Same rule as the `web` validator (plan-a decision 19).
@@ -297,13 +316,7 @@ impl Config {
         };
 
         const DATABASE_URL: &str = "DATABASE_URL";
-        let database_url = required(DATABASE_URL)?;
-        // sqlx parses any scheme; only a Postgres URL is valid here.
-        let is_postgres = Url::parse(&database_url)
-            .is_ok_and(|url| matches!(url.scheme(), "postgres" | "postgresql"));
-        let database = is_postgres
-            .then(|| PgConnectOptions::from_str(&database_url).ok())
-            .flatten()
+        let database = parse_database_url(&required(DATABASE_URL)?)
             .ok_or(ConfigError::Invalid { var: DATABASE_URL })?;
 
         const PUBLIC_ORIGIN: &str = "PUBLIC_ORIGIN";
@@ -340,14 +353,8 @@ impl Config {
         };
 
         const RUST_LOG: &str = "RUST_LOG";
-        let rust_log = match text(RUST_LOG)? {
-            None => DEFAULT_RUST_LOG.to_owned(),
-            Some(value) if value.trim().is_empty() => DEFAULT_RUST_LOG.to_owned(),
-            Some(value) => {
-                EnvFilter::try_new(&value).map_err(|_| ConfigError::Invalid { var: RUST_LOG })?;
-                value
-            }
-        };
+        let rust_log =
+            parse_rust_log(text(RUST_LOG)?).ok_or(ConfigError::Invalid { var: RUST_LOG })?;
 
         const ENABLE_WS_ECHO: &str = "ENABLE_WS_ECHO";
         let echo = decide_echo(text(ENABLE_WS_ECHO)?.as_deref(), &origin);
