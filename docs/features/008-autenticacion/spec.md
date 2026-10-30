@@ -543,6 +543,7 @@ Mobile-first a 375 px, con los tokens y las primitivas de ADR-0009 y sin colores
 ### owner
 
 - **APPROVE** (2026-10-28, en chat): aprueba la spec (`risk: high`), `B = 100`, la enmienda del callback y la nota de ADR-0008 sobre el reparto de tests. Sigue plan-a.
+- **APPROVE** (2026-10-29, en chat): aprueba la Enmienda 2026-10-29 (RF-C1, RF-C2, RF-C3, RF-C5 y RNF). Sigue la implementación de la fase C.
 
 ### security-reviewer — 2026-10-29 — APPROVE (ronda 4: Enmienda 2026-10-29 de RF-C1, RF-C3, RF-C5 y RNF)
 **🤖 security-reviewer**
