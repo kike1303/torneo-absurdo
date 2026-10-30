@@ -196,6 +196,18 @@ fn debug_never_shows_the_ids_of_the_authentication() {
         assert!(!shown.contains(&user.simple().to_string()), "{shown}");
         assert!(!shown.contains(&session.0.to_string()), "{shown}");
     }
+    let token = SessionToken::generate().unwrap();
+    let secret = token.as_str().to_owned();
+    let issued = format!(
+        "{:?}",
+        Issued {
+            id: session,
+            token,
+            max_age_secs: 1,
+        }
+    );
+    assert!(!issued.contains(&secret), "{issued}");
+    assert!(!issued.contains(&session.0.to_string()), "{issued}");
     assert!(format!("{info:?}").contains("step_up: true"));
     assert!(format!("{locked:?}").contains("link_window: true"));
 }

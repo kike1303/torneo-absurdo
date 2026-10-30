@@ -59,3 +59,43 @@ pub fn status_of(view: &AuthView, enabled: &[Provider]) -> ReauthStatus {
         unlink,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sessions::OauthAccountId;
+
+    /// RF18: the rule of `unlink`, the order of the login buttons, and no id ever comes out.
+    #[test]
+    fn the_status_says_only_what_the_page_needs() {
+        let (google, discord) = (
+            OauthAccountId::new(4_242_424_241),
+            OauthAccountId::new(4_242_424_242),
+        );
+        let view = AuthView {
+            step_up: true,
+            account: Some(discord),
+            linked: vec![(Provider::Google, google), (Provider::Discord, discord)],
+        };
+        let status = status_of(&view, &[Provider::Google, Provider::Discord]);
+        assert!(status.link_ready);
+        assert_eq!(status.unlink.len(), 2);
+        assert!(!status.unlink[0].ready);
+        assert_eq!(status.unlink[0].reauth_with, [Provider::Google]);
+        assert!(status.unlink[1].ready);
+        assert_eq!(
+            status.unlink[1].reauth_with,
+            [Provider::Google, Provider::Discord]
+        );
+        // Google off by config: only Discord could confirm, and only its own removal.
+        let off = status_of(&view, &[Provider::Discord]);
+        assert!(off.unlink[0].reauth_with.is_empty());
+        assert_eq!(off.unlink[1].reauth_with, [Provider::Discord]);
+        // RNF of logs: neither `Debug` shows the ids, and the body has no number.
+        for shown in [format!("{status:?}"), format!("{view:?}")] {
+            assert!(!shown.contains("424242"), "{shown}");
+        }
+        let body = serde_json::to_string(&status).unwrap();
+        assert!(!body.chars().any(|c| c.is_ascii_digit()), "{body}");
+    }
+}
