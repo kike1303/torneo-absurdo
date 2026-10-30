@@ -20,11 +20,7 @@ use uuid::Uuid;
 
 /// A ban of `user` in an open transaction (the CLI's actor, the row locked until commit).
 async fn pending_ban(pool: &PgPool, user: Uuid) -> Transaction<'static, Postgres> {
-    let mut tx = pool.begin().await.unwrap();
-    sqlx::query("SELECT set_config('torneo.actor', 'cli', true)")
-        .execute(&mut *tx)
-        .await
-        .unwrap();
+    let mut tx = support::db::begin_privileged(pool).await;
     sqlx::query("UPDATE users SET banned_at = now() WHERE id = $1")
         .bind(user)
         .execute(&mut *tx)

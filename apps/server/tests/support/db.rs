@@ -155,14 +155,21 @@ pub async fn privileged(
     pool: &sqlx::PgPool,
     query: sqlx::query::Query<'_, sqlx::Postgres, sqlx::postgres::PgArguments>,
 ) -> sqlx::postgres::PgQueryResult {
+    let mut tx = begin_privileged(pool).await;
+    let done = query.execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+    done
+}
+
+/// An open transaction with the CLI's actor set locally, for a test that has to hold a
+/// privileged write uncommitted (the ban that commits while a request waits on its lock).
+pub async fn begin_privileged(pool: &sqlx::PgPool) -> sqlx::Transaction<'static, sqlx::Postgres> {
     let mut tx = pool.begin().await.unwrap();
     sqlx::query("SELECT set_config('torneo.actor', 'cli', true)")
         .execute(&mut *tx)
         .await
         .unwrap();
-    let done = query.execute(&mut *tx).await.unwrap();
-    tx.commit().await.unwrap();
-    done
+    tx
 }
 
 #[test]
