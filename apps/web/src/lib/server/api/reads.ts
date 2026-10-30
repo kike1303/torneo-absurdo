@@ -1,4 +1,4 @@
-import type { Me, Provider } from '@torneo/protocol';
+import type { Me, Provider, ReauthStatus } from '@torneo/protocol';
 import { apiRequest, type Api, type ApiResult } from './client.js';
 
 // Reads only (008 plan-d decisions 3 and 8): `GET`, usable from hooks and `load` functions.
@@ -10,4 +10,8 @@ export function getMe(api: Api): Promise<ApiResult<Me>> {
 
 export function getProviders(api: Api): Promise<ApiResult<Provider[]>> {
   return apiRequest<Provider[]>(api, 'GET', '/api/auth/providers');
+}
+
+export function getReauthStatus(api: Api): Promise<ApiResult<ReauthStatus>> {
+  return apiRequest<ReauthStatus>(api, 'GET', '/api/auth/reauth-status');
 }
