@@ -24,8 +24,8 @@
 
   let title = $state<HTMLElement | null>(null);
 
-  // After a `use:enhance` action the focus is on the button that was pressed, so the `autofocus`
-  // attribute (which covers the page without JS) is not enough (009 RF21).
+  // With JS, Svelte only honors `autofocus` while the focus is on `body`. After a `use:enhance`
+  // action it can still be on another element, and the panel has to take it (009 RF21).
   $effect(() => {
     if (autofocus) title?.focus();
   });

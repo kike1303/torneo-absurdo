@@ -28,7 +28,7 @@
       : null,
   );
   const renameValue = $derived(renameError && form && 'value' in form ? String(form.value) : '');
-  // What an action just did goes first: right after unlinking, the page may still have ?reauth=1.
+  // What an action just did goes first (009 decision 13).
   const status = $derived(
     form && 'renamed' in form
       ? m.account_renamed()

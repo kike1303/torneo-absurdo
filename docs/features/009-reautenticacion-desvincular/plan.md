@@ -672,6 +672,17 @@ Sin cambios en los workflows.
     - si llega `auth.reauth_required` a una fila con `reauthWith` vacío (solo con un `POST` forzado, porque esa fila no tiene "Quitar"), no se abre un panel sin botones: queda el `provider-error`.
 
     El test de ids ignora los `bits-*`: bits-ui numera por `render()`, y una página real es un solo render. Sumo tres mutantes a los del plan: el botón de `/login` en `outline` con error, el panel sin `autofocus` y el panel que deja el `provider-error`. Los tres mueren.
+19. **Paso 12: una premisa del plan no es cierta en Kit 3.1, y lo que cambia.** La decisión 13 dice que, con `use:enhance`, `invalidateAll` pide `__data.json` con la URL de la página. En Kit 3.1, `enhance` navega a la URL de la action sin su llave (`get_action_location`, `apply_action_navigation`), así que toda action enviada desde `/es/account?reauth=1`, también una que falla, termina en `/es/account` (lo vi en el tráfico de un `rename`). Consecuencias:
+    - **La prioridad del `status` de la action sobre `reauthDone` no se puede distinguir.** Cuando llega `form`, `reauthDone` ya es falso: con JS porque la URL perdió `?reauth=1`, y sin JS porque la URL es `?/rename`. Tampoco el caso 1 la prueba: tras quitar, `link_ready` es falso. El mutante "`reauthDone` antes que la action" **sobrevive y es equivalente**. Dejo el orden que pide la decisión 13, que no cuesta nada.
+    - **Sumo el caso 4b:** una confirmación que vence estando en `?reauth=1`. Ese 403 llega por la navegación de Kit, y el panel tiene que abrirse igual, con el foco en su título. Pasa en los tres proyectos.
+    - El caso 4 suma un renombre y fija que la URL queda en `/es/account`.
+20. **Paso 12: el foco con JS.** El mutante "sin el `$effect`" **sobrevivía** al caso 1. Al tocar "Quitar", el botón se deshabilita, el foco cae en `body`, y ahí alcanza el `autofocus` que Svelte aplica en el cliente. El `$effect` solo importa si el foco está en otro elemento, así que el caso 2 envía el formulario con el foco en el campo del nombre, y con eso el mutante muere. Corrijo el comentario de `ReauthPanel`, que decía otra cosa.
+21. **Paso 12: otras precisiones de la decisión 14.**
+    - **El caso 5 fija la cookie `locale`.** Sin ella, el caso en `es` termina en `/en/login?error=auth.reauth_mismatch` (comprobado). El callback vuelve al `/login` sin prefijo, que elige por perfil, cookie y `Accept-Language`, y entrar por `/es/` no escribe la cookie. Es el comportamiento de 008 para todo código de callback, no algo nuevo: se reporta aparte, no se cambia aquí.
+    - **El caso 3 entra otra vez en un `newContext`.** Con sesión, `/login` no muestra los formularios, así que "login otra vez" no se puede hacer en el mismo contexto.
+    - **`reflected` pasa de `errors.spec.ts` a `fixtures.ts`,** porque también la usa el caso 6. `errors.spec.ts` no cambia lo que prueba.
+    - **Los dos tests de sesión de hoy pasan a ser el 7 y el 8.**
+    - **Los casos no se vieron en rojo contra una UI ausente,** porque la UI entró en el paso 11. Para comprobar que pueden fallar corrí mutantes de web: `next` sin `?reauth=1` y el panel de la fila que no abre con el 403. Los dos mueren.
 
 ## Revisión
 
