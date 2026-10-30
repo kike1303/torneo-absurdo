@@ -42,6 +42,8 @@ for (const locale of ['es', 'en'] as const satisfies Locale[]) {
     await test.step('2. a reload keeps the session, private and not stored', async () => {
       const res = await page.reload();
       expect(res?.headers()['cache-control']).toBe('private, no-store');
+      const vary = (res?.headers()['vary'] ?? '').split(',').map((v) => v.trim().toLowerCase());
+      expect(vary).toContain('cookie');
       await expect(page.getByTestId('header-user')).toContainText(chosen);
     });
 
