@@ -239,8 +239,8 @@ jobs:
 
   # The server with dev-auth for the e2e (008 plan-d decision 12, ADR-0006 note of 2026-10-30):
   # glibc of Ubuntu 24.04, the same as the noble Playwright image. It reads the `ci` cache of
-  # `rust` and never writes it (save-if: false), and defines no CARGO_*/RUST* variable of its
-  # own, which would change the cache key (check-workflows enforces both).
+  # `rust` and never writes it (save-if: false), and defines no CARGO*/CC*/CFLAGS*/CXX*/CMAKE*/
+  # RUST* variable of its own, which would change the cache key (check-workflows enforces both).
   e2e-server:
     needs: changes
     if: needs.changes.outputs.e2e == 'true'
@@ -343,6 +343,9 @@ jobs:
           E2E_SERVER_BIN: ${{ runner.temp }}/server-dev-auth/server
           E2E_APPLY_A9: '1'
         run: just _e2e-run
+      # The canaries of the run (session token, user id, alias, dev_identity) stay on the runner:
+      # artifacts of a public repo are public (check-workflows enforces the exclusion). The
+      # traces of test-results/artifacts, which carry cookies, are never uploaded.
       - name: Upload screenshots and server logs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -351,6 +354,7 @@ jobs:
           path: |
             apps/web/test-results/screenshots
             apps/web/test-results/logs
+            !apps/web/test-results/logs/dynamic-canaries.txt
           if-no-files-found: warn
           retention-days: 14
 

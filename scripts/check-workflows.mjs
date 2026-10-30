@@ -43,8 +43,17 @@ export const JOB_PERMISSIONS = {
 // 008 plan-d decision 12: the artifact of e2e-server is downloaded only by name, from this run.
 const DOWNLOAD_ARTIFACT = /^actions\/download-artifact@/i;
 const DOWNLOAD_FORBIDDEN = ['run-id', 'github-token', 'repository'];
-// rust-cache puts these in its key: with save-if: false, e2e-server would run cold forever.
-const CACHE_KEY_ENV = /^(?:CARGO_|RUST)/;
+// rust-cache (v2, src/config.ts) puts every variable with one of these prefixes in its key: one
+// of e2e-server's own would make it miss the cache of `rust` and, with save-if: false, run cold.
+const CACHE_KEY_ENV = /^(?:CARGO|CC|CFLAGS|CXX|CMAKE|RUST)/;
+const RUST_CACHE = /^Swatinem\/rust-cache@/i;
+// The only inputs e2e-server's rust-cache may set: any other one (key, prefix-key, env-vars,
+// workspaces…) changes the key or what is restored.
+const E2E_CACHE_INPUTS = new Set(['shared-key', 'save-if']);
+// Review of PR #56: values of the run (session token, user id, alias, dev_identity) that the
+// e2e writes so the teardown can look for them in the logs. They never go into an artifact.
+const CANARIES_FILE = 'apps/web/test-results/logs/dynamic-canaries.txt';
+const UPLOAD_ARTIFACT = /^actions\/upload-artifact@/i;
 const E2E_IF = "needs.changes.outputs.e2e == 'true'";
 const COMPOSE_DEV = 'infra/compose.dev.yml';
 
@@ -261,6 +270,7 @@ function checkSteps(steps, where, file, problems, local) {
     if (typeof step.uses === 'string') {
       checkUses(step.uses, at, file, problems, local);
       if (DOWNLOAD_ARTIFACT.test(step.uses)) checkDownload(step, at, file, problems);
+      if (UPLOAD_ARTIFACT.test(step.uses)) checkUpload(step, at, file, problems);
       if (CHECKOUT.test(step.uses)) {
         const persist = isMap(step.with) ? step.with['persist-credentials'] : undefined;
         if (persist !== false && persist !== 'false') {
@@ -281,6 +291,49 @@ function checkSteps(steps, where, file, problems, local) {
       problems.push(`${file}: script-expression: ${at} interpolates \${{ }} inside with.script`);
     }
   });
+}
+
+/** A path of upload-artifact without `./`, or `undefined` for an empty line. */
+function uploadPath(line) {
+  const trimmed = line.trim().replace(/^(!?)(?:\.\/)+/, '$1');
+  return trimmed === '' ? undefined : trimmed.replace(/\/+$/, '');
+}
+
+/** Whether an include pattern of upload-artifact (a path or a glob) takes `target`. */
+function uploadTakes(pattern, target) {
+  if (/[*?[]/.test(pattern)) {
+    const re = new RegExp(
+      `^${pattern
+        .replace(/[.+^${}()|\\]/g, '\\$&')
+        .replace(/\*\*/g, '\u0000')
+        .replace(/\*/g, '[^/]*')
+        .replace(/\?/g, '[^/]')
+        .replace(/\u0000/g, '.*')}(?:/.*)?$`,
+    );
+    return re.test(target);
+  }
+  return target === pattern || target.startsWith(`${pattern}/`) || pattern === '.';
+}
+
+/**
+ * Review of PR #56: an `actions/upload-artifact` that takes the canaries file of the e2e (by a
+ * parent directory or a glob) excludes it with `!${CANARIES_FILE}`. Artifacts of a public repo
+ * can be downloaded by anyone signed in to GitHub.
+ */
+function checkUpload(step, at, file, problems) {
+  const raw = isMap(step.with) ? step.with.path : undefined;
+  if (typeof raw !== 'string') return;
+  const lines = raw
+    .split('\n')
+    .map(uploadPath)
+    .filter((p) => p !== undefined);
+  const takes = lines.some((p) => !p.startsWith('!') && uploadTakes(p, CANARIES_FILE));
+  const excluded = lines.includes(`!${CANARIES_FILE}`);
+  if (takes && !excluded) {
+    problems.push(
+      `${file}: upload-canaries: ${at} uploads ${CANARIES_FILE}: add the line !${CANARIES_FILE} to its path`,
+    );
+  }
 }
 
 /**
@@ -312,6 +365,49 @@ function composeDevPostgres(tree) {
   }
 }
 
+/** The `with` of every Swatinem/rust-cache step of a job. */
+function rustCaches(job) {
+  const steps = isMap(job) && Array.isArray(job.steps) ? job.steps : [];
+  return steps
+    .map((step, i) => [i, step])
+    .filter(
+      ([, step]) => isMap(step) && typeof step.uses === 'string' && RUST_CACHE.test(step.uses),
+    )
+    .map(([i, step]) => [i, isMap(step.with) ? step.with : {}]);
+}
+
+/**
+ * Review of PR #56 (devops): e2e-server reads the cache of `rust` and never writes it, so a PR
+ * cannot fill the shared cache with a dev-auth build. Its rust-cache sets save-if: false, the
+ * shared-key of `rust`, and no other input.
+ */
+function checkE2eCache(jobs, file, problems) {
+  const caches = rustCaches(jobs['e2e-server']);
+  if (caches.length === 0) {
+    problems.push(`${file}: e2e-server-cache: jobs.e2e-server must use Swatinem/rust-cache`);
+    return;
+  }
+  const shared = rustCaches(jobs.rust).map(([, w]) => w['shared-key']);
+  for (const [i, withs] of caches) {
+    const at = `jobs.e2e-server.steps[${i}]`;
+    const save = withs['save-if'];
+    if (save !== false && save !== 'false') {
+      problems.push(`${file}: e2e-server-cache: ${at} must set save-if: false`);
+    }
+    const key = withs['shared-key'];
+    if (typeof key !== 'string' || shared.length !== 1 || shared[0] !== key) {
+      problems.push(
+        `${file}: e2e-server-cache: ${at} must set the shared-key of the one rust-cache of jobs.rust (${show(shared)})`,
+      );
+    }
+    for (const input of Object.keys(withs).filter((k) => !E2E_CACHE_INPUTS.has(k))) {
+      problems.push(
+        `${file}: e2e-server-cache: ${at} must not set ${input} (it changes the key of the cache of jobs.rust)`,
+      );
+    }
+  }
+}
+
 /**
  * ci.yml, 008 plan-d decision 12: e2e-server runs exactly when e2e does, without CARGO_* or
  * RUST* variables of its own, and every Postgres service uses the image of compose.dev.yml (a
@@ -340,10 +436,11 @@ function checkE2e(jobs, file, problems, tree) {
       if (!isMap(env)) continue;
       for (const name of Object.keys(env).filter((k) => CACHE_KEY_ENV.test(k))) {
         problems.push(
-          `${file}: e2e-server-env: ${where} sets ${name}: rust-cache keys on CARGO_*/RUST*, and with save-if: false the job would run cold`,
+          `${file}: e2e-server-env: ${where} sets ${name}: rust-cache keys on CARGO*, CC*, CFLAGS*, CXX*, CMAKE* and RUST*, and with save-if: false the job would run cold`,
         );
       }
     }
+    checkE2eCache(jobs, file, problems);
   }
   const expected = composeDevPostgres(tree);
   for (const [id, job] of Object.entries(jobs)) {

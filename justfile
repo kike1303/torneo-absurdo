@@ -147,9 +147,10 @@ _check-pg-log since:
     echo "check-pg-log: ok"
 
 # Needs Docker (Postgres) and compiles the server with dev-auth (008 RF-D7, plan-d decision 10).
+# _web-prepare runs once, in _e2e-run: a `just` sub-invocation does not share the dedupe.
 # Everything listens on 127.0.0.1 and the browsers go out only through the egress proxy.
 # End-to-end tests against `node build`, the server and an edge proxy (Chromium and WebKit)
-e2e: _web-prepare db-up
+e2e: db-up
     cargo build -p server --features dev-auth --locked
     E2E_DATABASE_URL='postgres://torneo:torneo_dev@127.0.0.1:{{pg_port}}/torneo_e2e' \
         E2E_SERVER_BIN='{{justfile_directory()}}/target/debug/server' \

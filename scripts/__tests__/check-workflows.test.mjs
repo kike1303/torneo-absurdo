@@ -682,6 +682,9 @@ const DOWNLOAD = '          name: server-dev-auth\n          path: bin\n';
 const PG_IMAGE =
   'postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193';
 const COMPOSE_DEV = 'infra/compose.dev.yml';
+const E2E_CACHE = '          shared-key: ci\n          save-if: false\n';
+const UPLOAD_PATHS =
+  '            apps/web/test-results/logs\n            !apps/web/test-results/logs/dynamic-canaries.txt\n';
 
 /** @type {[string, Record<string, [string, string][]>, RegExp][]} */
 const E2E_CASES = [
@@ -732,6 +735,93 @@ const E2E_CASES = [
       [CI]: [[E2E_SERVER_IF, `${E2E_SERVER_IF}    env:\n      RUSTFLAGS: -Dwarnings\n`]],
     },
     /e2e-server-env: jobs\.e2e-server.*RUSTFLAGS/,
+  ],
+  // Review of PR #56 (devops): the other prefixes rust-cache puts in its key.
+  ...[
+    ['CC', 'clang'],
+    ['CFLAGS', '-O2'],
+    ['CXX', 'clang++'],
+    ['CMAKE_GENERATOR', 'Ninja'],
+    ['CARGOTEST', 'x'],
+  ].map(([name, value]) => [
+    `e2e-server with ${name} in a step`,
+    { [CI]: [[E2E_SERVER_ENV, `        env:\n          ${name}: ${value}\n`]] },
+    new RegExp(`e2e-server-env: jobs\\.e2e-server.*${name}`),
+  ]),
+  // Review of PR #56 (devops): e2e-server reads the cache of rust and never writes it.
+  [
+    'e2e-server with save-if: true',
+    { [CI]: [[E2E_CACHE, '          shared-key: ci\n          save-if: true\n']] },
+    /e2e-server-cache: .*save-if: false/,
+  ],
+  [
+    'e2e-server with save-if as an expression',
+    {
+      [CI]: [[E2E_CACHE, "          shared-key: ci\n          save-if: ${{ github.ref != '' }}\n"]],
+    },
+    /e2e-server-cache: .*save-if: false/,
+  ],
+  [
+    'e2e-server without save-if',
+    { [CI]: [[E2E_CACHE, '          shared-key: ci\n']] },
+    /e2e-server-cache: .*save-if: false/,
+  ],
+  [
+    'e2e-server with another shared-key',
+    { [CI]: [[E2E_CACHE, '          shared-key: e2e\n          save-if: false\n']] },
+    /e2e-server-cache: .*shared-key/,
+  ],
+  [
+    'e2e-server with an input that changes the key',
+    { [CI]: [[E2E_CACHE, `${E2E_CACHE}          prefix-key: v1\n`]] },
+    /e2e-server-cache: .*prefix-key/,
+  ],
+  [
+    'e2e-server without rust-cache',
+    {
+      [CI]: [
+        [
+          `      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0\n        with:\n${E2E_CACHE}`,
+          '',
+        ],
+      ],
+    },
+    /e2e-server-cache: jobs\.e2e-server must use Swatinem\/rust-cache/,
+  ],
+  // Review of PR #56 (devops): the canaries of a run never leave the runner.
+  [
+    'upload-artifact of the logs without excluding the canaries',
+    { [CI]: [[UPLOAD_PATHS, '            apps/web/test-results/logs\n']] },
+    /upload-canaries: .*dynamic-canaries\.txt/,
+  ],
+  [
+    'upload-artifact of test-results without excluding the canaries',
+    {
+      [CI]: [
+        [
+          '            apps/web/test-results/screenshots\n' + UPLOAD_PATHS,
+          '            apps/web/test-results\n',
+        ],
+      ],
+    },
+    /upload-canaries:/,
+  ],
+  [
+    'upload-artifact of a glob that matches the canaries',
+    { [CI]: [[UPLOAD_PATHS, '            apps/web/test-results/**/*.txt\n']] },
+    /upload-canaries:/,
+  ],
+  [
+    'upload-artifact of the canaries file itself, with a single-line path',
+    {
+      [CI]: [
+        [
+          '          path: |\n            apps/web/test-results/screenshots\n' + UPLOAD_PATHS,
+          '          path: ./apps/web/test-results/logs/dynamic-canaries.txt\n',
+        ],
+      ],
+    },
+    /upload-canaries:/,
   ],
   [
     'download-artifact with run-id',
@@ -1372,5 +1462,33 @@ describe('ci.yml filters cover what each job runs (review of PR #5)', () => {
       'docs/guides/sprites.md',
     ];
     expect(read.filter((file) => !globs.some((g) => g.test(file)))).toEqual([]);
+  });
+});
+
+describe('justfile sub-invocations (review of PR #56)', () => {
+  const recipes = justRecipes(readFileSync(new URL('justfile', ROOT_URL), 'utf8'));
+  /** The recipe and every recipe it depends on, transitively (one `just` run dedupes these). */
+  const closure = (name, seen = new Set()) => {
+    if (seen.has(name) || !recipes[name]) return seen;
+    seen.add(name);
+    for (const dep of recipes[name].deps) closure(dep, seen);
+    return seen;
+  };
+
+  it('finds the e2e sub-invocation', () => {
+    expect(recipes.e2e.body.join('\n')).toMatch(/\{\{just_executable\(\)\}\}\s+_e2e-run/);
+  });
+
+  // `{{just_executable()}} X` is a new just process: a dependency shared with the caller runs twice.
+  it.each(Object.keys(recipes))('%s does not run a dependency twice', (name) => {
+    const outer = closure(name);
+    outer.delete(name);
+    const twice = [];
+    for (const line of recipes[name].body) {
+      for (const m of line.matchAll(/\{\{just_executable\(\)\}\}\s+([\w-]+)/g)) {
+        for (const dep of closure(m[1])) if (outer.has(dep)) twice.push(`${m[1]} -> ${dep}`);
+      }
+    }
+    expect(twice).toEqual([]);
   });
 });

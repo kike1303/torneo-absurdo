@@ -48,6 +48,10 @@ jobs:
       - run: echo rust
       - name: The musl binary has no dev-auth
         run: node scripts/check-release-binary.mjs target/x86_64-unknown-linux-musl/debug/server
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          shared-key: ci
+          save-if: ${{ github.ref == 'refs/heads/main' }}
   web:
     needs: changes
     runs-on: ubuntu-24.04
@@ -68,6 +72,10 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          shared-key: ci
+          save-if: false
       - name: Build
         env:
           SOMETHING: else
@@ -90,6 +98,14 @@ jobs:
           name: server-dev-auth
           path: bin
       - run: echo e2e
+      - name: Upload screenshots and server logs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: e2e-screenshots-and-logs
+          path: |
+            apps/web/test-results/screenshots
+            apps/web/test-results/logs
+            !apps/web/test-results/logs/dynamic-canaries.txt
   images:
     needs: changes
     runs-on: ubuntu-24.04
