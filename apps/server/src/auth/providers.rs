@@ -95,6 +95,19 @@ pub fn identity(provider: Provider, body: &[u8]) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// ADR-0012, "Enmienda 2026-10-30" (B4.6): the CSP's `form-action` lists exactly these two
+    /// URLs. A PR that changes either one changes the CSP (`apps/web/vite.config.ts`,
+    /// `CSP_EXTENSIONS` of `scripts/check-kit-config.mjs`) and that amendment too; otherwise the
+    /// login fails closed in the browser.
+    #[test]
+    fn the_authorize_urls_are_the_form_action_sources_of_b4_6() {
+        assert_eq!(
+            GOOGLE_AUTHORIZE,
+            "https://accounts.google.com/o/oauth2/v2/auth"
+        );
+        assert_eq!(DISCORD_AUTHORIZE, "https://discord.com/oauth2/authorize");
+    }
+
     #[test]
     fn production_urls_are_https_constants_of_the_spec() {
         for provider in [Provider::Google, Provider::Discord] {

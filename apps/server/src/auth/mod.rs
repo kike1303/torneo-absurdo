@@ -282,6 +282,71 @@ mod source_rules {
         assert!(hits[0].0.ends_with("auth/callback.rs"), "{hits:?}");
     }
 
+    /// ADR-0012 B4.6 (security-reviewer, recommendation 1): the two provider origins of
+    /// `form-action` are named only by the URL constants of `auth/providers.rs`, so no route can
+    /// redirect to another path of those origins. The needles are split, so this test never
+    /// counts itself, and the test module of `providers.rs` (which pins the constants) is not
+    /// code.
+    #[test]
+    fn the_provider_origins_live_only_in_the_provider_constants() {
+        let origins = [
+            ["accounts", ".google", ".com"].concat(),
+            ["discord", ".com"].concat(),
+        ];
+        let mut seen = 0;
+        for (path, text) in sources() {
+            let lower = text.to_lowercase();
+            if !path.ends_with("auth/providers.rs") {
+                for origin in &origins {
+                    assert!(!lower.contains(origin), "{} names {origin}", path.display());
+                }
+                continue;
+            }
+            let code = lower.split("#[cfg(test)]").next().unwrap_or_default();
+            for line in code.lines() {
+                if origins.iter().any(|origin| line.contains(origin.as_str())) {
+                    seen += 1;
+                    assert!(
+                        line.trim_start().starts_with("pub const "),
+                        "providers.rs names a provider origin outside its constants: {line}"
+                    );
+                }
+            }
+        }
+        // `GOOGLE_AUTHORIZE` and the three of Discord (`oauth2.googleapis.com` and
+        // `openidconnect.googleapis.com` are other hosts).
+        assert_eq!(seen, 4);
+    }
+
+    /// B4.6: a redirect of ours never keeps the method and the body (307, 308). The redirect of
+    /// `start` and `link` to the provider is a 303; `tests/oauth_providers.rs` reads its status.
+    #[test]
+    fn no_redirect_of_the_server_is_307_or_308() {
+        let needles = [
+            ["Redirect::", "temporary"].concat(),
+            ["Redirect::", "permanent"].concat(),
+            ["TEMPORARY", "_REDIRECT"].concat(),
+            ["PERMANENT", "_REDIRECT"].concat(),
+            ["from_u16(", "307"].concat(),
+            ["from_u16(", "308"].concat(),
+        ];
+        let files = sources();
+        assert!(
+            files
+                .iter()
+                .any(|(path, _)| path.ends_with("auth/start.rs"))
+        );
+        for (path, text) in files {
+            for needle in &needles {
+                assert!(
+                    !text.contains(needle.as_str()),
+                    "{} uses {needle}",
+                    path.display()
+                );
+            }
+        }
+    }
+
     /// Every `Location` to the login page (the errors, and the bare `/login` of a `link` without
     /// a session) is a literal of `auth/callback.rs` and of no other code of `src/` (008
     /// "Enmienda 2026-10-30" of RF-B5 and RF-C2). Test modules are not code.
