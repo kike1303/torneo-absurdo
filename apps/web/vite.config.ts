@@ -32,7 +32,13 @@ export default defineConfig({
           'connect-src': ['self'],
           'object-src': ['none'],
           'base-uri': ['self'],
-          'form-action': ['self'],
+          // ADR-0012 B4.6 (2026-10-30 amendment): the authorize endpoints of
+          // apps/server/src/auth/providers.rs, with their path, for the 303 of start and link.
+          'form-action': [
+            'self',
+            'https://accounts.google.com/o/oauth2/v2/auth',
+            'https://discord.com/oauth2/authorize',
+          ],
           'frame-ancestors': ['none'],
         },
       },

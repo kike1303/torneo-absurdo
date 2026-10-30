@@ -97,36 +97,44 @@ test('4. with a session, the error and a link to the account', async ({ page, id
   await expect(page.getByTestId('login-account-link')).toHaveAttribute('href', '/es/account');
 });
 
-/** Collects `securitypolicyviolation` events of the page. */
-async function watchViolations(page: Page): Promise<() => Promise<string[]>> {
-  await page.evaluate(() => {
-    const w = window as unknown as { __violations: string[] };
-    w.__violations = [];
+/**
+ * Collects the `securitypolicyviolation` events of every document of the page, through a
+ * binding that survives the navigation away (the form submit itself navigates).
+ */
+async function watchViolations(page: Page): Promise<string[]> {
+  const seen: string[] = [];
+  await page.exposeFunction('__cspViolation', (directive: string) => seen.push(directive));
+  await page.addInitScript(() => {
     document.addEventListener('securitypolicyviolation', (e) =>
-      w.__violations.push(e.effectiveDirective),
+      (window as unknown as { __cspViolation: (d: string) => void }).__cspViolation(
+        e.effectiveDirective,
+      ),
     );
   });
-  return () => page.evaluate(() => (window as unknown as { __violations: string[] }).__violations);
+  return seen;
 }
 
-// Fixme until step 14 of plan-d: the 2026-10-30 amendment of ADR-0012 (B4.6) widens
-// form-action to the two authorize endpoints. Run once on B1 (2026-10-30): Chromium, Chromium
-// mobile and WebKit mobile all block the 303 to the provider (no CONNECT reaches the proxy).
-test.fixme('5. open question 1: the Google and Discord buttons reach their provider', async ({
-  page,
+// ADR-0012 B4.6 (2026-10-30 amendment). Run once on B1 before it (2026-10-30): Chromium,
+// Chromium mobile and WebKit mobile all blocked the 303 to the provider (no CONNECT reached the
+// proxy).
+test('5. open question 1: the Google and Discord buttons reach their provider', async ({
+  context,
 }) => {
   for (const [provider, host] of [
     ['google', 'accounts.google.com:443'],
     ['discord', 'discord.com:443'],
   ] as const) {
     expectEgress(host);
+    // A page per provider: the cut navigation of the previous one never settles on our origin.
+    const page = await context.newPage();
+    const violations = await watchViolations(page);
     await page.goto('/en/login');
     await waitForHydration(page);
-    const violations = await watchViolations(page);
     const before = fileLines(EGRESS_LOG).length;
     await press(page.getByTestId(`login-provider-${provider}`));
     await expect.poll(() => fileLines(EGRESS_LOG).slice(before)).toContain(host);
-    expect(await violations().catch(() => [])).toEqual([]);
+    expect(violations, provider).toEqual([]);
+    await page.close();
   }
 });
 
@@ -165,9 +173,9 @@ test('6. the 2026-10-30 amendment: an exhausted quota ends in /login, never in J
 test('7. B4.6: a form injected towards a Discord webhook is blocked by form-action', async ({
   page,
 }) => {
+  const violations = await watchViolations(page);
   await page.goto('/en/login');
   await waitForHydration(page);
-  const violations = await watchViolations(page);
   const before = fileLines(EGRESS_LOG).length;
   await page.evaluate(() => {
     const form = document.createElement('form');
@@ -176,7 +184,7 @@ test('7. B4.6: a form injected towards a Discord webhook is blocked by form-acti
     document.body.append(form);
     form.submit();
   });
-  await expect.poll(violations).toContain('form-action');
+  await expect.poll(() => violations).toContain('form-action');
   await page.waitForTimeout(500);
   expect(fileLines(EGRESS_LOG).slice(before)).toEqual([]);
 });
