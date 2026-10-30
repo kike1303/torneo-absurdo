@@ -4,7 +4,7 @@
   import * as Alert from '#lib/components/ui/alert/index.js';
   import { Button } from '#lib/components/ui/button/index.js';
   import * as Card from '#lib/components/ui/card/index.js';
-  import { isProvider, providerRows } from '#lib/features/account/providers.js';
+  import { isProvider, linkPanel, providerRows } from '#lib/features/account/providers.js';
   import { resolveApiError } from '#lib/features/auth/error-text.js';
   import { formatCoins } from '#lib/i18n/format.js';
   import { m } from '#lib/paraglide/messages.js';
@@ -13,22 +13,30 @@
   let { data, form } = $props();
   const locale = $derived(getLocale());
 
-  const rows = $derived(data.state === 'ready' ? providerRows(data.linked, data.enabled) : []);
+  const rows = $derived(
+    data.state === 'ready' ? providerRows(data.linked, data.enabled, data.reauth) : [],
+  );
+  const panel = $derived(
+    data.state === 'ready' ? linkPanel(data.reauth, data.linked, data.enabled) : [],
+  );
   const renameError = $derived(
     form && 'value' in form && form.code !== undefined ? resolveApiError(form.code) : null,
   );
   const providerError = $derived(
     form && 'provider' in form && isProvider(form.provider)
-      ? { provider: form.provider, key: resolveApiError(form.code) }
+      ? { provider: form.provider, key: resolveApiError(form.code), code: form.code }
       : null,
   );
   const renameValue = $derived(renameError && form && 'value' in form ? String(form.value) : '');
+  // What an action just did goes first: right after unlinking, the page may still have ?reauth=1.
   const status = $derived(
     form && 'renamed' in form
       ? m.account_renamed()
       : form && 'unlinked' in form
         ? m.account_unlinked()
-        : '',
+        : data.state === 'ready' && data.reauthDone
+          ? m.account_reauth_done()
+          : '',
   );
 </script>
 
@@ -75,7 +83,7 @@
         <Card.Title><h2>{m.account_providers_heading()}</h2></Card.Title>
       </Card.Header>
       <Card.Content>
-        <ProviderList {rows} {locale} error={providerError} />
+        <ProviderList {rows} {locale} error={providerError} linkPanel={panel} />
       </Card.Content>
     </Card.Root>
 
