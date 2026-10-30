@@ -461,6 +461,74 @@ mod source_rules {
         assert!(code.to_lowercase().contains(&actor));
     }
 
+    /// Files of `src/` allowed to build SQL from text. None: every value goes by `bind`.
+    const DYNAMIC_SQL_ALLOWED: &[&str] = &[];
+
+    /// Whether `source` builds SQL from text: sqlx's assert-safe wrapper anywhere, or a
+    /// `format!` as the SQL of a `query*` call (008 plan-b decision 7; QA on phase C). This is
+    /// what would let a dynamic `UPDATE users SET role …` past the token check above.
+    pub(super) fn builds_sql_from_text(source: &str) -> bool {
+        let wrapper = ["assert", "sqlsafe"].concat();
+        let tokens = tokens(source);
+        tokens.iter().enumerate().any(|(i, token)| {
+            if token.contains(&wrapper) {
+                return true;
+            }
+            let call = token.rsplit("::").next().unwrap_or_default();
+            let is_query =
+                ["query", "query_as", "query_scalar", "query_with", "raw_sql"].contains(&call);
+            is_query
+                && get(&tokens, i + 1) == "("
+                && get(&tokens, i + 2)
+                    .trim_start_matches('&')
+                    .starts_with("format!")
+        })
+    }
+
+    #[test]
+    fn no_sql_of_the_server_is_built_from_text() {
+        let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/admin.rs");
+        for (path, text) in sources() {
+            // This file: its code, not the examples of these tests.
+            let text = if path == here {
+                text.split("#[cfg(test)]")
+                    .next()
+                    .unwrap_or_default()
+                    .to_owned()
+            } else {
+                text
+            };
+            let allowed = DYNAMIC_SQL_ALLOWED.iter().any(|name| path.ends_with(name));
+            assert!(
+                allowed || !builds_sql_from_text(&text),
+                "{} builds SQL from text",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn the_dynamic_sql_check_sees_each_form() {
+        let wrapper = ["sqlx::Assert", "SqlSafe"].concat();
+        for source in [
+            format!("sqlx::query({wrapper}(format!(\"UPDATE users SET {{c}} = $1\")))"),
+            format!("let q = {wrapper}(text);"),
+            "sqlx::query(&format!(\"SELECT {} FROM users\", c))".to_owned(),
+            "sqlx::query_as(format!(\"SELECT 1\"))".to_owned(),
+            "query_scalar(format!(\"SELECT 1\"))".to_owned(),
+            "sqlx::raw_sql(&format!(\"SET x = {}\", v))".to_owned(),
+        ] {
+            assert!(builds_sql_from_text(&source), "{source}");
+        }
+        for source in [
+            "sqlx::query(\"UPDATE users SET locale = $1 WHERE id = $2\").bind(locale)",
+            "let text = format!(\"/cuenta/{}\", section);",
+            "sqlx::query(change).bind(command.user)",
+        ] {
+            assert!(!builds_sql_from_text(source), "{source}");
+        }
+    }
+
     #[test]
     fn the_normalizer_sees_every_form_of_a_write() {
         for sql in [
