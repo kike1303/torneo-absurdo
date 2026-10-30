@@ -290,6 +290,7 @@ async fn a_database_error_in_the_second_validation_closes_with_try_again() {
         pool,
         Arc::new(support::app::AlwaysUp),
     )
+    .unwrap()
     .with_ws(AppState::ws_from_config(&config, &Settings::default()).with_validation_gate(held));
     let app = support::app::start(state).await;
     let mut client = connect(app.addr, Some(&token), None).await.unwrap();
@@ -527,7 +528,8 @@ async fn a_failed_session_lookup_makes_an_anonymous_socket() {
         &Settings::default(),
         pool,
         Arc::new(support::app::AlwaysUp),
-    );
+    )
+    .unwrap();
     let ws_state = state.ws.clone();
     let app = support::app::start(state).await;
     let mut lock = direct.begin().await.unwrap();
@@ -769,5 +771,53 @@ async fn a_message_over_4_kb_closes_a_socket_with_a_session() {
     assert!(
         matches!(ending, Ending::Close(1009, _) | Ending::NoCloseFrame),
         "{ending:?}"
+    );
+}
+
+/// T17 with the real rename (008 RF-C4): the socket of A subscribed to `self` gets
+/// `ProfileChanged` when A renames from another session over HTTP; B's socket gets nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_rename_reaches_only_the_self_channel_of_its_user() {
+    let db = TestDb::create().await;
+    let (app, pool, _ws_state) =
+        support::app::start_db_ws(&db, &[], &Settings::default(), |ws| ws).await;
+    let (a, token_a) = support::app::user_with_session(&pool).await;
+    let (_, token_b) = support::app::user_with_session(&pool).await;
+    let other_a = support::app::session_for(&pool, a).await;
+    let mut socket_a = connect(app.addr, Some(&token_a), None).await.unwrap();
+    let mut socket_b = connect(app.addr, Some(&token_b), None).await.unwrap();
+    for socket in [&mut socket_a, &mut socket_b] {
+        ws::send_text(socket, r#"{"type":"subscribe","channel":"self"}"#).await;
+        assert_eq!(
+            ws::next_data(socket, Duration::from_secs(2)).await,
+            Some(Message::Text(
+                r#"{"type":"subscribed","channel":"self"}"#.into()
+            ))
+        );
+    }
+    let renamed = http::send_body(
+        app.addr,
+        "PUT",
+        "/api/me/display-name",
+        &[
+            ("origin", ORIGIN),
+            ("cookie", &cookie(&other_a)),
+            ("content-type", "application/json"),
+        ],
+        r#"{"display_name":"Nombre Nuevo"}"#,
+    )
+    .await;
+    assert_eq!(renamed.status, 200, "{}", renamed.text());
+    assert_eq!(
+        ws::next_data(&mut socket_a, Duration::from_secs(2)).await,
+        Some(Message::Text(
+            r#"{"type":"self_event","event":{"kind":"profile_changed","display_name":"Nombre Nuevo"}}"#
+                .into()
+        ))
+    );
+    assert!(
+        ws::next_data(&mut socket_b, Duration::from_millis(300))
+            .await
+            .is_none()
     );
 }

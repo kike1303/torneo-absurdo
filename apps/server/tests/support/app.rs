@@ -96,7 +96,7 @@ pub fn state_with_probe(
 ) -> AppState {
     let config = super::config::config(vars);
     let pool = super::config::lazy_pool(&config);
-    AppState::from_config(&config, settings, pool, probe)
+    AppState::from_config(&config, settings, pool, probe).unwrap()
 }
 
 /// Like [`state`], with a WebSocket state below what the config allows.
@@ -115,7 +115,7 @@ pub async fn start_db(
     all.extend_from_slice(vars);
     let config = super::config::config(&all);
     let pool = db.migrated_pool().await;
-    let state = AppState::from_config(&config, settings, pool.clone(), Arc::new(AlwaysUp));
+    let state = AppState::from_config(&config, settings, pool.clone(), Arc::new(AlwaysUp)).unwrap();
     (start(state).await, pool)
 }
 
@@ -131,7 +131,7 @@ pub async fn start_db_ws(
     all.extend_from_slice(vars);
     let config = super::config::config(&all);
     let pool = db.migrated_pool().await;
-    let state = AppState::from_config(&config, settings, pool.clone(), Arc::new(AlwaysUp));
+    let state = AppState::from_config(&config, settings, pool.clone(), Arc::new(AlwaysUp)).unwrap();
     let state = state.with_ws(ws(AppState::ws_from_config(&config, settings)));
     let handle = state.ws.clone();
     (start(state).await, pool, handle)

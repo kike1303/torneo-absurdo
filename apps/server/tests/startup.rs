@@ -90,7 +90,12 @@ async fn the_port_opens_only_after_the_database_and_the_migrations() {
     let versions: Vec<i64> = rows.iter().map(|r| r.get::<i64, _>("version")).collect();
     assert_eq!(
         versions,
-        [20_261_023_000_000, 20_261_028_000_000, 20_261_029_000_000]
+        [
+            20_261_023_000_000,
+            20_261_028_000_000,
+            20_261_029_000_000,
+            20_261_029_100_000
+        ]
     );
     assert!(rows.iter().all(|r| r.get::<bool, _>("success")));
     pool.close().await;
@@ -302,5 +307,51 @@ async fn dev_auth_needs_a_loopback_origin_and_bind_addr() {
         assert_eq!(finished.status.code(), Some(1), "{vars:?}");
         let line = single_json_line(&finished.stdout);
         assert_eq!(line["var"], var, "{vars:?}");
+    }
+}
+
+/// 008 RF-C1, plan-c decision 3: an empty half of a provider pair (loopback) or a missing
+/// credential (outside loopback) stops the start with only the variable name in the log.
+#[tokio::test]
+async fn oauth_credentials_are_config_invalid_without_the_value() {
+    let mut cases = vec![
+        (
+            vec![
+                ("PUBLIC_ORIGIN", "http://localhost:5173"),
+                ("DISCORD_CLIENT_SECRET", ""),
+            ],
+            "DISCORD_CLIENT_SECRET",
+        ),
+        (
+            vec![
+                ("PUBLIC_ORIGIN", "http://localhost:5173"),
+                ("GOOGLE_CLIENT_ID", "c4n4ry with spaces"),
+            ],
+            "GOOGLE_CLIENT_ID",
+        ),
+    ];
+    // Outside loopback the binary with `dev-auth` never starts anyway (DEV_AUTH).
+    if cfg!(not(feature = "dev-auth")) {
+        cases.push((
+            vec![
+                ("PUBLIC_ORIGIN", "https://torneo.example"),
+                ("GOOGLE_CLIENT_ID", ""),
+                ("GOOGLE_CLIENT_SECRET", ""),
+            ],
+            "GOOGLE_CLIENT_ID",
+        ));
+    }
+    for (vars, var) in cases {
+        let mut envs = vec![("DATABASE_URL", "postgres://u:p@127.0.0.1:1/x")];
+        envs.extend(vars.iter().copied());
+        let finished = run_to_exit(&envs).await;
+        assert_eq!(finished.status.code(), Some(1), "{vars:?}");
+        let line = single_json_line(&finished.stdout);
+        assert_eq!(line["event"], "config.invalid");
+        assert_eq!(line["var"], var, "{vars:?}");
+        for text in finished.stdout.iter().chain(&finished.stderr) {
+            assert!(!text.contains("c4n4ry"), "{text}");
+        }
+        assert!(finished.stderr.is_empty());
     }
 }

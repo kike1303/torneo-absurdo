@@ -388,6 +388,90 @@ const CASES = [
     /services\.server: env: IP_HASH_KEY must be \$\{IP_HASH_KEY:\?\}/,
   ],
   [
+    'GOOGLE_CLIENT_ID missing',
+    { [C]: [['      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?GOOGLE_CLIENT_ID is required}\n', '']] },
+    /services\.server: env: GOOGLE_CLIENT_ID is required/,
+  ],
+  [
+    'GOOGLE_CLIENT_ID as a literal',
+    {
+      [C]: [
+        [
+          '      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?GOOGLE_CLIENT_ID is required}\n',
+          '      GOOGLE_CLIENT_ID: filler\n',
+        ],
+      ],
+    },
+    /services\.server: env: GOOGLE_CLIENT_ID must be \$\{GOOGLE_CLIENT_ID:\?\}/,
+  ],
+  [
+    'GOOGLE_CLIENT_SECRET missing',
+    {
+      [C]: [
+        [
+          '      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?GOOGLE_CLIENT_SECRET is required}\n',
+          '',
+        ],
+      ],
+    },
+    /services\.server: env: GOOGLE_CLIENT_SECRET is required/,
+  ],
+  [
+    'GOOGLE_CLIENT_SECRET as a literal',
+    {
+      [C]: [
+        [
+          '      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?GOOGLE_CLIENT_SECRET is required}\n',
+          '      GOOGLE_CLIENT_SECRET: filler\n',
+        ],
+      ],
+    },
+    /services\.server: env: GOOGLE_CLIENT_SECRET must be \$\{GOOGLE_CLIENT_SECRET:\?\}/,
+  ],
+  [
+    'DISCORD_CLIENT_ID missing',
+    {
+      [C]: [['      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?DISCORD_CLIENT_ID is required}\n', '']],
+    },
+    /services\.server: env: DISCORD_CLIENT_ID is required/,
+  ],
+  [
+    'DISCORD_CLIENT_ID as a literal',
+    {
+      [C]: [
+        [
+          '      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?DISCORD_CLIENT_ID is required}\n',
+          '      DISCORD_CLIENT_ID: filler\n',
+        ],
+      ],
+    },
+    /services\.server: env: DISCORD_CLIENT_ID must be \$\{DISCORD_CLIENT_ID:\?\}/,
+  ],
+  [
+    'DISCORD_CLIENT_SECRET missing',
+    {
+      [C]: [
+        [
+          '      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:?DISCORD_CLIENT_SECRET is required}\n',
+          '',
+        ],
+      ],
+    },
+    /services\.server: env: DISCORD_CLIENT_SECRET is required/,
+  ],
+  [
+    'DISCORD_CLIENT_SECRET as a literal',
+    {
+      [C]: [
+        [
+          '      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:?DISCORD_CLIENT_SECRET is required}\n',
+          '      DISCORD_CLIENT_SECRET: filler\n',
+        ],
+      ],
+    },
+    /services\.server: env: DISCORD_CLIENT_SECRET must be \$\{DISCORD_CLIENT_SECRET:\?\}/,
+  ],
+  [
     'DAILY_GRANT missing',
     { [C]: [["      DAILY_GRANT: '100'\n", '']] },
     /services\.server: env: DAILY_GRANT is required/,

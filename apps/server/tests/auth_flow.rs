@@ -324,10 +324,7 @@ async fn a_banned_user_gets_auth_banned_and_no_session() {
     let db = TestDb::create().await;
     let (app, pool) = app(&db).await;
     flow::login(&app, "ana", None, None).await;
-    sqlx::query("UPDATE users SET banned_at = now()")
-        .execute(&pool)
-        .await
-        .unwrap();
+    support::db::privileged(&pool, sqlx::query("UPDATE users SET banned_at = now()")).await;
     let before = count(&pool, "sessions").await;
     assert_callback_error(&flow::login(&app, "ana", None, None).await, "auth.banned");
     assert_eq!(count(&pool, "sessions").await, before);
@@ -428,7 +425,7 @@ async fn t20_a_colliding_alias_is_retried_and_ten_collisions_are_try_again() {
 fn state(db: &TestDb, pool: PgPool) -> AppState {
     let url = db.url();
     let config = support::config::config(&[("DATABASE_URL", url.as_str())]);
-    AppState::from_config(&config, &Settings::default(), pool, Arc::new(AlwaysUp))
+    AppState::from_config(&config, &Settings::default(), pool, Arc::new(AlwaysUp)).unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

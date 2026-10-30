@@ -142,6 +142,7 @@ mod tests {
             id: SessionId(Uuid::from_u128(7)),
             user_id: Uuid::from_u128(1),
             role: Role::User,
+            recently_authenticated: true,
         }
     }
 

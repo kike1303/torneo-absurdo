@@ -32,7 +32,7 @@ pub fn wire_balance(coins: ledger::Coins) -> Option<i64> {
     (coins.0.unsigned_abs() <= MAX_SAFE_INTEGER.unsigned_abs()).then_some(coins.0)
 }
 
-async fn me(state: &AppState, user_id: uuid::Uuid) -> Result<Option<Me>, ()> {
+pub(crate) async fn me(state: &AppState, user_id: uuid::Uuid) -> Result<Option<Me>, ()> {
     let row = sqlx::query(
         "SELECT display_name, role, locale, theme, display_name_is_generated \
          FROM users WHERE id = $1",

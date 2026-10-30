@@ -14,7 +14,23 @@ use super::app::ORIGIN;
 /// database replace it.
 pub const UNUSED_DB: &str = "postgres://torneo:unused@127.0.0.1:1/unused";
 
-/// The variables every in-process test starts from.
+/// Test-only OAuth credentials (plan-c decision 3): not real ones, and the fake providers of
+/// `support::fake_provider` expect exactly these. Canaries of the log tests too.
+pub const GOOGLE_CLIENT_ID: &str = "test-google-client-id";
+pub const GOOGLE_CLIENT_SECRET: &str = "test-google-secret-c4n4ry";
+pub const DISCORD_CLIENT_ID: &str = "test-discord-client-id";
+pub const DISCORD_CLIENT_SECRET: &str = "test-discord-secret-c4n4ry";
+
+/// The four variables that turn Google and Discord on (required outside loopback).
+pub const PROVIDER_VARS: [(&str, &str); 4] = [
+    ("GOOGLE_CLIENT_ID", GOOGLE_CLIENT_ID),
+    ("GOOGLE_CLIENT_SECRET", GOOGLE_CLIENT_SECRET),
+    ("DISCORD_CLIENT_ID", DISCORD_CLIENT_ID),
+    ("DISCORD_CLIENT_SECRET", DISCORD_CLIENT_SECRET),
+];
+
+/// The variables every in-process test starts from. Without the providers: a test that needs
+/// them adds [`PROVIDER_VARS`].
 pub fn base_vars() -> Vec<(&'static str, String)> {
     vec![
         ("DATABASE_URL", UNUSED_DB.to_owned()),

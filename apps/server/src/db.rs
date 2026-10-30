@@ -47,6 +47,8 @@ pub fn error_kind(error: &sqlx::Error) -> &'static str {
             "TA001" => return "ledger_immutable",
             "TA002" => return "ledger_unbalanced",
             "TA003" => return "ledger_closed",
+            // `users_privileged_guard` (008 plan-c decision 10).
+            "TA004" => return "privileged_write",
             _ => {}
         }
     }
@@ -58,6 +60,14 @@ pub fn error_kind(error: &sqlx::Error) -> &'static str {
         sqlx::Error::PoolClosed => "pool",
         _ => "other",
     }
+}
+
+/// Whether `error` is a unique violation of the constraint `name` (by its fixed name, never by
+/// the text of the error, which carries the key).
+pub fn is_unique_violation(error: &sqlx::Error, name: &str) -> bool {
+    error.as_database_error().is_some_and(|e| {
+        e.kind() == sqlx::error::ErrorKind::UniqueViolation && e.constraint() == Some(name)
+    })
 }
 
 /// Connects the pool, retrying every `retry.interval` until `retry.deadline` has passed.

@@ -57,6 +57,11 @@ const ENV = {
     // Required secrets from Coolify, never literals in git (spec 008, RF-B18).
     INTERNAL_API_SECRET: '${INTERNAL_API_SECRET:?}',
     IP_HASH_KEY: '${IP_HASH_KEY:?}',
+    // The OAuth credentials (spec 008 RF-C1, plan-c decision 3): required outside loopback.
+    GOOGLE_CLIENT_ID: '${GOOGLE_CLIENT_ID:?}',
+    GOOGLE_CLIENT_SECRET: '${GOOGLE_CLIENT_SECRET:?}',
+    DISCORD_CLIENT_ID: '${DISCORD_CLIENT_ID:?}',
+    DISCORD_CLIENT_SECRET: '${DISCORD_CLIENT_SECRET:?}',
     // Any integer from 1 to 10 000, checked below: TA-27 changes the value, not this script.
     DAILY_GRANT: null,
   },

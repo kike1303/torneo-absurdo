@@ -354,9 +354,12 @@ _prod-local-start:
     set -euo pipefail
     : "${IMAGE_TAG:?IMAGE_TAG is required}"
     bash scripts/local-networks.sh up
-    # The two secrets of the server, generated once into a file git ignores (008 plan-b decision 6).
+    # The two secrets of the server and the four OAuth fillers, generated once into a file git
+    # ignores (008 plan-b decision 6, plan-c decision 3).
     bash scripts/local-secrets.sh
-    env -u DATABASE_URL -u PUBLIC_HOST -u INTERNAL_API_SECRET -u IP_HASH_KEY IMAGE_TAG="$IMAGE_TAG" \
+    env -u DATABASE_URL -u PUBLIC_HOST -u INTERNAL_API_SECRET -u IP_HASH_KEY \
+        -u GOOGLE_CLIENT_ID -u GOOGLE_CLIENT_SECRET -u DISCORD_CLIENT_ID -u DISCORD_CLIENT_SECRET \
+        IMAGE_TAG="$IMAGE_TAG" \
         docker compose -p torneo-local \
         --env-file infra/local.env --env-file infra/local.secrets.env \
         -f infra/docker-compose.yml -f infra/compose.local.yml \
@@ -367,6 +370,8 @@ _prod-local-start:
 # Stop `prod-local` and remove the networks it created
 prod-local-down:
     env -u DATABASE_URL -u PUBLIC_HOST IMAGE_TAG=unused INTERNAL_API_SECRET=unused IP_HASH_KEY=unused \
+        GOOGLE_CLIENT_ID=unused GOOGLE_CLIENT_SECRET=unused \
+        DISCORD_CLIENT_ID=unused DISCORD_CLIENT_SECRET=unused \
         docker compose -p torneo-local \
         --env-file infra/local.env -f infra/docker-compose.yml -f infra/compose.local.yml down
     bash scripts/local-networks.sh down

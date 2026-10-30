@@ -6,7 +6,10 @@ pub mod auth;
 pub mod bin;
 pub mod config;
 pub mod db;
+pub mod fake_provider;
 pub mod http;
+pub mod logs;
+pub mod oauth;
 pub mod pg_proxy;
 pub mod ws;
 

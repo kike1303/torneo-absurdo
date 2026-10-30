@@ -9,4 +9,9 @@
  * [`ErrorCode`]: it never appears in a body.
  */
 export type CallbackErrorCode =
-  'auth.invalid_state' | 'auth.banned' | 'auth.provider_error' | 'auth.try_again';
+  | 'auth.invalid_state'
+  | 'auth.banned'
+  | 'auth.provider_error'
+  | 'auth.try_again'
+  | 'auth.already_linked'
+  | 'auth.provider_already_linked';

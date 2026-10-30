@@ -22,8 +22,13 @@ mod health;
 mod me;
 mod ws;
 
-pub use error::{ApiError, ApiErrorCode, AuthErrorCode, CallbackErrorCode, ErrorCode, WsErrorCode};
+pub use error::{
+    ApiError, ApiErrorCode, AuthErrorCode, CallbackErrorCode, ErrorCode, ProfileErrorCode,
+    WsErrorCode,
+};
 pub use fight::{AbilityKind, EndReason, FightEvent, FightLog, FighterInfo, MomentKind, Side};
 pub use health::HealthResponse;
-pub use me::{Locale, MAX_SAFE_INTEGER, Me, Provider, Role, Theme};
+pub use me::{
+    DisplayNameRequest, Locale, MAX_SAFE_INTEGER, Me, PreferencesRequest, Provider, Role, Theme,
+};
 pub use ws::{Channel, ClientMessage, SelfEvent, ServerMessage};

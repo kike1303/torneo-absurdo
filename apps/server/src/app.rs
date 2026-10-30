@@ -35,6 +35,9 @@ pub enum StartupError {
     Bind,
     #[error("the server stopped with an I/O error")]
     Serve,
+    /// The TLS config of the OAuth client could not be built (008 plan-c decision 4).
+    #[error("the TLS client config could not be built")]
+    Tls,
 }
 
 /// HTTP connection settings.
@@ -62,6 +65,11 @@ pub struct Settings {
     pub ws: WsConfig,
     pub rate: RateSettings,
     pub alias: AliasConfig,
+    /// The URLs of Google and Discord: the production constants unless a test replaces them
+    /// (never an environment variable, plan-c decision 5).
+    pub oauth: crate::auth::providers::OAuthSettings,
+    /// The pause of the link callback before its transaction (the race tests).
+    pub link_gate: crate::auth::link::LinkGateConfig,
 }
 
 #[derive(Clone)]
@@ -78,22 +86,23 @@ pub struct AppState {
 impl AppState {
     /// The whole state from the configuration (008 plan-b decision 3.2): the `Origin`
     /// policy, the client context, the limiters and the WebSocket all come from `config`.
-    /// `probe` is the health check of `pool` in production; the tests pass a fake one.
+    /// `probe` is the health check of `pool` in production; the tests pass a fake one. Fails only
+    /// with [`StartupError::Tls`].
     pub fn from_config(
         config: &Config,
         settings: &Settings,
         pool: PgPool,
         probe: Arc<dyn DbProbe>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, StartupError> {
+        Ok(Self {
             db: pool,
             health: Arc::new(HealthState::new(probe, settings.health)),
             origin: Arc::new(OriginPolicy::new(config.public_origin.clone())),
             ws: Arc::new(Self::ws_from_config(config, settings)),
             net: Arc::new(Self::net_from_config(config)),
             rate: Arc::new(RateLimits::new(&settings.rate)),
-            auth: Arc::new(AuthState::from_config(config, settings)),
-        }
+            auth: Arc::new(AuthState::from_config(config, settings)?),
+        })
     }
 
     /// Replaces the WebSocket state (the tests shorten its caps below what the config allows).
@@ -157,6 +166,9 @@ pub async fn serve(
 ) -> Result<(), StartupError> {
     let pool = db::connect_with_retry(config.database.clone(), settings.db_retry).await?;
     db::migrate(&pool).await?;
+    // The whole state before the port: a TLS config that cannot be built never opens it.
+    let probe = Arc::new(PgProbe::new(pool.clone()));
+    let state = AppState::from_config(config, &settings, pool, probe)?;
     let listener = TcpListener::bind(SocketAddr::new(config.bind_addr, config.port))
         .await
         .map_err(|error| {
@@ -171,8 +183,6 @@ pub async fn serve(
         .map_err(|_| StartupError::Bind)?
         .port();
     tracing::info!(event = "server.listening", port);
-    let probe = Arc::new(PgProbe::new(pool.clone()));
-    let state = AppState::from_config(config, &settings, pool, probe);
     run_until_shutdown(listener, state, settings.http, shutdown).await
 }
 

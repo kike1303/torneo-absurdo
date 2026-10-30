@@ -66,11 +66,15 @@ pub enum Handler {
     Health,
     Ws,
     AuthStart,
+    AuthLink,
+    AuthUnlink,
     AuthCallback,
     AuthProviders,
     Logout,
     LogoutAll,
     Me,
+    MeDisplayName,
+    MePreferences,
     #[cfg(feature = "dev-auth")]
     DevAuthorize,
     #[cfg(feature = "dev-auth")]
@@ -108,6 +112,18 @@ pub const ROUTES: &[RouteSpec] = &[
         handler: Handler::AuthStart,
     },
     RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/auth/link/{provider}",
+        effect: Effect::Mutate,
+        handler: Handler::AuthLink,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/auth/unlink/{provider}",
+        effect: Effect::Mutate,
+        handler: Handler::AuthUnlink,
+    },
+    RouteSpec {
         method: RouteMethod::Get,
         path: "/api/auth/{provider}/callback",
         effect: Effect::Mutate,
@@ -136,6 +152,18 @@ pub const ROUTES: &[RouteSpec] = &[
         path: "/api/me",
         effect: Effect::Read,
         handler: Handler::Me,
+    },
+    RouteSpec {
+        method: RouteMethod::Put,
+        path: "/api/me/display-name",
+        effect: Effect::Mutate,
+        handler: Handler::MeDisplayName,
+    },
+    RouteSpec {
+        method: RouteMethod::Put,
+        path: "/api/me/preferences",
+        effect: Effect::Mutate,
+        handler: Handler::MePreferences,
     },
     #[cfg(feature = "dev-auth")]
     RouteSpec {
@@ -200,11 +228,16 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         Handler::AuthStart => on(filter, auth::start::handler)
             .layer(body)
             .layer(auth_ip()),
+        Handler::AuthLink => on(filter, auth::link::handler).layer(body).layer(auth_ip()),
+        // No body extractor (like logout): nothing for the limit to reject (RF-C3).
+        Handler::AuthUnlink => on(filter, auth::unlink::handler),
         Handler::AuthCallback => on(filter, auth::callback::handler).layer(auth_ip()),
         Handler::AuthProviders => on(filter, auth::providers),
         Handler::Logout => on(filter, auth::logout::logout).layer(body),
         Handler::LogoutAll => on(filter, auth::logout::logout_all).layer(body),
         Handler::Me => on(filter, crate::profile::me::handler),
+        Handler::MeDisplayName => on(filter, crate::profile::update::display_name).layer(body),
+        Handler::MePreferences => on(filter, crate::profile::update::preferences).layer(body),
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize => on(filter, auth::dev::authorize),
         #[cfg(feature = "dev-auth")]

@@ -10,11 +10,20 @@ pub enum ApiErrorCode {
     MethodNotAllowed,
     #[serde(rename = "http.rate_limited")]
     RateLimited,
+    /// Any rejected JSON body: malformed, wrong `Content-Type`, unknown field, wrong type, a
+    /// value outside the enum or over the size limit (008 RF-C5, amendment 2026-10-29).
+    #[serde(rename = "http.invalid_body")]
+    InvalidBody,
 }
 
 impl ApiErrorCode {
     /// Every variant. A test with an exhaustive `match` keeps this list complete.
-    pub const ALL: &'static [Self] = &[Self::NotFound, Self::MethodNotAllowed, Self::RateLimited];
+    pub const ALL: &'static [Self] = &[
+        Self::NotFound,
+        Self::MethodNotAllowed,
+        Self::RateLimited,
+        Self::InvalidBody,
+    ];
     /// The only domain prefix this enum may use.
     pub const PREFIX: &'static str = "http.";
 
@@ -24,6 +33,7 @@ impl ApiErrorCode {
             Self::NotFound => "http.not_found",
             Self::MethodNotAllowed => "http.method_not_allowed",
             Self::RateLimited => "http.rate_limited",
+            Self::InvalidBody => "http.invalid_body",
         }
     }
 }
@@ -109,6 +119,18 @@ pub enum AuthErrorCode {
     TryAgain,
     #[serde(rename = "auth.unauthenticated")]
     Unauthenticated,
+    /// The identity of a link is already another user's (008 RF-C2): never merged.
+    #[serde(rename = "auth.already_linked")]
+    AlreadyLinked,
+    /// The user already has an account of that provider (008 RF-C2).
+    #[serde(rename = "auth.provider_already_linked")]
+    ProviderAlreadyLinked,
+    /// Unlinking would leave no enabled provider to log in with (008 RF-C3).
+    #[serde(rename = "auth.last_provider")]
+    LastProvider,
+    /// An admin route needs an admin who authenticated in the last 60 minutes (008 RF-C7).
+    #[serde(rename = "auth.reauth_required")]
+    ReauthRequired,
 }
 
 impl AuthErrorCode {
@@ -120,6 +142,10 @@ impl AuthErrorCode {
         Self::ProviderError,
         Self::TryAgain,
         Self::Unauthenticated,
+        Self::AlreadyLinked,
+        Self::ProviderAlreadyLinked,
+        Self::LastProvider,
+        Self::ReauthRequired,
     ];
     /// The only domain prefix this enum may use.
     pub const PREFIX: &'static str = "auth.";
@@ -133,6 +159,10 @@ impl AuthErrorCode {
             Self::ProviderError => "auth.provider_error",
             Self::TryAgain => "auth.try_again",
             Self::Unauthenticated => "auth.unauthenticated",
+            Self::AlreadyLinked => "auth.already_linked",
+            Self::ProviderAlreadyLinked => "auth.provider_already_linked",
+            Self::LastProvider => "auth.last_provider",
+            Self::ReauthRequired => "auth.reauth_required",
         }
     }
 }
@@ -153,6 +183,10 @@ pub enum CallbackErrorCode {
     ProviderError,
     #[serde(rename = "auth.try_again")]
     TryAgain,
+    #[serde(rename = "auth.already_linked")]
+    AlreadyLinked,
+    #[serde(rename = "auth.provider_already_linked")]
+    ProviderAlreadyLinked,
 }
 
 impl CallbackErrorCode {
@@ -162,6 +196,8 @@ impl CallbackErrorCode {
         Self::Banned,
         Self::ProviderError,
         Self::TryAgain,
+        Self::AlreadyLinked,
+        Self::ProviderAlreadyLinked,
     ];
 
     /// The serialized code, equal to the [`AuthErrorCode`] it maps to.
@@ -177,6 +213,8 @@ impl AuthErrorCode {
             CallbackErrorCode::Banned => Self::Banned,
             CallbackErrorCode::ProviderError => Self::ProviderError,
             CallbackErrorCode::TryAgain => Self::TryAgain,
+            CallbackErrorCode::AlreadyLinked => Self::AlreadyLinked,
+            CallbackErrorCode::ProviderAlreadyLinked => Self::ProviderAlreadyLinked,
         }
     }
 }
@@ -184,6 +222,38 @@ impl AuthErrorCode {
 impl From<CallbackErrorCode> for AuthErrorCode {
     fn from(code: CallbackErrorCode) -> Self {
         Self::from_callback(code)
+    }
+}
+
+/// Profile codes (`profile.*`, 008 RF-C4): the answers of a rename.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum ProfileErrorCode {
+    #[serde(rename = "profile.display_name_invalid")]
+    DisplayNameInvalid,
+    #[serde(rename = "profile.display_name_reserved")]
+    DisplayNameReserved,
+    #[serde(rename = "profile.display_name_taken")]
+    DisplayNameTaken,
+}
+
+impl ProfileErrorCode {
+    /// Every variant. A test with an exhaustive `match` keeps this list complete.
+    pub const ALL: &'static [Self] = &[
+        Self::DisplayNameInvalid,
+        Self::DisplayNameReserved,
+        Self::DisplayNameTaken,
+    ];
+    /// The only domain prefix this enum may use.
+    pub const PREFIX: &'static str = "profile.";
+
+    /// The serialized code (the same string serde writes).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DisplayNameInvalid => "profile.display_name_invalid",
+            Self::DisplayNameReserved => "profile.display_name_reserved",
+            Self::DisplayNameTaken => "profile.display_name_taken",
+        }
     }
 }
 
@@ -198,6 +268,7 @@ pub enum ErrorCode {
     Http(ApiErrorCode),
     Ws(WsErrorCode),
     Auth(AuthErrorCode),
+    Profile(ProfileErrorCode),
 }
 
 impl ErrorCode {
@@ -207,6 +278,7 @@ impl ErrorCode {
             Self::Http(code) => code.as_str(),
             Self::Ws(code) => code.as_str(),
             Self::Auth(code) => code.as_str(),
+            Self::Profile(code) => code.as_str(),
         }
     }
 }
@@ -226,6 +298,12 @@ impl From<WsErrorCode> for ErrorCode {
 impl From<AuthErrorCode> for ErrorCode {
     fn from(code: AuthErrorCode) -> Self {
         Self::Auth(code)
+    }
+}
+
+impl From<ProfileErrorCode> for ErrorCode {
+    fn from(code: ProfileErrorCode) -> Self {
+        Self::Profile(code)
     }
 }
 
@@ -254,6 +332,7 @@ mod tests {
             ApiErrorCode::NotFound => 0,
             ApiErrorCode::MethodNotAllowed => 1,
             ApiErrorCode::RateLimited => 2,
+            ApiErrorCode::InvalidBody => 3,
         }
     }
 
@@ -281,6 +360,10 @@ mod tests {
             AuthErrorCode::ProviderError => 3,
             AuthErrorCode::TryAgain => 4,
             AuthErrorCode::Unauthenticated => 5,
+            AuthErrorCode::AlreadyLinked => 6,
+            AuthErrorCode::ProviderAlreadyLinked => 7,
+            AuthErrorCode::LastProvider => 8,
+            AuthErrorCode::ReauthRequired => 9,
         }
     }
 
@@ -290,13 +373,24 @@ mod tests {
             CallbackErrorCode::Banned => 1,
             CallbackErrorCode::ProviderError => 2,
             CallbackErrorCode::TryAgain => 3,
+            CallbackErrorCode::AlreadyLinked => 4,
+            CallbackErrorCode::ProviderAlreadyLinked => 5,
         }
     }
 
-    const API_COUNT: usize = 3;
+    fn profile_index(code: ProfileErrorCode) -> usize {
+        match code {
+            ProfileErrorCode::DisplayNameInvalid => 0,
+            ProfileErrorCode::DisplayNameReserved => 1,
+            ProfileErrorCode::DisplayNameTaken => 2,
+        }
+    }
+
+    const API_COUNT: usize = 4;
     const WS_COUNT: usize = 11;
-    const AUTH_COUNT: usize = 6;
-    const CALLBACK_COUNT: usize = 4;
+    const AUTH_COUNT: usize = 10;
+    const CALLBACK_COUNT: usize = 6;
+    const PROFILE_COUNT: usize = 3;
 
     #[test]
     fn all_lists_every_variant_once() {
@@ -315,6 +409,12 @@ mod tests {
             .collect();
         assert_eq!(callback.len(), CALLBACK_COUNT);
         assert_eq!(CallbackErrorCode::ALL.len(), CALLBACK_COUNT);
+        let profile: HashSet<usize> = ProfileErrorCode::ALL
+            .iter()
+            .map(|c| profile_index(*c))
+            .collect();
+        assert_eq!(profile.len(), PROFILE_COUNT);
+        assert_eq!(ProfileErrorCode::ALL.len(), PROFILE_COUNT);
     }
 
     #[test]
@@ -324,6 +424,11 @@ mod tests {
             (CallbackErrorCode::Banned, "auth.banned"),
             (CallbackErrorCode::ProviderError, "auth.provider_error"),
             (CallbackErrorCode::TryAgain, "auth.try_again"),
+            (CallbackErrorCode::AlreadyLinked, "auth.already_linked"),
+            (
+                CallbackErrorCode::ProviderAlreadyLinked,
+                "auth.provider_already_linked",
+            ),
         ];
         assert_eq!(expected.len(), CALLBACK_COUNT);
         for (code, text) in expected {
@@ -336,7 +441,14 @@ mod tests {
             );
         }
         // Not in the closed list: never a callback error.
-        for text in ["auth.csrf_origin", "auth.unauthenticated", "http.not_found"] {
+        for text in [
+            "auth.csrf_origin",
+            "auth.unauthenticated",
+            "auth.last_provider",
+            "auth.reauth_required",
+            "http.not_found",
+            "profile.display_name_taken",
+        ] {
             assert!(serde_json::from_str::<CallbackErrorCode>(&format!("\"{text}\"")).is_err());
         }
     }
@@ -347,6 +459,7 @@ mod tests {
             (ApiErrorCode::NotFound, "http.not_found"),
             (ApiErrorCode::MethodNotAllowed, "http.method_not_allowed"),
             (ApiErrorCode::RateLimited, "http.rate_limited"),
+            (ApiErrorCode::InvalidBody, "http.invalid_body"),
         ];
         assert_eq!(expected.len(), API_COUNT);
         for (code, text) in expected {
@@ -395,12 +508,46 @@ mod tests {
             (AuthErrorCode::ProviderError, "auth.provider_error"),
             (AuthErrorCode::TryAgain, "auth.try_again"),
             (AuthErrorCode::Unauthenticated, "auth.unauthenticated"),
+            (AuthErrorCode::AlreadyLinked, "auth.already_linked"),
+            (
+                AuthErrorCode::ProviderAlreadyLinked,
+                "auth.provider_already_linked",
+            ),
+            (AuthErrorCode::LastProvider, "auth.last_provider"),
+            (AuthErrorCode::ReauthRequired, "auth.reauth_required"),
         ];
         assert_eq!(expected.len(), AUTH_COUNT);
         for (code, text) in expected {
             assert_eq!(serde_json::to_string(&code).unwrap(), format!("\"{text}\""));
             assert_eq!(
                 serde_json::from_str::<AuthErrorCode>(&format!("\"{text}\"")).unwrap(),
+                code
+            );
+        }
+    }
+
+    #[test]
+    fn profile_codes_have_the_exact_strings() {
+        let expected = [
+            (
+                ProfileErrorCode::DisplayNameInvalid,
+                "profile.display_name_invalid",
+            ),
+            (
+                ProfileErrorCode::DisplayNameReserved,
+                "profile.display_name_reserved",
+            ),
+            (
+                ProfileErrorCode::DisplayNameTaken,
+                "profile.display_name_taken",
+            ),
+        ];
+        assert_eq!(expected.len(), PROFILE_COUNT);
+        for (code, text) in expected {
+            assert_eq!(code.as_str(), text);
+            assert_eq!(serde_json::to_string(&code).unwrap(), format!("\"{text}\""));
+            assert_eq!(
+                serde_json::from_str::<ProfileErrorCode>(&format!("\"{text}\"")).unwrap(),
                 code
             );
         }
@@ -429,6 +576,13 @@ mod tests {
             );
             assert_eq!(ErrorCode::from(*code).as_str(), code.as_str());
         }
+        for code in ProfileErrorCode::ALL {
+            assert_eq!(
+                serde_json::to_value(code).unwrap(),
+                serde_json::Value::from(code.as_str())
+            );
+            assert_eq!(ErrorCode::from(*code).as_str(), code.as_str());
+        }
     }
 
     #[test]
@@ -446,7 +600,17 @@ mod tests {
             assert!(code.as_str().starts_with(AuthErrorCode::PREFIX), "{code:?}");
             assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
         }
-        assert_eq!(seen.len(), API_COUNT + WS_COUNT + AUTH_COUNT);
+        for code in ProfileErrorCode::ALL {
+            assert!(
+                code.as_str().starts_with(ProfileErrorCode::PREFIX),
+                "{code:?}"
+            );
+            assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
+        }
+        assert_eq!(
+            seen.len(),
+            API_COUNT + WS_COUNT + AUTH_COUNT + PROFILE_COUNT
+        );
     }
 
     #[test]
@@ -470,6 +634,13 @@ mod tests {
             assert_eq!(
                 serde_json::from_str::<ErrorCode>(&json).unwrap(),
                 ErrorCode::Auth(*code)
+            );
+        }
+        for code in ProfileErrorCode::ALL {
+            let json = format!("\"{}\"", code.as_str());
+            assert_eq!(
+                serde_json::from_str::<ErrorCode>(&json).unwrap(),
+                ErrorCode::Profile(*code)
             );
         }
         assert_eq!(
@@ -505,6 +676,18 @@ mod tests {
             (
                 ApiError::new(ApiErrorCode::RateLimited),
                 r#"{"error":"http.rate_limited"}"#,
+            ),
+            (
+                ApiError::new(ApiErrorCode::InvalidBody),
+                r#"{"error":"http.invalid_body"}"#,
+            ),
+            (
+                ApiError::new(ProfileErrorCode::DisplayNameTaken),
+                r#"{"error":"profile.display_name_taken"}"#,
+            ),
+            (
+                ApiError::new(AuthErrorCode::ReauthRequired),
+                r#"{"error":"auth.reauth_required"}"#,
             ),
         ];
         for (value, json) in cases {
