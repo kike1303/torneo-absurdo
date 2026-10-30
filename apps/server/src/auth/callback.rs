@@ -49,13 +49,18 @@ pub fn login_location() -> HeaderValue {
 /// navigates to (008 "Enmienda 2026-10-30" of RF-B5): no `Retry-After`, no body, never `next`.
 /// `cache_control` is `no-store`, or `private, no-store` where the session was read.
 pub fn try_again_redirect(cache_control: HeaderValue) -> Response {
+    code_redirect(CallbackErrorCode::TryAgain, cache_control)
+}
+
+/// 303 to the login page with `code` and no cookie change: what a route the browser posts to
+/// answers before any flow exists (`auth.try_again`, and 009 RF8 and RF11: `auth.reauth_required`
+/// of a link without a confirmation, `auth.reauth_mismatch` of a reauth without that account).
+/// Unlike [`error_redirect`], the flow cookie is not touched.
+pub fn code_redirect(code: CallbackErrorCode, cache_control: HeaderValue) -> Response {
     (
         StatusCode::SEE_OTHER,
         [
-            (
-                header::LOCATION,
-                error_location(CallbackErrorCode::TryAgain),
-            ),
+            (header::LOCATION, error_location(code)),
             (header::CACHE_CONTROL, cache_control),
         ],
     )

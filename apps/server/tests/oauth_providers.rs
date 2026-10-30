@@ -50,7 +50,8 @@ async fn the_redirect_to_a_real_provider_is_a_303_to_its_authorize_constant() {
         &server::app::Settings::default(),
     )
     .await;
-    let (_, token) = support::app::user_with_session(&pool).await;
+    // A fresh session: `link` needs a confirmation (009 RF8).
+    let (_, token) = support::app::user_with_dev_account(&pool).await;
     let session = oauth::session_cookie(&token);
     for (path, cookie, authorize) in [
         ("/api/auth/google/start", None, GOOGLE_AUTHORIZE),

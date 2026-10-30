@@ -647,6 +647,11 @@ Sin cambios en los workflows.
    - en `recent_admin`, la autenticación vigente de un admin con el corte en `NULL` (`<= NULL`).
 
    Con esos casos, el mutante de `step_up` muere. Sumo el mutante "sin `COALESCE` en `recent_admin`", que también muere. El caso (v) de admin (paso 7) sigue siendo una sesión con todo en `NULL`.
+6. **Paso 4: dos tests de 008 más se adaptan.** Solo suman lo que pide la regla, sin tocar sus aserciones:
+   - `tests/link.rs`, `a_second_account_of_the_same_provider_is_provider_already_linked`, vinculaba dos veces desde la sesión rotada, que con RF10 no tiene confirmación. Antes del segundo `link` vuelve a entrar con la misma identidad de Google.
+   - `tests/oauth_providers.rs`, `the_redirect_to_a_real_provider_is_a_303_to_its_authorize_constant`, empezaba `link` con una sesión sin autenticación. Usa `support::app::user_with_dev_account`, el mismo helper del test de los dos callbacks.
+
+   El 303 sin cookies de RF8 es `callback::code_redirect(code, cache_control)`, y `try_again_redirect` pasa a usarlo. El mutante de plan-c (ignorar el resultado de `revoke(One)`) sobrevive, como prevé el paso 4, y lo reemplaza el mutante "sin fila es una autenticación que sirve".
 
 ## Revisión
 
