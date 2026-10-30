@@ -62,6 +62,14 @@ pub fn error_kind(error: &sqlx::Error) -> &'static str {
     }
 }
 
+/// Whether `error` is a unique violation of the constraint `name` (by its fixed name, never by
+/// the text of the error, which carries the key).
+pub fn is_unique_violation(error: &sqlx::Error, name: &str) -> bool {
+    error.as_database_error().is_some_and(|e| {
+        e.kind() == sqlx::error::ErrorKind::UniqueViolation && e.constraint() == Some(name)
+    })
+}
+
 /// Connects the pool, retrying every `retry.interval` until `retry.deadline` has passed.
 /// Each failure logs `db.unavailable` with the error kind only.
 pub async fn connect_with_retry(

@@ -73,6 +73,8 @@ pub enum Handler {
     Logout,
     LogoutAll,
     Me,
+    MeDisplayName,
+    MePreferences,
     #[cfg(feature = "dev-auth")]
     DevAuthorize,
     #[cfg(feature = "dev-auth")]
@@ -151,6 +153,18 @@ pub const ROUTES: &[RouteSpec] = &[
         effect: Effect::Read,
         handler: Handler::Me,
     },
+    RouteSpec {
+        method: RouteMethod::Put,
+        path: "/api/me/display-name",
+        effect: Effect::Mutate,
+        handler: Handler::MeDisplayName,
+    },
+    RouteSpec {
+        method: RouteMethod::Put,
+        path: "/api/me/preferences",
+        effect: Effect::Mutate,
+        handler: Handler::MePreferences,
+    },
     #[cfg(feature = "dev-auth")]
     RouteSpec {
         method: RouteMethod::Get,
@@ -222,6 +236,8 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         Handler::Logout => on(filter, auth::logout::logout).layer(body),
         Handler::LogoutAll => on(filter, auth::logout::logout_all).layer(body),
         Handler::Me => on(filter, crate::profile::me::handler),
+        Handler::MeDisplayName => on(filter, crate::profile::update::display_name).layer(body),
+        Handler::MePreferences => on(filter, crate::profile::update::preferences).layer(body),
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize => on(filter, auth::dev::authorize),
         #[cfg(feature = "dev-auth")]
