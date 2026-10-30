@@ -46,6 +46,8 @@ jobs:
       contents: read
     steps:
       - run: echo rust
+      - name: The musl binary has no dev-auth
+        run: node scripts/check-release-binary.mjs target/x86_64-unknown-linux-musl/debug/server
   web:
     needs: changes
     runs-on: ubuntu-24.04
@@ -96,6 +98,8 @@ jobs:
       contents: read
     steps:
       - run: echo images
+      - name: Server binary
+        run: node scripts/check-release-binary.mjs "$RUNNER_TEMP/server"
   ci-ok:
     needs: [changes, policy, rust, web, e2e-server, e2e, images]
     if: always()

@@ -48,6 +48,25 @@ const CACHE_KEY_ENV = /^(?:CARGO_|RUST)/;
 const E2E_IF = "needs.changes.outputs.e2e == 'true'";
 const COMPOSE_DEV = 'infra/compose.dev.yml';
 
+// 008 RF-D9, plan-d decision 12: the server image of a release is built twice with the same
+// inputs, checked between the two builds and compared by config digest before the retention.
+const BUILD_PUSH = /^docker\/build-push-action@/i;
+const RETENTION = /^actions\/delete-package-versions@/i;
+const SERVER_DOCKERFILE = 'apps/server/Dockerfile';
+const RELEASE_CHECK_TAG = 'torneo-release-check/server:local';
+const SAME_INPUTS = [
+  'context',
+  'file',
+  'platforms',
+  'build-args',
+  'labels',
+  'provenance',
+  'sbom',
+  'cache-from',
+];
+const BUILD_INPUTS = [...SAME_INPUTS, 'push', 'load', 'tags'];
+const RELEASE_CHECK = /node scripts\/check-release-binary\.mjs(?! --expect-dev)\s/;
+
 const FORBIDDEN_TRIGGERS = ['pull_request_target', 'workflow_run'];
 // Data an outsider controls. Plan-c goes further: no `${{ }}` at all inside `run:` (see below).
 const SHA_REF = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\/[^@\s]+)?@[0-9a-f]{40}$/;
@@ -335,6 +354,115 @@ function checkE2e(jobs, file, problems, tree) {
 }
 
 /**
+ * 008 RF-D9: `rust` checks its musl binary and `images` the `/server` of its image, both as a
+ * release (without --expect-dev).
+ */
+function checkBinaryChecks(jobs, file, problems) {
+  for (const id of ['rust', 'images']) {
+    const steps = Array.isArray(jobs[id]?.steps) ? jobs[id].steps : [];
+    if (!steps.some((s) => isMap(s) && RELEASE_CHECK.test(`${s.run ?? ''}\n`))) {
+      problems.push(
+        `${file}: release-binary: jobs.${id} must run scripts/check-release-binary.mjs without --expect-dev`,
+      );
+    }
+  }
+}
+
+/**
+ * 008 RF-D9 (plan-d decision 12, open question 7): in release.yml the server is built twice with
+ * the same inputs. The first build only loads a local tag; a step between the two runs
+ * check-release-binary on it; the second pushes; and before the retention a step compares the
+ * `imageid` of both builds with the `config.digest` that the registry publishes.
+ */
+function checkReleaseServer(jobs, file, problems) {
+  const rule = 'release-binary';
+  const steps = Array.isArray(jobs.build?.steps) ? jobs.build.steps : [];
+  const builds = steps
+    .map((step, index) => ({ step, index }))
+    .filter(
+      ({ step }) =>
+        isMap(step) &&
+        typeof step.uses === 'string' &&
+        BUILD_PUSH.test(step.uses) &&
+        isMap(step.with) &&
+        step.with.file === SERVER_DOCKERFILE,
+    );
+  if (builds.length !== 2) {
+    problems.push(
+      `${file}: ${rule}: jobs.build must build ${SERVER_DOCKERFILE} exactly twice (a local build for the check, then the push), found ${builds.length}`,
+    );
+    return;
+  }
+  const [check, push] = builds;
+  const a = check.step.with;
+  const b = push.step.with;
+  const is = (value, bool) => value === bool || value === String(bool);
+  if (!is(a.push, false) || !is(a.load, true)) {
+    problems.push(`${file}: ${rule}: the first server build must have push: false and load: true`);
+  }
+  if (String(a.tags ?? '').trim() !== RELEASE_CHECK_TAG) {
+    problems.push(
+      `${file}: ${rule}: the first server build must tag only ${RELEASE_CHECK_TAG} (never a GHCR tag)`,
+    );
+  }
+  if (!is(b.push, true) || is(b.load, true)) {
+    problems.push(`${file}: ${rule}: the second server build must have push: true and no load`);
+  }
+  for (const key of SAME_INPUTS) {
+    if (!(key in a) || !(key in b)) {
+      problems.push(`${file}: ${rule}: ${key} must be set in both server builds`);
+    } else if (String(a[key]) !== String(b[key])) {
+      problems.push(`${file}: ${rule}: ${key} must be the same in both server builds`);
+    }
+  }
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    if (!BUILD_INPUTS.includes(key)) {
+      problems.push(`${file}: ${rule}: ${key} is not allowed in the server builds`);
+    }
+  }
+  if (String(check.step.if ?? '') !== String(push.step.if ?? '')) {
+    problems.push(`${file}: ${rule}: both server builds must have the same if:`);
+  }
+  const between = steps.slice(check.index + 1, push.index);
+  if (!between.some((s) => isMap(s) && RELEASE_CHECK.test(`${s.run ?? ''}\n`))) {
+    problems.push(
+      `${file}: ${rule}: a step between the two server builds must run scripts/check-release-binary.mjs on the local image (without --expect-dev)`,
+    );
+  }
+  const retention = steps.findIndex(
+    (s) => isMap(s) && typeof s.uses === 'string' && RETENTION.test(s.uses),
+  );
+  // The checked side comes from `docker save` (the config blob, the same with either image
+  // store) and the pushed side from the imageid of the push and the config.digest of the tags.
+  // The imageid of a `load` build is the manifest digest with the containerd image store, so it
+  // is never used (008 plan-d deviation D38).
+  const references = (s, id) =>
+    typeof id === 'string' &&
+    isMap(s.env) &&
+    Object.values(s.env).some((v) => String(v).includes(`steps.${id}.outputs.imageid`));
+  const compares = (s) =>
+    isMap(s) &&
+    typeof s.run === 'string' &&
+    references(s, push.step.id) &&
+    s.run.includes(`docker save ${RELEASE_CHECK_TAG}`) &&
+    s.run.includes('imagetools inspect --raw') &&
+    s.run.includes('.config.digest');
+  const end = retention === -1 ? steps.length : retention;
+  if (!steps.slice(push.index + 1, end).some(compares)) {
+    problems.push(
+      `${file}: ${rule}: after the push and before the retention, a step must compare the config of the checked image (docker save ${RELEASE_CHECK_TAG}) with the imageid of the push and the config.digest of imagetools inspect --raw`,
+    );
+  }
+  steps.forEach((s, i) => {
+    if (isMap(s) && references(s, check.step.id)) {
+      problems.push(
+        `${file}: ${rule}: jobs.build.steps[${i}] uses the imageid of the local build, which depends on the image store (the manifest digest with containerd): use docker save`,
+      );
+    }
+  });
+}
+
+/**
  * @param {Set<string>} local names of the composite actions present under .github/actions/
  */
 function checkUses(uses, at, file, problems, local) {
@@ -428,7 +556,11 @@ function checkWorkflow(doc, name, file, problems, local, tree) {
     }
   }
 
-  if (name === 'ci.yml') checkE2e(jobs, file, problems, tree);
+  if (name === 'ci.yml') {
+    checkE2e(jobs, file, problems, tree);
+    checkBinaryChecks(jobs, file, problems);
+  }
+  if (name === 'release.yml') checkReleaseServer(jobs, file, problems);
 
   if (name === 'ci.yml') {
     // RF-C12: policy always runs; ci-ok (the only required check) waits for every other job.

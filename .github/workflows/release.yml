@@ -4,6 +4,9 @@
 #   - deploy waits for the owner's approval of the `production` environment. DEPLOY_MODE=manual
 #     (the default) only records the approved tag; `api` is not implemented and fails.
 #   - verify polls https://$PUBLIC_HOST/api/health until `version` is the tag.
+#   - The server binary never carries dev-auth (008 RF-D9): the image is built twice with the
+#     same inputs, checked between the two builds, and the pushed config digest must be the
+#     checked one before the retention (and so before deploy). check-workflows enforces the shape.
 # No secret besides the job token: the tag and every input reach run: through env: only.
 name: release
 
@@ -108,7 +111,39 @@ jobs:
           persist-credentials: false
 
       # Only cache-from (the cache of main): a tag run never writes cache (RF-C13).
+      # 008 RF-D9 (plan-d open question 7): the server is built twice with exactly the same inputs.
+      # This first build only loads it into the runner's Docker under a name that is never pushed;
+      # the second one pushes from the builder cache. The steps after the push prove that both are
+      # the same image.
+      - name: Build server for the binary check (not pushed)
+        id: server-check
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/server/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          provenance: false
+          sbom: false
+          build-args: APP_VERSION=${{ steps.tag.outputs.tag }}
+          tags: torneo-release-check/server:local
+          labels: org.opencontainers.image.source=https://github.com/kike1303/torneo-absurdo
+          cache-from: type=gha,scope=server
+
+      # The runner's Node, no setup-js: the script uses Node built-ins only.
+      - name: The release binary has no dev-auth (RF-D9)
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          cid="$(docker create torneo-release-check/server:local)"
+          trap 'docker rm "$cid" >/dev/null' EXIT
+          docker cp "$cid:/server" "$RUNNER_TEMP/server"
+          node scripts/check-release-binary.mjs "$RUNNER_TEMP/server"
+
       - name: Build and push server
+        id: server-push
         if: github.event_name == 'push'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -166,6 +201,39 @@ jobs:
               echo "$img: $TAG and $SHORT point to different digests" >&2
               exit 1
             fi
+          done
+
+      # 008 RF-D9: what was pushed is what was checked, even if the builder cache missed. The
+      # checked side is the config blob of the loaded image, read with `docker save` and hashed
+      # here: `docker image inspect` and the imageid of a `load` build give the manifest digest
+      # with the containerd image store (plan-d deviation D38). The pushed side is the imageid of
+      # the push (the config digest of the image exporter) and the config.digest of each tag,
+      # which the step above already proved to be a single image manifest.
+      - name: The pushed server is the checked one (RF-D9)
+        if: github.event_name == 'push'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          SHORT: ${{ steps.tag.outputs.short }}
+          PUSHED: ${{ steps.server-push.outputs.imageid }}
+        run: |
+          set -euo pipefail
+          saved="$(mktemp -d)"
+          trap 'rm -rf "$saved"' EXIT
+          docker save torneo-release-check/server:local | tar -x -C "$saved"
+          config_path="$(jq -er '.[0].Config' "$saved/manifest.json")"
+          checked="sha256:$(sha256sum "$saved/$config_path" | cut -d' ' -f1)"
+          echo "checked server config: $checked"
+          if [ "$PUSHED" != "$checked" ]; then
+            echo "the pushed server (imageid ${PUSHED:-<none>}) is not the checked one ($checked)" >&2
+            exit 1
+          fi
+          for t in "$TAG" "$SHORT"; do
+            config="$(docker buildx imagetools inspect --raw "$IMAGE_REPO/server:$t" | jq -r .config.digest)"
+            if [ "$config" != "$checked" ]; then
+              echo "server:$t has config $config, the checked image is $checked" >&2
+              exit 1
+            fi
+            echo "server:$t config $config is the checked image"
           done
 
       # Exactly these parameters (ADR-0006 D5). node20 action: see plan-c, Risks.

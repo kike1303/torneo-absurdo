@@ -770,6 +770,196 @@ const E2E_CASES = [
   ],
 ];
 
+// 008 RF-D9, plan-d decision 12: the release binary check.
+const CHECK_BUILD = '      - name: Build server for the binary check (not pushed)\n';
+const PUSH_BUILD = '      - name: Build and push server\n';
+const CHECK_STEP =
+  '      - name: The release binary has no dev-auth\n        if: github.event_name == \'push\'\n        run: node scripts/check-release-binary.mjs "$RUNNER_TEMP/server"\n';
+const DIGEST_STEP_NAME = '      - name: The pushed server is the checked one\n';
+const RETENTION_STEP =
+  "      - name: Retention of server\n        if: github.event_name == 'push'\n        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55\n        with:\n          package-name: example/server\n";
+const LOCAL_TAG = '          tags: torneo-release-check/server:local\n';
+const PUSH_TAG = '          tags: ghcr.io/example/server:v1\n';
+const MUSL_CHECK =
+  '      - name: The musl binary has no dev-auth\n        run: node scripts/check-release-binary.mjs target/x86_64-unknown-linux-musl/debug/server\n';
+const IMAGES_CHECK =
+  '      - name: Server binary\n        run: node scripts/check-release-binary.mjs "$RUNNER_TEMP/server"\n';
+/** The `with:` of one of the two server builds, located by the line after its tags. */
+const inBuild = (tag, from, to) => ({ [REL]: [[`${tag}${from}`, `${tag}${to}`]] });
+const LABELS = '          labels: org.opencontainers.image.source=https://example.com/repo\n';
+
+/** @type {[string, Record<string, [string, string][]>, RegExp][]} */
+const RELEASE_CASES = [
+  [
+    'a single server build (the local one builds another Dockerfile)',
+    {
+      [REL]: [
+        ['          file: apps/server/Dockerfile\n', '          file: apps/web/Dockerfile\n'],
+      ],
+    },
+    /release-binary: jobs\.build must build apps\/server\/Dockerfile exactly twice .*found 1/,
+  ],
+  [
+    'a third server build',
+    {
+      [REL]: [
+        [
+          RETENTION_STEP,
+          `${PUSH_BUILD}        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc\n        with:\n          file: apps/server/Dockerfile\n${RETENTION_STEP}`,
+        ],
+      ],
+    },
+    /release-binary: .*exactly twice .*found 3/,
+  ],
+  [
+    'the check build with a GHCR tag',
+    { [REL]: [[LOCAL_TAG, '          tags: ghcr.io/example/server:check\n']] },
+    /release-binary: .*the first server build must tag only torneo-release-check\/server:local/,
+  ],
+  [
+    'the check build pushed',
+    {
+      [REL]: [
+        [
+          '          push: false\n          load: true\n',
+          '          push: true\n          load: true\n',
+        ],
+      ],
+    },
+    /release-binary: .*the first server build must have push: false and load: true/,
+  ],
+  [
+    'the push build without push',
+    { [REL]: [['          push: true\n', '          push: false\n']] },
+    /release-binary: .*the second server build must have push: true/,
+  ],
+  [
+    'different build-args',
+    {
+      [REL]: [
+        [
+          `          build-args: APP_VERSION=\${{ inputs.tag }}\n${PUSH_TAG}`,
+          `          build-args: APP_VERSION=other\n${PUSH_TAG}`,
+        ],
+      ],
+    },
+    /release-binary: .*build-args must be the same in both server builds/,
+  ],
+  [
+    'different labels',
+    inBuild(PUSH_TAG, LABELS, '          labels: org.opencontainers.image.source=https://other\n'),
+    /release-binary: .*labels must be the same in both server builds/,
+  ],
+  [
+    'cache-from missing in the push',
+    inBuild(PUSH_TAG, `${LABELS}          cache-from: type=gha,scope=server\n`, LABELS),
+    /release-binary: .*cache-from must be set in both server builds/,
+  ],
+  [
+    'cache-to in a release build',
+    inBuild(PUSH_TAG, LABELS, `${LABELS}          cache-to: type=gha,mode=max,scope=server\n`),
+    /release-binary: .*cache-to is not allowed in the server builds/,
+  ],
+  [
+    'the two builds with different if',
+    {
+      [REL]: [
+        [
+          `${PUSH_BUILD}        id: server-push\n        if: github.event_name == 'push'\n`,
+          `${PUSH_BUILD}        id: server-push\n        if: always()\n`,
+        ],
+      ],
+    },
+    /release-binary: .*both server builds must have the same if:/,
+  ],
+  [
+    'no binary check between the builds',
+    { [REL]: [[CHECK_STEP, '']] },
+    /release-binary: .*a step between the two server builds must run scripts\/check-release-binary\.mjs/,
+  ],
+  [
+    'the binary check with --expect-dev',
+    { [REL]: [[CHECK_STEP, CHECK_STEP.replace('.mjs "', '.mjs --expect-dev "')]] },
+    /release-binary: .*a step between the two server builds must run scripts\/check-release-binary\.mjs/,
+  ],
+  [
+    'the binary check after the push',
+    {
+      [REL]: [
+        [CHECK_STEP, ''],
+        [DIGEST_STEP_NAME, `${CHECK_STEP}${DIGEST_STEP_NAME}`],
+      ],
+    },
+    /release-binary: .*a step between the two server builds/,
+  ],
+  [
+    'no imageid of the push in the digest comparison',
+    { [REL]: [['          PUSHED: ${{ steps.server-push.outputs.imageid }}\n', '']] },
+    /release-binary: .*a step must compare the config of the checked image/,
+  ],
+  [
+    'the digest comparison without the published config.digest',
+    {
+      [REL]: [
+        [
+          'docker buildx imagetools inspect --raw ghcr.io/example/server:v1 | jq -r .config.digest',
+          'echo done',
+        ],
+      ],
+    },
+    /release-binary: .*a step must compare the config of the checked image/,
+  ],
+  [
+    'the checked config from docker image inspect instead of docker save',
+    {
+      [REL]: [
+        [
+          "docker save torneo-release-check/server:local | tar -xO manifest.json | jq -r '.[0].Config'",
+          "docker image inspect -f '{{.Id}}' torneo-release-check/server:local",
+        ],
+      ],
+    },
+    /release-binary: .*a step must compare the config of the checked image/,
+  ],
+  [
+    'the imageid of the local build (the manifest digest with the containerd store)',
+    {
+      [REL]: [
+        [
+          '          PUSHED: ${{ steps.server-push.outputs.imageid }}\n',
+          '          PUSHED: ${{ steps.server-push.outputs.imageid }}\n          CHECKED: ${{ steps.server-check.outputs.imageid }}\n',
+        ],
+      ],
+    },
+    /release-binary: .*uses the imageid of the local build, which depends on the image store/,
+  ],
+  [
+    'the digest comparison after the retention',
+    {
+      [REL]: [
+        [RETENTION_STEP, ''],
+        [DIGEST_STEP_NAME, `${RETENTION_STEP}${DIGEST_STEP_NAME}`],
+      ],
+    },
+    /release-binary: after the push and before the retention, a step must compare the config of the checked image/,
+  ],
+  [
+    'rust without the check of its musl binary',
+    { [CI]: [[MUSL_CHECK, '']] },
+    /ci\.yml: release-binary: jobs\.rust must run scripts\/check-release-binary\.mjs without --expect-dev/,
+  ],
+  [
+    'images without the check of its server binary',
+    { [CI]: [[IMAGES_CHECK, '']] },
+    /ci\.yml: release-binary: jobs\.images must run/,
+  ],
+  [
+    'images checking with --expect-dev',
+    { [CI]: [[IMAGES_CHECK, IMAGES_CHECK.replace('.mjs "', '.mjs --expect-dev "')]] },
+    /ci\.yml: release-binary: jobs\.images must run/,
+  ],
+];
+
 describe('check-workflows (RF-C12, plan-c decision 23)', () => {
   it('passes on the valid fixture', () => {
     expect(checkWorkflows(valid)).toEqual([]);
@@ -812,6 +1002,14 @@ describe('check-workflows (RF-C12, plan-c decision 23)', () => {
   });
 
   it.each(E2E_CASES)('fails on: %s', (_name, edits, pattern) => {
+    const problems = checkWorkflows(mutated(edits));
+    expect(
+      problems.some((p) => pattern.test(p)),
+      problems.join('\n') || '(no problems)',
+    ).toBe(true);
+  });
+
+  it.each(RELEASE_CASES)('fails on: %s', (_name, edits, pattern) => {
     const problems = checkWorkflows(mutated(edits));
     expect(
       problems.some((p) => pattern.test(p)),

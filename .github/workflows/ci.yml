@@ -72,6 +72,8 @@ jobs:
               - scripts/wasi-runner.mjs
               # Embedded by apps/server/src/config.rs with include_str! (008 RF-B18).
               - scripts/__fixtures__/loopback-origins.json
+              # Run on the musl binary (008 RF-D9).
+              - scripts/check-release-binary.mjs
             web: &web
               - *common
               - apps/web/**
@@ -98,6 +100,8 @@ jobs:
               - infra/**
               - .dockerignore
               - '**/Dockerfile'
+              # The [features] table, read by check-compose (008 RF-D9).
+              - apps/server/Cargo.toml
               - rust-toolchain.toml
               - .github/dependabot.yml
             # 008 RF-D9, plan-d decision 12: what the e2e runs (the web and the server with
@@ -121,6 +125,7 @@ jobs:
               - .dockerignore
               - scripts/check-compose.mjs
               - scripts/check-dockerignore.sh
+              - scripts/check-release-binary.mjs
               - scripts/fixtures/context.Dockerfile
               - scripts/local-networks.sh
               # Run by _prod-local-start: the generated secrets of prod-local (008 plan-b).
@@ -209,6 +214,12 @@ jobs:
             exit 1
           fi
           file "$bin"
+      # 008 RF-D9 (plan-d decision 12): the strings a release must never carry. `images` does not
+      # run on apps/server/src/**, so this is where a dev-auth string outside its #[cfg] fails
+      # first. A debug build without features is as strict as the release (LTO removes nothing
+      # that is there).
+      - name: The musl binary has no dev-auth (RF-D9)
+        run: node scripts/check-release-binary.mjs target/x86_64-unknown-linux-musl/debug/server
 
   web:
     needs: changes
@@ -420,7 +431,7 @@ jobs:
           tags: ghcr.io/kike1303/torneo-absurdo/web:ci
           cache-from: type=gha,scope=web
           cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=web' || '' }}
-      - name: Non-root user, Node version, static binary, no node_modules (RF-C1, RF-C2)
+      - name: Non-root user, Node version, static binary, no dev-auth, no node_modules (RF-C1, RF-C2, RF-D9)
         run: |
           set -euo pipefail
           for svc in server web; do
@@ -445,6 +456,8 @@ jobs:
             exit 1
           fi
           file "$RUNNER_TEMP/server"
+          # 008 RF-D9: the binary of the image carries none of the dev-auth strings.
+          node scripts/check-release-binary.mjs "$RUNNER_TEMP/server"
           cid="$(docker create "$REPO/web:ci")"
           count="$(docker export "$cid" | tar -t | grep -c '^app/node_modules/' || true)"
           docker rm "$cid" >/dev/null
