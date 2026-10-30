@@ -96,5 +96,6 @@
   "arena_stats_over_33": "Frames over 33 ms",
   "arena_stats_title": "Frame statistics",
   "arena_stats_pace": "Pace (factor)",
-  "arena_stats_pace_clamped": "clamped from {requested}"
+  "arena_stats_pace_clamped": "clamped from {requested}",
+  "account_link": "Go to your account"
 }

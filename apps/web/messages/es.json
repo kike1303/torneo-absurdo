@@ -96,5 +96,6 @@
   "arena_stats_over_33": "Frames de más de 33 ms",
   "arena_stats_title": "Estadísticas de frames",
   "arena_stats_pace": "Ritmo (factor)",
-  "arena_stats_pace_clamped": "ajustado desde {requested}"
+  "arena_stats_pace_clamped": "ajustado desde {requested}",
+  "account_link": "Ir a tu cuenta"
 }

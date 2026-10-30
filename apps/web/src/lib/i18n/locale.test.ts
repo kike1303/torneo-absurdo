@@ -22,29 +22,43 @@ describe('isLocale', () => {
   });
 });
 
+describe('pickLocale with a profile (008 RF-D4): profile → cookie → Accept-Language → en', () => {
+  it.each([
+    ['es', 'en', 'en-US', 'es'],
+    ['en', 'es', 'es-MX', 'en'],
+    [null, 'es', 'en-US', 'es'],
+    [null, undefined, 'es-MX,es;q=0.9', 'es'],
+    [null, undefined, null, 'en'],
+    [undefined, 'xx', 'es', 'es'],
+    ['xx', undefined, null, 'en'],
+  ] as const)('profile %j, cookie %j, accept %j → %s', (profile, cookie, accept, expected) =>
+    expect(pickLocale(profile as never, cookie, accept)).toBe(expected),
+  );
+});
+
 describe('pickLocale', () => {
   it('uses a valid cookie over Accept-Language', () => {
-    expect(pickLocale('es', 'en-US,en;q=0.9')).toBe('es');
-    expect(pickLocale('en', 'es-MX,es;q=0.9')).toBe('en');
+    expect(pickLocale(null, 'es', 'en-US,en;q=0.9')).toBe('es');
+    expect(pickLocale(null, 'en', 'es-MX,es;q=0.9')).toBe('en');
   });
 
   it('ignores an invalid cookie', () => {
-    expect(pickLocale('xx', 'es')).toBe('es');
-    expect(pickLocale('ES', null)).toBe('en');
-    expect(pickLocale('', 'es')).toBe('es');
+    expect(pickLocale(null, 'xx', 'es')).toBe('es');
+    expect(pickLocale(null, 'ES', null)).toBe('en');
+    expect(pickLocale(null, '', 'es')).toBe('es');
   });
 
   it('honours Accept-Language weights and region subtags', () => {
-    expect(pickLocale(undefined, 'fr-FR,es;q=0.8,en;q=0.5')).toBe('es');
-    expect(pickLocale(undefined, 'en;q=0.4, es-AR;q=0.9')).toBe('es');
-    expect(pickLocale(undefined, 'es;q=0, en;q=0.1')).toBe('en');
-    expect(pickLocale(undefined, 'de, fr')).toBe('en');
+    expect(pickLocale(null, undefined, 'fr-FR,es;q=0.8,en;q=0.5')).toBe('es');
+    expect(pickLocale(null, undefined, 'en;q=0.4, es-AR;q=0.9')).toBe('es');
+    expect(pickLocale(null, undefined, 'es;q=0, en;q=0.1')).toBe('en');
+    expect(pickLocale(null, undefined, 'de, fr')).toBe('en');
   });
 
   it('falls back to en without cookie or header', () => {
-    expect(pickLocale(undefined, undefined)).toBe('en');
-    expect(pickLocale(undefined, null)).toBe('en');
-    expect(pickLocale(undefined, '')).toBe('en');
+    expect(pickLocale(null, undefined, undefined)).toBe('en');
+    expect(pickLocale(null, undefined, null)).toBe('en');
+    expect(pickLocale(null, undefined, '')).toBe('en');
   });
 
   it('treats an unparseable weight as zero', () => {

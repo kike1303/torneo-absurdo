@@ -33,10 +33,14 @@ export function createHeadTransformer(choice: ThemeChoice): (html: string) => st
   };
 }
 
-/** RF-A6 and RF-A9: resolves the theme, stores it in `locals` and fills the head markers. */
+/**
+ * RF-A6, RF-A9 and 008 RF-D4: resolves the theme (the profile's first, with a session), stores
+ * it in `locals` and fills the head markers.
+ */
 export function createThemeHandle(enableDevCatalog: string | undefined): Handle {
   return ({ event, resolve }) => {
     const choice = resolveTheme({
+      profile: event.locals.user?.theme ?? null,
       cookie: event.cookies.get(THEME_COOKIE),
       override: event.url.searchParams.get('theme'),
       enableDevCatalog,

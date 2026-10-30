@@ -17,13 +17,17 @@ export function localeLocation(locale: Locale, pathname: string, search: string)
   return `/${locale}/${stripLeadingSlashes(pathname)}${search}`;
 }
 
-/** Redirects every non-excluded path without `/es` or `/en` prefix with a relative 307 (RF-A3). */
+/**
+ * Redirects every non-excluded path without `/es` or `/en` prefix with a relative 307 (RF-A3).
+ * With a session, the profile's language comes first (008 RF-D4).
+ */
 export const localeRedirect: Handle = ({ event, resolve }) => {
   const { pathname, search } = event.url;
   if (isExcludedPath(pathname) || localeFromPathname(pathname) !== undefined) {
     return resolve(event);
   }
   const locale = pickLocale(
+    event.locals.user?.locale ?? null,
     event.cookies.get(LOCALE_COOKIE),
     event.request.headers.get('accept-language'),
   );

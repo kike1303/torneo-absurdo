@@ -16,7 +16,7 @@ import { relativizeLocation } from './relativize-location.js';
 export const paraglide: Handle = async ({ event, resolve }) => {
   let effectiveRequestUrl: URL | undefined;
   if (isExcludedPath(event.url.pathname)) {
-    const locale = pickLocale(event.cookies.get(LOCALE_COOKIE), null);
+    const locale = pickLocale(null, event.cookies.get(LOCALE_COOKIE), null);
     // The copy only feeds Paraglide's locale detection; its origin (from the client's `Host`)
     // never reaches a response, because `relativizeLocation` rewrites any `Location` below.
     // eslint-disable-next-line no-restricted-syntax -- see above (TA-10, plan-a decision 20)

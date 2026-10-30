@@ -61,11 +61,16 @@ export function localeFromAcceptLanguage(header: string | null | undefined): Loc
   return best?.locale;
 }
 
-/** Locale for a path without prefix (RF-A3): valid `locale` cookie → `Accept-Language` → `en`. */
+/**
+ * Locale for a path without prefix (RF-A3, 008 RF-D4): the profile's preference (with a session)
+ * → valid `locale` cookie → `Accept-Language` → `en`.
+ */
 export function pickLocale(
+  profile: string | null | undefined,
   cookie: string | null | undefined,
   acceptLanguage: string | null | undefined,
 ): Locale {
+  if (isLocale(profile)) return profile;
   if (isLocale(cookie)) return cookie;
   return localeFromAcceptLanguage(acceptLanguage) ?? baseLocale;
 }

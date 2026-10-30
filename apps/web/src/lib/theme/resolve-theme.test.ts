@@ -46,6 +46,47 @@ describe('resolveTheme (catalog override, RF-A9)', () => {
   });
 });
 
+describe('resolveTheme (profile, 008 RF-D4, ADR-0009 D3)', () => {
+  const at = (profile: 'dark' | 'light' | 'system' | null, cookie: string | undefined) =>
+    resolveTheme({ profile, cookie, override: null, enableDevCatalog: undefined, routeId: '/' });
+  it.each([
+    // profile → cookie → dark
+    ['light', 'dark', 'light'],
+    ['system', 'light', 'system'],
+    ['dark', undefined, 'dark'],
+    // Without a preference in the profile (`null`), the cookie decides.
+    [null, 'light', 'light'],
+    [null, undefined, 'dark'],
+    [null, 'nonsense', 'dark'],
+  ] as const)('profile %j, cookie %j → %s', (profile, cookie, expected) =>
+    expect(at(profile, cookie)).toBe(expected),
+  );
+
+  it('the catalog override still wins over the profile', () => {
+    expect(
+      resolveTheme({
+        profile: 'dark',
+        cookie: 'dark',
+        override: 'light',
+        enableDevCatalog: '1',
+        routeId: '/dev/components',
+      }),
+    ).toBe('light');
+  });
+
+  it('a profile value outside the list is ignored', () => {
+    expect(
+      resolveTheme({
+        profile: 'neon' as never,
+        cookie: 'light',
+        override: null,
+        enableDevCatalog: undefined,
+        routeId: '/',
+      }),
+    ).toBe('light');
+  });
+});
+
 describe('themeMeta', () => {
   it('emits one theme-color for dark and light', () => {
     expect(themeMeta('dark')).toContain('content="dark"');
