@@ -19,7 +19,7 @@ pub struct TestDb {
     url: Url,
 }
 
-fn is_test_name(name: &str) -> bool {
+pub fn is_test_name(name: &str) -> bool {
     name.strip_prefix(PREFIX).is_some_and(|hex| {
         hex.len() == 32
             && hex
@@ -170,14 +170,4 @@ pub async fn begin_privileged(pool: &sqlx::PgPool) -> sqlx::Transaction<'static,
         .await
         .unwrap();
     tx
-}
-
-#[test]
-fn test_names_are_validated() {
-    assert!(is_test_name("torneo_test_0123456789abcdef0123456789abcdef"));
-    assert!(!is_test_name("torneo"));
-    assert!(!is_test_name(
-        "torneo_test_0123456789ABCDEF0123456789abcdef"
-    ));
-    assert!(!is_test_name("torneo_test_x; DROP DATABASE torneo"));
 }
