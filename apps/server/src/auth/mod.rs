@@ -22,7 +22,7 @@ use protocol::Provider;
 use rand_core::{OsRng, TryRngCore};
 use sha2::{Digest, Sha256};
 
-use crate::app::{AppState, Settings};
+use crate::app::{AppState, Settings, StartupError};
 use crate::config::Config;
 use crate::http::cookies::CookiePolicy;
 use crate::ledger::Coins;
@@ -38,6 +38,8 @@ pub struct AuthState {
     pub public_origin: String,
     /// The enabled providers, in the order of the login buttons.
     pub providers: Vec<Provider>,
+    /// The client of the token and userinfo requests (TLS only with a real provider).
+    pub http: client::HttpClient,
     #[cfg(feature = "dev-auth")]
     pub dev: dev::DevProvider,
 }
@@ -51,17 +53,21 @@ impl fmt::Debug for AuthState {
 }
 
 impl AuthState {
-    pub fn from_config(config: &Config, settings: &Settings) -> Self {
-        Self {
+    /// The auth state, with the TLS config of the OAuth client (built here, once). Fails with
+    /// [`StartupError::Tls`] if a real provider is on and the config cannot be built.
+    pub fn from_config(config: &Config, settings: &Settings) -> Result<Self, StartupError> {
+        let tls = tls_for(config)?;
+        Ok(Self {
             cookies: config.cookies,
             ip_hash_key: config.ip_hash_key.clone(),
             daily_grant: config.daily_grant,
             alias: settings.alias.0.clone(),
             public_origin: config.public_origin.clone(),
             providers: enabled_providers(),
+            http: client::HttpClient::new(tls),
             #[cfg(feature = "dev-auth")]
             dev: dev::DevProvider::default(),
-        }
+        })
     }
 
     /// The provider of a URL segment, if it exists and is enabled.
@@ -81,6 +87,27 @@ impl AuthState {
             }
         }
     }
+}
+
+/// The TLS config of the OAuth client, only if a real provider is on (plan-c decision 4).
+pub fn tls_for(config: &Config) -> Result<Option<Arc<rustls::ClientConfig>>, StartupError> {
+    tls_for_with(
+        !config.oauth.configured().is_empty(),
+        client::production_config,
+    )
+}
+
+fn tls_for_with(
+    real_provider: bool,
+    build: impl FnOnce() -> Result<Arc<rustls::ClientConfig>, rustls::Error>,
+) -> Result<Option<Arc<rustls::ClientConfig>>, StartupError> {
+    if !real_provider {
+        return Ok(None);
+    }
+    build().map(Some).map_err(|_| {
+        tracing::error!(event = "startup.tls_unavailable");
+        StartupError::Tls
+    })
 }
 
 /// Google and Discord arrive with phase C; `dev` only with the feature.
@@ -120,6 +147,33 @@ pub fn flow_hash(id: &str) -> [u8; 32] {
 /// `GET /api/auth/providers` (RF-B13).
 pub async fn providers(State(state): State<AppState>) -> Json<Vec<Provider>> {
     Json(state.auth.providers.clone())
+}
+
+#[cfg(test)]
+mod tls_at_startup {
+    use super::*;
+    use crate::app::StartupError;
+
+    /// plan-c decision 4: a TLS config that cannot be built stops the start, never a server
+    /// whose real providers would always fail. `ring` never fails here, so the build is
+    /// injected.
+    #[test]
+    fn a_tls_config_that_cannot_be_built_is_a_startup_error() {
+        let failed = tls_for_with(true, || Err(rustls::Error::General("canary".to_owned())));
+        assert_eq!(failed.err(), Some(StartupError::Tls));
+        assert!(matches!(
+            tls_for_with(true, client::production_config),
+            Ok(Some(_))
+        ));
+    }
+
+    #[test]
+    fn without_a_real_provider_no_tls_config_is_built() {
+        let built = tls_for_with(false, || -> Result<_, rustls::Error> {
+            panic!("built without a real provider")
+        });
+        assert!(matches!(built, Ok(None)));
+    }
 }
 
 #[cfg(test)]

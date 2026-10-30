@@ -45,7 +45,8 @@ async fn twenty_concurrent_first_logins_make_one_user_one_grant_and_twenty_sessi
         &Settings::default(),
         pool.clone(),
         Arc::new(AlwaysUp),
-    );
+    )
+    .unwrap();
     let identity = Identity {
         provider: Provider::Dev,
         subject: "ana".to_owned(),

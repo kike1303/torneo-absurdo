@@ -29,7 +29,8 @@ async fn a_logout_without_the_database_does_not_claim_success() {
         .max_connections(2)
         .acquire_timeout(Duration::from_secs(2))
         .connect_lazy_with(config.database.clone());
-    let state = AppState::from_config(&config, &Settings::default(), pool, Arc::new(AlwaysUp));
+    let state =
+        AppState::from_config(&config, &Settings::default(), pool, Arc::new(AlwaysUp)).unwrap();
     let app = support::app::start(state).await;
     let name = config.cookies.session_name();
     let cookie = format!("{name}={token}");
@@ -81,7 +82,8 @@ async fn logout_all_with_a_failed_session_lookup_revokes_nothing() {
         .max_connections(2)
         .acquire_timeout(Duration::from_secs(2))
         .connect_lazy_with(options);
-    let state = AppState::from_config(&config, &Settings::default(), pool, Arc::new(AlwaysUp));
+    let state =
+        AppState::from_config(&config, &Settings::default(), pool, Arc::new(AlwaysUp)).unwrap();
     let app = support::app::start(state).await;
     let cookie = format!("{}={token}", config.cookies.session_name());
     let headers = [("origin", ORIGIN), ("cookie", cookie.as_str())];
@@ -127,7 +129,8 @@ async fn me_with_a_failed_session_lookup_keeps_the_session() {
         .max_connections(2)
         .acquire_timeout(Duration::from_secs(2))
         .connect_lazy_with(options);
-    let state = AppState::from_config(&config, &Settings::default(), pool, Arc::new(AlwaysUp));
+    let state =
+        AppState::from_config(&config, &Settings::default(), pool, Arc::new(AlwaysUp)).unwrap();
     let app = support::app::start(state).await;
     let cookie = format!("{}={token}", config.cookies.session_name());
 

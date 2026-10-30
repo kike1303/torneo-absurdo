@@ -99,6 +99,9 @@ pub const CAPPED_TARGETS: &[&str] = &[
     "tungstenite",
     "tokio_tungstenite",
     "h2",
+    // The TLS client of the OAuth flow (008 plan-c decision 12): built without `logging`.
+    "rustls",
+    "tokio_rustls",
 ];
 
 /// Whether an event belongs to this crate (and may write allowlisted fields).
@@ -401,6 +404,9 @@ mod tests {
                 tracing::info!(target: "hyper::proto", "info canary");
                 tracing::trace!(target: "tungstenite::protocol", "trace canary");
                 tracing::info!(target: "h2::codec", "info canary");
+                // The TLS client of phase C (plan-c decision 12), if `logging` ever turns on.
+                tracing::trace!(target: "rustls::client::hs", "trace canary");
+                tracing::debug!(target: "tokio_rustls::client", "debug canary");
                 tracing::debug!(target: "server::ws", event = "ws.closed", close_code = 1008u16);
             });
             // Without a default directive (the first case) the own debug event is filtered

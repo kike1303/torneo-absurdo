@@ -290,6 +290,7 @@ async fn a_database_error_in_the_second_validation_closes_with_try_again() {
         pool,
         Arc::new(support::app::AlwaysUp),
     )
+    .unwrap()
     .with_ws(AppState::ws_from_config(&config, &Settings::default()).with_validation_gate(held));
     let app = support::app::start(state).await;
     let mut client = connect(app.addr, Some(&token), None).await.unwrap();
@@ -527,7 +528,8 @@ async fn a_failed_session_lookup_makes_an_anonymous_socket() {
         &Settings::default(),
         pool,
         Arc::new(support::app::AlwaysUp),
-    );
+    )
+    .unwrap();
     let ws_state = state.ws.clone();
     let app = support::app::start(state).await;
     let mut lock = direct.begin().await.unwrap();

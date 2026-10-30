@@ -425,7 +425,7 @@ async fn t20_a_colliding_alias_is_retried_and_ten_collisions_are_try_again() {
 fn state(db: &TestDb, pool: PgPool) -> AppState {
     let url = db.url();
     let config = support::config::config(&[("DATABASE_URL", url.as_str())]);
-    AppState::from_config(&config, &Settings::default(), pool, Arc::new(AlwaysUp))
+    AppState::from_config(&config, &Settings::default(), pool, Arc::new(AlwaysUp)).unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

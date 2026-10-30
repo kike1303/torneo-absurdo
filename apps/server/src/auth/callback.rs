@@ -18,8 +18,8 @@ use serde::Deserialize;
 use sqlx::Row;
 use subtle::ConstantTimeEq;
 
+use super::flow_hash;
 use super::login::{self, Identity, LoginError};
-use super::{client, flow_hash};
 use crate::app::AppState;
 use crate::http::cookies::CookiePolicy;
 use crate::http::errors::error_response;
@@ -216,7 +216,7 @@ async fn identity(
     let token = oauth
         .exchange_code(AuthorizationCode::new(code))
         .set_pkce_verifier(PkceCodeVerifier::new(verifier))
-        .request_async(&client::send)
+        .request_async(&|request| state.auth.http.send(request))
         .await
         .map_err(|_| ProviderError)?;
     let userinfo = axum::http::Request::builder()
@@ -230,7 +230,12 @@ async fn identity(
         .body(Vec::new())
         .map_err(|_| ProviderError)?;
     drop(token);
-    let response = client::send(userinfo).await.map_err(|_| ProviderError)?;
+    let response = state
+        .auth
+        .http
+        .send(userinfo)
+        .await
+        .map_err(|_| ProviderError)?;
     if response.status() != StatusCode::OK {
         return Err(ProviderError);
     }
