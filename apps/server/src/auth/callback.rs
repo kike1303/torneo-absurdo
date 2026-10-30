@@ -20,14 +20,16 @@ use protocol::{ApiErrorCode, CallbackErrorCode, Provider};
 use serde::Deserialize;
 use sqlx::Row;
 use subtle::ConstantTimeEq;
+use uuid::Uuid;
 
+use super::link::{self, LinkRequest};
 use super::login::{self, Identity, LoginError};
 use super::{client, flow_hash, providers};
 use crate::app::AppState;
 use crate::http::cookies::CookiePolicy;
 use crate::http::errors::error_response;
 use crate::net::{ClientContext, IpKey, LocalAddr};
-use crate::sessions::{Issued, TokenHash, UaFamily};
+use crate::sessions::{self, Issued, TokenHash, UaFamily};
 
 /// The login page with an error code from the closed list: the only place that builds this
 /// `Location` (the callback errors and a logout that could not revoke).
@@ -129,6 +131,22 @@ struct Flow {
     code_verifier: String,
     next: String,
     live: bool,
+    link_user_id: Option<Uuid>,
+}
+
+/// What the flow is for. Exhaustive: a `login` flow never links, a `link` flow never logs in,
+/// and any other text (the `CHECK` forbids it) is `auth.invalid_state`.
+enum FlowPurpose {
+    Login,
+    Link(Uuid),
+}
+
+fn purpose_of(flow: &Flow) -> Option<FlowPurpose> {
+    match (flow.purpose.as_str(), flow.link_user_id) {
+        ("login", None) => Some(FlowPurpose::Login),
+        ("link", Some(user)) => Some(FlowPurpose::Link(user)),
+        _ => None,
+    }
 }
 
 async fn run(
@@ -142,7 +160,8 @@ async fn run(
     let flow = flow.ok_or(InvalidState)?;
     let row = sqlx::query(
         "DELETE FROM oauth_flows WHERE id_hash = $1 \
-         RETURNING provider, purpose, state, code_verifier, next, expires_at > now()",
+         RETURNING provider, purpose, state, code_verifier, next, expires_at > now(), \
+         link_user_id",
     )
     .bind(flow.as_slice())
     .fetch_optional(&state.db)
@@ -157,37 +176,72 @@ async fn run(
         code_verifier: get(3)?,
         next: get(4)?,
         live: row.try_get(5).map_err(|_| InvalidState)?,
+        link_user_id: row.try_get(6).map_err(|_| InvalidState)?,
     };
     let query = query.ok_or(InvalidState)?;
     let same_state = query
         .state
         .as_deref()
         .is_some_and(|s| bool::from(s.as_bytes().ct_eq(flow.state.as_bytes())));
-    // Linking is phase C: a `link` flow never logs in.
-    if !flow.live || flow.provider != provider.as_str() || flow.purpose != "login" || !same_state {
+    let purpose = purpose_of(&flow);
+    if !flow.live || flow.provider != provider.as_str() || !same_state {
         return Err(InvalidState);
     }
+    let Some(purpose) = purpose else {
+        return Err(InvalidState);
+    };
     // The provider refused (for example `access_denied`): its text never goes anywhere.
     if query.error.is_some() {
         return Err(ProviderError);
     }
     let code = query.code.ok_or(ProviderError)?;
     let location = location_of(&flow.next);
-    let subject = identity(state, provider, code, flow.code_verifier, context.local).await?;
-    let identity = Identity { provider, subject };
-    let issued = login::login(
-        &state.auth,
-        &state.db,
-        &identity,
-        context.ip_hash,
-        context.ua,
-        context.previous,
-    )
-    .await
-    .map_err(|error| match error {
-        LoginError::Banned => CallbackErrorCode::Banned,
-        LoginError::TryAgain => CallbackErrorCode::TryAgain,
-    })?;
+    let issued = match purpose {
+        FlowPurpose::Login => {
+            let subject =
+                identity(state, provider, code, flow.code_verifier, context.local).await?;
+            let identity = Identity { provider, subject };
+            login::login(
+                &state.auth,
+                &state.db,
+                &identity,
+                context.ip_hash,
+                context.ua,
+                context.previous,
+            )
+            .await
+            .map_err(|error| match error {
+                LoginError::Banned => CallbackErrorCode::Banned,
+                LoginError::TryAgain => CallbackErrorCode::TryAgain,
+            })?
+        }
+        FlowPurpose::Link(user) => {
+            // T4: the session of the callback is the one of the user who started the link.
+            // Only a first check: the guarantee is the rotation inside the transaction, since
+            // the session can close while the provider answers (up to 20 s).
+            let hash = context.previous.ok_or(InvalidState)?;
+            let session = sessions::validate(&state.db, &hash)
+                .await
+                .map_err(|_| CallbackErrorCode::TryAgain)?
+                .filter(|info| info.user_id == user)
+                .ok_or(InvalidState)?;
+            let subject =
+                identity(state, provider, code, flow.code_verifier, context.local).await?;
+            let identity = Identity { provider, subject };
+            state.auth.link_gate.0.before_link().await;
+            link::link(
+                state,
+                LinkRequest {
+                    user,
+                    session: session.id,
+                    identity: &identity,
+                    ip_hash: context.ip_hash,
+                    ua: context.ua,
+                },
+            )
+            .await?
+        }
+    };
     Ok((issued, location))
 }
 

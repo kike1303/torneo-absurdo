@@ -66,6 +66,7 @@ pub enum Handler {
     Health,
     Ws,
     AuthStart,
+    AuthLink,
     AuthCallback,
     AuthProviders,
     Logout,
@@ -106,6 +107,12 @@ pub const ROUTES: &[RouteSpec] = &[
         path: "/api/auth/{provider}/start",
         effect: Effect::Mutate,
         handler: Handler::AuthStart,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/auth/link/{provider}",
+        effect: Effect::Mutate,
+        handler: Handler::AuthLink,
     },
     RouteSpec {
         method: RouteMethod::Get,
@@ -200,6 +207,7 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         Handler::AuthStart => on(filter, auth::start::handler)
             .layer(body)
             .layer(auth_ip()),
+        Handler::AuthLink => on(filter, auth::link::handler).layer(body).layer(auth_ip()),
         Handler::AuthCallback => on(filter, auth::callback::handler).layer(auth_ip()),
         Handler::AuthProviders => on(filter, auth::providers),
         Handler::Logout => on(filter, auth::logout::logout).layer(body),

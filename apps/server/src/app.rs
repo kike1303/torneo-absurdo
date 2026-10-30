@@ -68,6 +68,8 @@ pub struct Settings {
     /// The URLs of Google and Discord: the production constants unless a test replaces them
     /// (never an environment variable, plan-c decision 5).
     pub oauth: crate::auth::providers::OAuthSettings,
+    /// The pause of the link callback before its transaction (the race tests).
+    pub link_gate: crate::auth::link::LinkGateConfig,
 }
 
 #[derive(Clone)]

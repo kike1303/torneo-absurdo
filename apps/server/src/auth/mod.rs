@@ -5,6 +5,7 @@ pub mod callback;
 pub mod client;
 #[cfg(feature = "dev-auth")]
 pub mod dev;
+pub mod link;
 pub mod login;
 pub mod logout;
 pub mod next;
@@ -45,6 +46,8 @@ pub struct AuthState {
     pub providers: Vec<Provider>,
     /// The client of the token and userinfo requests (TLS only with a real provider).
     pub http: client::HttpClient,
+    /// The pause of the link race tests ([`link::NoLinkGate`] in production).
+    pub link_gate: link::LinkGateConfig,
     #[cfg(feature = "dev-auth")]
     pub dev: dev::DevProvider,
 }
@@ -72,6 +75,7 @@ impl AuthState {
             urls: settings.oauth.clone(),
             providers: enabled_providers(&config.oauth),
             http: client::HttpClient::new(tls),
+            link_gate: settings.link_gate.clone(),
             #[cfg(feature = "dev-auth")]
             dev: dev::DevProvider::default(),
         })

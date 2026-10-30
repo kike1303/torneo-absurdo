@@ -1,6 +1,7 @@
 //! `POST /api/auth/{provider}/start` (ADR-0008 D2, 008 RF-B5): a form from the login page. It
 //! creates the flow (128-bit id and `state`, PKCE `code_verifier`, all from `OsRng`), sets the
-//! flow cookie and answers 303 to the provider's authorization URL.
+//! flow cookie and answers 303 to the provider's authorization URL. [`begin_flow`] is shared
+//! with `POST /api/auth/link/{provider}` (RF-C2), which only changes the purpose.
 
 use axum::extract::rejection::FormRejection;
 use axum::extract::{Form, Path, State};
@@ -12,6 +13,7 @@ use oauth2::{
 };
 use protocol::{ApiErrorCode, CallbackErrorCode, Provider};
 use serde::Deserialize;
+use uuid::Uuid;
 
 use super::callback::error_redirect;
 use super::{flow_hash, next, random_text};
@@ -32,16 +34,43 @@ pub async fn handler(
     let Some(provider) = state.auth.provider(&segment) else {
         return error_response(StatusCode::NOT_FOUND, ApiErrorCode::NotFound);
     };
-    match start(&state, provider, form).await {
+    match begin_flow(&state, provider, form, Purpose::Login).await {
         Ok(response) => response,
         Err(code) => error_redirect(&state.auth.cookies, code),
     }
 }
 
-async fn start(
+/// What a flow is for: logging in, or linking a provider to the user of the session that
+/// started it (`oauth_flows.link_user_id`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Purpose {
+    Login,
+    Link(Uuid),
+}
+
+impl Purpose {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Login => "login",
+            Self::Link(_) => "link",
+        }
+    }
+
+    fn link_user_id(self) -> Option<Uuid> {
+        match self {
+            Self::Login => None,
+            Self::Link(user) => Some(user),
+        }
+    }
+}
+
+/// Creates the flow and answers the 303 to the provider. Any rejection of the form (a body over
+/// 4 KB included) is `auth.invalid_state`: axum's text never reaches the client.
+pub async fn begin_flow(
     state: &AppState,
     provider: Provider,
     form: Result<Form<StartForm>, FormRejection>,
+    purpose: Purpose,
 ) -> Result<Response, CallbackErrorCode> {
     let Ok(Form(form)) = form else {
         return Err(CallbackErrorCode::InvalidState);
@@ -69,12 +98,14 @@ async fn start(
             .execute(&state.db)
             .await?;
         sqlx::query(
-            "INSERT INTO oauth_flows \
-             (id_hash, provider, purpose, state, code_verifier, next, dev_identity, expires_at) \
-             VALUES ($1, $2, 'login', $3, $4, $5, $6, now() + $7::bigint * interval '1 second')",
+            "INSERT INTO oauth_flows (id_hash, provider, purpose, link_user_id, state, \
+             code_verifier, next, dev_identity, expires_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now() + $9::bigint * interval '1 second')",
         )
         .bind(flow_hash(&flow_id).as_slice())
         .bind(provider.as_str())
+        .bind(purpose.as_str())
+        .bind(purpose.link_user_id())
         .bind(&state_text)
         .bind(&verifier)
         .bind(&next)
