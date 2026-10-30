@@ -1,7 +1,7 @@
 //! 008 RF-B11 with the database down: a logout that could not revoke never claims success. It
 //! is a form-post navigation, so instead of a JSON error the browser gets a 303 to the login
 //! page with the closed `auth.try_again` code, keeps its cookie (the session is still alive)
-//! and can retry.
+//! and can retry. 009 plan decision 6: `logout-all` takes the lock of the user first.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod support;
@@ -148,4 +148,113 @@ async fn me_with_a_failed_session_lookup_keeps_the_session() {
     assert!(me.set_cookies().is_empty(), "{:?}", me.set_cookies());
     let ok = http::send(app.addr, "GET", "/api/me", &[("cookie", &cookie)]).await;
     assert_eq!(ok.status, 200);
+}
+
+/// Waits until one backend of this database waits on a lock.
+async fn one_waiting(pool: &sqlx::PgPool) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let waiting: i64 = sqlx::Row::get(
+            &sqlx::query(
+                "SELECT count(*) FROM pg_stat_activity \
+                 WHERE datname = current_database() AND wait_event_type = 'Lock'",
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap(),
+            0,
+        );
+        if waiting == 1 {
+            return;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{waiting} waiting");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+async fn sessions_of(pool: &sqlx::PgPool, user: uuid::Uuid) -> i64 {
+    sqlx::Row::get(
+        &sqlx::query("SELECT count(*) FROM sessions WHERE user_id = $1")
+            .bind(user)
+            .fetch_one(pool)
+            .await
+            .unwrap(),
+        0,
+    )
+}
+
+/// 009 plan decision 6 (answer 2 of architect): `logout-all` takes the lock of the user first,
+/// so it runs in series with every link, reauth and unlink of that user and never forms a cycle
+/// with them. Here the test holds the lock; the `logout-all` waits for it, then revokes all.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn logout_all_waits_for_the_lock_of_the_user() {
+    let db = TestDb::create().await;
+    let (app, pool) = support::app::start_db(&db, &[], &Settings::default()).await;
+    let (user, token) = support::app::user_with_session(&pool).await;
+    support::app::session_for(&pool, user).await;
+    let name = support::config::config(&[]).cookies.session_name();
+    let cookie = format!("{name}={token}");
+    let mut hold = pool.begin().await.unwrap();
+    sqlx::query("SELECT 1 FROM users WHERE id = $1 FOR UPDATE")
+        .bind(user)
+        .execute(&mut *hold)
+        .await
+        .unwrap();
+    let addr = app.addr;
+    let request = tokio::spawn(async move {
+        http::send(
+            addr,
+            "POST",
+            "/api/auth/logout-all",
+            &[("origin", ORIGIN), ("cookie", cookie.as_str())],
+        )
+        .await
+    });
+    one_waiting(&pool).await;
+    assert_eq!(sessions_of(&pool, user).await, 2);
+    hold.commit().await.unwrap();
+    let done = request.await.unwrap();
+    assert_eq!(done.status, 303, "{}", done.text());
+    assert_eq!(done.header("location"), Some("/"));
+    assert_eq!(sessions_of(&pool, user).await, 0);
+}
+
+/// The precision of architect for step 6: a ban that commits while `logout-all` waits on the
+/// lock. The lock has no `banned_at IS NULL`: a banned user can still close every session.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn logout_all_still_closes_everything_if_a_ban_commits_while_it_waits() {
+    let db = TestDb::create().await;
+    let (app, pool) = support::app::start_db(&db, &[], &Settings::default()).await;
+    let (user, token) = support::app::user_with_session(&pool).await;
+    support::app::session_for(&pool, user).await;
+    let name = support::config::config(&[]).cookies.session_name();
+    let cookie = format!("{name}={token}");
+    let mut ban = support::db::begin_privileged(&pool).await;
+    sqlx::query("SELECT 1 FROM users WHERE id = $1 FOR UPDATE")
+        .bind(user)
+        .execute(&mut *ban)
+        .await
+        .unwrap();
+    let addr = app.addr;
+    let request = tokio::spawn(async move {
+        http::send(
+            addr,
+            "POST",
+            "/api/auth/logout-all",
+            &[("origin", ORIGIN), ("cookie", cookie.as_str())],
+        )
+        .await
+    });
+    one_waiting(&pool).await;
+    // The ban of the test is only the column: the sessions are the logout-all's to close.
+    sqlx::query("UPDATE users SET banned_at = now() WHERE id = $1")
+        .bind(user)
+        .execute(&mut *ban)
+        .await
+        .unwrap();
+    ban.commit().await.unwrap();
+    let done = request.await.unwrap();
+    assert_eq!(done.status, 303, "{}", done.text());
+    assert_eq!(done.header("location"), Some("/"));
+    assert_eq!(sessions_of(&pool, user).await, 0);
 }

@@ -70,6 +70,8 @@ pub struct Settings {
     pub oauth: crate::auth::providers::OAuthSettings,
     /// The pause of the link callback before its transaction (the race tests).
     pub link_gate: crate::auth::link::LinkGateConfig,
+    /// The pause of an unlink before its transaction (the race tests of 009 RF15).
+    pub unlink_gate: crate::auth::unlink::UnlinkGateConfig,
 }
 
 #[derive(Clone)]

@@ -76,6 +76,17 @@ async fn run(
         Plan::Revoke(filter) => {
             let revoked = async {
                 let mut tx = state.db.begin().await?;
+                // logout-all first takes the lock of the user, as link, reauth, unlink and the
+                // CLI do: every write of the sessions of a user runs in series, and an unlink
+                // holding one session while it revokes the others never forms a cycle with it
+                // (009 plan decision 6). No `banned_at IS NULL`: a banned user can still close
+                // every session. One session (`Token`) is one row and needs no lock.
+                if let RevokeFilter::AllOfUser(user) = filter {
+                    sqlx::query("SELECT 1 FROM users WHERE id = $1 FOR UPDATE")
+                        .bind(user)
+                        .fetch_one(&mut *tx)
+                        .await?;
+                }
                 sessions::revoke(&mut tx, filter).await?;
                 tx.commit().await
             };

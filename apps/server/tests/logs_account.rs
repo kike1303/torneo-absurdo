@@ -80,6 +80,10 @@ async fn flow(canaries: Canaries) {
     let linked = oauth::link(&app, Kind::Discord, &discord, &token).await;
     let token = oauth::session_of(&linked);
     add(token.clone());
+    // The rotated session has no confirmation (009 RF10): a reauthentication with Google before
+    // the unlink at the end.
+    let token = oauth::session_of(&oauth::reauth(&app, Kind::Google, &sub, &token).await);
+    add(token.clone());
 
     // Another user holds a name; the rename to it collides, then one wins.
     let taken = server::profile::name::validate("Canario Ocupado").unwrap();

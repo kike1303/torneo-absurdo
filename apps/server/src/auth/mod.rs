@@ -51,6 +51,8 @@ pub struct AuthState {
     pub http: client::HttpClient,
     /// The pause of the link race tests ([`link::NoLinkGate`] in production).
     pub link_gate: link::LinkGateConfig,
+    /// The pause of the unlink race tests ([`unlink::NoUnlinkGate`] in production, 009 RF15).
+    pub unlink_gate: unlink::UnlinkGateConfig,
     #[cfg(feature = "dev-auth")]
     pub dev: dev::DevProvider,
 }
@@ -79,6 +81,7 @@ impl AuthState {
             providers: enabled_providers(&config.oauth),
             http: client::HttpClient::new(tls),
             link_gate: settings.link_gate.clone(),
+            unlink_gate: settings.unlink_gate.clone(),
             #[cfg(feature = "dev-auth")]
             dev: dev::DevProvider::default(),
         })
