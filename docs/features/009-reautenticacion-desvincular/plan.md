@@ -683,6 +683,7 @@ Sin cambios en los workflows.
     - **`reflected` pasa de `errors.spec.ts` a `fixtures.ts`,** porque también la usa el caso 6. `errors.spec.ts` no cambia lo que prueba.
     - **Los dos tests de sesión de hoy pasan a ser el 7 y el 8.**
     - **Los casos no se vieron en rojo contra una UI ausente,** porque la UI entró en el paso 11. Para comprobar que pueden fallar corrí mutantes de web: `next` sin `?reauth=1` y el panel de la fila que no abre con el 403. Los dos mueren.
+22. **Paso 13: más vistas de las que pide el plan.** Las capturas y axe cubren el panel en sus dos lugares (`account-reauth-link` y `account-reauth-row`) y `/login` con `auth.reauth_mismatch` y sesión (`login-reauth-mismatch`). `expectPanelButtons` mide el ancho completo y los 44 px a 375 px, y `sm:w-auto` a 1280 px, sobre el botón de `dev`. Revisé a ojo cuatro de las capturas (móvil y escritorio, `es` y `en`, los dos temas) contra la UI de la spec, y no hizo falta ajustar nada.
 
 ## Revisión
 
