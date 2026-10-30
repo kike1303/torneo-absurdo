@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NEXT_CASES } from '../../../../tests/support/next-cases.js';
-import { canonicalLoginQuery } from './login-url.js';
+import { canonicalLoginQuery, loginRedirectSearch } from './login-url.js';
 
 // 008 RF-D6 and the T4 case of the 2026-10-28 amendment (plan-d decision 7): the query of
 // /login keeps only a known `error` and a safe `next`, so nothing unknown is ever reflected.
@@ -48,5 +48,25 @@ describe('canonicalLoginQuery', () => {
     if (typeof next !== 'string') return;
     const { search } = q(new URLSearchParams({ next }).toString());
     expect(search).toBe(expected ? `?next=${encodeURIComponent(expected)}` : '');
+  });
+});
+
+// The locale redirect of the unprefixed /login, where the server's callback lands (QA of
+// phase D): only a listed `error` survives, nothing else is ever copied into the Location.
+describe('loginRedirectSearch', () => {
+  it.each([
+    ['', ''],
+    ['?error=auth.banned', '?error=auth.banned'],
+    ['error=auth.try_again', '?error=auth.try_again'],
+    ['?error=auth.invalid_state&next=%2Fes%2Faccount', '?error=auth.invalid_state'],
+    [`?error=${CANARY}`, ''],
+    ['?error=', ''],
+    ['?error=__proto__', ''],
+    ['?error=auth.csrf_origin', ''],
+    ['?error=auth.banned&error=auth.banned', ''],
+    [`?next=%2Fes%2Faccount&x=${CANARY}`, ''],
+    [`?error=auth.banned%0d%0a${CANARY}`, ''],
+  ])('%s → %s', (search, expected) => {
+    expect(loginRedirectSearch(search)).toBe(expected);
   });
 });

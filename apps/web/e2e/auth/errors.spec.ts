@@ -90,6 +90,29 @@ test('3. an unknown ?error= is never reflected (Location, HTML, attributes, logs
   }
 });
 
+test('3b. the unprefixed /login (where the callback lands) never reflects ?error=', async ({
+  page,
+}) => {
+  const value = canary('unprefixed');
+  for (const [raw, expected] of [
+    [encodeURIComponent(value), '/en/login'],
+    [`${encodeURIComponent(value)}&next=%2Fen%2F${value}&x=${value}`, '/en/login'],
+    [`%0d%0a${value}`, '/en/login'],
+    ['auth.banned', '/en/login?error=auth.banned'],
+  ] as const) {
+    const path = `/login?error=${raw}`;
+    const res = await page.request.get(path, {
+      maxRedirects: 0,
+      headers: { 'accept-language': 'en' },
+    });
+    expect(res.status(), raw).toBe(307);
+    expect(res.headers().location, raw).toBe(expected);
+    await page.goto(path);
+    await expect(page).toHaveURL(expected);
+    expect(await reflected(page), raw).not.toContain(value);
+  }
+});
+
 test('4. with a session, the error and a link to the account', async ({ page, identity }) => {
   await login(page, identity, 'es');
   await page.goto('/es/login?error=auth.already_linked');

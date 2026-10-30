@@ -30,3 +30,17 @@ export function canonicalLoginQuery(rawSearch: string): CanonicalLoginQuery {
   const search = canonical === '' ? '' : `?${canonical}`;
   return { changed: raw !== canonical, search };
 }
+
+/**
+ * The query the locale redirect of the unprefixed `/login` carries (the server's callback
+ * redirects there, QA of phase D): `?error=<code>` only if there is exactly one `error` and it
+ * is a `CallbackErrorCode`, and `''` otherwise. Nothing else (`next`, unknown parameters, an
+ * unknown `error`) is ever copied into the `Location`.
+ */
+export function loginRedirectSearch(rawSearch: string): string {
+  const errors = new URLSearchParams(
+    rawSearch.startsWith('?') ? rawSearch.slice(1) : rawSearch,
+  ).getAll('error');
+  const [error] = errors;
+  return errors.length === 1 && isCallbackErrorCode(error) ? `?error=${error}` : '';
+}

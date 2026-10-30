@@ -98,6 +98,29 @@ describe('localeRedirect', () => {
   });
 });
 
+describe('localeRedirect of the unprefixed /login (QA of phase D)', () => {
+  const CANARY = 'qacanary7f3e1';
+  it.each([
+    [`/login?error=${CANARY}`, '/en/login'],
+    [`/login/?error=${CANARY}`, '/en/login'],
+    [`//login?error=${CANARY}`, '/en/login'],
+    ['/login?error=auth.banned', '/en/login?error=auth.banned'],
+    [`/login?error=auth.banned&next=%2Fen%2F${CANARY}&x=${CANARY}`, '/en/login?error=auth.banned'],
+    [`/login?next=%2Fen%2Faccount`, '/en/login'],
+    ['/login', '/en/login'],
+  ])('%s → %s', async (path, expected) => {
+    const { response } = await run(path);
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe(expected);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+  });
+
+  it('other paths keep their query', async () => {
+    const { response } = await run('/loginx?a=1');
+    expect(response.headers.get('location')).toBe('/en/loginx?a=1');
+  });
+});
+
 describe('localeLocation', () => {
   it('builds /<locale>/ + path without leading slashes + search', () => {
     expect(localeLocation('en', '/', '')).toBe('/en/');
