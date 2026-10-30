@@ -2,10 +2,23 @@
   import '../app.css';
   import { onMount } from 'svelte';
   import AppHeader from '#lib/components/layout/AppHeader.svelte';
+  import { page } from '$app/state';
+  import { saveThemePreference } from '#lib/features/account/preferences.js';
+  import { isSafeNext } from '#lib/features/auth/next.js';
+  import { getLocale } from '#lib/paraglide/runtime.js';
   import { m } from '#lib/paraglide/messages.js';
   import { initTheme } from '#lib/theme/theme.svelte.js';
 
   let { data, children } = $props();
+
+  // "Sign in" comes back to this page: only its path (never the query, which the request
+  // controls) and only if it is a safe `next`; never from an error page or the login itself.
+  const loginHref = $derived.by(() => {
+    const login = `/${getLocale()}/login`;
+    const path = page.url.pathname;
+    if (page.error || path.endsWith('/login') || !isSafeNext(path)) return login;
+    return `${login}?next=${encodeURIComponent(path)}`;
+  });
 
   onMount(() => {
     initTheme(data.theme);
@@ -20,7 +33,13 @@
 >
   {m.skip_to_content()}
 </a>
-<AppHeader theme={data.theme} />
+<AppHeader
+  theme={data.theme}
+  session={data.session}
+  user={data.user}
+  {loginHref}
+  onThemeSave={data.user ? (choice) => saveThemePreference(getLocale(), choice) : undefined}
+/>
 <main id="main" class="mx-auto max-w-5xl px-4 py-8">
   {@render children()}
 </main>

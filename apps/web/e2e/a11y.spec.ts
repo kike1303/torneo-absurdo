@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { login as authLogin, test as authTest } from './auth/fixtures.js';
 import { waitForHydration } from './support/hydration.js';
 
 const ORIGIN = 'http://localhost:4173';
@@ -17,8 +18,9 @@ test.describe('test 4: axe without serious or critical violations', () => {
   for (const theme of ['light', 'dark'] as const) {
     test(`home and 404 with theme=${theme}`, async ({ page }) => {
       await page.context().addCookies([{ name: 'theme', value: theme, url: ORIGIN }]);
-      // `/api/x` renders the 404 on an excluded path (QA H2).
-      for (const path of ['/es/', '/en/', '/es/no-existe', '/api/x']) {
+      // `/api/x` renders the 404 on an excluded path (QA H2), on the web directly: through the
+      // edge it reaches the server (008 plan-d decision 10).
+      for (const path of ['/es/', '/en/', '/es/no-existe', 'http://localhost:4175/api/x']) {
         await page.goto(path);
         expect(await seriousViolations(page), path).toEqual([]);
       }
@@ -109,3 +111,20 @@ test('test 9: reduced motion zeroes transitions and animations', async ({ browse
   expect(ms(dialog.animation)).toBeLessThanOrEqual(0.01);
   await context.close();
 });
+
+// 008 plan-d step 12: the auth screens with axe (AA), in both themes, signed out and in.
+for (const theme of ['light', 'dark'] as const) {
+  authTest(`auth screens with theme=${theme}`, async ({ page, identity }) => {
+    await page.context().addCookies([{ name: 'theme', value: theme, url: ORIGIN }]);
+    for (const path of ['/es/login', '/en/login?error=auth.banned']) {
+      await page.goto(path);
+      expect(await seriousViolations(page), path).toEqual([]);
+    }
+    await authLogin(page, identity, 'es');
+    expect(await seriousViolations(page), 'onboarding').toEqual([]);
+    await page.goto('/es/account');
+    expect(await seriousViolations(page), 'account').toEqual([]);
+    await page.goto('/es/dev/components?theme=' + theme);
+    expect(await seriousViolations(page), 'catalog with the auth section').toEqual([]);
+  });
+}

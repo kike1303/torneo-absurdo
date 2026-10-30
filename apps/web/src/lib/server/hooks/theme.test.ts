@@ -51,4 +51,15 @@ describe('createThemeHandle', () => {
     expect(transformed).toContain('data-theme="dark"');
     expect(transformed).not.toContain('<script>');
   });
+
+  it('with a session, the profile theme wins over the cookie (008 RF-D4)', async () => {
+    const event = fakeEvent({
+      url: 'http://h/es/',
+      cookies: { theme: 'dark' },
+      routeId: '/',
+      locals: { user: { theme: 'light' } as App.Locals['user'] },
+    });
+    await createThemeHandle(undefined)({ event, resolve: async () => new Response('') });
+    expect(event.locals.theme).toBe('light');
+  });
 });

@@ -133,6 +133,75 @@ describe('import boundaries that fail', () => {
   });
 });
 
+// 008 plan-d decision 8: API mutations only from the actions of a `+page.server.ts`.
+describe('api/mutations only from +page.server.ts', () => {
+  const IMPORT =
+    "import { postUnlink } from '#lib/server/api/mutations.js';\nexport const x = postUnlink;\n";
+  const RELATIVE =
+    "import { postUnlink } from '../lib/server/api/mutations.js';\nexport const x = postUnlink;\n";
+  it.each([
+    ['src/hooks.server.ts', IMPORT],
+    ['src/routes/+layout.server.ts', RELATIVE],
+    ['src/routes/account/+layout.server.ts', IMPORT],
+    ['src/routes/account/+page.ts', IMPORT],
+    ['src/routes/account/+layout.ts', IMPORT],
+    ['src/routes/healthz/+server.ts', IMPORT],
+    ['src/lib/server/hooks/session.ts', IMPORT],
+    ['src/lib/features/account/x.ts', IMPORT],
+    [
+      'src/lib/components/account/ProviderList.svelte',
+      svelte("  import { postUnlink } from '#lib/server/api/mutations.js';\n  postUnlink;"),
+    ],
+  ])('%s fails', async (file, code) => {
+    expect(await rules(file, code)).toContain(IMPORTS);
+  });
+
+  it('a dynamic import() fails too', async () => {
+    expect(
+      await rules(
+        'src/routes/+layout.server.ts',
+        "export const x = () => import('#lib/server/api/mutations.js');\n",
+      ),
+    ).toContain(DYNAMIC);
+  });
+
+  it.each([
+    ['src/routes/account/+page.server.ts', IMPORT],
+    ['src/routes/onboarding/+page.server.ts', IMPORT],
+    ['src/routes/preferences/+page.server.ts', RELATIVE.replace('../lib', '../../lib')],
+  ])('%s passes', async (file, code) => {
+    expect(await rules(file, code)).toEqual([]);
+  });
+});
+
+// 008 plan-d decision 13 (change 6 of architect): postgres.js is a devDependency for the e2e
+// database helpers only; it never reaches the app bundle.
+describe('postgres only from e2e/', () => {
+  const PG = "import postgres from 'postgres';\nexport const sql = postgres;\n";
+  it.each([
+    ['src/lib/server/db.ts', PG],
+    ['src/hooks.server.ts', PG],
+    ['src/routes/account/+page.server.ts', PG],
+    [
+      'src/lib/components/account/X.svelte',
+      svelte("  import postgres from 'postgres';\n  postgres;"),
+    ],
+    ['tests/some.test.ts', PG],
+  ])('%s fails', async (file, code) => {
+    expect(await rules(file, code)).toContain(IMPORTS);
+  });
+
+  it('import() fails too', async () => {
+    expect(
+      await rules('src/lib/server/x.ts', "export const x = () => import('postgres');\n"),
+    ).toContain(DYNAMIC);
+  });
+
+  it.each(['e2e/support/db.mjs', 'tests/e2e-db.test.ts'])('%s passes', async (file) => {
+    expect(await rules(file, PG)).toEqual([]);
+  });
+});
+
 describe('each #lib pattern works alone (relative twins disabled)', () => {
   it.each([
     [

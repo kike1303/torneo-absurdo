@@ -29,9 +29,58 @@ export const CSP_BASE = Object.freeze({
  * directive with exactly these sources.
  */
 export const CSP_EXTENSIONS = Object.freeze({
-  extraSources: { 'script-src': ['wasm-unsafe-eval'] },
+  extraSources: {
+    'script-src': ['wasm-unsafe-eval'],
+    // B4.6 (2026-10-30 amendment): the authorize endpoints of the providers, with their path, so
+    // the 303 of `start` and `link` passes and a form posted straight to any other path of those
+    // origins (a Discord webhook) does not. Exactly GOOGLE_AUTHORIZE and DISCORD_AUTHORIZE of
+    // apps/server/src/auth/providers.rs (checked below).
+    'form-action': [
+      'https://accounts.google.com/o/oauth2/v2/auth',
+      'https://discord.com/oauth2/authorize',
+    ],
+  },
   extraDirectives: { 'worker-src': ['self'] },
 });
+
+/** The constants of providers.rs that B4.6 copies, in the order of `form-action`. */
+const PROVIDER_CONSTANTS = ['GOOGLE_AUTHORIZE', 'DISCORD_AUTHORIZE'];
+const PROVIDERS_RS = 'apps/server/src/auth/providers.rs';
+
+/**
+ * B4.6 is tied to providers.rs: each constant appears once, outside the test module, and equals
+ * its source of `CSP_EXTENSIONS` (security-reviewer, 2026-10-30 amendment). A drift fails here,
+ * in `just check`, before the login fails closed.
+ * @param {string} source contents of providers.rs
+ * @param {string} file label used in messages
+ * @returns {string[]}
+ */
+export function checkProvidersSource(source, file) {
+  const rule = 'csp (ADR-0012 B4.6)';
+  // Only the code before the test module: a test may well spell the constants differently.
+  const testModule = source.search(/^#\[cfg\(test\)\]/m);
+  const code = testModule === -1 ? source : source.slice(0, testModule);
+  const expected = CSP_EXTENSIONS.extraSources['form-action'];
+  /** @type {string[]} */
+  const problems = [];
+  PROVIDER_CONSTANTS.forEach((name, index) => {
+    const found = [
+      ...code.matchAll(
+        new RegExp(`^\\s*pub\\s+const\\s+${name}\\s*:\\s*&str\\s*=\\s*"([^"]*)"\\s*;`, 'gm'),
+      ),
+    ].map((m) => m[1]);
+    if (found.length !== 1) {
+      problems.push(
+        `${file}: ${rule}: ${name} must be defined exactly once (found ${found.length})`,
+      );
+    } else if (found[0] !== expected[index]) {
+      problems.push(
+        `${file}: ${rule}: ${name} is ${found[0]}, but form-action allows ${expected[index]}: change both, and the amendment`,
+      );
+    }
+  });
+  return problems;
+}
 
 /** Kit's plugin factory: the only import allowed from this module (security-reviewer on #50). */
 const KIT_VITE = '@sveltejs/kit/vite';
@@ -356,6 +405,8 @@ export function checkKitConfig(webDir) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const webDir = process.argv[2] ? path.resolve(process.argv[2]) : path.join(ROOT, 'apps/web');
   const problems = checkKitConfig(webDir);
+  const providers = path.join(ROOT, PROVIDERS_RS);
+  problems.push(...checkProvidersSource(readFileSync(providers, 'utf8'), PROVIDERS_RS));
   if (problems.length > 0) {
     console.error(`check-kit-config: ${problems.length} problem(s)`);
     for (const p of problems) console.error(`  ${p}`);

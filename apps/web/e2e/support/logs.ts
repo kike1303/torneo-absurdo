@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -6,6 +6,57 @@ import { fileURLToPath } from 'node:url';
 export const WEB_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const LOG_DIR = path.join(WEB_DIR, 'test-results', 'logs');
 export type Instance = 'catalog' | 'no-catalog';
+
+// 008 plan-d decision 10: the files of the server, the ban CLI and the network guard.
+export const SERVER_LOG = path.join(LOG_DIR, 'server.log');
+export const ADMIN_CLI_LOG = path.join(LOG_DIR, 'admin-cli.log');
+export const EGRESS_LOG = path.join(LOG_DIR, 'egress.log');
+/** Hosts a spec expects in egress.log, one `host:port` per line. Emptied by `just _e2e-run`. */
+export const EXPECTED_EGRESS = path.join(LOG_DIR, 'expected-egress.txt');
+/** Values of this run that must never reach a log. Emptied by `just _e2e-run`. */
+export const DYNAMIC_CANARIES = path.join(LOG_DIR, 'dynamic-canaries.txt');
+
+/**
+ * egress.log against expected-egress.txt (008 plan-d decision 10, condition 1 of devops). A
+ * missing egress.log fails: a proxy that never started would switch the guard off silently.
+ */
+export function egressProblems(egressLog = EGRESS_LOG, expectedFile = EXPECTED_EGRESS): string[] {
+  if (!existsSync(egressLog)) return ['egress: egress.log missing (did the proxy start?)'];
+  const expected = new Set(fileLines(expectedFile));
+  return fileLines(egressLog)
+    .filter((target) => !expected.has(target))
+    .map((target) => `egress: the browser tried to reach ${target}, which no test declared`);
+}
+
+function append(file: string, line: string): void {
+  mkdirSync(LOG_DIR, { recursive: true });
+  appendFileSync(file, `${line}\n`);
+}
+
+/**
+ * Declares a value of this run (a session token, a user id, an alias, a `dev_identity`, a
+ * `?error=`, a ban reason) that the global teardown then looks for in every log. Values shorter
+ * than 6 characters would match by accident, so they are refused.
+ */
+export function addDynamicCanary(value: string): void {
+  if (value.length < 6 || /[\r\n]/.test(value))
+    throw new Error('a canary needs 6+ chars, one line');
+  append(DYNAMIC_CANARIES, value);
+}
+
+/** Declares a `host:port` this spec makes the browser try to reach (the proxy cuts it). */
+export function expectEgress(target: string): void {
+  if (!/^[a-z0-9.-]+:\d+$/.test(target)) throw new Error('expected host:port');
+  append(EXPECTED_EGRESS, target);
+}
+
+/** The non-empty lines of a file, or `[]` if it does not exist. */
+export function fileLines(file: string): string[] {
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((line) => line.length > 0);
+}
 
 export const ALLOWED_FIELDS = new Set([
   'ts',

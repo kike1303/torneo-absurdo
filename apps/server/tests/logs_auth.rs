@@ -159,6 +159,29 @@ async fn run(rust_log: &str) {
         Some("/login?error=auth.invalid_state")
     );
 
+    // The quota branch of the callback (008 "Enmienda 2026-10-30" of RF-B5, security-reviewer):
+    // a client of its own /64 drains AUTH_IP, and the refused callback carries canaries in the
+    // query and the flow cookie. Neither the layer nor the request log may write them.
+    let quota_ip = format!("2001:db8:{:x}::9", rand_u16() ^ 2);
+    let quota_canary = format!("canary-quota-{}", uuid::Uuid::new_v4().simple());
+    let quota_cookie = format!("{FLOW}={}", quota_canary.replace('-', "_"));
+    let quota_path = format!("/api/auth/dev/callback?code={quota_canary}&state={quota_canary}");
+    let quota_headers = [
+        ("cookie", quota_cookie.as_str()),
+        ("x-forwarded-for", quota_ip.as_str()),
+    ];
+    let mut refused = None;
+    for _ in 0..6 {
+        let response = http::send(addr, "GET", &quota_path, &quota_headers).await;
+        assert_eq!(response.status, 303);
+        if response.header("location") == Some("/login?error=auth.try_again") {
+            refused = Some(response);
+            break;
+        }
+    }
+    let refused = refused.expect("the quota never refused the callback");
+    assert_eq!(refused.cookie(FLOW), Some(""));
+
     server.signal("TERM");
     let finished = server.finish(Duration::from_secs(10)).await;
     assert_eq!(finished.status.code(), Some(0));
@@ -185,6 +208,8 @@ async fn run(rust_log: &str) {
         session_id.to_string(),
         session_id.simple().to_string(),
         bad_code,
+        quota_canary.clone(),
+        quota_canary.replace('-', "_"),
     ];
     for line in finished.stdout.iter().chain(&finished.stderr) {
         for canary in &canaries {

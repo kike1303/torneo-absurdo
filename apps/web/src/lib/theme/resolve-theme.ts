@@ -17,6 +17,8 @@ export function parseTheme(value: unknown): ThemeChoice | undefined {
 }
 
 export interface ResolveThemeInput {
+  /** The profile's preference with a session (008 RF-D4); `null` or absent defers to the cookie. */
+  profile?: ThemeChoice | null;
   cookie: string | undefined;
   /** `?theme=` value; only `dark | light`, and only on `/dev/**` with the catalog on (RF-A9). */
   override: string | null;
@@ -24,11 +26,12 @@ export interface ResolveThemeInput {
   routeId: string | null;
 }
 
+/** ADR-0009 D3, 008 RF-D4: catalog override → profile (with a session) → cookie → `dark`. */
 export function resolveTheme(input: ResolveThemeInput): ThemeChoice {
   if (input.enableDevCatalog === '1' && input.routeId?.startsWith('/dev/')) {
     if (input.override === 'dark' || input.override === 'light') return input.override;
   }
-  return parseTheme(input.cookie) ?? DEFAULT_THEME;
+  return parseTheme(input.profile) ?? parseTheme(input.cookie) ?? DEFAULT_THEME;
 }
 
 /** `<meta>` tags for `%theme.meta%` (ADR-0009 D3). Values come from a closed list only. */

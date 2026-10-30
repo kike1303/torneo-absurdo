@@ -33,6 +33,7 @@ jobs:
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
       web: ${{ steps.filter.outputs.web }}
+      e2e: ${{ steps.filter.outputs.e2e }}
       images: ${{ steps.filter.outputs.images }}
     steps:
       # A push to main diffs against the previous commit with git; a PR uses the API.
@@ -71,7 +72,9 @@ jobs:
               - scripts/wasi-runner.mjs
               # Embedded by apps/server/src/config.rs with include_str! (008 RF-B18).
               - scripts/__fixtures__/loopback-origins.json
-            web:
+              # Run on the musl binary (008 RF-D9).
+              - scripts/check-release-binary.mjs
+            web: &web
               - *common
               - apps/web/**
               - packages/**
@@ -97,8 +100,24 @@ jobs:
               - infra/**
               - .dockerignore
               - '**/Dockerfile'
+              # The [features] table, read by check-compose (008 RF-D9).
+              - apps/server/Cargo.toml
               - rust-toolchain.toml
               - .github/dependabot.yml
+            # 008 RF-D9, plan-d decision 12: what the e2e runs (the web and the server with
+            # dev-auth). Among the crates the server depends only on protocol; engine and
+            # engine-wasm already come with web, and a balance PR (crates/sim, crates/content)
+            # does not run it.
+            e2e:
+              - *web
+              - apps/server/**
+              - crates/protocol/**
+              - content/names/**
+              - Cargo.toml
+              - Cargo.lock
+              - rust-toolchain.toml
+              - .cargo/**
+              - .sqlx/**
             images:
               - *common
               - infra/**
@@ -106,6 +125,7 @@ jobs:
               - .dockerignore
               - scripts/check-compose.mjs
               - scripts/check-dockerignore.sh
+              - scripts/check-release-binary.mjs
               - scripts/fixtures/context.Dockerfile
               - scripts/local-networks.sh
               # Run by _prod-local-start: the generated secrets of prod-local (008 plan-b).
@@ -194,6 +214,12 @@ jobs:
             exit 1
           fi
           file "$bin"
+      # 008 RF-D9 (plan-d decision 12): the strings a release must never carry. `images` does not
+      # run on apps/server/src/**, so this is where a dev-auth string outside its #[cfg] fails
+      # first. A debug build without features is as strict as the release (LTO removes nothing
+      # that is there).
+      - name: The musl binary has no dev-auth (RF-D9)
+        run: node scripts/check-release-binary.mjs target/x86_64-unknown-linux-musl/debug/server
 
   web:
     needs: changes
@@ -211,17 +237,63 @@ jobs:
       # The scripts/ tests exclude check-workflows (it runs in policy, RF-C10).
       - run: just check-web
 
-  # Runs inside the official Playwright image (plan-c deviation 21): the browsers and their
-  # system packages come baked in, so no run depends on the Ubuntu apt mirror nor on the browser
-  # download. The image version must equal @playwright/test of the lockfile (checked below);
-  # Dependabot does not bump container images, so both move together by hand.
-  e2e:
+  # The server with dev-auth for the e2e (008 plan-d decision 12, ADR-0006 note of 2026-10-30):
+  # glibc of Ubuntu 24.04, the same as the noble Playwright image. It reads the `ci` cache of
+  # `rust` and never writes it (save-if: false), and defines no CARGO*/CC*/CFLAGS*/CXX*/CMAKE*/
+  # RUST* variable of its own, which would change the cache key (check-workflows enforces both).
+  e2e-server:
     needs: changes
-    if: needs.changes.outputs.web == 'true'
+    if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust toolchain of rust-toolchain.toml
+        run: |
+          rustup toolchain install --no-self-update
+          rustc --version
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci
+          save-if: false
+      - name: Server with dev-auth (dev profile)
+        run: cargo build -p server --features dev-auth --locked
+      - name: The binary is the dev-auth one (RF-D9)
+        run: node scripts/check-release-binary.mjs --expect-dev target/debug/server
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: server-dev-auth
+          path: target/debug/server
+          if-no-files-found: error
+          retention-days: 1
+          # Re-running every job of a run uploads the same name again (409 without this).
+          overwrite: true
+
+  # Runs inside the official Playwright image (plan-c deviation 21): the browsers and their
+  # system packages come baked in, so no run depends on the Ubuntu apt mirror nor on the browser
+  # download. The image version must equal @playwright/test of the lockfile (checked below);
+  # Dependabot does not bump container images, so both move together by hand. Since 008 it also
+  # runs the server of e2e-server against a Postgres service (plan-d decision 12).
+  e2e:
+    needs: [changes, e2e-server]
+    if: needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    # The image of infra/compose.dev.yml (check-workflows compares the digest). No POSTGRES_DB:
+    # db.mjs creates torneo_e2e from the `postgres` database, and waits for it (services take no
+    # options other than --shm-size here). Public e2e credentials, never a secret.
+    services:
+      postgres:
+        image: postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        env:
+          POSTGRES_USER: torneo
+          POSTGRES_PASSWORD: torneo_e2e
     container:
       # mcr.microsoft.com/playwright:v1.64.1-noble, multi-arch index digest (2026-10-23).
       image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
@@ -251,8 +323,29 @@ jobs:
           fi
           echo "Playwright $version, browsers in ${PLAYWRIGHT_BROWSERS_PATH:?the image sets PLAYWRIGHT_BROWSERS_PATH}"
           ls "$PLAYWRIGHT_BROWSERS_PATH"
-      # Two instances (catalog and no catalog), Chromium plus WebKit for theme and CSP (RF-C10).
-      - run: just e2e
+      # Only by name and from this run: never run-id, github-token nor repository.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: server-dev-auth
+          path: ${{ runner.temp }}/server-dev-auth
+      - name: The downloaded binary is the dev-auth one (RF-D9)
+        env:
+          E2E_SERVER_BIN: ${{ runner.temp }}/server-dev-auth/server
+        run: |
+          set -euo pipefail
+          chmod +x "$E2E_SERVER_BIN"
+          node scripts/check-release-binary.mjs --expect-dev "$E2E_SERVER_BIN"
+      # The edge, the server, two webs and the egress proxy, Chromium plus WebKit, desktop and
+      # mobile (RF-C10, 008 RF-D7 and RF-D8). A9 is applied to the service with ALTER SYSTEM.
+      - name: e2e
+        env:
+          E2E_DATABASE_URL: postgres://torneo:torneo_e2e@postgres:5432/torneo_e2e
+          E2E_SERVER_BIN: ${{ runner.temp }}/server-dev-auth/server
+          E2E_APPLY_A9: '1'
+        run: just _e2e-run
+      # The canaries of the run (session token, user id, alias, dev_identity) stay on the runner:
+      # artifacts of a public repo are public (check-workflows enforces the exclusion). The
+      # traces of test-results/artifacts, which carry cookies, are never uploaded.
       - name: Upload screenshots and server logs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -261,6 +354,7 @@ jobs:
           path: |
             apps/web/test-results/screenshots
             apps/web/test-results/logs
+            !apps/web/test-results/logs/dynamic-canaries.txt
           if-no-files-found: warn
           retention-days: 14
 
@@ -341,7 +435,7 @@ jobs:
           tags: ghcr.io/kike1303/torneo-absurdo/web:ci
           cache-from: type=gha,scope=web
           cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=web' || '' }}
-      - name: Non-root user, Node version, static binary, no node_modules (RF-C1, RF-C2)
+      - name: Non-root user, Node version, static binary, no dev-auth, no node_modules (RF-C1, RF-C2, RF-D9)
         run: |
           set -euo pipefail
           for svc in server web; do
@@ -366,6 +460,8 @@ jobs:
             exit 1
           fi
           file "$RUNNER_TEMP/server"
+          # 008 RF-D9: the binary of the image carries none of the dev-auth strings.
+          node scripts/check-release-binary.mjs "$RUNNER_TEMP/server"
           cid="$(docker create "$REPO/web:ci")"
           count="$(docker export "$cid" | tar -t | grep -c '^app/node_modules/' || true)"
           docker rm "$cid" >/dev/null
@@ -377,9 +473,13 @@ jobs:
       - name: Smoke test of the web image alone (RF-C2)
         run: |
           set -euo pipefail
+          # A random filler secret and an internal URL nothing listens on (008 decision 12):
+          # without a session cookie the web never calls it.
+          filler="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))")"
+          internal=(-e INTERNAL_API_URL=http://127.0.0.1:9 -e INTERNAL_API_SECRET="$filler")
           cid="$(docker run -d --read-only --cap-drop ALL --security-opt no-new-privileges \
             -p 127.0.0.1:3001:3000 -e PUBLIC_ORIGIN=http://localhost:3001 -e HOST=0.0.0.0 \
-            -e PORT=3000 "$REPO/web:ci")"
+            -e PORT=3000 "${internal[@]}" "$REPO/web:ci")"
           trap 'docker rm -f "$cid" >/dev/null' EXIT
           for _ in $(seq 1 30); do
             curl -fsS -o /dev/null http://127.0.0.1:3001/healthz && break
@@ -387,24 +487,43 @@ jobs:
           done
           curl -fsS -o /dev/null -w '/healthz %{http_code}\n' http://127.0.0.1:3001/healthz
           curl -fsS -o /dev/null -w '/en/ %{http_code}\n' http://127.0.0.1:3001/en/
-          # Without PUBLIC_ORIGIN the guard of RF-A23 exits before listening, and for that reason:
-          # Kit's env_invalid with the validator's message, not any other crash.
-          set +e
-          out="$(timeout 60 docker run --rm --name web-no-origin "$REPO/web:ci" 2>&1)"
-          status=$?
-          set -e
-          docker rm -f web-no-origin >/dev/null 2>&1 || true
-          echo "$out"
-          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
-            echo "web without PUBLIC_ORIGIN exited with $status, expected a startup failure" >&2
+          # A broken configuration exits before listening, and for that reason: Kit's env_invalid
+          # with the validator's message, not any other crash.
+          # start_fails <case> <expected message> [docker run args...]
+          start_fails() {
+            local name="$1" want="$2" out status
+            shift 2
+            set +e
+            out="$(timeout 60 docker run --rm --name web-start-fails "$@" "$REPO/web:ci" 2>&1)"
+            status=$?
+            set -e
+            docker rm -f web-start-fails >/dev/null 2>&1 || true
+            echo "$out"
+            if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+              echo "web $name exited with $status, expected a startup failure" >&2
+              return 1
+            fi
+            if ! grep -q 'env_invalid' <<<"$out" || ! grep -qF "$want" <<<"$out"; then
+              echo "web $name failed for another reason" >&2
+              return 1
+            fi
+            echo "web $name exits with $status (env_invalid: $want)"
+            last_out="$out"
+          }
+          # The internal variables are set, so the first error is the one of PUBLIC_ORIGIN.
+          start_fails 'without PUBLIC_ORIGIN' 'PUBLIC_ORIGIN is required at runtime' "${internal[@]}"
+          start_fails 'without INTERNAL_API_SECRET' 'INTERNAL_API_SECRET is required at runtime' \
+            -e PUBLIC_ORIGIN=http://localhost:3001 -e INTERNAL_API_URL=http://127.0.0.1:9
+          # A malformed secret that is a canary: the validator names the rule, never the value.
+          canary="canary-$(node -e "process.stdout.write(require('node:crypto').randomBytes(8).toString('hex'))")!"
+          start_fails 'with a malformed secret' 'INTERNAL_API_SECRET must be base64url' \
+            -e PUBLIC_ORIGIN=http://localhost:3001 -e INTERNAL_API_URL=http://127.0.0.1:9 \
+            -e INTERNAL_API_SECRET="$canary"
+          if grep -qF "${canary%!}" <<<"$last_out"; then
+            echo "the startup error shows the value of INTERNAL_API_SECRET" >&2
             exit 1
           fi
-          if ! grep -q 'env_invalid' <<<"$out" ||
-            ! grep -qF 'PUBLIC_ORIGIN is required at runtime' <<<"$out"; then
-            echo "web without PUBLIC_ORIGIN failed for another reason" >&2
-            exit 1
-          fi
-          echo "web without PUBLIC_ORIGIN exits with $status (env_invalid, PUBLIC_ORIGIN)"
+          echo "the malformed secret does not appear in the output"
       # plan-c decision 16: the production compose plus the local Postgres, in amd64.
       - name: prod-local up
         env:
@@ -455,8 +574,10 @@ jobs:
           once http://127.0.0.1:3000/es/ 200 x-content-type-options referrer-policy \
             strict-transport-security cross-origin-opener-policy permissions-policy \
             content-security-policy
-          # ADR-0012 B1 exactly, as this image emits it (nonce normalized; directive and source
-          # order ignored). A B4 extension changes this line in its own PR.
+          # ADR-0012 B1 plus B4.6 (the 2026-10-30 amendment: the two authorize endpoints in
+          # form-action), as this image emits it (nonce normalized; directive and source order
+          # ignored). A B4 extension changes this line in its own PR, and the b1= of verify in
+          # release.yml with it: check-workflows wants both identical byte for byte (B6.4 item 7).
           csp_norm() {
             tr -d '\r' | sed -E "s/'nonce-[A-Za-z0-9+/_=-]+'/'nonce-*'/g" | tr ';' '\n' |
               while read -r name rest; do
@@ -464,11 +585,11 @@ jobs:
                 printf '%s %s\n' "$name" "$(tr ' ' '\n' <<<"$rest" | grep -v '^$' | sort | paste -sd ' ' -)"
               done | sort
           }
-          b1="default-src 'self'; script-src 'self' 'nonce-*'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+          b1="default-src 'self'; script-src 'self' 'nonce-*'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com/o/oauth2/v2/auth https://discord.com/oauth2/authorize; frame-ancestors 'none'"
           csp="$(curl -sS -I http://127.0.0.1:3000/es/ | grep -i '^content-security-policy:' |
             sed 's/^[^:]*:[[:space:]]*//')"
           if ! diff <(csp_norm <<<"$b1") <(csp_norm <<<"$csp"); then
-            echo "/es/ CSP is not ADR-0012 B1: $csp" >&2
+            echo "/es/ CSP is not ADR-0012 B1 plus B4.6: $csp" >&2
             exit 1
           fi
           server_headers=(x-content-type-options strict-transport-security
@@ -520,7 +641,7 @@ jobs:
 
   # The only required check (plan-c decision 19): skipped jobs count as success.
   ci-ok:
-    needs: [changes, policy, rust, web, e2e, images]
+    needs: [changes, policy, rust, web, e2e-server, e2e, images]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5

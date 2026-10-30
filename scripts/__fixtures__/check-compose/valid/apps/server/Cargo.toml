@@ -1,0 +1,16 @@
+# Reduced copy of apps/server/Cargo.toml: check-compose reads only its [features] table, and the
+# sync test compares only that table with the real file (008 plan-d decision 12).
+[package]
+name = "server"
+version = "0.1.0"
+
+[dependencies]
+protocol.workspace = true
+
+[features]
+# The dev OAuth provider and the loopback cookie names (008 RF-B6, RF-B9). Never in `default`
+# and never in the release image (RF-D9).
+dev-auth = []
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["process", "test-util"] }

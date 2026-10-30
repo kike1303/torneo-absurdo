@@ -2,7 +2,8 @@ import { expect, test } from '@playwright/test';
 import { ALLOWED_FIELDS, CANARIES, linesSince, readLines } from './support/logs.js';
 import { raw } from './support/raw-http.js';
 
-const PORT = 4173;
+// The web directly: the edge drops the canary X-Forwarded-For (008 plan-d decision 11).
+const PORT = 4175;
 const CANARY_HEADERS = {
   cookie: `session=${CANARIES.cookie}; theme=dark`,
   authorization: `Bearer ${CANARIES.authorization}`,

@@ -24,6 +24,52 @@ jobs:
       - env:
           INPUT_TAG: ${{ inputs.tag }}
         run: echo "$INPUT_TAG"
+      - name: Build server for the binary check (not pushed)
+        id: server-check
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        with:
+          context: .
+          file: apps/server/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          provenance: false
+          sbom: false
+          build-args: APP_VERSION=${{ inputs.tag }}
+          tags: torneo-release-check/server:local
+          labels: org.opencontainers.image.source=https://example.com/repo
+          cache-from: type=gha,scope=server
+      - name: The release binary has no dev-auth
+        if: github.event_name == 'push'
+        run: node scripts/check-release-binary.mjs "$RUNNER_TEMP/server"
+      - name: Build and push server
+        id: server-push
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        with:
+          context: .
+          file: apps/server/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          build-args: APP_VERSION=${{ inputs.tag }}
+          tags: ghcr.io/example/server:v1
+          labels: org.opencontainers.image.source=https://example.com/repo
+          cache-from: type=gha,scope=server
+      - name: The pushed server is the checked one
+        if: github.event_name == 'push'
+        env:
+          PUSHED: ${{ steps.server-push.outputs.imageid }}
+          TAG: v1
+          SHORT: sha-0000000
+        run: node scripts/check-pushed-server.mjs
+      - name: Retention of server
+        if: github.event_name == 'push'
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55
+        with:
+          package-name: example/server
   deploy:
     needs: build
     runs-on: ubuntu-24.04
@@ -45,3 +91,8 @@ jobs:
     permissions: {}
     steps:
       - run: echo verify
+      - name: Security headers (ADR-0012 B2)
+        run: |
+          # ADR-0012 B1 plus B4.6.
+          b1="default-src 'self'; script-src 'self' 'nonce-*'; form-action 'self' https://accounts.google.com/o/oauth2/v2/auth https://discord.com/oauth2/authorize; frame-ancestors 'none'"
+          echo "$b1"

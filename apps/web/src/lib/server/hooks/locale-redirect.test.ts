@@ -11,6 +11,26 @@ async function run(path: string, init: Partial<FakeEventInit> = {}) {
   return { response, resolve, event };
 }
 
+describe('localeRedirect with a session (008 RF-D4)', () => {
+  const user = (locale: 'en' | 'es' | null) => ({ user: { locale } as App.Locals['user'] });
+  it('the profile language wins over the cookie and Accept-Language', async () => {
+    const { response } = await run('/', {
+      headers: { 'accept-language': 'en' },
+      cookies: { locale: 'en' },
+      locals: user('es'),
+    });
+    expect(response.headers.get('location')).toBe('/es/');
+  });
+  it('a profile without a language defers to the cookie', async () => {
+    const { response } = await run('/', { cookies: { locale: 'es' }, locals: user(null) });
+    expect(response.headers.get('location')).toBe('/es/');
+  });
+  it('a prefixed path still decides by its URL', async () => {
+    const { resolve } = await run('/en/', { locals: user('es') });
+    expect(resolve).toHaveBeenCalled();
+  });
+});
+
 describe('localeRedirect', () => {
   it('redirects / with a relative Location by cookie, Accept-Language, then en', async () => {
     expect((await run('/')).response.headers.get('location')).toBe('/en/');
@@ -75,6 +95,29 @@ describe('localeRedirect', () => {
     const { response, resolve } = await run(path);
     expect(response.status).toBe(307);
     expect(resolve).not.toHaveBeenCalled();
+  });
+});
+
+describe('localeRedirect of the unprefixed /login (QA of phase D)', () => {
+  const CANARY = 'qacanary7f3e1';
+  it.each([
+    [`/login?error=${CANARY}`, '/en/login'],
+    [`/login/?error=${CANARY}`, '/en/login'],
+    [`//login?error=${CANARY}`, '/en/login'],
+    ['/login?error=auth.banned', '/en/login?error=auth.banned'],
+    [`/login?error=auth.banned&next=%2Fen%2F${CANARY}&x=${CANARY}`, '/en/login?error=auth.banned'],
+    [`/login?next=%2Fen%2Faccount`, '/en/login'],
+    ['/login', '/en/login'],
+  ])('%s → %s', async (path, expected) => {
+    const { response } = await run(path);
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe(expected);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+  });
+
+  it('other paths keep their query', async () => {
+    const { response } = await run('/loginx?a=1');
+    expect(response.headers.get('location')).toBe('/en/loginx?a=1');
   });
 });
 

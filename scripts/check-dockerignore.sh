@@ -6,12 +6,15 @@
 # `just dev`) is used as is, without opening it. A missing subject is created with a canary under
 # noclobber (`set -C`) and only the files created here are removed on exit. On failure only the
 # path that leaked is printed, never its contents.
+#
+# Plan-d step 2: infra/local.secrets.env.abc123 stands for the temporary file of
+# scripts/local-secrets.sh (`mktemp` next to it) that a `kill -9` could leave behind.
 set -eu
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-subjects="infra/.env infra/local.secrets.env apps/server/.env apps/web/.env tools/sff-converter/input/canary.sff content/_local/canary.txt"
+subjects="infra/.env infra/local.secrets.env infra/local.secrets.env.abc123 apps/server/.env apps/web/.env tools/sff-converter/input/canary.sff content/_local/canary.txt"
 created=""
 created_dirs=""
 tmp=""
@@ -61,7 +64,7 @@ if [ ! -d "$ctx" ]; then
 fi
 
 failed=0
-for path in infra/.env infra/local.secrets.env apps/server/.env apps/web/.env private .git content/_local tools; do
+for path in infra/.env infra/local.secrets.env infra/local.secrets.env.abc123 apps/server/.env apps/web/.env private .git content/_local tools; do
     if [ -e "$ctx/$path" ] || [ -L "$ctx/$path" ]; then
         echo "leaked into build context: $path" >&2
         failed=1

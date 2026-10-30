@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { login as authLogin, test as authTest } from './auth/fixtures.js';
 import { waitForHydration } from './support/hydration.js';
 
 async function collectViolations(page: Page): Promise<void> {
@@ -62,4 +63,18 @@ test('RF-A18: no CSP violations on /es/dev/arena while loading and 5 s of playba
     await expect(stage).toHaveAttribute('data-state', 'playing');
   }
   expect(await violations(page)).toEqual([]);
+});
+
+// ADR-0012 B4.6 (step 14 of 008 plan-d): the login and the account load under the amended CSP
+// without a violation, in Chromium and WebKit.
+authTest('B4.6: no CSP violations on /login and /account', async ({ page, identity }) => {
+  await collectViolations(page);
+  await page.goto('/es/login');
+  await waitForHydration(page);
+  expect(await violations(page), '/es/login').toEqual([]);
+  await authLogin(page, identity, 'en', '/en/account');
+  if (page.url().includes('/onboarding')) await page.getByTestId('onboarding-skip').click();
+  await page.waitForURL('/en/account');
+  await waitForHydration(page);
+  expect(await violations(page), '/en/account').toEqual([]);
 });

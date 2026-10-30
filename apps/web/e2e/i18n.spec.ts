@@ -138,6 +138,8 @@ test.describe('locale cookie and switcher (RF-A4, RF-A5)', () => {
 });
 
 test.describe('pages on excluded paths (QA H2)', () => {
+  // The web directly: through the edge, /api and /ws reach the server (008 plan-d decision 10).
+  const WEB = 4175;
   const PATHS = ['/api', '/api/x', '/ws', '/healthz/x', '/healthz//'];
 
   for (const method of ['GET', 'POST'] as const) {
@@ -148,7 +150,7 @@ test.describe('pages on excluded paths (QA H2)', () => {
         ['locale=xx', 'en'],
       ] as const) {
         for (const path of PATHS) {
-          const res = await raw(PORT, path, {
+          const res = await raw(WEB, path, {
             method,
             headers: {
               ...(cookie ? { cookie } : {}),

@@ -4,7 +4,7 @@ type: architecture
 status: draft
 author: architect
 created: 2026-10-20
-updated: 2026-10-28
+updated: 2026-10-30
 ---
 
 # Arquitectura general
@@ -42,7 +42,7 @@ updated: 2026-10-28
 
 ## Seguridad y logs
 - **Logs**: un objeto JSON por línea, con una allowlist cerrada de campos por app y sin datos del cliente (IP, cookies, headers, URL, cuerpos ni valores de persona). `web` escribe solo por `apps/web/src/lib/server/log.ts` y registra los errores por código, nunca por su mensaje; el server, por el formateador de `telemetry.rs`; Postgres, con parámetros que no escriben filas ni sentencias. Contrato completo, niveles, plazo y cómo agregar un campo o un evento: [ADR-0012](decisions/0012-logs-y-cabeceras-de-seguridad.md), parte A.
-- **CSP y cabeceras**: la CSP base de `web`, las cabeceras de `web`, del server y de Traefik, lo prohibido y las ampliaciones permitidas (renderer, `engine-wasm`, WebSocket): [ADR-0012](decisions/0012-logs-y-cabeceras-de-seguridad.md), parte B.
+- **CSP y cabeceras**: la CSP base de `web`, las cabeceras de `web`, del server y de Traefik, lo prohibido y las ampliaciones permitidas (renderer, `engine-wasm`, WebSocket y, desde la feature 008, `form-action` de los endpoints de autorización de Google y Discord, B4.6): [ADR-0012](decisions/0012-logs-y-cabeceras-de-seguridad.md), parte B.
 - Auth, sesiones, `Origin`/CSRF y límites por IP: [ADR-0008](decisions/0008-autenticacion.md).
 
 ## Ciclo de vida de una pelea
@@ -59,12 +59,43 @@ Scheduled ─▶ BettingOpen ─▶ BettingClosed ─▶ Live ─▶ Settled
 - Las repeticiones usan el log guardado, y cualquiera puede re-simularlo en el navegador con `engine-wasm` para verificarlo.
 
 ## Datos (borrador)
-- `users`, `sessions`, `oauth_accounts`
-- `ledger_entries` (asientos inmutables), con saldos derivados o materializados con verificación
+- `users`, `sessions`, `oauth_accounts`, `oauth_flows`, `auth_events`, `admin_audit` (feature 008, ver "Autenticación y monedas")
+- `ledger_accounts`, `ledger_entries`, `ledger_postings` (feature 008, ver "Autenticación y monedas")
 - `fights` (personajes, ruleset_version, seed_commit, seed —oculta hasta Settled—, resultado, log)
 - `bets`, `pools`
 - `tournaments`, `tournament_rounds`
 - `character_ratings`, `seasons`, `season_stats`
+
+## Autenticación y monedas (feature 008)
+Detalle en la [spec de 008](features/008-autenticacion/spec.md) y en [ADR-0008](decisions/0008-autenticacion.md); aquí, solo la forma.
+
+### Tablas
+| Tabla | Qué guarda |
+|---|---|
+| `users` | Alias (`display_name`) y su llave de comparación (`display_name_key`, `UNIQUE`), si el alias es el generado, rol (`user` o `admin`), `locale` y `theme` del perfil (`NULL` = sin preferencia) y `banned_at`. |
+| `oauth_accounts` | Una cuenta por proveedor (`google`, `discord`, `dev`) e identidad: llave `(provider, provider_user_id)` y, como mucho, una de cada proveedor por usuario. |
+| `oauth_flows` | Un flujo OAuth en curso (10 min): el `SHA-256` del id de la cookie del flujo, `state`, `code_verifier` (PKCE), `next` y, si es `link`, el usuario que vincula. El callback lo consume con `DELETE … RETURNING`. |
+| `sessions` | El `SHA-256` del token de la cookie (nunca el token), usuario, expiración absoluta, última actividad, `ip_hash` (HMAC con `IP_HASH_KEY`) y familia de navegador. |
+| `auth_events` | `login`, `link`, `unlink` y `grant`, con `ip_hash`; nunca la IP. |
+| `admin_audit` | Lo que hace la CLI de admin (`grant`, `revoke`, `ban`, `unban`), solo inserción. |
+
+### Ledger de doble entrada
+- Las monedas se mueven solo con asientos: un `ledger_entries` y sus `ledger_postings` (cuenta e importe, nunca 0). La cuenta `issuance` es la contraparte de las monedas que se emiten (el `grant` diario).
+- **Solo inserción**: triggers impiden `UPDATE`, `DELETE` y `TRUNCATE` en asientos, movimientos y cuentas.
+- **Cuadre diferido**: un constraint trigger `DEFERRABLE INITIALLY DEFERRED` exige, al hacer `COMMIT`, al menos dos movimientos por asiento y suma cero. Un asiento solo acepta movimientos en la transacción que lo creó (`created_xact`), así que uno ya confirmado no se puede "completar" después.
+- **El saldo es un `SUM`** de los movimientos de la cuenta del usuario; no hay columna de saldo que actualizar. Un `grant` por usuario y día (UTC) lo garantiza un índice único.
+
+### Revocación entre procesos
+Revocar una sesión (logout, logout-all, `unlink`, el ban de la CLI) hace `pg_notify('session_revoked', <id>)` en la misma transacción. El server escucha con `LISTEN session_revoked` en una conexión propia y cierra en el acto los WebSocket de cada sesión notificada. Si esa conexión se pierde, revalida todos los sockets con sesión, vuelve a escuchar y revalida otra vez. La CLI corre en otro proceso (`docker exec … server admin ban`) y llega por el mismo camino.
+
+### `web` y el API interno (ADR-0008 D5)
+- `web` llama al server directo por `INTERNAL_API_URL` (en producción `http://torneo-server:8080`, el alias del server en la red `torneo-edge`) con `X-Internal-Secret` (`INTERNAL_API_SECRET`, el mismo de los dos procesos).
+- **Ninguna cookie del navegador llega al server por el `fetch` interno, salvo la de sesión.** El `fetch` de Kit, después de `handleFetch`, reemplaza `cookie` por todas las cookies del navegador si el hostname del destino es `event.url.hostname` (que sale de `Host`, no de `PUBLIC_ORIGIN`) o un subdominio suyo. La barrera es `credentials: 'omit'` en las dos ramas de `handleFetch`: con `omit`, Kit no agrega nada y sale solo la cookie que puso el hook. Lo prueba `apps/web/e2e/internal-fetch.spec.ts` sobre el `fetch` real de Kit, con varios `Host`. Que `INTERNAL_API_URL` no pueda estar en el host de `PUBLIC_ORIGIN` ni en un subdominio suyo (validado al arrancar) es una defensa más, no la barrera.
+- `handleFetch` (`apps/web/src/lib/server/hooks/handle-fetch.ts`) agrega, **solo** si la URL empieza por `INTERNAL_API_URL` más `/`: la cookie de sesión de la política (`__Host-session`; `ta_dev_session` solo en loopback), el secreto, `X-Client-Ip` (`getClientAddress()`), y `X-Client-Origin` y `X-Client-Fetch-Site` copiados del navegador. Todo otro `fetch` sale sin cookie, secreto ni `x-client-*`.
+- En cada petición con cookie de sesión, el hook de sesión hace un `GET /api/me` y deja `locals.user`; esas respuestas van con `Cache-Control: private, no-store` y `Vary: Cookie`. Ningún `load` llama a una mutación: las mutaciones (`lib/server/api/mutations.ts`) solo se importan en un `+page.server.ts` y se llaman desde sus `actions` (ESLint y un test).
+- **Qué postea el navegador directo a `/api`** (el server tiene que poner o expirar una cookie en el navegador, y responde con un 303, nunca con JSON, por la Enmienda 2026-10-30 de RF-B5, salvo el 404 de un proveedor desconocido o apagado y el 403 `auth.csrf_origin`, que solo produce una petición armada a mano): `POST /api/auth/{p}/start`, `POST /api/auth/link/{p}`, `POST /api/auth/logout` y `POST /api/auth/logout-all`. El callback (`GET /api/auth/{p}/callback`) también es una navegación.
+- **Qué va por una form action de `web`** (sus errores son JSON y la página los muestra como texto): el renombre (`PUT /api/me/display-name`), las preferencias (`PUT /api/me/preferences`, acciones de `/preferences`) y desvincular (`POST /api/auth/unlink/{p}`).
+- Cada login pasa por `/<locale>/welcome`, que reescribe las cookies de tema e idioma con el perfil y manda al onboarding mientras el alias sea el generado.
 
 ## Tipos compartidos
 `crates/protocol` define los mensajes WS, los DTOs del API y el log de pelea (`FightLog`, `FightEvent` y sus enums, feature 003) con serde. Es una librería pura: sin I/O, sin `tokio`, sin reloj y sin texto para humanos (ADR-0007).
@@ -144,6 +175,7 @@ Scheduled ─▶ BettingOpen ─▶ BettingClosed ─▶ Live ─▶ Settled
    - **`api`**: no está implementado y el job **falla**. Implementarlo requiere un nuevo OK del owner, un token de Coolify de alcance de equipo y un secreto del environment (riesgo descrito en ADR-0006 D6).
 3. `verify` consulta `https://$PUBLIC_HOST/api/health` (variable de repositorio `PUBLIC_HOST`) cada 10 s durante 5 min, y falla si `version` no es el tag.
 4. **Rollback:** `workflow_dispatch` de `release.yml` desde `main` con el tag anterior. No reconstruye (solo comprueba que el tag existe en GHCR) y pasa por la misma aprobación.
+5. **Si `build` falla después de publicar** (en "Each tag is a single image manifest…" o en "The pushed server is the checked one (RF-D9)", la comparación de digests de `scripts/check-pushed-server.mjs`): `vX.Y.Z` y `sha-<7>` de `server`, y también los de `web`, **ya están en GHCR**, y `deploy` no corre. Esas imágenes no se despliegan nunca: si falló la comparación de digests, lo publicado no es el binario que se revisó (008 RF-D9), así que hay que investigar la causa antes de reintentar. Para reintentar, se borran a mano las versiones de `torneo-absurdo/server` y `torneo-absurdo/web` que llevan esas dos etiquetas (Package settings en GitHub, o `gh api -X DELETE` sobre la versión del paquete), porque "Neither tag is published yet" rechaza un tag que ya existe. Después se vuelve a empujar el tag o se publica un tag nuevo.
 
 Antes de aprobar un release que traiga migraciones se hace un "Backup now" de Postgres en Coolify, y nunca se despliega durante un main event (ADR-0006 D9 y D10).
 

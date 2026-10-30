@@ -1,7 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { checkCspSource, checkKitConfig } from '../check-kit-config.mjs';
+import { checkCspSource, checkProvidersSource, checkKitConfig } from '../check-kit-config.mjs';
 
 const FIXTURES = fileURLToPath(new URL('../__fixtures__/check-kit-config/', import.meta.url));
 const run = (name) => checkKitConfig(path.join(FIXTURES, name));
@@ -27,6 +28,9 @@ describe('check-kit-config (RF-A10, plan-a decision 17)', () => {
     expect(checkKitConfig(fileURLToPath(new URL('../../apps/web', import.meta.url)))).toEqual([]);
   });
 });
+
+const GOOGLE = 'https://accounts.google.com/o/oauth2/v2/auth';
+const DISCORD = 'https://discord.com/oauth2/authorize';
 
 const BASE = {
   'default-src': ['self'],
@@ -67,6 +71,9 @@ describe('check-kit-config: csp is the exact B1 allowlist (ADR-0012 consequence 
       'both B4 extensions',
       (d) => add('worker-src', 'self')(add('script-src', 'wasm-unsafe-eval')(d)),
     ],
+    // B4.6 (2026-10-30 amendment): the authorize endpoints of the two providers, with their path.
+    ['the two B4.6 sources in form-action', add('form-action', GOOGLE, DISCORD)],
+    ['one B4.6 source in form-action', add('form-action', DISCORD)],
   ])('allows %s', (_, edit) => {
     expect(csp(config(edit))).toEqual([]);
   });
@@ -101,6 +108,22 @@ describe('check-kit-config: csp is the exact B1 allowlist (ADR-0012 consequence 
     ['object-src', 'self'],
     ['base-uri', 'none'],
     ['form-action', 'https://evil.example'],
+    // B4.6: exactly the two sources, with their path, and only in form-action.
+    ['form-action', 'https://accounts.google.com'],
+    ['form-action', 'https://discord.com'],
+    ['form-action', 'https://discord.com/'],
+    ['form-action', 'https://discord.com/api/webhooks/x'],
+    ['form-action', 'https://discord.com/oauth2/authorize/'],
+    ['form-action', 'https://accounts.google.com/o/oauth2/auth'],
+    ['form-action', 'https://evil.example/oauth2/authorize'],
+    ['form-action', 'https://discord.com:8443/oauth2/authorize'],
+    ['form-action', 'http://discord.com/oauth2/authorize'],
+    ['form-action', 'https:'],
+    ['form-action', '*'],
+    ['form-action', 'https://*.discord.com/oauth2/authorize'],
+    ['connect-src', 'https://discord.com/oauth2/authorize'],
+    ['default-src', 'https://accounts.google.com/o/oauth2/v2/auth'],
+    ['script-src', 'https://accounts.google.com/o/oauth2/v2/auth'],
     ['frame-ancestors', 'self'],
     // B3: 'wasm-unsafe-eval' outside script-src
     ['default-src', 'wasm-unsafe-eval'],
@@ -344,5 +367,48 @@ describe('check-kit-config: csp is the exact B1 allowlist (ADR-0012 consequence 
     expect(csp(source)).toEqual([
       `vite.config.ts:${line}: csp (ADR-0012 B1/B4): \`connect-src\` must not contain 'https:'`,
     ]);
+  });
+});
+
+// B4.6 is tied to providers.rs (security-reviewer, recommendation of the amendment): the two
+// constants of the server are exactly the two sources of the allowlist.
+describe('check-kit-config: B4.6 matches GOOGLE_AUTHORIZE and DISCORD_AUTHORIZE', () => {
+  const RS = `pub const GOOGLE_AUTHORIZE: &str = "${GOOGLE}";
+pub const GOOGLE_TOKEN: &str = "https://oauth2.googleapis.com/token";
+pub const DISCORD_AUTHORIZE: &str = "${DISCORD}";
+
+#[cfg(test)]
+mod tests {
+    const GOOGLE_AUTHORIZE: &str = "https://decoy.example/x";
+}
+`;
+  const check = (text) => checkProvidersSource(text, 'providers.rs');
+
+  it('passes on the real providers.rs', () => {
+    const real = readFileSync(
+      new URL('../../apps/server/src/auth/providers.rs', import.meta.url),
+      'utf8',
+    );
+    expect(check(real)).toEqual([]);
+  });
+
+  it('passes on matching constants, ignoring the test module', () => {
+    expect(check(RS)).toEqual([]);
+  });
+
+  it.each([
+    ['a drifted Google URL', RS.replace(GOOGLE, 'https://accounts.google.com/o/oauth2/auth')],
+    ['a drifted Discord URL', RS.replace(DISCORD, 'https://discord.com/api/oauth2/authorize')],
+    ['a missing constant', RS.replace(/pub const DISCORD_AUTHORIZE[^\n]*\n/, '')],
+    [
+      'a repeated constant',
+      RS.replace(
+        'pub const GOOGLE_TOKEN',
+        `pub const GOOGLE_AUTHORIZE: &str = "${GOOGLE}";\npub const GOOGLE_TOKEN`,
+      ),
+    ],
+  ])('fails on %s', (_name, text) => {
+    expect(check(text).length).toBeGreaterThan(0);
+    expect(check(text).join('\n')).toMatch(/B4\.6/);
   });
 });

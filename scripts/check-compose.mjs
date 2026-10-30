@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // RF-C3, RF-C4, RF-C6 and plan-c decisions 9 and 10: the production compose, the local override,
-// .dockerignore and the Dockerfiles keep the exact shape the deployment depends on.
+// .dockerignore and the Dockerfiles keep the exact shape the deployment depends on. Since 008
+// RF-D9 (plan-d decision 12) also that the release image can never be built with dev-auth: no
+// feature flag in the server Dockerfile, and `default` of apps/server/Cargo.toml never reaches it.
 //
 // Every problem is `<file>: <rule>: <detail>`. The Traefik header values are derived from
 // SECURITY_HEADERS (apps/web/src/lib/server/hooks/security-headers.ts), the single source of truth.
@@ -18,6 +20,7 @@ export const FILES = {
   dev: 'infra/compose.dev.yml',
   dockerignore: '.dockerignore',
   serverDockerfile: 'apps/server/Dockerfile',
+  serverCargo: 'apps/server/Cargo.toml',
   webDockerfile: 'apps/web/Dockerfile',
   toolchain: 'rust-toolchain.toml',
   nodeVersion: '.node-version',
@@ -67,6 +70,10 @@ const ENV = {
   },
   web: {
     PUBLIC_ORIGIN,
+    // ADR-0008 D5, 008 decision 12: the alias of server on torneo-edge, literal, and the same
+    // required secret as server (never a literal in git).
+    INTERNAL_API_URL: 'http://torneo-server:8080',
+    INTERNAL_API_SECRET: '${INTERNAL_API_SECRET:?}',
     ADDRESS_HEADER: 'X-Forwarded-For',
     XFF_DEPTH: '1',
     HOST: '0.0.0.0',
@@ -833,6 +840,229 @@ function checkDockerfiles(read, problems) {
 }
 
 /**
+ * Instructions of a Dockerfile with the `\` continuations joined and the comment lines dropped
+ * (also inside a continuation, as BuildKit does). 008 plan-d decision 12: the cook RUN of the
+ * server goes on in a second line, so a check line by line would miss a flag there.
+ * @param {string} text
+ * @returns {{ line: number, keyword: string, args: string }[]}
+ */
+export function dockerInstructions(text) {
+  /** @type {{ line: number, keyword: string, args: string }[]} */
+  const out = [];
+  /** @type {{ line: number, text: string } | null} */
+  let current = null;
+  const finish = () => {
+    if (!current) return;
+    const m = /^\s*(\S+)\s*([\s\S]*)$/.exec(current.text);
+    if (m) out.push({ line: current.line, keyword: m[1].toUpperCase(), args: m[2].trim() });
+    current = null;
+  };
+  text.split('\n').forEach((raw, index) => {
+    if (/^\s*#/.test(raw) || /^\s*$/.test(raw)) return;
+    if (!current) current = { line: index + 1, text: '' };
+    const continued = /\\\s*$/.exec(raw);
+    if (continued) {
+      current.text += `${raw.slice(0, continued.index)} `;
+      return;
+    }
+    current.text += raw;
+    finish();
+  });
+  finish();
+  return out;
+}
+
+/** Flags that select cargo features: `-F` alone, glued (`-Fx`) or bundled (`-rFx`). */
+// A token starts after a space, a quote or the `=` of an ARG or ENV value.
+const FEATURE_FLAGS = [
+  { flag: '--all-features', pattern: /(?:^|[\s"'=])--all-features(?=[\s"']|$)/ },
+  { flag: '--features', pattern: /(?:^|[\s"'=])--features(?=[\s"'=]|$)/ },
+  { flag: '-F', pattern: /(?:^|[\s"'=])-[A-Za-z]*F/ },
+];
+
+/**
+ * 008 RF-D9: no instruction of the server Dockerfile selects a feature or names dev-auth.
+ * Fails closed on what this reader does not model: an escape directive (it changes what `\`
+ * means) and heredocs (their lines are not instructions).
+ * @param {string} text
+ * @param {string[]} problems
+ */
+function checkServerDockerfileFeatures(text, problems) {
+  const file = FILES.serverDockerfile;
+  text.split('\n').forEach((raw, index) => {
+    if (/^\s*#\s*escape\s*=/i.test(raw)) {
+      problems.push(`${file}:${index + 1}: dockerfile-parse: the escape directive is not allowed`);
+    }
+  });
+  for (const { line, keyword, args } of dockerInstructions(text)) {
+    const at = `${file}:${line}`;
+    if (/<<-?\s*["']?[A-Za-z_]/.test(args)) {
+      problems.push(`${at}: dockerfile-parse: ${keyword} with a heredoc is not allowed`);
+    }
+    for (const { flag, pattern } of FEATURE_FLAGS) {
+      if (pattern.test(args)) {
+        problems.push(`${at}: no-features: ${keyword} uses ${flag} (the release has no features)`);
+      }
+    }
+    if (args.includes('dev-auth')) {
+      problems.push(`${at}: no-dev-auth: ${keyword} names dev-auth (never in the release image)`);
+    }
+  }
+}
+
+const FEATURE_KEY = /^[A-Za-z0-9_-]+$/;
+const FEATURE_VALUE = /^"([A-Za-z0-9_?/:-]+)"$/;
+const DEV_AUTH_DEFINITION = 'dev-auth = []';
+
+/** The text of a TOML line before a `#` comment (the values read here never contain `#`). */
+const codeOf = (line) => line.replace(/#.*$/, '').trim();
+
+/**
+ * Reads only the [features] table of a Cargo.toml: bare keys and arrays of basic strings, on
+ * one line or several, comments included. Anything else in that table, a repeated table, a
+ * `[features.x]` or a `features` key at the root is a problem: it fails closed instead of
+ * guessing (008 plan-d decision 12, no TOML parser).
+ * @param {string} text
+ * @param {string} file
+ * @param {string[]} problems
+ * @returns {Map<string, { line: number, values: string[] }>}
+ */
+export function cargoFeatures(text, file, problems) {
+  const rule = 'cargo-features';
+  /** @type {Map<string, { line: number, values: string[] }>} */
+  const features = new Map();
+  /** @type {string | null} null before the first table header */
+  let table = null;
+  let seen = false;
+  /** @type {{ key: string, line: number, code: string } | null} */
+  let pending = null;
+  const fail = (line, message) => problems.push(`${file}:${line}: ${rule}: ${message}`);
+
+  const finish = () => {
+    if (!pending) return;
+    const { key, line, code } = pending;
+    pending = null;
+    const array = /^\[([\s\S]*)\]$/.exec(code);
+    const items = array ? array[1].split(',').map((item) => item.trim()) : null;
+    if (items && items.at(-1) === '') items.pop();
+    const values = items?.map((item) => FEATURE_VALUE.exec(item)?.[1]);
+    if (!values || values.some((v) => v === undefined)) {
+      fail(line, `${key}: not an array of strings`);
+      return;
+    }
+    if (features.has(key)) fail(line, `${key} is repeated`);
+    features.set(key, { line, values: /** @type {string[]} */ (values) });
+  };
+
+  text.split('\n').forEach((raw, index) => {
+    const line = index + 1;
+    const code = codeOf(raw);
+    if (pending) {
+      pending.code += ` ${code}`;
+      if (code.includes(']') || /^\[/.test(code)) finish();
+      return;
+    }
+    if (code === '') return;
+    const header = /^\[\[?(.*?)\]\]?$/.exec(code);
+    if (header) {
+      const name = header[1].trim();
+      table = code.startsWith('[[') ? `[${name}]` : name;
+      if (table === 'features') {
+        if (seen) fail(line, '[features] is repeated');
+        seen = true;
+      } else if (/^["']?features["']?(\s*\.|$)/.test(name)) {
+        fail(line, `[${name}] is not understood (only a plain [features] table)`);
+      }
+      return;
+    }
+    if (table === null) {
+      if (/^["']?features["']?\s*[.=]/.test(code)) {
+        fail(line, 'features outside [features] (a dotted key or an inline table)');
+      }
+      return;
+    }
+    if (table !== 'features') return;
+    const entry = /^([^=]*?)\s*=\s*(.*)$/.exec(code);
+    if (!entry) {
+      fail(line, 'not a key = value line');
+      return;
+    }
+    const [, key, value] = entry;
+    if (!FEATURE_KEY.test(key)) {
+      fail(line, `${key} must be a bare key, without quotes or dots`);
+      return;
+    }
+    pending = { key, line, code: value };
+    if (!value.startsWith('[') || value.includes(']')) finish();
+  });
+  if (pending) {
+    const { key, line } = pending;
+    pending = null;
+    fail(line, `${key}: not an array of strings`);
+  }
+  return features;
+}
+
+/**
+ * 008 RF-D9: `default` never reaches dev-auth, and dev-auth appears only in its definition.
+ * @param {string | null} text
+ * @param {string[]} problems
+ */
+function checkServerCargo(text, problems) {
+  const file = FILES.serverCargo;
+  const rule = 'cargo-features';
+  if (text === null) {
+    problems.push(`${file}: exists: missing`);
+    return;
+  }
+  const features = cargoFeatures(text, file, problems);
+
+  // The word counts everywhere, comments included: the strictest reading (devops, ronda 2).
+  const lines = text.split('\n');
+  let definitions = 0;
+  lines.forEach((raw, index) => {
+    if (!raw.includes('dev-auth')) return;
+    if (raw.trim() === DEV_AUTH_DEFINITION && features.get('dev-auth')?.line === index + 1) {
+      definitions += 1;
+      return;
+    }
+    problems.push(`${file}:${index + 1}: ${rule}: dev-auth outside its definition`);
+  });
+  if (definitions !== 1) {
+    problems.push(`${file}: ${rule}: [features] must define exactly ${DEV_AUTH_DEFINITION}`);
+  }
+
+  // Transitive closure from default. `dep:x` names a dependency, not a feature, and `x/y` or
+  // `x?/y` a feature of a dependency: neither is followed, but any `…/dev-auth` fails.
+  const visited = new Set();
+  /** @param {string} name @param {string | null} via */
+  const visit = (name, via) => {
+    if (visited.has(name)) return;
+    visited.add(name);
+    for (const value of features.get(name)?.values ?? []) {
+      const through = via ?? (name === 'default' ? null : name);
+      const reach = (what) =>
+        problems.push(
+          `${file}: ${rule}: default reaches dev-auth${through ? ` through ${through}` : ''} (${what})`,
+        );
+      if (value.startsWith('dep:')) continue;
+      const slash = value.indexOf('/');
+      if (slash !== -1) {
+        if (value.slice(slash + 1) === 'dev-auth') reach(value);
+        continue;
+      }
+      if (value === 'dev-auth') reach(value);
+      else if (features.has(value)) visit(value, through ?? value);
+      else
+        problems.push(
+          `${file}: ${rule}: unknown feature ${value} (an optional dependency goes as dep:)`,
+        );
+    }
+  };
+  if (features.has('default')) visit('default', null);
+}
+
+/**
  * @typedef {{ read: (rel: string) => string | null, files: string[] }} Tree
  */
 
@@ -870,6 +1100,9 @@ export function checkCompose(tree) {
 
   checkDockerignore(tree.read(FILES.dockerignore), tree.files, problems);
   checkDockerfiles(tree.read, problems);
+  const serverDockerfile = tree.read(FILES.serverDockerfile);
+  if (serverDockerfile !== null) checkServerDockerfileFeatures(serverDockerfile, problems);
+  checkServerCargo(tree.read(FILES.serverCargo), problems);
   return problems;
 }
 

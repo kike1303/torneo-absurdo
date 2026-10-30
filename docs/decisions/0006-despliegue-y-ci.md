@@ -13,7 +13,7 @@ supersedes: null
 linear: TA-5
 depends_on: ["0002", "0003", "0005"]
 created: 2026-10-20
-updated: 2026-10-26
+updated: 2026-10-30
 ---
 
 # ADR-0006: Despliegue en Coolify y CI con presupuesto cero
@@ -259,6 +259,16 @@ updated: 2026-10-26
 - **Dónde está el detalle:** `docs/features/001-fundaciones/plan-c.md`, desviación 21.
 - **Estado:** esta nota no cambia el `status` ni las approvals del ADR, ni el texto de D7.
 
+### 2026-10-30 — architect: el job `e2e-server` y su timeout (TA-26)
+- **Qué:** la fase D de 008 (`docs/features/008-autenticacion/plan-d.md`) agrega a `ci.yml` el job `e2e-server`, que compila el server con `dev-auth` y lo pasa a `e2e` como artifact. `e2e` pasa a depender de él (`needs`). D7 cambia en tres puntos:
+  - **Timeout.** `e2e-server` lleva `timeout-minutes: 20`. La lista de D7 y la de "Números fijados" se leen con ese job sumado. Tampoco nombraban `policy` ni `ci-ok`, que ya existen con 5 min cada uno. Con todo, queda `changes` 5, `policy` 5, `rust` 20, `web` 15, `e2e-server` 20, `e2e` 20, `images` 25, `ci-ok` 5, `build` (release) 30, `deploy` 10 y `verify` 10.
+  - **Filtro.** `changes` suma una salida `e2e` con `apps/server/**`, `crates/protocol/**`, `content/names/**`, `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo/**` y `.sqlx/**`, además de lo que ya dispara `e2e` por `web` y los comunes. No usa `crates/**`: un PR que solo toca `crates/sim` o `crates/content` no corre el e2e.
+  - **Caché.** `e2e-server` restaura la caché `shared-key: ci` de `rust` con `save-if: false`, así que nunca la escribe, ni siquiera en `main`. Si la escribiera, en `main` el job más corto le ganaría la llave a `rust` con una caché parcial.
+- **Por qué es una nota y no una enmienda:** es una cifra más en la lista fija y un job más bajo las mismas reglas. La decisión de D7 no cambia: los mismos filtros por `changes`, `ci-ok` como único check requerido, solo `main` escribe caché, actions fijadas por SHA y `timeout-minutes` en todos los jobs.
+- **Objetivo de velocidad.** Se mantiene el de D7: un PR con Rust y caché caliente en ≤ 8 min (p50). Plan-d lo mide en su PR, con las palancas en el orden que fija ahí. Si después de aplicarlas sigue por encima, la desviación la firma architect con los números medidos y queda en una nota aparte.
+- **Si la primera corrida en frío de `e2e-server` se acerca a los 20 min,** devops-engineer sube su timeout con la misma regla que `images`, y lo agrega a esta nota.
+- **Estado:** revisada por devops-engineer el 2026-10-30 (APPROVE, ver "Revisión"). Esta nota no cambia el `status` ni las approvals del ADR, ni el texto de D7. El gate del owner no aplica a una nota, y si aplicara lo cubre su delegación del 2026-10-29 (spec de 008, "Revisión → owner").
+
 ## Revisión
 ### devops-engineer — 2026-10-20 — REQUEST_CHANGES
 - Verifiqué:
@@ -356,3 +366,18 @@ updated: 2026-10-26
   3. **Caché de imágenes**: `cache-to: type=gha,mode=max` (con `mode=min` no se guarda la etapa `cook` de `cargo-chef`) y un `scope` por imagen (`scope=server`, `scope=web`). Si no, las dos imágenes se pisan la caché.
   4. **`DEPLOY_MODE` a prueba de fallos**: cualquier valor distinto de `api`, incluido no definirla, se trata como `manual`. Con `api`, la lista "Allowed IPs" de la API de Coolify no puede limitarse a los runners de GitHub, porque sus IPs cambian. Ese es un argumento más para `manual`.
   5. **`deny.toml`**: usar la sintaxis actual `{ crate = "openssl-sys" }` y `[graph] targets = ["x86_64-unknown-linux-musl"]`, para evaluar las dependencias del target real. Con un destination `torneo-db`, Coolify también conecta el proxy a esa red. Es inofensivo, porque Traefik entra por `torneo-edge`, pero la verificación 15 no debe tomarlo como un fallo.
+
+### devops-engineer — 2026-10-30 — APPROVE (nota "el job `e2e-server` y su timeout")
+**🤖 devops-engineer**
+- Verifiqué: la nota contra `.github/workflows/ci.yml` y `release.yml` de 97053ae, contra `scripts/check-workflows.mjs`, contra la "Estimación de CI" y las revisiones de plan-d (mis puntos 1 a 3 y la respuesta 10 de architect) y contra plan-c de 001 (decisión 16 y la desviación del timeout de `images`).
+  - **Timeouts.** La lista coincide con el código: `changes` 5, `policy` 5, `rust` 20, `web` 15, `e2e` 20, `images` 25 y `ci-ok` 5 en `ci.yml`, y `build` 30, `deploy` 10 y `verify` 10 en `release.yml`. Es cierto que D7 y "Números fijados" no nombraban `policy` ni `ci-ok`. Para `e2e-server`, 20 min dejan el doble de margen sobre la estimación en frío de plan-d (de 8 a 10 min).
+  - **Filtro.** Resuelve mi punto 3. Sin `crates/**`, un PR de balance (`crates/sim`, `crates/content`) no corre `e2e-server` ni `e2e`. `crates/protocol/**` ya está en `web`, así que repetirlo en `e2e` no cambia nada, pero deja explícita la única dependencia del server dentro del workspace. `content/names/**` solo existe en esta salida, y hace falta.
+  - **Caché.** Resuelve mi punto 1. `Swatinem/rust-cache` no sobrescribe una llave que ya existe, así que el primer job que guarda se queda con la llave. Con `save-if: false`, `e2e-server` nunca le gana a `rust` y no suma una llave a una caché que ya pasa de 10 GB.
+  - **`ci-ok`.** Si `e2e-server` falla, `e2e` queda `skipped` y `ci-ok` lo contaría como éxito. No pasa porque `check-workflows.mjs` exige que `ci-ok` dependa de todos los demás jobs (RF-C12), y plan-d lo agrega en `needs`. La invariante de D7 se mantiene.
+  - **Objetivo de ≤ 8 min.** Se mantiene, con las palancas (b) y (c) en orden y la desviación firmada por architect si hace falta. La estimación de plan-d (de 9 a 11 min de pared con caché caliente) lo incumple antes de las palancas, así que la medición en el PR es obligatoria y no opcional.
+  - **Forma.** El frontmatter es válido y `updated` es correcto. Como nota no cambia `status`, approvals ni el texto de D7, igual que las notas del 2026-10-24 y el 2026-10-26. No contradice ningún ADR `approved`.
+- Cómo leo "la misma regla que `images`", para que se pueda verificar: subo el timeout de `e2e-server` solo si hay una corrida en frío medida que pase de 15 min, como mucho hasta 30 min. La duración medida queda en esta nota y en "Desviaciones" de plan-d. Si architect fija otro techo, lo corrige en la nota.
+- Condiciones para el PR de plan-d (no cambian la nota):
+  1. El cuerpo de plan-d todavía contradice la nota: la línea del filtro dice `crates/**` y la de `e2e-server` dice "el mismo `save-if` de `rust`". Hay que alinear las dos antes de aprobar plan-d.
+  2. `e2e-server` no define `CARGO_*` ni `RUST*` propias en `env:` (por ejemplo, `RUSTFLAGS`). `rust-cache` las mete en el hash de la llave. Si difieren de las de `rust`, la llave nunca coincide y, con `save-if: false`, el job va en frío en cada corrida sin que se note.
+  3. `e2e-server` lleva el mismo `if: needs.changes.outputs.e2e == 'true'` que `e2e`. Así no compila en PR donde `e2e` no corre.

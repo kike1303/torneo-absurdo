@@ -38,7 +38,32 @@ pub fn error_location(code: CallbackErrorCode) -> HeaderValue {
     HeaderValue::from_str(&location).unwrap_or(HeaderValue::from_static("/"))
 }
 
-/// The error redirect of the callback.
+/// The login page with no query: where `link` without a session sends the browser (008
+/// "Enmienda 2026-10-30" of RF-C2). Built here, beside [`error_location`], so every `Location`
+/// to the login page has one home.
+pub fn login_location() -> HeaderValue {
+    HeaderValue::from_static("/login")
+}
+
+/// 303 to `auth.try_again` with no cookie change, for a 429 or a 503 of a route the browser
+/// navigates to (008 "Enmienda 2026-10-30" of RF-B5): no `Retry-After`, no body, never `next`.
+/// `cache_control` is `no-store`, or `private, no-store` where the session was read.
+pub fn try_again_redirect(cache_control: HeaderValue) -> Response {
+    (
+        StatusCode::SEE_OTHER,
+        [
+            (
+                header::LOCATION,
+                error_location(CallbackErrorCode::TryAgain),
+            ),
+            (header::CACHE_CONTROL, cache_control),
+        ],
+    )
+        .into_response()
+}
+
+/// The error redirect of the callback: it always expires the flow cookie. The quota layer of the
+/// callback (`rate::http::redirect_layer`) answers with this very function.
 pub fn error_redirect(cookies: &CookiePolicy, code: CallbackErrorCode) -> Response {
     let location = error_location(code);
     (

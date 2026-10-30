@@ -28,6 +28,7 @@ export const JOB_PERMISSIONS = {
     policy: READ,
     rust: READ,
     web: READ,
+    'e2e-server': READ,
     e2e: READ,
     images: READ,
     'ci-ok': {},
@@ -38,6 +39,58 @@ export const JOB_PERMISSIONS = {
     verify: {},
   },
 };
+
+// 008 plan-d decision 12: the artifact of e2e-server is downloaded only by name, from this run.
+const DOWNLOAD_ARTIFACT = /^actions\/download-artifact@/i;
+const DOWNLOAD_FORBIDDEN = ['run-id', 'github-token', 'repository'];
+// rust-cache (v2, src/config.ts) puts every variable with one of these prefixes in its key: one
+// of e2e-server's own would make it miss the cache of `rust` and, with save-if: false, run cold.
+const CACHE_KEY_ENV = /^(?:CARGO|CC|CFLAGS|CXX|CMAKE|RUST)/;
+const RUST_CACHE = /^Swatinem\/rust-cache@/i;
+// The only inputs e2e-server's rust-cache may set: any other one (key, prefix-key, env-vars,
+// workspaces…) changes the key or what is restored.
+const E2E_CACHE_INPUTS = new Set(['shared-key', 'save-if']);
+// Review of PR #56: values of the run (session token, user id, alias, dev_identity) that the
+// e2e writes so the teardown can look for them in the logs. They never go into an artifact.
+const CANARIES_FILE = 'apps/web/test-results/logs/dynamic-canaries.txt';
+const UPLOAD_ARTIFACT = /^actions\/upload-artifact@/i;
+const E2E_IF = "needs.changes.outputs.e2e == 'true'";
+const COMPOSE_DEV = 'infra/compose.dev.yml';
+
+// ADR-0012 B6.4 item 7 (2026-10-30 amendment): the two copies of the web CSP in the workflows.
+const CSP_STEPS = [
+  { workflow: 'ci.yml', job: 'images', step: 'Health, version and headers (RF-C7)' },
+  { workflow: 'release.yml', job: 'verify', step: 'Security headers (ADR-0012 B2)' },
+];
+const B1_ASSIGNMENT = /^[ \t]*b1=(.*)$/gm;
+
+// 008 RF-D9, plan-d decision 12: the server image of a release is built twice with the same
+// inputs, checked between the two builds and compared by config digest before the retention.
+const BUILD_PUSH = /^docker\/build-push-action@/i;
+const RETENTION = /^actions\/delete-package-versions@/i;
+const SERVER_DOCKERFILE = 'apps/server/Dockerfile';
+const RELEASE_CHECK_TAG = 'torneo-release-check/server:local';
+const SAME_INPUTS = [
+  'context',
+  'file',
+  'platforms',
+  'build-args',
+  'labels',
+  'provenance',
+  'sbom',
+  'cache-from',
+];
+const BUILD_INPUTS = [...SAME_INPUTS, 'push', 'load', 'tags'];
+const RELEASE_CHECK = /node scripts\/check-release-binary\.mjs(?! --expect-dev)\s/;
+// QA finding 3 of phase D: a check that cannot fail is no check. The command is a whole line (no
+// `|| true`, `;`, `&`, `if`), the step runs on bash -e, and the comparison is a tested script.
+const RELEASE_CHECK_LINE = /^node scripts\/check-release-binary\.mjs (?:"[^"]*"|[A-Za-z0-9_./-]+)$/;
+const PUSHED_CHECK = 'node scripts/check-pushed-server.mjs';
+// Review of PR #56 (qa): a `set` with a `+` option anywhere (`set +e`, `set -x +e`, `set +o
+// errexit`, also behind `eval '`, `builtin` or `\set`), and any `shopt -o`, which reaches errexit and
+// pipefail (`shopt -u -o errexit`, `shopt -uo pipefail`).
+const SET_PLUS = /(?:^|[^\w./-])set\s(?:[^;&|]*\s)?['"]?\+/;
+const SHOPT_O = /(?:^|[^\w./-])shopt\s(?:[^;&|]*\s)?-[a-z]*o/;
 
 const FORBIDDEN_TRIGGERS = ['pull_request_target', 'workflow_run'];
 // Data an outsider controls. Plan-c goes further: no `${{ }}` at all inside `run:` (see below).
@@ -221,6 +274,8 @@ function checkSteps(steps, where, file, problems, local) {
     }
     if (typeof step.uses === 'string') {
       checkUses(step.uses, at, file, problems, local);
+      if (DOWNLOAD_ARTIFACT.test(step.uses)) checkDownload(step, at, file, problems);
+      if (UPLOAD_ARTIFACT.test(step.uses)) checkUpload(step, at, file, problems);
       if (CHECKOUT.test(step.uses)) {
         const persist = isMap(step.with) ? step.with['persist-credentials'] : undefined;
         if (persist !== false && persist !== 'false') {
@@ -239,6 +294,385 @@ function checkSteps(steps, where, file, problems, local) {
       step.with.script.includes('${{')
     ) {
       problems.push(`${file}: script-expression: ${at} interpolates \${{ }} inside with.script`);
+    }
+  });
+}
+
+/** A path of upload-artifact without `./`, or `undefined` for an empty line. */
+function uploadPath(line) {
+  const trimmed = line.trim().replace(/^(!?)(?:\.\/)+/, '$1');
+  return trimmed === '' ? undefined : trimmed.replace(/\/+$/, '');
+}
+
+/** Whether an include pattern of upload-artifact (a path or a glob) takes `target`. */
+function uploadTakes(pattern, target) {
+  if (/[*?[]/.test(pattern)) {
+    const re = new RegExp(
+      `^${pattern
+        .replace(/[.+^${}()|\\]/g, '\\$&')
+        .replace(/\*\*/g, '\u0000')
+        .replace(/\*/g, '[^/]*')
+        .replace(/\?/g, '[^/]')
+        .replace(/\u0000/g, '.*')}(?:/.*)?$`,
+    );
+    return re.test(target);
+  }
+  return target === pattern || target.startsWith(`${pattern}/`) || pattern === '.';
+}
+
+/**
+ * Review of PR #56: an `actions/upload-artifact` that takes the canaries file of the e2e (by a
+ * parent directory or a glob) excludes it with `!${CANARIES_FILE}`. Artifacts of a public repo
+ * can be downloaded by anyone signed in to GitHub.
+ */
+function checkUpload(step, at, file, problems) {
+  const raw = isMap(step.with) ? step.with.path : undefined;
+  if (typeof raw !== 'string') return;
+  const lines = raw
+    .split('\n')
+    .map(uploadPath)
+    .filter((p) => p !== undefined);
+  const takes = lines.some((p) => !p.startsWith('!') && uploadTakes(p, CANARIES_FILE));
+  const excluded = lines.includes(`!${CANARIES_FILE}`);
+  if (takes && !excluded) {
+    problems.push(
+      `${file}: upload-canaries: ${at} uploads ${CANARIES_FILE}: add the line !${CANARIES_FILE} to its path`,
+    );
+  }
+}
+
+/**
+ * `actions/download-artifact` only by `name`, without `run-id`, `github-token` or `repository`,
+ * which would bring a binary of another run (008 plan-d decision 12, change 10 of devops).
+ */
+function checkDownload(step, at, file, problems) {
+  const withs = isMap(step.with) ? step.with : {};
+  for (const key of DOWNLOAD_FORBIDDEN) {
+    if (key in withs) {
+      problems.push(`${file}: download-artifact: ${at} must not set ${key} (only this run)`);
+    }
+  }
+  if (typeof withs.name !== 'string' || withs.name === '') {
+    problems.push(`${file}: download-artifact: ${at} must download by name`);
+  }
+}
+
+/** The image of the `postgres` service of infra/compose.dev.yml, or `undefined`. */
+function composeDevPostgres(tree) {
+  const text = tree.read(COMPOSE_DEV);
+  if (text === null) return undefined;
+  try {
+    const doc = parseDocument(text).toJS();
+    const image = doc?.services?.postgres?.image;
+    return typeof image === 'string' ? image : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The `with` of every Swatinem/rust-cache step of a job. */
+function rustCaches(job) {
+  const steps = isMap(job) && Array.isArray(job.steps) ? job.steps : [];
+  return steps
+    .map((step, i) => [i, step])
+    .filter(
+      ([, step]) => isMap(step) && typeof step.uses === 'string' && RUST_CACHE.test(step.uses),
+    )
+    .map(([i, step]) => [i, isMap(step.with) ? step.with : {}]);
+}
+
+/**
+ * Review of PR #56 (devops): e2e-server reads the cache of `rust` and never writes it, so a PR
+ * cannot fill the shared cache with a dev-auth build. Its rust-cache sets save-if: false, the
+ * shared-key of `rust`, and no other input.
+ */
+function checkE2eCache(jobs, file, problems) {
+  const caches = rustCaches(jobs['e2e-server']);
+  if (caches.length === 0) {
+    problems.push(`${file}: e2e-server-cache: jobs.e2e-server must use Swatinem/rust-cache`);
+    return;
+  }
+  const shared = rustCaches(jobs.rust).map(([, w]) => w['shared-key']);
+  for (const [i, withs] of caches) {
+    const at = `jobs.e2e-server.steps[${i}]`;
+    const save = withs['save-if'];
+    if (save !== false && save !== 'false') {
+      problems.push(`${file}: e2e-server-cache: ${at} must set save-if: false`);
+    }
+    const key = withs['shared-key'];
+    if (typeof key !== 'string' || shared.length !== 1 || shared[0] !== key) {
+      problems.push(
+        `${file}: e2e-server-cache: ${at} must set the shared-key of the one rust-cache of jobs.rust (${show(shared)})`,
+      );
+    }
+    for (const input of Object.keys(withs).filter((k) => !E2E_CACHE_INPUTS.has(k))) {
+      problems.push(
+        `${file}: e2e-server-cache: ${at} must not set ${input} (it changes the key of the cache of jobs.rust)`,
+      );
+    }
+  }
+}
+
+/**
+ * ci.yml, 008 plan-d decision 12: e2e-server runs exactly when e2e does, without CARGO_* or
+ * RUST* variables of its own, and every Postgres service uses the image of compose.dev.yml (a
+ * Dependabot bump of one fails here, in `policy`, until the other moves too).
+ */
+function checkE2e(jobs, file, problems, tree) {
+  const server = jobs['e2e-server'];
+  const e2e = jobs.e2e;
+  if (isMap(e2e) && String(e2e.if ?? '').trim() !== E2E_IF) {
+    problems.push(`${file}: e2e-server-if: jobs.e2e must run with if: ${E2E_IF}`);
+  }
+  if (isMap(server)) {
+    if (String(server.if ?? '').trim() !== String(e2e?.if ?? '').trim()) {
+      problems.push(
+        `${file}: e2e-server-if: jobs.e2e-server must run with the same if: as jobs.e2e`,
+      );
+    }
+    const envs = [
+      ['jobs.e2e-server.env', server.env],
+      ...(Array.isArray(server.steps) ? server.steps : []).map((step, i) => [
+        `jobs.e2e-server.steps[${i}].env`,
+        isMap(step) ? step.env : undefined,
+      ]),
+    ];
+    for (const [where, env] of envs) {
+      if (!isMap(env)) continue;
+      for (const name of Object.keys(env).filter((k) => CACHE_KEY_ENV.test(k))) {
+        problems.push(
+          `${file}: e2e-server-env: ${where} sets ${name}: rust-cache keys on CARGO*, CC*, CFLAGS*, CXX*, CMAKE* and RUST*, and with save-if: false the job would run cold`,
+        );
+      }
+    }
+    checkE2eCache(jobs, file, problems);
+  }
+  const expected = composeDevPostgres(tree);
+  for (const [id, job] of Object.entries(jobs)) {
+    if (!isMap(job) || !isMap(job.services)) continue;
+    for (const [name, service] of Object.entries(job.services)) {
+      const image = isMap(service) ? service.image : service;
+      if (typeof image !== 'string' || !/^postgres:/.test(image)) continue;
+      if (expected === undefined) {
+        problems.push(
+          `${file}: postgres-digest: jobs.${id}.services.${name}: ${COMPOSE_DEV} has no postgres image to compare with`,
+        );
+      } else if (image !== expected) {
+        problems.push(
+          `${file}: postgres-digest: jobs.${id}.services.${name} must use the image of ${COMPOSE_DEV} (${expected})`,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * ADR-0012 B6.4 item 7: `b1=` appears once in the headers step of `images` (ci.yml) and once in
+ * the one of `verify` (release.yml), and both are identical byte for byte. `images` compares the
+ * first with the image, so the second is checked before the merge, in `policy`.
+ * @param {Map<string, any>} docs parsed workflows by file name
+ */
+function checkCspCopies(docs, problems) {
+  /** @type {{ where: string, value: string }[]} */
+  const values = [];
+  for (const { workflow, job, step } of CSP_STEPS) {
+    const doc = docs.get(workflow);
+    if (!doc) continue;
+    const file = `${WORKFLOWS_DIR}/${workflow}`;
+    const steps = Array.isArray(doc.jobs?.[job]?.steps) ? doc.jobs[job].steps : [];
+    const named = steps.filter((s) => isMap(s) && s.name === step);
+    if (named.length !== 1) {
+      problems.push(
+        `${file}: csp-b1: jobs.${job} must have exactly one step named ${show(step)}, found ${named.length}`,
+      );
+      continue;
+    }
+    const run = typeof named[0].run === 'string' ? named[0].run : '';
+    const found = [...run.matchAll(B1_ASSIGNMENT)];
+    const where = `jobs.${job} (${step})`;
+    if (found.length !== 1) {
+      problems.push(`${file}: csp-b1: ${where} must set b1= exactly once, found ${found.length}`);
+      continue;
+    }
+    values.push({ where: `${where} of ${workflow}`, value: found[0][1] });
+  }
+  if (values.length === 2 && values[0].value !== values[1].value) {
+    problems.push(
+      `${WORKFLOWS_DIR}/release.yml: csp-b1: the b1= of ${values[0].where} and of ${values[1].where} must be identical byte for byte (ADR-0012 B6.4 item 7)`,
+    );
+  }
+}
+
+/**
+ * Why a step that runs `line` could pass while `line` fails, or null when it fails closed. The
+ * effective shell is the default (bash -e) or `bash` (bash -eo pipefail); a single line is the
+ * command alone; several lines start with `set -euo pipefail` and never undo it nor exit 0.
+ * @param {any} step
+ * @param {RegExp} line
+ * @param {any} job
+ * @param {any} workflowDefaults
+ */
+function failOpen(step, line, job, workflowDefaults) {
+  const shell = step.shell ?? job?.defaults?.run?.shell ?? workflowDefaults?.run?.shell;
+  if (shell !== undefined && shell !== 'bash') return 'shell: must be the default or bash';
+  const lines = String(step.run ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '' && !l.startsWith('#'));
+  const hits = lines.filter((l) => line.test(l)).length;
+  if (hits !== 1) return `exactly one line must be the bare command, found ${hits}`;
+  if (lines.length > 1 && lines[0] !== 'set -euo pipefail') {
+    return 'a multi-line run: must start with set -euo pipefail';
+  }
+  if (lines.some((l) => SET_PLUS.test(l))) return 'set + is not allowed';
+  if (lines.some((l) => SHOPT_O.test(l))) return 'shopt -o is not allowed';
+  if (lines.some((l) => /\bexit\b(?!\s+[1-9])/.test(l))) return 'exit must have a non-zero status';
+  return null;
+}
+
+/** @param {any} step */
+const runsReleaseCheck = (step) => isMap(step) && RELEASE_CHECK.test(`${step.run ?? ''}\n`);
+
+/**
+ * 008 RF-D9: `rust` checks its musl binary and `images` the `/server` of its image, both as a
+ * release (without --expect-dev), with no if: and failing closed.
+ */
+function checkBinaryChecks(jobs, file, problems, workflowDefaults) {
+  for (const id of ['rust', 'images']) {
+    const steps = Array.isArray(jobs[id]?.steps) ? jobs[id].steps : [];
+    if (!steps.some(runsReleaseCheck)) {
+      problems.push(
+        `${file}: release-binary: jobs.${id} must run scripts/check-release-binary.mjs without --expect-dev`,
+      );
+    }
+    steps.forEach((step, i) => {
+      if (!runsReleaseCheck(step)) return;
+      const at = `jobs.${id}.steps[${i}]${step.name ? ` (${step.name})` : ''}`;
+      const reason = failOpen(step, RELEASE_CHECK_LINE, jobs[id], workflowDefaults);
+      if (reason) problems.push(`${file}: release-binary: ${at} must fail closed: ${reason}`);
+      if ('if' in step) problems.push(`${file}: release-binary: ${at} must not have an if:`);
+    });
+  }
+}
+
+/**
+ * 008 RF-D9 (plan-d decision 12, open question 7): in release.yml the server is built twice with
+ * the same inputs. The first build only loads a local tag; a step between the two runs
+ * check-release-binary on it; the second pushes; and before the retention a step compares the
+ * `imageid` of both builds with the `config.digest` that the registry publishes.
+ */
+function checkReleaseServer(jobs, file, problems, workflowDefaults) {
+  const rule = 'release-binary';
+  const steps = Array.isArray(jobs.build?.steps) ? jobs.build.steps : [];
+  const builds = steps
+    .map((step, index) => ({ step, index }))
+    .filter(
+      ({ step }) =>
+        isMap(step) &&
+        typeof step.uses === 'string' &&
+        BUILD_PUSH.test(step.uses) &&
+        isMap(step.with) &&
+        step.with.file === SERVER_DOCKERFILE,
+    );
+  if (builds.length !== 2) {
+    problems.push(
+      `${file}: ${rule}: jobs.build must build ${SERVER_DOCKERFILE} exactly twice (a local build for the check, then the push), found ${builds.length}`,
+    );
+    return;
+  }
+  const [check, push] = builds;
+  const a = check.step.with;
+  const b = push.step.with;
+  const is = (value, bool) => value === bool || value === String(bool);
+  if (!is(a.push, false) || !is(a.load, true)) {
+    problems.push(`${file}: ${rule}: the first server build must have push: false and load: true`);
+  }
+  if (String(a.tags ?? '').trim() !== RELEASE_CHECK_TAG) {
+    problems.push(
+      `${file}: ${rule}: the first server build must tag only ${RELEASE_CHECK_TAG} (never a GHCR tag)`,
+    );
+  }
+  if (!is(b.push, true) || is(b.load, true)) {
+    problems.push(`${file}: ${rule}: the second server build must have push: true and no load`);
+  }
+  for (const key of SAME_INPUTS) {
+    if (!(key in a) || !(key in b)) {
+      problems.push(`${file}: ${rule}: ${key} must be set in both server builds`);
+    } else if (String(a[key]) !== String(b[key])) {
+      problems.push(`${file}: ${rule}: ${key} must be the same in both server builds`);
+    }
+  }
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    if (!BUILD_INPUTS.includes(key)) {
+      problems.push(`${file}: ${rule}: ${key} is not allowed in the server builds`);
+    }
+  }
+  if (String(check.step.if ?? '') !== String(push.step.if ?? '')) {
+    problems.push(`${file}: ${rule}: both server builds must have the same if:`);
+  }
+  const buildIf = String(check.step.if ?? '');
+  const at = (i) => `jobs.build.steps[${i}]${steps[i].name ? ` (${steps[i].name})` : ''}`;
+  /** The checks shared by the two RF-D9 steps: same if: as the builds and fail closed. */
+  const closed = (i, line) => {
+    if (String(steps[i].if ?? '') !== buildIf) {
+      problems.push(`${file}: ${rule}: ${at(i)} must have the if: of the server builds`);
+    }
+    const reason = failOpen(steps[i], line, jobs.build, workflowDefaults);
+    if (reason) problems.push(`${file}: ${rule}: ${at(i)} must fail closed: ${reason}`);
+  };
+  const between = [];
+  for (let i = check.index + 1; i < push.index; i++) {
+    if (runsReleaseCheck(steps[i])) between.push(i);
+  }
+  if (between.length === 0) {
+    problems.push(
+      `${file}: ${rule}: a step between the two server builds must run scripts/check-release-binary.mjs on the local image (without --expect-dev)`,
+    );
+  }
+  for (const i of between) closed(i, RELEASE_CHECK_LINE);
+  const retention = steps.findIndex(
+    (s) => isMap(s) && typeof s.uses === 'string' && RETENTION.test(s.uses),
+  );
+  // The comparison is scripts/check-pushed-server.mjs (unit-tested): the checked side comes from
+  // `docker save` (the config blob, the same with either image store) and the pushed side from
+  // the imageid of the push and the config.digest of the tags. The imageid of a `load` build is
+  // the manifest digest with the containerd image store, so it is never used (plan-d D38).
+  const references = (s, id) =>
+    typeof id === 'string' &&
+    isMap(s.env) &&
+    Object.values(s.env).some((v) => String(v).includes(`steps.${id}.outputs.imageid`));
+  const end = retention === -1 ? steps.length : retention;
+  const compares = [];
+  for (let i = push.index + 1; i < end; i++) {
+    if (isMap(steps[i]) && String(steps[i].run ?? '').includes('scripts/check-pushed-server.mjs')) {
+      compares.push(i);
+    }
+  }
+  if (compares.length === 0) {
+    problems.push(
+      `${file}: ${rule}: after the push and before the retention, a step must compare the config of the checked image with the push: run: ${PUSHED_CHECK}`,
+    );
+  }
+  for (const i of compares) {
+    const s = steps[i];
+    if (String(s.run).trim() !== PUSHED_CHECK) {
+      problems.push(`${file}: ${rule}: ${at(i)} must run exactly ${PUSHED_CHECK}`);
+    }
+    closed(i, new RegExp(`^${PUSHED_CHECK.replace(/[.]/g, '\\.')}$`));
+    const env = isMap(s.env) ? s.env : {};
+    const imageid = `\${{ steps.${push.step.id}.outputs.imageid }}`;
+    if (typeof push.step.id !== 'string' || String(env.PUSHED ?? '').trim() !== imageid) {
+      problems.push(`${file}: ${rule}: ${at(i)} must set PUSHED: ${imageid}`);
+    }
+    if (!String(env.TAG ?? '').trim() || !String(env.SHORT ?? '').trim()) {
+      problems.push(`${file}: ${rule}: ${at(i)} must set TAG and SHORT (the two pushed tags)`);
+    }
+  }
+  steps.forEach((s, i) => {
+    if (isMap(s) && references(s, check.step.id)) {
+      problems.push(
+        `${file}: ${rule}: jobs.build.steps[${i}] uses the imageid of the local build, which depends on the image store (the manifest digest with containerd): use docker save`,
+      );
     }
   });
 }
@@ -271,7 +705,7 @@ function triggersOf(on) {
 }
 
 /** @param {any} doc */
-function checkWorkflow(doc, name, file, problems, local) {
+function checkWorkflow(doc, name, file, problems, local, tree) {
   for (const trigger of triggersOf(doc.on)) {
     if (FORBIDDEN_TRIGGERS.includes(trigger)) {
       problems.push(`${file}: forbidden-trigger: ${trigger} is not allowed`);
@@ -336,6 +770,12 @@ function checkWorkflow(doc, name, file, problems, local) {
       );
     }
   }
+
+  if (name === 'ci.yml') {
+    checkE2e(jobs, file, problems, tree);
+    checkBinaryChecks(jobs, file, problems, doc.defaults);
+  }
+  if (name === 'release.yml') checkReleaseServer(jobs, file, problems, doc.defaults);
 
   if (name === 'ci.yml') {
     // RF-C12: policy always runs; ci-ok (the only required check) waits for every other job.
@@ -461,6 +901,8 @@ export function checkWorkflows(tree) {
     }
   }
 
+  /** @type {Map<string, any>} */
+  const docs = new Map();
   for (const file of [...workflows, ...actions]) {
     const text = tree.read(file);
     if (text === null) continue;
@@ -468,10 +910,12 @@ export function checkWorkflows(tree) {
     checkText(text, parsed?.document, file, problems);
     if (!parsed) continue;
     checkSecrets(parsed.document, file, problems);
-    if (workflows.includes(file))
-      checkWorkflow(parsed.doc, path.posix.basename(file), file, problems, local);
-    else checkAction(parsed.doc, file, problems, local);
+    if (workflows.includes(file)) {
+      docs.set(path.posix.basename(file), parsed.doc);
+      checkWorkflow(parsed.doc, path.posix.basename(file), file, problems, local, tree);
+    } else checkAction(parsed.doc, file, problems, local);
   }
+  checkCspCopies(docs, problems);
   return problems;
 }
 

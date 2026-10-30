@@ -4,6 +4,9 @@
 #   - deploy waits for the owner's approval of the `production` environment. DEPLOY_MODE=manual
 #     (the default) only records the approved tag; `api` is not implemented and fails.
 #   - verify polls https://$PUBLIC_HOST/api/health until `version` is the tag.
+#   - The server binary never carries dev-auth (008 RF-D9): the image is built twice with the
+#     same inputs, checked between the two builds, and the pushed config digest must be the
+#     checked one before the retention (and so before deploy). check-workflows enforces the shape.
 # No secret besides the job token: the tag and every input reach run: through env: only.
 name: release
 
@@ -108,7 +111,39 @@ jobs:
           persist-credentials: false
 
       # Only cache-from (the cache of main): a tag run never writes cache (RF-C13).
+      # 008 RF-D9 (plan-d open question 7): the server is built twice with exactly the same inputs.
+      # This first build only loads it into the runner's Docker under a name that is never pushed;
+      # the second one pushes from the builder cache. The steps after the push prove that both are
+      # the same image.
+      - name: Build server for the binary check (not pushed)
+        id: server-check
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/server/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          provenance: false
+          sbom: false
+          build-args: APP_VERSION=${{ steps.tag.outputs.tag }}
+          tags: torneo-release-check/server:local
+          labels: org.opencontainers.image.source=https://github.com/kike1303/torneo-absurdo
+          cache-from: type=gha,scope=server
+
+      # The runner's Node, no setup-js: the script uses Node built-ins only.
+      - name: The release binary has no dev-auth (RF-D9)
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          cid="$(docker create torneo-release-check/server:local)"
+          trap 'docker rm "$cid" >/dev/null' EXIT
+          docker cp "$cid:/server" "$RUNNER_TEMP/server"
+          node scripts/check-release-binary.mjs "$RUNNER_TEMP/server"
+
       - name: Build and push server
+        id: server-push
         if: github.event_name == 'push'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -167,6 +202,20 @@ jobs:
               exit 1
             fi
           done
+
+      # 008 RF-D9: what was pushed is what was checked, even if the builder cache missed. The
+      # checked side is the config blob of the loaded image (`docker save`, hashed): the imageid
+      # of a `load` build is the manifest digest with the containerd image store (plan-d deviation
+      # D38). The pushed side is the imageid of the push and the config.digest of each tag, which
+      # the step above already proved to be a single image manifest. A unit-tested script, so the
+      # step fails closed (check-workflows requires exactly this run:, QA finding 3 of phase D).
+      - name: The pushed server is the checked one (RF-D9)
+        if: github.event_name == 'push'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          SHORT: ${{ steps.tag.outputs.short }}
+          PUSHED: ${{ steps.server-push.outputs.imageid }}
+        run: node scripts/check-pushed-server.mjs
 
       # Exactly these parameters (ADR-0006 D5). node20 action: see plan-c, Risks.
       - name: Retention of server (keep 10)
@@ -257,9 +306,12 @@ jobs:
           server=("$nosniff" "$hsts"
             'cross-origin-resource-policy=same-origin'
             "content-security-policy=default-src 'none'; frame-ancestors 'none'")
-          # ADR-0012 B1 as Kit emits it; `B1` as a value compares with this (nonce normalized,
-          # directive and source order ignored). A B4 extension changes this line in its own PR.
-          b1="default-src 'self'; script-src 'self' 'nonce-*'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+          # ADR-0012 B1 plus B4.6 (the 2026-10-30 amendment: the two authorize endpoints in
+          # form-action) as Kit emits it; `B1` as a value compares with this (nonce normalized,
+          # directive and source order ignored). A B4 extension changes this line in its own PR,
+          # with the b1= of images in ci.yml: check-workflows wants both identical byte for byte
+          # (B6.4 item 7).
+          b1="default-src 'self'; script-src 'self' 'nonce-*'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com/o/oauth2/v2/auth https://discord.com/oauth2/authorize; frame-ancestors 'none'"
           csp_norm() {
             tr -d '\r' | sed -E "s/'nonce-[A-Za-z0-9+/_=-]+'/'nonce-*'/g" | tr ';' '\n' |
               while read -r name rest; do
@@ -271,7 +323,7 @@ jobs:
           headers="$(mktemp)"
           trap 'rm -f "$headers"' EXIT
           # check <path> <status> <name=value>...: `-` requires the header to be absent and `B1`
-          # compares it with $b1; any other value must match exactly, once.
+          # compares it with $b1 (B1 plus B4.6); any other value must match exactly, once.
           check() {
             local path="$1" want="$2" url="https://$PUBLIC_HOST$1" status pair name value got count
             shift 2
@@ -296,7 +348,7 @@ jobs:
                 fail=1
               elif [ "$value" = B1 ]; then
                 if ! diff <(csp_norm <<<"$b1") <(csp_norm <<<"$got") >/dev/null; then
-                  echo "$path sends $name: $got, expected ADR-0012 B1" >&2
+                  echo "$path sends $name: $got, expected ADR-0012 B1 plus B4.6" >&2
                   fail=1
                 fi
               elif [ "$got" != "$value" ]; then

@@ -557,7 +557,7 @@ async fn me_without_a_valid_session_is_401() {
 // --- Rate limit and Origin --------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_sixth_start_in_a_burst_is_429_with_retry_after_6() {
+async fn the_sixth_start_in_a_burst_is_refused_with_a_redirect() {
     let db = TestDb::create().await;
     let (settings, clock) = flow::with_manual_clock(Settings::default());
     let (app, _pool) = support::app::start_db(&db, &[], &settings).await;
@@ -577,18 +577,28 @@ async fn the_sixth_start_in_a_burst_is_429_with_retry_after_6() {
     for i in 0..5 {
         assert_eq!(start().await.status, 303, "{i}");
     }
+    // 008 "Enmienda 2026-10-30" of RF-B5: the 429 is a 303 to `auth.try_again`, without
+    // `Retry-After` or a body; the bucket still refills in 6 s.
     let limited = start().await;
-    assert_eq!(limited.status, 429);
-    assert_eq!(limited.header("retry-after"), Some("6"));
-    assert_eq!(limited.text(), r#"{"error":"http.rate_limited"}"#);
-    clock.advance(Duration::from_secs(6));
-    assert_eq!(start().await.status, 303);
-    // The callback shares the bucket.
+    assert_eq!(limited.status, 303);
     assert_eq!(
-        http::get(app.addr, "/api/auth/dev/callback?code=x&state=y")
-            .await
-            .status,
-        429
+        limited.header("location"),
+        Some("/login?error=auth.try_again")
+    );
+    assert_eq!(limited.header("retry-after"), None);
+    assert!(limited.body.is_empty());
+    assert!(limited.set_cookies().is_empty());
+    clock.advance(Duration::from_secs(5));
+    assert_eq!(
+        start().await.header("location"),
+        Some("/login?error=auth.try_again")
+    );
+    clock.advance(Duration::from_secs(1));
+    assert!(start().await.cookie(FLOW).is_some_and(|v| !v.is_empty()));
+    // The callback shares the bucket.
+    assert_callback_error(
+        &http::get(app.addr, "/api/auth/dev/callback?code=x&state=y").await,
+        "auth.try_again",
     );
 }
 

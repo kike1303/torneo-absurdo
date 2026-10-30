@@ -24,13 +24,22 @@ export type CloseReasonKey =
   | 'ws_close_reason_too_many_subscriptions'
   | 'ws_close_reason_unauthenticated'
   | 'ws_close_reason_try_again'
+  | 'ws_close_reason_abnormal'
   | 'ws_close_reason_unknown';
 
 const UNAUTHENTICATED: AuthErrorCode = 'auth.unauthenticated';
 const TRY_AGAIN: AuthErrorCode = 'auth.try_again';
 
-/** Maps a close reason to its key. Fails to compile if a `WsErrorCode` has no case. */
-export function closeReasonKey(reason: string): CloseReasonKey {
+/** Closed without a close frame: the browser reports it, never the server. */
+const ABNORMAL_CLOSURE = 1006;
+
+/**
+ * Maps a close reason to its key. Fails to compile if a `WsErrorCode` has no case. A 1006 without
+ * a reason is a handshake the server refused (`ws.capacity` and `ws.ip_capacity` are a 503 before
+ * the upgrade, which the browser never shows) or a cut connection (#53, 008 plan-d).
+ */
+export function closeReasonKey(reason: string, closeCode?: number): CloseReasonKey {
+  if (reason === '' && closeCode === ABNORMAL_CLOSURE) return 'ws_close_reason_abnormal';
   if (reason === UNAUTHENTICATED) return 'ws_close_reason_unauthenticated';
   if (reason === TRY_AGAIN) return 'ws_close_reason_try_again';
   const code = reason as WsErrorCode;
@@ -128,7 +137,7 @@ export function openEcho(
     events.onStatus('received');
   };
   socket.onclose = (event) => {
-    events.onClose(event.code, closeReasonKey(event.reason));
+    events.onClose(event.code, closeReasonKey(event.reason, event.code));
     events.onStatus('closed');
   };
   return {

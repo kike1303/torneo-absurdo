@@ -153,6 +153,18 @@ async fn flow(canaries: Canaries) {
     add(hex(&ip_hash));
     add(base64::engine::general_purpose::STANDARD.encode(&ip_hash));
 
+    // A statement over sqlx's 1 s threshold, on a worker thread: its `slow statement` warning
+    // is the positive control of a third-party line (its text is dropped by the layer).
+    let slow = pool.clone();
+    tokio::spawn(async move {
+        sqlx::query("SELECT pg_sleep(1.1)")
+            .execute(&slow)
+            .await
+            .unwrap();
+    })
+    .await
+    .unwrap();
+
     let cookie = oauth::session_cookie(&token);
     let unlinked = http::send(
         app.addr,
@@ -196,6 +208,16 @@ fn no_secret_identity_or_profile_field_reaches_the_log() {
                 "{level}: no {event}"
             );
         }
+        // And a third-party line (`target` of sqlx, capped at `warn`), emitted on a worker
+        // thread: the capture sees other crates too, so `debug,sqlx=trace` is really tested
+        // (nit of #55).
+        assert!(
+            lines.iter().any(|l| l["target"]
+                .as_str()
+                .is_some_and(|t| t == "sqlx" || t.starts_with("sqlx::"))
+                && l["event"] == "external"),
+            "{level}: no sqlx line"
+        );
         for line in &lines {
             for key in line.as_object().unwrap().keys() {
                 assert!(

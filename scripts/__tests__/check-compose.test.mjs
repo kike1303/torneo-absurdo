@@ -37,10 +37,19 @@ const DI = FILES.dockerignore;
 const SD = FILES.serverDockerfile;
 const WD = FILES.webDockerfile;
 const H = FILES.headers;
+const SC = FILES.serverCargo;
+
+// The release build and the line of the cook RUN in the valid server Dockerfile.
+const BUILD_RUN =
+  'RUN cargo zigbuild --release --locked --target x86_64-unknown-linux-musl -p server';
+const COOK_TAIL = '    --recipe-path recipe.json';
+const COOK_LINE =
+  (valid.read(FILES.serverDockerfile) ?? '')
+    .split('\n')
+    .findIndex((l) => l.startsWith('RUN cargo chef cook')) + 1;
 
 const SERVER_IMAGE = 'server:${IMAGE_TAG:?IMAGE_TAG is required}';
-const WEB_ENV =
-  '      PUBLIC_ORIGIN: https://${PUBLIC_HOST:?PUBLIC_HOST is required}\n      ADDRESS_HEADER';
+const WEB_ENV = '      INTERNAL_API_URL: http://torneo-server:8080\n';
 const SERVER_ENV = '      RUST_LOG: info\n';
 const SERVER_LOGGING =
   "    logging:\n      driver: json-file\n      options:\n        max-size: '10m'\n        max-file: '3'\n    networks:\n      torneo-edge:";
@@ -318,6 +327,48 @@ const CASES = [
     { [C]: [[WEB_ENV, '      PORT_HEADER: x-forwarded-port\n' + WEB_ENV]] },
     /forbidden-env: PORT_HEADER/,
   ],
+  // 008 decision 12 (step 3): web reaches the server by its alias, with the server's secret.
+  [
+    'INTERNAL_API_URL missing in web',
+    { [C]: [['      INTERNAL_API_URL: http://torneo-server:8080\n', '']] },
+    /services\.web: env: INTERNAL_API_URL is required/,
+  ],
+  [
+    'INTERNAL_API_URL to another host',
+    {
+      [C]: [
+        [
+          '      INTERNAL_API_URL: http://torneo-server:8080\n',
+          '      INTERNAL_API_URL: https://torneo.example\n',
+        ],
+      ],
+    },
+    /services\.web: env: INTERNAL_API_URL must be http:\/\/torneo-server:8080/,
+  ],
+  [
+    'INTERNAL_API_SECRET missing in web',
+    {
+      [C]: [
+        [
+          '      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required}\n      ADDRESS_HEADER',
+          '      ADDRESS_HEADER',
+        ],
+      ],
+    },
+    /services\.web: env: INTERNAL_API_SECRET is required/,
+  ],
+  [
+    'INTERNAL_API_SECRET literal in web',
+    {
+      [C]: [
+        [
+          '      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required}\n      ADDRESS_HEADER',
+          '      INTERNAL_API_SECRET: c2VjcmV0\n      ADDRESS_HEADER',
+        ],
+      ],
+    },
+    /services\.web: env: INTERNAL_API_SECRET must be \$\{INTERNAL_API_SECRET:\?\}/,
+  ],
   [
     'BIND_ADDR in server',
     { [C]: [[SERVER_ENV, SERVER_ENV + '      BIND_ADDR: 0.0.0.0\n']] },
@@ -519,6 +570,19 @@ const CASES = [
     },
     /services\.server: only-adds/,
   ],
+  // 008 plan-d deviation D30 and D40: prod-local gets no PROTOCOL_HEADER (nor ORIGIN) on web.
+  [
+    'local sets PROTOCOL_HEADER on web',
+    {
+      [L]: [
+        [
+          '  web:\n    ports:',
+          '  web:\n    environment:\n      PROTOCOL_HEADER: x-forwarded-proto\n    ports:',
+        ],
+      ],
+    },
+    /services\.web: only-adds: only ports may be added/,
+  ],
   [
     'local port on all interfaces',
     { [L]: [["      - '127.0.0.1:3000:3000'", "      - '3000:3000'"]] },
@@ -648,6 +712,149 @@ const CASES = [
     'final base not nonroot',
     { [SD]: [['static-debian13:nonroot@', 'static-debian13:latest@']] },
     /nonroot: the final base must be a :nonroot tag/,
+  ],
+  // 008 RF-D9, plan-d decision 12: no feature flag and no dev-auth in any instruction of the
+  // server Dockerfile, with the `\` continuations joined and the comments dropped.
+  ...[
+    ['-F as its own token', `${BUILD_RUN} -F x`, /no-features: RUN uses -F/],
+    ['-F glued (-Fx)', `${BUILD_RUN} -Fx`, /no-features: RUN uses -F/],
+    ['-F glued (-Fdev-auth)', `${BUILD_RUN} -Fdev-auth`, /no-features: RUN uses -F/],
+    ['-F bundled (-rFx)', `${BUILD_RUN} -rFx`, /no-features: RUN uses -F/],
+    ['--features x', `${BUILD_RUN} --features x`, /no-features: RUN uses --features/],
+    ['--features=x', `${BUILD_RUN} --features=x`, /no-features: RUN uses --features/],
+    ['--all-features', `${BUILD_RUN} --all-features`, /no-features: RUN uses --all-features/],
+    ['dev-auth in a RUN', `${BUILD_RUN} # dev-auth`, /no-dev-auth: RUN names dev-auth/],
+    ['lowercase run', BUILD_RUN.replace('RUN ', 'run ') + ' -F x', /no-features: RUN uses -F/],
+  ].map(([name, line, pattern]) => [
+    `server Dockerfile: ${name}`,
+    { [SD]: [[BUILD_RUN, line]] },
+    pattern,
+  ]),
+  [
+    'server Dockerfile: --features in the continuation of cargo chef cook',
+    { [SD]: [[COOK_TAIL, '    --features x --recipe-path recipe.json']] },
+    new RegExp(`apps/server/Dockerfile:${COOK_LINE}: no-features: RUN uses --features`),
+  ],
+  [
+    'server Dockerfile: a comment line inside a continuation does not end it',
+    {
+      [SD]: [
+        [
+          COOK_TAIL,
+          '    # a comment line is dropped, the RUN goes on\n    --features x \\\n    --recipe-path recipe.json',
+        ],
+      ],
+    },
+    new RegExp(`apps/server/Dockerfile:${COOK_LINE}: no-features: RUN uses --features`),
+  ],
+  [
+    'server Dockerfile: ARG FEATURES=dev-auth',
+    { [SD]: [['ARG APP_VERSION=dev\n', 'ARG APP_VERSION=dev\nARG FEATURES=dev-auth\n']] },
+    /no-dev-auth: ARG names dev-auth/,
+  ],
+  [
+    'server Dockerfile: ENV with --features',
+    { [SD]: [['ENV SQLX_OFFLINE=true\n', 'ENV SQLX_OFFLINE=true FLAGS="--features x"\n']] },
+    /no-features: ENV uses --features/,
+  ],
+  [
+    'server Dockerfile: escape directive',
+    { [SD]: [['# Server image', '# escape=`\n# Server image']] },
+    /apps\/server\/Dockerfile:1: dockerfile-parse: the escape directive is not allowed/,
+  ],
+  [
+    'server Dockerfile: heredoc',
+    { [SD]: [[BUILD_RUN, 'RUN <<EOF\ncargo zigbuild --release -p server\nEOF']] },
+    /dockerfile-parse: RUN with a heredoc is not allowed/,
+  ],
+  // 008 RF-D9: apps/server/Cargo.toml, a bounded reader of [features] that fails closed.
+  ...[
+    ['default = ["dev-auth"]', 'default = ["dev-auth"]\ndev-auth = []', /default reaches dev-auth/],
+    [
+      'default through another feature',
+      'default = ["x"]\nx = ["dev-auth"]\ndev-auth = []',
+      /default reaches dev-auth through x/,
+    ],
+    [
+      'default through a multi-line array with comments',
+      'default = [\n  # a comment\n  "y", # another\n  "x",\n]\nx = ["dev-auth"]\ny = []\ndev-auth = []',
+      /default reaches dev-auth through x/,
+    ],
+    ['"x?/dev-auth"', 'default = ["x?/dev-auth"]\ndev-auth = []', /default reaches dev-auth/],
+    ['"x/dev-auth"', 'default = ["x/dev-auth"]\ndev-auth = []', /default reaches dev-auth/],
+    [
+      '"server/dev-auth"',
+      'default = ["server/dev-auth"]\ndev-auth = []',
+      /default reaches dev-auth/,
+    ],
+    ['an unknown feature', 'default = ["nope"]\ndev-auth = []', /unknown feature nope/],
+    ['an inline table', 'x = { y = [] }\ndev-auth = []', /x: not an array of strings/],
+    ["a literal string ('x')", "default = ['x']\nx = []\ndev-auth = []", /not an array of strings/],
+    [
+      'a string that is not a feature',
+      'default = ["a b"]\ndev-auth = []',
+      /not an array of strings/,
+    ],
+    ['an unterminated array', 'default = ["x",\ndev-auth = []', /not an array of strings/],
+    ['a quoted key', '"default" = ["x"]\nx = []\ndev-auth = []', /must be a bare key/],
+    ['a dotted key', 'default.x = []\ndev-auth = []', /must be a bare key/],
+    ['a repeated key', 'x = []\nx = []\ndev-auth = []', /x is repeated/],
+    [
+      'dev-auth enabling something',
+      'dev-auth = ["x"]\nx = []',
+      /must define exactly dev-auth = \[\]/,
+    ],
+    ['no dev-auth', 'x = []', /must define exactly dev-auth = \[\]/],
+  ].map(([name, table, pattern]) => [
+    `server Cargo.toml: ${name}`,
+    { [SC]: [['dev-auth = []', table]] },
+    pattern,
+  ]),
+  [
+    'server Cargo.toml: an array still open at the end of the file',
+    {
+      [SC]: [
+        [
+          '[dev-dependencies]\ntokio = { workspace = true, features = ["process", "test-util"] }\n',
+          'x = [\n  "y",\n',
+        ],
+      ],
+    },
+    /x: not an array of strings/,
+  ],
+  [
+    'server Cargo.toml: [features] repeated',
+    { [SC]: [['[dev-dependencies]', '[features]\nx = []\n\n[dev-dependencies]']] },
+    /\[features\] is repeated/,
+  ],
+  [
+    'server Cargo.toml: [features.x]',
+    { [SC]: [['[dev-dependencies]', '[features.x]\n\n[dev-dependencies]']] },
+    /\[features\.x\] is not understood/,
+  ],
+  [
+    'server Cargo.toml: a quoted [features] header',
+    { [SC]: [['[dev-dependencies]', '["features"]\nx = []\n\n[dev-dependencies]']] },
+    /\["features"\] is not understood/,
+  ],
+  [
+    'server Cargo.toml: features as a dotted key at the root',
+    { [SC]: [['[package]', 'features.default = ["x"]\n\n[package]']] },
+    /features outside \[features\]/,
+  ],
+  [
+    'server Cargo.toml: dev-auth in a comment',
+    { [SC]: [['# The dev OAuth', '# dev-auth\n# The dev OAuth']] },
+    /dev-auth outside its definition/,
+  ],
+  [
+    'server Cargo.toml: dev-auth in another table',
+    {
+      [SC]: [
+        ['protocol.workspace = true', 'protocol = { workspace = true, features = ["dev-auth"] }'],
+      ],
+    },
+    /dev-auth outside its definition/,
   ],
   // SECURITY_HEADERS is the source of the Traefik values
   [
@@ -1006,6 +1213,8 @@ const REVIEW_CASES = [
 function forSync(file, text) {
   if (text === null) return null;
   if (file === FILES.nodeVersion) return '<version>\n';
+  // Of apps/server/Cargo.toml only [features] is read, so only that table is compared.
+  if (file === FILES.serverCargo) return /^\[features\]\n(?:(?!\[).*\n?)*/m.exec(text)?.[0] ?? '';
   return text
     .replace(/@sha256:[0-9a-f]{64}/g, '@sha256:<digest>')
     .replace(/\b(node|rust|postgres):\d+(?:\.\d+)+(?=-)/g, '$1:<version>')
@@ -1070,6 +1279,11 @@ describe('valid fixture vs the real files (plan-c deviations 12 and 22)', () => 
         [FILES.toolchain]: [[/^channel = "[^"]*"$/m, 'channel = "1.999.0"']],
       },
     ],
+    // Only the [features] table of apps/server/Cargo.toml is compared (008 plan-d decision 12).
+    [
+      'a new dependency of the server',
+      { [SC]: [[/\[dependencies\]\n/, '[dependencies]\nnew-crate.workspace = true\n']] },
+    ],
   ])('does not ask for a resync on a Dependabot bump: %s', (_name, edits) => {
     expect(drift(valid, realWith(edits))).toEqual([]);
   });
@@ -1079,6 +1293,7 @@ describe('valid fixture vs the real files (plan-c deviations 12 and 22)', () => 
     ['the zig version', SD, [/0\.15\.2/g, '0.15.3']],
     ['an image suffix', WD, [/-bookworm-slim@/, '-trixie-slim@']],
     ['the distroless tag', SD, [/:nonroot@/, ':latest@']],
+    ['a feature of the server', SC, [/dev-auth = \[\]/, 'dev-auth = []\nx = []']],
   ])('still asks for a resync on a structural change: %s', (_name, file, edit) => {
     expect(drift(valid, realWith({ [file]: [edit] }))).toEqual([file]);
   });
@@ -1138,6 +1353,30 @@ describe('check-compose (RF-C3, RF-C4, RF-C6)', () => {
     expect(problems).toEqual([
       'apps/server/Dockerfile.dockerignore: single-dockerignore: only the root .dockerignore is allowed (BuildKit prefers <Dockerfile>.dockerignore)',
     ]);
+  });
+
+  it('accepts comments that name dev-auth or --features in the server Dockerfile', () => {
+    const tree = mutated({
+      [SD]: [[BUILD_RUN, `# never --features dev-auth, -F or --all-features here\n${BUILD_RUN}`]],
+    });
+    expect(checkCompose(tree)).toEqual([]);
+  });
+
+  it('does not follow dep: entries of [features] and accepts features that never reach dev-auth', () => {
+    const tree = mutated({
+      [SC]: [
+        [
+          'dev-auth = []',
+          'default = ["dep:protocol", "y"]\ny = [\n  "protocol/x",\n]\ndev-auth = []',
+        ],
+      ],
+    });
+    expect(checkCompose(tree)).toEqual([]);
+  });
+
+  it('reports a missing server Cargo.toml', () => {
+    const tree = { read: (rel) => (rel === SC ? null : valid.read(rel)), files: valid.files };
+    expect(checkCompose(tree)).toContain(`${SC}: exists: missing`);
   });
 
   it('reports a missing compose file instead of crashing', () => {

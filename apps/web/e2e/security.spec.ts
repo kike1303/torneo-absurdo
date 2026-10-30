@@ -18,7 +18,7 @@ function expectSecurityHeaders(res: RawResponse, label: string): void {
 // ADR-0012 B1 as the browser receives it, with Kit's per-request nonce as `'nonce-*'`. The
 // static check (scripts/check-kit-config.mjs) can only read vite.config.ts; this compares what Kit
 // actually emits, so a policy assembled some other way still fails (security-reviewer on #50).
-// A B4 extension changes this table in its own PR.
+// A B4 extension changes this table in its own PR (B4.6 below).
 const CSP_B1: Record<string, string[]> = {
   'default-src': ["'self'"],
   'script-src': ["'self'", "'nonce-*'"],
@@ -28,7 +28,12 @@ const CSP_B1: Record<string, string[]> = {
   'connect-src': ["'self'"],
   'object-src': ["'none'"],
   'base-uri': ["'self'"],
-  'form-action': ["'self'"],
+  // B4.6 (2026-10-30 amendment): the authorize endpoints of the two providers, with their path.
+  'form-action': [
+    "'self'",
+    'https://accounts.google.com/o/oauth2/v2/auth',
+    'https://discord.com/oauth2/authorize',
+  ],
   'frame-ancestors': ["'none'"],
 };
 

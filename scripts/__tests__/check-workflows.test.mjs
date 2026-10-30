@@ -260,24 +260,24 @@ const CASES = [
     {
       [CI]: [
         [
-          '  e2e:\n    needs: changes\n    runs-on: ubuntu-24.04',
-          '  e2e:\n    needs: changes\n    runs-on: macos-15',
+          '  images:\n    needs: changes\n    runs-on: ubuntu-24.04',
+          '  images:\n    needs: changes\n    runs-on: macos-15',
         ],
       ],
     },
-    /runs-on: jobs\.e2e/,
+    /runs-on: jobs\.images/,
   ],
   [
     'runs-on self-hosted list',
     {
       [CI]: [
         [
-          '  e2e:\n    needs: changes\n    runs-on: ubuntu-24.04',
-          '  e2e:\n    needs: changes\n    runs-on: [self-hosted]',
+          '  images:\n    needs: changes\n    runs-on: ubuntu-24.04',
+          '  images:\n    needs: changes\n    runs-on: [self-hosted]',
         ],
       ],
     },
-    /runs-on: jobs\.e2e/,
+    /runs-on: jobs\.images/,
   ],
   // continue-on-error
   [
@@ -290,12 +290,12 @@ const CASES = [
     {
       [CI]: [
         [
-          '  e2e:\n    needs: changes\n',
-          '  e2e:\n    needs: changes\n    continue-on-error: false\n',
+          '  images:\n    needs: changes\n',
+          '  images:\n    needs: changes\n    continue-on-error: false\n',
         ],
       ],
     },
-    /continue-on-error: jobs\.e2e must not/,
+    /continue-on-error: jobs\.images must not/,
   ],
   [
     'continue-on-error in a composite step',
@@ -409,8 +409,8 @@ const CASES = [
     {
       [CI]: [
         [
-          'needs: [changes, policy, rust, web, e2e, images]',
-          'needs: [changes, rust, web, e2e, images]',
+          'needs: [changes, policy, rust, web, e2e-server, e2e, images]',
+          'needs: [changes, rust, web, e2e-server, e2e, images]',
         ],
       ],
     },
@@ -674,6 +674,593 @@ const PLAYWRIGHT_CASES = [
   ],
 ];
 
+// 008 plan-d decision 12 (step 9): the e2e-server job, the artifact and the Postgres service.
+const E2E_SERVER_IF =
+  "  e2e-server:\n    needs: changes\n    if: needs.changes.outputs.e2e == 'true'\n";
+const E2E_SERVER_ENV = '        env:\n          SOMETHING: else\n';
+const DOWNLOAD = '          name: server-dev-auth\n          path: bin\n';
+const PG_IMAGE =
+  'postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193';
+const COMPOSE_DEV = 'infra/compose.dev.yml';
+const E2E_CACHE = '          shared-key: ci\n          save-if: false\n';
+const UPLOAD_PATHS =
+  '            apps/web/test-results/logs\n            !apps/web/test-results/logs/dynamic-canaries.txt\n';
+
+/** @type {[string, Record<string, [string, string][]>, RegExp][]} */
+const E2E_CASES = [
+  [
+    'e2e-server outside ci-ok',
+    {
+      [CI]: [
+        [
+          '[changes, policy, rust, web, e2e-server, e2e, images]',
+          '[changes, policy, rust, web, e2e, images]',
+        ],
+      ],
+    },
+    /ci-ok: jobs\.ci-ok must need every other job/,
+  ],
+  [
+    'e2e-server with another if',
+    {
+      [CI]: [
+        [
+          E2E_SERVER_IF,
+          "  e2e-server:\n    needs: changes\n    if: needs.changes.outputs.web == 'true'\n",
+        ],
+      ],
+    },
+    /e2e-server-if: jobs\.e2e-server must run with the same if: as jobs\.e2e/,
+  ],
+  [
+    'e2e without the e2e filter',
+    {
+      [CI]: [
+        [
+          "    needs: [changes, e2e-server]\n    if: needs.changes.outputs.e2e == 'true'\n",
+          "    needs: [changes, e2e-server]\n    if: needs.changes.outputs.web == 'true'\n",
+        ],
+      ],
+    },
+    /e2e-server-if: jobs\.e2e must run with if: needs\.changes\.outputs\.e2e == 'true'/,
+  ],
+  [
+    'e2e-server with a CARGO_ variable in a step',
+    { [CI]: [[E2E_SERVER_ENV, '        env:\n          CARGO_INCREMENTAL: 0\n']] },
+    /e2e-server-env: jobs\.e2e-server.*CARGO_INCREMENTAL/,
+  ],
+  [
+    'e2e-server with a RUST variable in the job',
+    {
+      [CI]: [[E2E_SERVER_IF, `${E2E_SERVER_IF}    env:\n      RUSTFLAGS: -Dwarnings\n`]],
+    },
+    /e2e-server-env: jobs\.e2e-server.*RUSTFLAGS/,
+  ],
+  // Review of PR #56 (devops): the other prefixes rust-cache puts in its key.
+  ...[
+    ['CC', 'clang'],
+    ['CFLAGS', '-O2'],
+    ['CXX', 'clang++'],
+    ['CMAKE_GENERATOR', 'Ninja'],
+    ['CARGOTEST', 'x'],
+  ].map(([name, value]) => [
+    `e2e-server with ${name} in a step`,
+    { [CI]: [[E2E_SERVER_ENV, `        env:\n          ${name}: ${value}\n`]] },
+    new RegExp(`e2e-server-env: jobs\\.e2e-server.*${name}`),
+  ]),
+  // Review of PR #56 (devops): e2e-server reads the cache of rust and never writes it.
+  [
+    'e2e-server with save-if: true',
+    { [CI]: [[E2E_CACHE, '          shared-key: ci\n          save-if: true\n']] },
+    /e2e-server-cache: .*save-if: false/,
+  ],
+  [
+    'e2e-server with save-if as an expression',
+    {
+      [CI]: [[E2E_CACHE, "          shared-key: ci\n          save-if: ${{ github.ref != '' }}\n"]],
+    },
+    /e2e-server-cache: .*save-if: false/,
+  ],
+  [
+    'e2e-server without save-if',
+    { [CI]: [[E2E_CACHE, '          shared-key: ci\n']] },
+    /e2e-server-cache: .*save-if: false/,
+  ],
+  [
+    'e2e-server with another shared-key',
+    { [CI]: [[E2E_CACHE, '          shared-key: e2e\n          save-if: false\n']] },
+    /e2e-server-cache: .*shared-key/,
+  ],
+  [
+    'e2e-server with an input that changes the key',
+    { [CI]: [[E2E_CACHE, `${E2E_CACHE}          prefix-key: v1\n`]] },
+    /e2e-server-cache: .*prefix-key/,
+  ],
+  [
+    'e2e-server without rust-cache',
+    {
+      [CI]: [
+        [
+          `      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0\n        with:\n${E2E_CACHE}`,
+          '',
+        ],
+      ],
+    },
+    /e2e-server-cache: jobs\.e2e-server must use Swatinem\/rust-cache/,
+  ],
+  // Review of PR #56 (devops): the canaries of a run never leave the runner.
+  [
+    'upload-artifact of the logs without excluding the canaries',
+    { [CI]: [[UPLOAD_PATHS, '            apps/web/test-results/logs\n']] },
+    /upload-canaries: .*dynamic-canaries\.txt/,
+  ],
+  [
+    'upload-artifact of test-results without excluding the canaries',
+    {
+      [CI]: [
+        [
+          '            apps/web/test-results/screenshots\n' + UPLOAD_PATHS,
+          '            apps/web/test-results\n',
+        ],
+      ],
+    },
+    /upload-canaries:/,
+  ],
+  [
+    'upload-artifact of a glob that matches the canaries',
+    { [CI]: [[UPLOAD_PATHS, '            apps/web/test-results/**/*.txt\n']] },
+    /upload-canaries:/,
+  ],
+  [
+    'upload-artifact of the canaries file itself, with a single-line path',
+    {
+      [CI]: [
+        [
+          '          path: |\n            apps/web/test-results/screenshots\n' + UPLOAD_PATHS,
+          '          path: ./apps/web/test-results/logs/dynamic-canaries.txt\n',
+        ],
+      ],
+    },
+    /upload-canaries:/,
+  ],
+  [
+    'download-artifact with run-id',
+    { [CI]: [[DOWNLOAD, `${DOWNLOAD}          run-id: 123\n`]] },
+    /download-artifact: .*run-id/,
+  ],
+  [
+    'download-artifact with github-token',
+    { [CI]: [[DOWNLOAD, `${DOWNLOAD}          github-token: x\n`]] },
+    /download-artifact: .*github-token/,
+  ],
+  [
+    'download-artifact with repository',
+    { [CI]: [[DOWNLOAD, `${DOWNLOAD}          repository: someone/else\n`]] },
+    /download-artifact: .*repository/,
+  ],
+  [
+    'download-artifact without a name',
+    { [CI]: [[DOWNLOAD, '          path: bin\n']] },
+    /download-artifact: .*by name/,
+  ],
+  [
+    'Postgres service with another digest',
+    { [CI]: [[PG_IMAGE, `postgres:17.10-alpine@sha256:${'b'.repeat(64)}`]] },
+    /postgres-digest: jobs\.e2e\.services\.postgres/,
+  ],
+  [
+    'Postgres service with another tag',
+    { [CI]: [[PG_IMAGE, PG_IMAGE.replace('17.10', '17.11')]] },
+    /postgres-digest:/,
+  ],
+  [
+    'compose.dev.yml with another digest',
+    { [COMPOSE_DEV]: [[PG_IMAGE, `postgres:17.10-alpine@sha256:${'c'.repeat(64)}`]] },
+    /postgres-digest:/,
+  ],
+];
+
+// ADR-0012 B6.4 item 7 (2026-10-30 amendment): the b1= of images and of verify, once each and
+// identical byte for byte.
+const B1_LINE =
+  "          b1=\"default-src 'self'; script-src 'self' 'nonce-*'; form-action 'self' https://accounts.google.com/o/oauth2/v2/auth https://discord.com/oauth2/authorize; frame-ancestors 'none'\"\n";
+const VERIFY_HEADERS =
+  '      - name: Security headers (ADR-0012 B2)\n        run: |\n          # ADR-0012 B1 plus B4.6.\n';
+const IMAGES_HEADERS =
+  '      - name: Health, version and headers (RF-C7)\n        run: |\n          # ADR-0012 B1 plus B4.6.\n';
+
+/** @type {[string, Record<string, [string, string][]>, RegExp][]} */
+const CSP_CASES = [
+  [
+    'the b1= of release.yml differs from the one of images',
+    { [REL]: [[B1_LINE, B1_LINE.replace("form-action 'self' ", "form-action 'self' https: ")]] },
+    /csp-b1: the b1= of jobs\.images .* and of jobs\.verify .* must be identical byte for byte/,
+  ],
+  [
+    'the b1= of ci.yml differs only in a space',
+    { [CI]: [[B1_LINE, B1_LINE.replace("'self'; script-src", "'self';  script-src")]] },
+    /csp-b1: .* must be identical byte for byte/,
+  ],
+  [
+    'verify without b1=',
+    { [REL]: [[B1_LINE, '']] },
+    /release\.yml: csp-b1: jobs\.verify .*Security headers \(ADR-0012 B2\).* must set b1= exactly once, found 0/,
+  ],
+  [
+    'images without b1=',
+    { [CI]: [[B1_LINE, '']] },
+    /ci\.yml: csp-b1: jobs\.images .*Health, version and headers \(RF-C7\).* must set b1= exactly once, found 0/,
+  ],
+  [
+    'b1= twice in images',
+    { [CI]: [[B1_LINE, B1_LINE + B1_LINE]] },
+    /ci\.yml: csp-b1: jobs\.images .* found 2/,
+  ],
+  [
+    'the headers step of verify renamed',
+    { [REL]: [[VERIFY_HEADERS, VERIFY_HEADERS.replace('(ADR-0012 B2)', '(B2)')]] },
+    /release\.yml: csp-b1: jobs\.verify must have exactly one step named "Security headers \(ADR-0012 B2\)", found 0/,
+  ],
+  [
+    'the headers step of images twice',
+    { [CI]: [[IMAGES_HEADERS, `${IMAGES_HEADERS}${B1_LINE}      - name: x\n${IMAGES_HEADERS}`]] },
+    /ci\.yml: csp-b1: jobs\.images must have exactly one step named "Health, version and headers \(RF-C7\)", found 2/,
+  ],
+];
+
+// 008 RF-D9, plan-d decision 12: the release binary check.
+const CHECK_BUILD = '      - name: Build server for the binary check (not pushed)\n';
+const PUSH_BUILD = '      - name: Build and push server\n';
+const CHECK_STEP =
+  '      - name: The release binary has no dev-auth\n        if: github.event_name == \'push\'\n        run: node scripts/check-release-binary.mjs "$RUNNER_TEMP/server"\n';
+const DIGEST_STEP_NAME = '      - name: The pushed server is the checked one\n';
+const RETENTION_STEP =
+  "      - name: Retention of server\n        if: github.event_name == 'push'\n        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55\n        with:\n          package-name: example/server\n";
+const LOCAL_TAG = '          tags: torneo-release-check/server:local\n';
+const PUSH_TAG = '          tags: ghcr.io/example/server:v1\n';
+const MUSL_CHECK =
+  '      - name: The musl binary has no dev-auth\n        run: node scripts/check-release-binary.mjs target/x86_64-unknown-linux-musl/debug/server\n';
+const IMAGES_CHECK =
+  '      - name: Server binary\n        run: node scripts/check-release-binary.mjs "$RUNNER_TEMP/server"\n';
+/** The `with:` of one of the two server builds, located by the line after its tags. */
+const inBuild = (tag, from, to) => ({ [REL]: [[`${tag}${from}`, `${tag}${to}`]] });
+const LABELS = '          labels: org.opencontainers.image.source=https://example.com/repo\n';
+// QA finding 3 of phase D: both RF-D9 steps of the release fail closed.
+const DIGEST_RUN = '        run: node scripts/check-pushed-server.mjs\n';
+const PUSHED_ENV = '          PUSHED: ${{ steps.server-push.outputs.imageid }}\n';
+const CHECK_RUN = '        run: node scripts/check-release-binary.mjs "$RUNNER_TEMP/server"\n';
+const CHECK_CMD = 'node scripts/check-release-binary.mjs "$RUNNER_TEMP/server"';
+const MUSL_RUN =
+  '        run: node scripts/check-release-binary.mjs target/x86_64-unknown-linux-musl/debug/server\n';
+const BUILD_JOB = '  build:\n    runs-on: ubuntu-24.04\n';
+/** The check step of release.yml as a block run: with the given lines. */
+const checkBlock = (...lines) => `        run: |\n${lines.map((l) => `          ${l}\n`).join('')}`;
+const DIGEST_AT = String.raw`jobs\.build\.steps\[\d+\] \(The pushed server is the checked one\)`;
+const CHECK_AT = String.raw`jobs\.build\.steps\[\d+\] \(The release binary has no dev-auth\)`;
+
+/** @type {[string, Record<string, [string, string][]>, RegExp][]} */
+const RELEASE_CASES = [
+  [
+    'a single server build (the local one builds another Dockerfile)',
+    {
+      [REL]: [
+        ['          file: apps/server/Dockerfile\n', '          file: apps/web/Dockerfile\n'],
+      ],
+    },
+    /release-binary: jobs\.build must build apps\/server\/Dockerfile exactly twice .*found 1/,
+  ],
+  [
+    'a third server build',
+    {
+      [REL]: [
+        [
+          RETENTION_STEP,
+          `${PUSH_BUILD}        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc\n        with:\n          file: apps/server/Dockerfile\n${RETENTION_STEP}`,
+        ],
+      ],
+    },
+    /release-binary: .*exactly twice .*found 3/,
+  ],
+  [
+    'the check build with a GHCR tag',
+    { [REL]: [[LOCAL_TAG, '          tags: ghcr.io/example/server:check\n']] },
+    /release-binary: .*the first server build must tag only torneo-release-check\/server:local/,
+  ],
+  [
+    'the check build pushed',
+    {
+      [REL]: [
+        [
+          '          push: false\n          load: true\n',
+          '          push: true\n          load: true\n',
+        ],
+      ],
+    },
+    /release-binary: .*the first server build must have push: false and load: true/,
+  ],
+  [
+    'the push build without push',
+    { [REL]: [['          push: true\n', '          push: false\n']] },
+    /release-binary: .*the second server build must have push: true/,
+  ],
+  [
+    'different build-args',
+    {
+      [REL]: [
+        [
+          `          build-args: APP_VERSION=\${{ inputs.tag }}\n${PUSH_TAG}`,
+          `          build-args: APP_VERSION=other\n${PUSH_TAG}`,
+        ],
+      ],
+    },
+    /release-binary: .*build-args must be the same in both server builds/,
+  ],
+  [
+    'different labels',
+    inBuild(PUSH_TAG, LABELS, '          labels: org.opencontainers.image.source=https://other\n'),
+    /release-binary: .*labels must be the same in both server builds/,
+  ],
+  [
+    'cache-from missing in the push',
+    inBuild(PUSH_TAG, `${LABELS}          cache-from: type=gha,scope=server\n`, LABELS),
+    /release-binary: .*cache-from must be set in both server builds/,
+  ],
+  [
+    'cache-to in a release build',
+    inBuild(PUSH_TAG, LABELS, `${LABELS}          cache-to: type=gha,mode=max,scope=server\n`),
+    /release-binary: .*cache-to is not allowed in the server builds/,
+  ],
+  [
+    'the two builds with different if',
+    {
+      [REL]: [
+        [
+          `${PUSH_BUILD}        id: server-push\n        if: github.event_name == 'push'\n`,
+          `${PUSH_BUILD}        id: server-push\n        if: always()\n`,
+        ],
+      ],
+    },
+    /release-binary: .*both server builds must have the same if:/,
+  ],
+  [
+    'no binary check between the builds',
+    { [REL]: [[CHECK_STEP, '']] },
+    /release-binary: .*a step between the two server builds must run scripts\/check-release-binary\.mjs/,
+  ],
+  [
+    'the binary check with --expect-dev',
+    { [REL]: [[CHECK_STEP, CHECK_STEP.replace('.mjs "', '.mjs --expect-dev "')]] },
+    /release-binary: .*a step between the two server builds must run scripts\/check-release-binary\.mjs/,
+  ],
+  [
+    'the binary check after the push',
+    {
+      [REL]: [
+        [CHECK_STEP, ''],
+        [DIGEST_STEP_NAME, `${CHECK_STEP}${DIGEST_STEP_NAME}`],
+      ],
+    },
+    /release-binary: .*a step between the two server builds/,
+  ],
+  [
+    'no imageid of the push in the digest comparison',
+    { [REL]: [[PUSHED_ENV, '']] },
+    /release-binary: .*\(The pushed server is the checked one\) must set PUSHED: \$\{\{ steps\.server-push\.outputs\.imageid \}\}/,
+  ],
+  [
+    'the digest comparison as inline shell instead of the script',
+    {
+      [REL]: [
+        [
+          '        run: node scripts/check-pushed-server.mjs\n',
+          '        run: |\n          set -euo pipefail\n          node scripts/check-pushed-server.mjs\n',
+        ],
+      ],
+    },
+    /release-binary: jobs\.build\.steps\[\d+\] \(The pushed server is the checked one\) must run exactly node scripts\/check-pushed-server\.mjs/,
+  ],
+  [
+    'the imageid of the local build (the manifest digest with the containerd store)',
+    {
+      [REL]: [
+        [
+          '          PUSHED: ${{ steps.server-push.outputs.imageid }}\n',
+          '          PUSHED: ${{ steps.server-push.outputs.imageid }}\n          CHECKED: ${{ steps.server-check.outputs.imageid }}\n',
+        ],
+      ],
+    },
+    /release-binary: .*uses the imageid of the local build, which depends on the image store/,
+  ],
+  [
+    'the digest comparison after the retention',
+    {
+      [REL]: [
+        [RETENTION_STEP, ''],
+        [DIGEST_STEP_NAME, `${RETENTION_STEP}${DIGEST_STEP_NAME}`],
+      ],
+    },
+    /release-binary: after the push and before the retention, a step must compare the config of the checked image/,
+  ],
+  // The comparison step is exactly the script, unconditional within the release, and on bash -e.
+  [
+    'the comparison with || true',
+    { [REL]: [[DIGEST_RUN, '        run: node scripts/check-pushed-server.mjs || true\n']] },
+    new RegExp(
+      `release-binary: ${DIGEST_AT} must run exactly node scripts/check-pushed-server\\.mjs`,
+    ),
+  ],
+  [
+    'the comparison followed by true',
+    { [REL]: [[DIGEST_RUN, '        run: node scripts/check-pushed-server.mjs; true\n']] },
+    new RegExp(`release-binary: ${DIGEST_AT} must run exactly`),
+  ],
+  [
+    'the comparison replaced by true',
+    { [REL]: [[DIGEST_RUN, '        run: "true"\n']] },
+    /release-binary: after the push and before the retention, a step must compare the config of the checked image/,
+  ],
+  [
+    'continue-on-error: true on the comparison',
+    { [REL]: [[DIGEST_STEP_NAME, `${DIGEST_STEP_NAME}        continue-on-error: true\n`]] },
+    new RegExp(`continue-on-error: ${DIGEST_AT} must not declare it`),
+  ],
+  [
+    'continue-on-error: true on the build job',
+    { [REL]: [[BUILD_JOB, `${BUILD_JOB}    continue-on-error: true\n`]] },
+    /continue-on-error: jobs\.build must not declare it/,
+  ],
+  [
+    'the comparison with if: false',
+    {
+      [REL]: [
+        [
+          `${DIGEST_STEP_NAME}        if: github.event_name == 'push'\n`,
+          `${DIGEST_STEP_NAME}        if: false\n`,
+        ],
+      ],
+    },
+    new RegExp(`release-binary: ${DIGEST_AT} must have the if: of the server builds`),
+  ],
+  [
+    'the comparison without if: (it would also run on a rollback)',
+    { [REL]: [[`${DIGEST_STEP_NAME}        if: github.event_name == 'push'\n`, DIGEST_STEP_NAME]] },
+    new RegExp(`release-binary: ${DIGEST_AT} must have the if: of the server builds`),
+  ],
+  [
+    'the comparison with shell: bash {0} (no -e)',
+    { [REL]: [[DIGEST_RUN, `        shell: bash {0}\n${DIGEST_RUN}`]] },
+    new RegExp(`release-binary: ${DIGEST_AT} must fail closed: shell: must be the default or bash`),
+  ],
+  [
+    'the comparison without TAG',
+    { [REL]: [['          TAG: v1\n', '']] },
+    new RegExp(`release-binary: ${DIGEST_AT} must set TAG and SHORT`),
+  ],
+  [
+    'the comparison with a fixed PUSHED',
+    { [REL]: [[PUSHED_ENV, `          PUSHED: sha256:${'a'.repeat(64)}\n`]] },
+    new RegExp(`release-binary: ${DIGEST_AT} must set PUSHED`),
+  ],
+  [
+    'defaults.run.shell without -e on the build job',
+    { [REL]: [[BUILD_JOB, `${BUILD_JOB}    defaults:\n      run:\n        shell: bash {0}\n`]] },
+    new RegExp(`release-binary: ${CHECK_AT} must fail closed: shell: must be the default or bash`),
+  ],
+  [
+    'defaults.run.shell without -e on the release workflow',
+    { [REL]: [['jobs:\n', 'defaults:\n  run:\n    shell: sh {0}\njobs:\n']] },
+    new RegExp(`release-binary: ${DIGEST_AT} must fail closed: shell:`),
+  ],
+  // The binary check between the builds fails the step when the script fails.
+  [
+    'the binary check with || true',
+    { [REL]: [[CHECK_RUN, CHECK_RUN.replace('server"\n', 'server" || true\n')]] },
+    new RegExp(`release-binary: ${CHECK_AT} must fail closed: exactly one line must be the bare`),
+  ],
+  [
+    'the binary check followed by true without set -e',
+    { [REL]: [[CHECK_RUN, checkBlock(CHECK_CMD, 'true')]] },
+    new RegExp(
+      `release-binary: ${CHECK_AT} must fail closed: a multi-line run: must start with set -euo pipefail`,
+    ),
+  ],
+  [
+    'the binary check after set +e',
+    { [REL]: [[CHECK_RUN, checkBlock('set -euo pipefail', 'set +e', CHECK_CMD, 'true')]] },
+    new RegExp(`release-binary: ${CHECK_AT} must fail closed: set \\+ is not allowed`),
+  ],
+  // Review of PR #56 (qa): every other way to switch errexit or pipefail off.
+  ...[
+    ['shopt -u -o errexit', 'shopt'],
+    ['shopt -uo errexit', 'shopt'],
+    ['shopt -u -o pipefail', 'shopt'],
+    ['shopt -o -u errexit', 'shopt'],
+    ['set +o errexit', 'set \\+'],
+    ['set +o pipefail', 'set \\+'],
+    ['set -x +e', 'set \\+'],
+    ["eval 'set +e'", 'set \\+'],
+    ['builtin set +e', 'set \\+'],
+    ['\\set +e', 'set \\+'],
+  ].map(([off, rule]) => [
+    `the binary check after ${off}`,
+    { [REL]: [[CHECK_RUN, checkBlock('set -euo pipefail', off, CHECK_CMD, 'true')]] },
+    new RegExp(`release-binary: ${CHECK_AT} must fail closed: ${rule}`),
+  ]),
+  [
+    'the binary check with an EXIT trap that exits 0',
+    {
+      [REL]: [[CHECK_RUN, checkBlock('set -euo pipefail', "trap 'exit 0' EXIT", CHECK_CMD)]],
+    },
+    new RegExp(`release-binary: ${CHECK_AT} must fail closed: exit must have a non-zero status`),
+  ],
+  [
+    'the binary check skipped by a bare exit',
+    { [REL]: [[CHECK_RUN, checkBlock('set -euo pipefail', 'exit', CHECK_CMD)]] },
+    new RegExp(`release-binary: ${CHECK_AT} must fail closed: exit must have`),
+  ],
+  [
+    'the binary check inside an if',
+    {
+      [REL]: [[CHECK_RUN, checkBlock('set -euo pipefail', `if ${CHECK_CMD}; then echo ok; fi`)]],
+    },
+    new RegExp(
+      `release-binary: ${CHECK_AT} must fail closed: exactly one line must be the bare command, found 0`,
+    ),
+  ],
+  [
+    'continue-on-error: true on the binary check',
+    { [REL]: [[CHECK_RUN, `        continue-on-error: true\n${CHECK_RUN}`]] },
+    new RegExp(`continue-on-error: ${CHECK_AT} must not declare it`),
+  ],
+  [
+    'the binary check with if: false',
+    { [REL]: [[CHECK_STEP, CHECK_STEP.replace("if: github.event_name == 'push'", 'if: false')]] },
+    new RegExp(`release-binary: ${CHECK_AT} must have the if: of the server builds`),
+  ],
+  [
+    'the binary check with shell: sh {0}',
+    { [REL]: [[CHECK_RUN, `        shell: sh {0}\n${CHECK_RUN}`]] },
+    new RegExp(`release-binary: ${CHECK_AT} must fail closed: shell:`),
+  ],
+  [
+    'rust checking its musl binary with || true',
+    { [CI]: [[MUSL_RUN, MUSL_RUN.replace('server\n', 'server || true\n')]] },
+    /ci\.yml: release-binary: jobs\.rust\.steps\[\d+\] \(The musl binary has no dev-auth\) must fail closed/,
+  ],
+  [
+    'rust checking its musl binary with if: false',
+    { [CI]: [[MUSL_RUN, `        if: false\n${MUSL_RUN}`]] },
+    /ci\.yml: release-binary: jobs\.rust\.steps\[\d+\] .* must not have an if:/,
+  ],
+  [
+    'images checking its server binary after set +e',
+    {
+      [CI]: [
+        [
+          IMAGES_CHECK,
+          `      - name: Server binary\n${checkBlock('set -euo pipefail', 'set +e', CHECK_CMD, 'true')}`,
+        ],
+      ],
+    },
+    /ci\.yml: release-binary: jobs\.images\.steps\[\d+\] \(Server binary\) must fail closed: set \+/,
+  ],
+  [
+    'rust without the check of its musl binary',
+    { [CI]: [[MUSL_CHECK, '']] },
+    /ci\.yml: release-binary: jobs\.rust must run scripts\/check-release-binary\.mjs without --expect-dev/,
+  ],
+  [
+    'images without the check of its server binary',
+    { [CI]: [[IMAGES_CHECK, '']] },
+    /ci\.yml: release-binary: jobs\.images must run/,
+  ],
+  [
+    'images checking with --expect-dev',
+    { [CI]: [[IMAGES_CHECK, IMAGES_CHECK.replace('.mjs "', '.mjs --expect-dev "')]] },
+    /ci\.yml: release-binary: jobs\.images must run/,
+  ],
+];
+
 describe('check-workflows (RF-C12, plan-c decision 23)', () => {
   it('passes on the valid fixture', () => {
     expect(checkWorkflows(valid)).toEqual([]);
@@ -713,6 +1300,39 @@ describe('check-workflows (RF-C12, plan-c decision 23)', () => {
       problems.some((p) => pattern.test(p)),
       problems.join('\n') || '(no problems)',
     ).toBe(true);
+  });
+
+  it.each(E2E_CASES)('fails on: %s', (_name, edits, pattern) => {
+    const problems = checkWorkflows(mutated(edits));
+    expect(
+      problems.some((p) => pattern.test(p)),
+      problems.join('\n') || '(no problems)',
+    ).toBe(true);
+  });
+
+  it.each([...CSP_CASES, ...RELEASE_CASES])('fails on: %s', (_name, edits, pattern) => {
+    const problems = checkWorkflows(mutated(edits));
+    expect(
+      problems.some((p) => pattern.test(p)),
+      problems.join('\n') || '(no problems)',
+    ).toBe(true);
+  });
+
+  it('compares b1= byte for byte, also when the two copies differ only in quotes', () => {
+    const tree = mutated({
+      [REL]: [[B1_LINE, B1_LINE.replace('b1="', "b1='").replace(/"\n$/, "'\n")]],
+    });
+    expect(checkWorkflows(tree).filter((p) => p.includes('csp-b1'))).toHaveLength(1);
+  });
+
+  it('fails without infra/compose.dev.yml when ci.yml has a Postgres service', () => {
+    const tree = {
+      read: (rel) => (rel === COMPOSE_DEV ? null : valid.read(rel)),
+      files: valid.files,
+    };
+    expect(checkWorkflows(tree).some((p) => /postgres-digest: .*compose\.dev\.yml/.test(p))).toBe(
+      true,
+    );
   });
 
   it('accepts timeout-minutes on a step (e2e browser install)', () => {
@@ -765,7 +1385,7 @@ describe('check-workflows (RF-C12, plan-c decision 23)', () => {
       [CI]: [
         [
           RUST_JOB,
-          `${RUST_JOB}    container: node:22${digest}\n    defaults:\n      run:\n        shell: bash\n    services:\n      pg:\n        image: postgres:17${digest}\n`,
+          `${RUST_JOB}    container: node:22${digest}\n    defaults:\n      run:\n        shell: bash\n    services:\n      cache:\n        image: redis:7${digest}\n`,
         ],
       ],
     });
@@ -837,7 +1457,7 @@ describe('ci.yml filters cover what each job runs (review of PR #5)', () => {
     .filter(([, , filter]) => filter);
 
   it('finds the gated jobs', () => {
-    expect(jobs.map(([id]) => id).sort()).toEqual(['e2e', 'images', 'rust', 'web']);
+    expect(jobs.map(([id]) => id).sort()).toEqual(['e2e', 'e2e-server', 'images', 'rust', 'web']);
   });
 
   it.each(jobs)('every script that %s runs is in its filter', (_id, job, filter) => {
@@ -859,5 +1479,33 @@ describe('ci.yml filters cover what each job runs (review of PR #5)', () => {
       'docs/guides/sprites.md',
     ];
     expect(read.filter((file) => !globs.some((g) => g.test(file)))).toEqual([]);
+  });
+});
+
+describe('justfile sub-invocations (review of PR #56)', () => {
+  const recipes = justRecipes(readFileSync(new URL('justfile', ROOT_URL), 'utf8'));
+  /** The recipe and every recipe it depends on, transitively (one `just` run dedupes these). */
+  const closure = (name, seen = new Set()) => {
+    if (seen.has(name) || !recipes[name]) return seen;
+    seen.add(name);
+    for (const dep of recipes[name].deps) closure(dep, seen);
+    return seen;
+  };
+
+  it('finds the e2e sub-invocation', () => {
+    expect(recipes.e2e.body.join('\n')).toMatch(/\{\{just_executable\(\)\}\}\s+_e2e-run/);
+  });
+
+  // `{{just_executable()}} X` is a new just process: a dependency shared with the caller runs twice.
+  it.each(Object.keys(recipes))('%s does not run a dependency twice', (name) => {
+    const outer = closure(name);
+    outer.delete(name);
+    const twice = [];
+    for (const line of recipes[name].body) {
+      for (const m of line.matchAll(/\{\{just_executable\(\)\}\}\s+([\w-]+)/g)) {
+        for (const dep of closure(m[1])) if (outer.has(dep)) twice.push(`${m[1]} -> ${dep}`);
+      }
+    }
+    expect(twice).toEqual([]);
   });
 });

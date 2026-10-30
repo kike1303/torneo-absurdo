@@ -464,10 +464,17 @@ mod source_rules {
     /// Files of `src/` allowed to build SQL from text. None: every value goes by `bind`.
     const DYNAMIC_SQL_ALLOWED: &[&str] = &[];
 
-    /// Whether `source` builds SQL from text: sqlx's assert-safe wrapper anywhere, or a
-    /// `format!` as the SQL of a `query*` call (008 plan-b decision 7; QA on phase C). This is
-    /// what would let a dynamic `UPDATE users SET role …` past the token check above.
+    /// Whether `source` builds SQL from text: sqlx's assert-safe wrapper anywhere, a leaked
+    /// `String` or `Box` anywhere (`.leak(`, `Box::leak`, `String::leak`: a runtime
+    /// `&'static str`, which sqlx 0.9 accepts as SQL), or a `format!` as the SQL of a `query*`
+    /// call (008 plan-b decision 7; QA on phase C; #55). This is what would let a dynamic
+    /// `UPDATE users SET role …` past the token check above. With sqlx 0.9 the `format!` form
+    /// does not compile; it stays in case a later version takes a `String` again.
     pub(super) fn builds_sql_from_text(source: &str) -> bool {
+        let leaks = [[".", "leak("].concat(), ["::", "leak("].concat()];
+        if leaks.iter().any(|needle| source.contains(needle.as_str())) {
+            return true;
+        }
         let wrapper = ["assert", "sqlsafe"].concat();
         let tokens = tokens(source);
         tokens.iter().enumerate().any(|(i, token)| {
@@ -517,6 +524,13 @@ mod source_rules {
             "sqlx::query_as(format!(\"SELECT 1\"))".to_owned(),
             "query_scalar(format!(\"SELECT 1\"))".to_owned(),
             "sqlx::raw_sql(&format!(\"SET x = {}\", v))".to_owned(),
+            // sqlx 0.9 only takes a `&'static str` (or the wrapper): a leaked `String` is one
+            // (security-reviewer and architect on #55).
+            "sqlx::query(format!(\"UPDATE users SET {c} = $1\").leak())".to_owned(),
+            "let sql: &'static str = text.leak();".to_owned(),
+            "let sql = Box::leak(text.into_boxed_str());".to_owned(),
+            "let sql = std::boxed::Box::leak(b);".to_owned(),
+            "let sql = String::leak(text);".to_owned(),
         ] {
             assert!(builds_sql_from_text(&source), "{source}");
         }

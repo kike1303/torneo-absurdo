@@ -37,6 +37,50 @@ fn rand_u16() -> u16 {
     uuid::Uuid::new_v4().as_bytes()[0].into()
 }
 
+/// ADR-0012 B4.6: with the production URLs (no fakes), `start` and `link` answer a 303 (never a
+/// 307 or 308, which keep the method and the body) whose `Location` is the authorize constant
+/// plus the query the server builds.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_redirect_to_a_real_provider_is_a_303_to_its_authorize_constant() {
+    use server::auth::providers::{DISCORD_AUTHORIZE, GOOGLE_AUTHORIZE};
+    let db = TestDb::create().await;
+    let (app, pool) = support::app::start_db(
+        &db,
+        &support::config::PROVIDER_VARS,
+        &server::app::Settings::default(),
+    )
+    .await;
+    let (_, token) = support::app::user_with_session(&pool).await;
+    let session = oauth::session_cookie(&token);
+    for (path, cookie, authorize) in [
+        ("/api/auth/google/start", None, GOOGLE_AUTHORIZE),
+        ("/api/auth/discord/start", None, DISCORD_AUTHORIZE),
+        (
+            "/api/auth/link/google",
+            Some(session.as_str()),
+            GOOGLE_AUTHORIZE,
+        ),
+        (
+            "/api/auth/link/discord",
+            Some(session.as_str()),
+            DISCORD_AUTHORIZE,
+        ),
+    ] {
+        let mut headers = vec![
+            ("origin", ORIGIN),
+            ("content-type", "application/x-www-form-urlencoded"),
+        ];
+        headers.extend(cookie.map(|c| ("cookie", c)));
+        let response = support::http::send_body(app.addr, "POST", path, &headers, "next=%2F").await;
+        assert_eq!(response.status, 303, "{path}: {}", response.text());
+        let location = response.header("location").unwrap();
+        assert!(
+            location.starts_with(&format!("{authorize}?")),
+            "{path}: {location}"
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_authorization_url_asks_for_one_scope_with_pkce() {
     let db = TestDb::create().await;

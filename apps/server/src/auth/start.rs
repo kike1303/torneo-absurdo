@@ -15,9 +15,10 @@ use protocol::{ApiErrorCode, CallbackErrorCode, Provider};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use super::callback::error_redirect;
+use super::callback::{error_redirect, try_again_redirect};
 use super::{flow_hash, next, random_text};
 use crate::app::AppState;
+use crate::http::cookies::CookiePolicy;
 use crate::http::errors::error_response;
 
 #[derive(Deserialize)]
@@ -36,7 +37,17 @@ pub async fn handler(
     };
     match begin_flow(&state, provider, form, Purpose::Login).await {
         Ok(response) => response,
-        Err(code) => error_redirect(&state.auth.cookies, code),
+        Err(code) => flow_error(&state.auth.cookies, code),
+    }
+}
+
+/// A flow that did not start. `auth.try_again` (the database, or `OsRng`) leaves the cookies
+/// alone, like every 429 and 503 of this route (008 "Enmienda 2026-10-30" of RF-B5); a rejected
+/// form is the callback's error redirect, which expires the flow cookie (T4 adapted).
+pub fn flow_error(cookies: &CookiePolicy, code: CallbackErrorCode) -> Response {
+    match code {
+        CallbackErrorCode::TryAgain => try_again_redirect(HeaderValue::from_static("no-store")),
+        code => error_redirect(cookies, code),
     }
 }
 

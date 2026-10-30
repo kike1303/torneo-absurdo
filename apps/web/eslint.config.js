@@ -74,6 +74,28 @@ const featuresValueRestriction = (relative) => [
     : []),
 ];
 
+const MUTATIONS_MESSAGE =
+  'API mutations are imported only by a `+page.server.ts`, and called only from its `actions` (008 plan-d decision 8, ADR-0008 D5).';
+/** @param {boolean} relative */
+const mutationsRestriction = (relative) => [
+  { regex: '^#lib/server/api/mutations(?:\\.[jt]s)?$', message: MUTATIONS_MESSAGE },
+  ...(relative
+    ? [
+        {
+          group: ['**/server/api/mutations', '**/server/api/mutations.*'],
+          message: MUTATIONS_MESSAGE,
+        },
+      ]
+    : []),
+];
+
+const POSTGRES_MESSAGE =
+  'postgres.js is only for the e2e database helpers (e2e/support/db.mjs): it never reaches the app (008 plan-d decision 13).';
+/** @param {boolean} _relative */
+const postgresRestriction = (_relative) => [
+  { regex: '^postgres(?:/.*)?$', message: POSTGRES_MESSAGE },
+];
+
 const UI_MESSAGE =
   'Primitives in `ui/` import nothing from features, domain components or Paraglide messages, not even types (ADR-0009 D4).';
 /**
@@ -240,6 +262,9 @@ export function createConfig({ relativePatterns = true } = {}) {
   const UI = 'src/lib/components/ui/**/*.{js,ts,svelte}';
   const A11Y = 'src/lib/components/ui/_a11y-messages.ts';
   const FIGHT_STAGE = 'src/lib/components/fight/FightStage.svelte';
+  // The only importers of `api/mutations` (008 plan-d decision 8); the use inside `actions` is
+  // checked by tests/no-mutation-in-load.test.ts.
+  const MUTATION_IMPORTERS = ['src/routes/**/+page.server.ts', 'src/lib/server/api/**/*.ts'];
 
   return defineConfig([
     globalIgnores([
@@ -274,22 +299,37 @@ export function createConfig({ relativePatterns = true } = {}) {
     {
       files: [SRC],
       ignores: [COMPONENTS],
-      rules: restrictedImports(r, [rendererRestriction]),
+      rules: restrictedImports(r, [rendererRestriction, mutationsRestriction, postgresRestriction]),
+    },
+    {
+      files: MUTATION_IMPORTERS,
+      rules: restrictedImports(r, [rendererRestriction, postgresRestriction]),
     },
     {
       files: [COMPONENTS],
       ignores: [UI, FIGHT_STAGE],
-      rules: restrictedImports(r, [rendererRestriction, featuresValueRestriction]),
+      rules: restrictedImports(r, [
+        rendererRestriction,
+        featuresValueRestriction,
+        mutationsRestriction,
+        postgresRestriction,
+      ]),
     },
     {
       files: [FIGHT_STAGE],
-      rules: restrictedImports(r, [featuresValueRestriction]),
+      rules: restrictedImports(r, [
+        featuresValueRestriction,
+        mutationsRestriction,
+        postgresRestriction,
+      ]),
     },
     ...Array.from({ length: UI_MAX_DEPTH + 1 }, (_, depth) => ({
       files: [`src/lib/components/ui/${'*/'.repeat(depth)}*.{js,ts,svelte}`],
       ignores: [A11Y],
       rules: restrictedImports(r, [
         rendererRestriction,
+        mutationsRestriction,
+        postgresRestriction,
         /** @param {boolean} rel */ (rel) => uiRestriction(rel, false, depth),
       ]),
     })),
@@ -297,8 +337,16 @@ export function createConfig({ relativePatterns = true } = {}) {
       files: [A11Y],
       rules: restrictedImports(r, [
         rendererRestriction,
+        mutationsRestriction,
+        postgresRestriction,
         /** @param {boolean} rel */ (rel) => uiRestriction(rel, true, 0),
       ]),
+    },
+    // The unit tests never talk to Postgres; only tests/e2e-db.test.ts loads db.mjs (decision 13).
+    {
+      files: ['tests/**/*.ts'],
+      ignores: ['tests/e2e-db.test.ts'],
+      rules: restrictedImports(r, [postgresRestriction]),
     },
     // Components never fetch (ADR-0009 D4).
     {
