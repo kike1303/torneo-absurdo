@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { page } from '$app/state';
   import UserBadge from '#lib/components/account/UserBadge.svelte';
   import { m } from '#lib/paraglide/messages.js';
   import { getLocale } from '#lib/paraglide/runtime.js';
@@ -13,21 +12,17 @@
     session = 'none',
     user = null,
     onThemeSave,
+    loginHref,
   }: {
     theme: ThemeChoice;
+    /** Built by the layout from a validated path, never from the query (no reflection). */
+    loginHref: string;
     session?: 'none' | 'valid' | 'unavailable';
     user?: { display_name: string; balance: number } | null;
     onThemeSave?: (choice: ThemeChoice) => Promise<boolean>;
   } = $props();
 
   const locale = $derived(getLocale());
-  // Back here after the login; /login validates and canonicalizes it (plan-d decision 7).
-  const loginHref = $derived.by(() => {
-    const here = `${page.url.pathname}${page.url.search}`;
-    return page.url.pathname.endsWith('/login')
-      ? `/${locale}/login`
-      : `/${locale}/login?next=${encodeURIComponent(here)}`;
-  });
 </script>
 
 <header class="border-b border-border bg-background" aria-label={m.header_label()}>
