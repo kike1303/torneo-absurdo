@@ -641,6 +641,12 @@ Sin cambios en los workflows.
 1. **Paso 1: `tests/startup.rs`.** Fija la lista de versiones de `_sqlx_migrations`, y suma `20261030000000`. No estaba en "Archivos que cambian". No cambia lo que prueba.
 2. **Paso 1: la sonda de `oauth_flows_purpose_ck` va sin usuario.** En `tests/migration_reauth.rs`, un flujo con `purpose = 'other'` y un usuario viola primero `oauth_flows_link_ck`. La sonda del `CHECK` de `purpose` va con `link_user_id` nulo, para que el constraint que lo rechaza sea el que se prueba.
 3. **Paso 2: el texto nuevo de `error_auth_reauth_required` viaja en el commit del paso 2.** La decisión 13 lo pone con las llaves de **[frontend]**. Lo adelanto porque desde este commit `/login?error=auth.reauth_required` es un código de la lista cerrada, y el texto de 008 ("Vuelve a entrar…") ya no describe la acción. Los textos son los de la decisión 13 (`es`) y su traducción (`en`).
+4. **Paso 3: el `UPDATE` de `grant` y `revoke` con el corte se adelanta del paso 8 al 3.** Con `RecentAdmin` sobre `recent_admin`, el T9 de `tests/admin_cli.rs` y el `tests/recent_admin.rs` adaptado (login real, `grant` y otro login) solo pasan si `grant` guarda `admin_account_cutoff`. En el paso 3 entra solo la sentencia de la decisión 7. La línea de proveedores, `--help`, sus tests y los UT de fuente de RF3 quedan en el paso 8.
+5. **Paso 3: dónde da `NULL` la regla, y un mutante más.** El plan dice que, sin `COALESCE`, una sesión anterior a 009 (las dos columnas en `NULL`) da un booleano nulo. En SQL no pasa: `s.auth_account_id IS NOT NULL` es falso, y `false AND NULL` es falso. Por eso el mutante "sin `COALESCE` en la vigencia" sobrevivía al caso de `NULL`. La regla da `NULL` en dos casos reales, y los dos están ahora en `a_session_without_an_authentication_is_false_without_an_error`:
+   - en `step_up`, un `auth_account_id` que apunta a una cuenta de otro usuario cuando el usuario no tiene ninguna (`bool_or` y `max` sobre nada);
+   - en `recent_admin`, la autenticación vigente de un admin con el corte en `NULL` (`<= NULL`).
+
+   Con esos casos, el mutante de `step_up` muere. Sumo el mutante "sin `COALESCE` en `recent_admin`", que también muere. El caso (v) de admin (paso 7) sigue siendo una sesión con todo en `NULL`.
 
 ## Revisión
 

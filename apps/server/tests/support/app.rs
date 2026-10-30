@@ -150,13 +150,15 @@ pub async fn user_with_session(pool: &sqlx::PgPool) -> (uuid::Uuid, String) {
     (user, session_for(pool, user).await)
 }
 
-/// Another valid session of `user`.
+/// Another valid session of `user`, with no authentication that counts (009: never `step_up`
+/// nor `recent_admin`).
 pub async fn session_for(pool: &sqlx::PgPool, user: uuid::Uuid) -> String {
     let mut tx = pool.begin().await.unwrap();
     let issued = server::sessions::issue(
         &mut tx,
         user,
         protocol::Role::User,
+        server::sessions::Authentication::None,
         &[0; 32],
         server::sessions::UaFamily::Other,
     )

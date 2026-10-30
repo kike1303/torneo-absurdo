@@ -30,6 +30,7 @@ async fn only_the_production_cookie_is_read() {
         &mut tx,
         user,
         protocol::Role::User,
+        sessions::Authentication::None,
         &[0; 32],
         UaFamily::Other,
     )

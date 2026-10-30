@@ -27,7 +27,7 @@ use super::start::{Purpose, StartForm, begin_flow, flow_error};
 use crate::app::AppState;
 use crate::http::errors::error_response;
 use crate::http::session::{self, PRIVATE_NO_STORE};
-use crate::sessions::{self, Issued, RevokeFilter, SessionId, UaFamily};
+use crate::sessions::{self, Authentication, Issued, RevokeFilter, SessionId, UaFamily};
 
 /// A pause between the session check of a link callback and its transaction. Production uses
 /// [`NoLinkGate`]; the race tests close the session there (plan-c decision 7).
@@ -200,7 +200,15 @@ async fn attempt(
     .bind(request.ip_hash.as_slice())
     .execute(&mut *tx)
     .await?;
-    Ok(sessions::issue(tx, request.user, role, &request.ip_hash, request.ua).await?)
+    Ok(sessions::issue(
+        tx,
+        request.user,
+        role,
+        Authentication::None,
+        &request.ip_hash,
+        request.ua,
+    )
+    .await?)
 }
 
 #[cfg(test)]

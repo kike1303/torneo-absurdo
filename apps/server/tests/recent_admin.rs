@@ -1,7 +1,8 @@
-//! 008 RF-C7 (plan-c decision 9): `RecentAdmin` lets through an admin who authenticated in the
-//! last 60 minutes, and only that. There is no admin route in this feature, so the test builds
-//! its own `Router` with one route that only extracts it, over a real `AppState`; no test route
-//! ever reaches the binary.
+//! 008 RF-C7 (plan-c decision 9) and 009 RF16: `RecentAdmin` lets through an admin whose
+//! authentication is current, of the last 60 minutes and with an account inside the cutoff of
+//! the last `grant`, and only that. There is no admin route in this feature, so the test builds
+//! its own `Router` with one route that only extracts it, over a real `AppState` on the database
+//! of the app with the fake providers; no test route ever reaches the binary.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod support;
@@ -13,12 +14,15 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::routing::get;
+use server::admin::{AdminAction, AdminCommand};
 use server::app::{AppState, Settings};
 use server::http::admin::RecentAdmin;
-use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
+use sqlx::{PgPool, Row};
 use support::app::AlwaysUp;
 use support::db::{TestDb, privileged};
+use support::fake_provider::Kind;
+use support::oauth;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -76,6 +80,7 @@ async fn session(pool: &PgPool, user: Uuid, role: protocol::Role) -> String {
         &mut tx,
         user,
         role,
+        server::sessions::Authentication::None,
         &[0; 32],
         server::sessions::UaFamily::Other,
     )
@@ -85,21 +90,47 @@ async fn session(pool: &PgPool, user: Uuid, role: protocol::Role) -> String {
     issued.token.as_str().to_owned()
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn only_an_admin_who_authenticated_in_the_last_hour_passes() {
-    let db = TestDb::create().await;
-    let pool = db.migrated_pool().await;
-    let mut vars = vec![];
+/// The state of the test router: the database of `db`, the config of the app (same cookies).
+fn state_on(db: &TestDb, pool: &PgPool) -> AppState {
     let url = db.url();
-    vars.push(("DATABASE_URL", url.as_str()));
-    let config = support::config::config(&vars);
-    let state = AppState::from_config(
+    let config = support::config::config(&[("DATABASE_URL", url.as_str())]);
+    AppState::from_config(
         &config,
         &Settings::default(),
         pool.clone(),
         Arc::new(AlwaysUp),
     )
-    .unwrap();
+    .unwrap()
+}
+
+async fn user_of(pool: &PgPool, token: &str) -> Uuid {
+    sqlx::query("SELECT user_id FROM sessions WHERE token_hash = $1")
+        .bind(server::sessions::TokenHash::of(token).0.as_slice())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+        .get(0)
+}
+
+/// `server admin grant`, in process (the binary has its own tests in `admin_cli.rs`).
+async fn grant(db: &TestDb, user: Uuid) {
+    let command = AdminCommand {
+        action: AdminAction::Grant,
+        user,
+        reason: None,
+    };
+    server::admin::run(&db.options(), &command).await.unwrap();
+}
+
+fn sub() -> String {
+    format!("g-{}", Uuid::new_v4().simple())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn only_an_admin_who_authenticated_in_the_last_hour_passes() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let state = state_on(&db, &pool);
     let private = Some("private, no-store".to_owned());
 
     let (status, body, cache) = call(&state, None).await;
@@ -107,15 +138,17 @@ async fn only_an_admin_who_authenticated_in_the_last_hour_passes() {
     assert_eq!(body, r#"{"error":"auth.unauthenticated"}"#);
     assert_eq!(cache, private);
 
-    let plain = user(&pool, "user").await;
-    let token = session(&pool, plain, protocol::Role::User).await;
-    let (status, body, cache) = call(&state, Some(&token)).await;
+    let plain = oauth::session_of(&oauth::login(&app, Kind::Google, &sub()).await);
+    let (status, body, cache) = call(&state, Some(&plain)).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body, r#"{"error":"auth.reauth_required"}"#);
     assert_eq!(cache, private);
 
-    let admin = user(&pool, "admin").await;
-    let token = session(&pool, admin, protocol::Role::Admin).await;
+    let identity = sub();
+    let before = oauth::session_of(&oauth::login(&app, Kind::Google, &identity).await);
+    let admin = user_of(&pool, &before).await;
+    grant(&db, admin).await;
+    let token = oauth::session_of(&oauth::login(&app, Kind::Google, &identity).await);
     let (status, _, _) = call(&state, Some(&token)).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 

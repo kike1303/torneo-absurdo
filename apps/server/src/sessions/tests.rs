@@ -109,3 +109,84 @@ fn the_absolute_expiry_depends_on_the_role() {
     assert_eq!(max_age_secs(protocol::Role::User), 30 * 24 * 3600);
     assert_eq!(max_age_secs(protocol::Role::Admin), 12 * 3600);
 }
+
+/// 009 plan decision 2: the windows of the SQL are exactly the documented constants, each in the
+/// fragment it belongs to, and nothing else of the rule names a window.
+#[test]
+fn the_windows_of_the_sql_are_the_constants() {
+    let window = |minutes: i64| format!("interval '{minutes} minutes'");
+    let step_up = window(STEP_UP_WINDOW_MINUTES);
+    let link = window(LINK_CALLBACK_WINDOW_MINUTES);
+    let admin = window(RECENT_ADMIN_WINDOW_MINUTES);
+    assert_eq!(
+        (
+            STEP_UP_WINDOW_MINUTES,
+            LINK_CALLBACK_WINDOW_MINUTES,
+            RECENT_ADMIN_WINDOW_MINUTES
+        ),
+        (10, 20, 60)
+    );
+    for sql in [
+        const_format_valid::BY_HASH,
+        const_format_valid::BY_ID,
+        const_format_valid::ANY_ID,
+    ] {
+        assert_eq!(sql.matches(&step_up).count(), 1, "{sql}");
+        assert_eq!(sql.matches(&admin).count(), 1, "{sql}");
+        assert!(!sql.contains(&link), "{sql}");
+    }
+    let lock = const_format_valid::LOCK_AUTH;
+    assert_eq!(lock.matches(&step_up).count(), 1, "{lock}");
+    assert_eq!(lock.matches(&link).count(), 1, "{lock}");
+    assert!(!lock.contains(&admin), "{lock}");
+    // Every boolean of the rule is NULL-safe: a session of before 009 is "no", not an error.
+    for sql in [const_format_valid::BY_HASH, lock] {
+        assert_eq!(sql.matches("COALESCE(").count(), 2, "{sql}");
+    }
+}
+
+/// 009 RF14 (plan, step 6): the row of the session stays locked until the transaction ends, so
+/// a logout that arrives during an unlink waits for it.
+#[test]
+fn lock_auth_locks_the_row_of_the_session() {
+    assert!(
+        const_format_valid::LOCK_AUTH.ends_with(" FOR UPDATE OF s"),
+        "{}",
+        const_format_valid::LOCK_AUTH
+    );
+}
+
+/// RNF of logs (009): no id of a session, a user or an OAuth account in a `Debug`.
+#[test]
+fn debug_never_shows_the_ids_of_the_authentication() {
+    let account = OauthAccountId::new(4_242_424_242);
+    let user = uuid::Uuid::new_v4();
+    let session = SessionId(uuid::Uuid::new_v4());
+    let info = SessionInfo {
+        id: session,
+        user_id: user,
+        role: protocol::Role::User,
+        step_up: true,
+        recent_admin: false,
+    };
+    let locked = LockedAuth {
+        user_id: user,
+        step_up: true,
+        link_window: true,
+        account: Some(account),
+    };
+    for shown in [
+        format!("{account:?}"),
+        format!("{info:?}"),
+        format!("{locked:?}"),
+        format!("{:?}", Authentication::Fresh(account)),
+        format!("{:?}", Authentication::KeptFrom(session)),
+    ] {
+        assert!(!shown.contains("4242424242"), "{shown}");
+        assert!(!shown.contains(&user.to_string()), "{shown}");
+        assert!(!shown.contains(&user.simple().to_string()), "{shown}");
+        assert!(!shown.contains(&session.0.to_string()), "{shown}");
+    }
+    assert!(format!("{info:?}").contains("step_up: true"));
+    assert!(format!("{locked:?}").contains("link_window: true"));
+}

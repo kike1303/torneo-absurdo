@@ -209,8 +209,14 @@ async fn execute(options: &PgConnectOptions, command: &AdminCommand) -> Result<(
         return Err(AdminError::UserNotFound);
     }
     let change = match command.action {
-        AdminAction::Grant => "UPDATE users SET role = 'admin' WHERE id = $1",
-        AdminAction::Revoke => "UPDATE users SET role = 'user' WHERE id = $1",
+        // 009 RF17: every account linked until now gives admin, and none linked later.
+        AdminAction::Grant => {
+            "UPDATE users SET role = 'admin', admin_account_cutoff = \
+             (SELECT max(id) FROM oauth_accounts WHERE user_id = $1) WHERE id = $1"
+        }
+        AdminAction::Revoke => {
+            "UPDATE users SET role = 'user', admin_account_cutoff = NULL WHERE id = $1"
+        }
         // A second ban keeps the date of the first.
         AdminAction::Ban => "UPDATE users SET banned_at = COALESCE(banned_at, now()) WHERE id = $1",
         AdminAction::Unban => "UPDATE users SET banned_at = NULL WHERE id = $1",
