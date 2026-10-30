@@ -86,6 +86,9 @@ services:
     memswap_limit: 384m
     environment:
       PUBLIC_ORIGIN: https://${PUBLIC_HOST:?PUBLIC_HOST is required}
+      # ADR-0008 D5: the server by its alias on torneo-edge, with the server's own secret.
+      INTERNAL_API_URL: http://torneo-server:8080
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required}
       ADDRESS_HEADER: X-Forwarded-For
       XFF_DEPTH: '1'
       HOST: 0.0.0.0

@@ -39,8 +39,7 @@ const WD = FILES.webDockerfile;
 const H = FILES.headers;
 
 const SERVER_IMAGE = 'server:${IMAGE_TAG:?IMAGE_TAG is required}';
-const WEB_ENV =
-  '      PUBLIC_ORIGIN: https://${PUBLIC_HOST:?PUBLIC_HOST is required}\n      ADDRESS_HEADER';
+const WEB_ENV = '      INTERNAL_API_URL: http://torneo-server:8080\n';
 const SERVER_ENV = '      RUST_LOG: info\n';
 const SERVER_LOGGING =
   "    logging:\n      driver: json-file\n      options:\n        max-size: '10m'\n        max-file: '3'\n    networks:\n      torneo-edge:";
@@ -317,6 +316,48 @@ const CASES = [
     'PORT_HEADER in web',
     { [C]: [[WEB_ENV, '      PORT_HEADER: x-forwarded-port\n' + WEB_ENV]] },
     /forbidden-env: PORT_HEADER/,
+  ],
+  // 008 decision 12 (step 3): web reaches the server by its alias, with the server's secret.
+  [
+    'INTERNAL_API_URL missing in web',
+    { [C]: [['      INTERNAL_API_URL: http://torneo-server:8080\n', '']] },
+    /services\.web: env: INTERNAL_API_URL is required/,
+  ],
+  [
+    'INTERNAL_API_URL to another host',
+    {
+      [C]: [
+        [
+          '      INTERNAL_API_URL: http://torneo-server:8080\n',
+          '      INTERNAL_API_URL: https://torneo.example\n',
+        ],
+      ],
+    },
+    /services\.web: env: INTERNAL_API_URL must be http:\/\/torneo-server:8080/,
+  ],
+  [
+    'INTERNAL_API_SECRET missing in web',
+    {
+      [C]: [
+        [
+          '      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required}\n      ADDRESS_HEADER',
+          '      ADDRESS_HEADER',
+        ],
+      ],
+    },
+    /services\.web: env: INTERNAL_API_SECRET is required/,
+  ],
+  [
+    'INTERNAL_API_SECRET literal in web',
+    {
+      [C]: [
+        [
+          '      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required}\n      ADDRESS_HEADER',
+          '      INTERNAL_API_SECRET: c2VjcmV0\n      ADDRESS_HEADER',
+        ],
+      ],
+    },
+    /services\.web: env: INTERNAL_API_SECRET must be \$\{INTERNAL_API_SECRET:\?\}/,
   ],
   [
     'BIND_ADDR in server',

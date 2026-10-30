@@ -67,6 +67,10 @@ const ENV = {
   },
   web: {
     PUBLIC_ORIGIN,
+    // ADR-0008 D5, 008 decision 12: the alias of server on torneo-edge, literal, and the same
+    // required secret as server (never a literal in git).
+    INTERNAL_API_URL: 'http://torneo-server:8080',
+    INTERNAL_API_SECRET: '${INTERNAL_API_SECRET:?}',
     ADDRESS_HEADER: 'X-Forwarded-For',
     XFF_DEPTH: '1',
     HOST: '0.0.0.0',

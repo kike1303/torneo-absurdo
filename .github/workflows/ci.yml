@@ -377,9 +377,13 @@ jobs:
       - name: Smoke test of the web image alone (RF-C2)
         run: |
           set -euo pipefail
+          # A random filler secret and an internal URL nothing listens on (008 decision 12):
+          # without a session cookie the web never calls it.
+          filler="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))")"
+          internal=(-e INTERNAL_API_URL=http://127.0.0.1:9 -e INTERNAL_API_SECRET="$filler")
           cid="$(docker run -d --read-only --cap-drop ALL --security-opt no-new-privileges \
             -p 127.0.0.1:3001:3000 -e PUBLIC_ORIGIN=http://localhost:3001 -e HOST=0.0.0.0 \
-            -e PORT=3000 "$REPO/web:ci")"
+            -e PORT=3000 "${internal[@]}" "$REPO/web:ci")"
           trap 'docker rm -f "$cid" >/dev/null' EXIT
           for _ in $(seq 1 30); do
             curl -fsS -o /dev/null http://127.0.0.1:3001/healthz && break
@@ -387,24 +391,43 @@ jobs:
           done
           curl -fsS -o /dev/null -w '/healthz %{http_code}\n' http://127.0.0.1:3001/healthz
           curl -fsS -o /dev/null -w '/en/ %{http_code}\n' http://127.0.0.1:3001/en/
-          # Without PUBLIC_ORIGIN the guard of RF-A23 exits before listening, and for that reason:
-          # Kit's env_invalid with the validator's message, not any other crash.
-          set +e
-          out="$(timeout 60 docker run --rm --name web-no-origin "$REPO/web:ci" 2>&1)"
-          status=$?
-          set -e
-          docker rm -f web-no-origin >/dev/null 2>&1 || true
-          echo "$out"
-          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
-            echo "web without PUBLIC_ORIGIN exited with $status, expected a startup failure" >&2
+          # A broken configuration exits before listening, and for that reason: Kit's env_invalid
+          # with the validator's message, not any other crash.
+          # start_fails <case> <expected message> [docker run args...]
+          start_fails() {
+            local name="$1" want="$2" out status
+            shift 2
+            set +e
+            out="$(timeout 60 docker run --rm --name web-start-fails "$@" "$REPO/web:ci" 2>&1)"
+            status=$?
+            set -e
+            docker rm -f web-start-fails >/dev/null 2>&1 || true
+            echo "$out"
+            if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+              echo "web $name exited with $status, expected a startup failure" >&2
+              return 1
+            fi
+            if ! grep -q 'env_invalid' <<<"$out" || ! grep -qF "$want" <<<"$out"; then
+              echo "web $name failed for another reason" >&2
+              return 1
+            fi
+            echo "web $name exits with $status (env_invalid: $want)"
+            last_out="$out"
+          }
+          # The internal variables are set, so the first error is the one of PUBLIC_ORIGIN.
+          start_fails 'without PUBLIC_ORIGIN' 'PUBLIC_ORIGIN is required at runtime' "${internal[@]}"
+          start_fails 'without INTERNAL_API_SECRET' 'INTERNAL_API_SECRET is required at runtime' \
+            -e PUBLIC_ORIGIN=http://localhost:3001 -e INTERNAL_API_URL=http://127.0.0.1:9
+          # A malformed secret that is a canary: the validator names the rule, never the value.
+          canary="canary-$(node -e "process.stdout.write(require('node:crypto').randomBytes(8).toString('hex'))")!"
+          start_fails 'with a malformed secret' 'INTERNAL_API_SECRET must be base64url' \
+            -e PUBLIC_ORIGIN=http://localhost:3001 -e INTERNAL_API_URL=http://127.0.0.1:9 \
+            -e INTERNAL_API_SECRET="$canary"
+          if grep -qF "${canary%!}" <<<"$last_out"; then
+            echo "the startup error shows the value of INTERNAL_API_SECRET" >&2
             exit 1
           fi
-          if ! grep -q 'env_invalid' <<<"$out" ||
-            ! grep -qF 'PUBLIC_ORIGIN is required at runtime' <<<"$out"; then
-            echo "web without PUBLIC_ORIGIN failed for another reason" >&2
-            exit 1
-          fi
-          echo "web without PUBLIC_ORIGIN exits with $status (env_invalid, PUBLIC_ORIGIN)"
+          echo "the malformed secret does not appear in the output"
       # plan-c decision 16: the production compose plus the local Postgres, in amd64.
       - name: prod-local up
         env:

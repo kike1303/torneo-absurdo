@@ -1,6 +1,12 @@
-import { ENABLE_DEV_CATALOG, PUBLIC_ORIGIN } from '$app/env/private';
+import {
+  ENABLE_DEV_CATALOG,
+  INTERNAL_API_SECRET,
+  INTERNAL_API_URL,
+  PUBLIC_ORIGIN,
+} from '$app/env/private';
 import type { HandleServerError, ServerInit } from '@sveltejs/kit/hooks';
 import { sequence } from '@sveltejs/kit/hooks';
+import { checkInternalApiEnv } from '#lib/env/validators.js';
 import { createDevGuard } from '#lib/server/hooks/dev-guard.js';
 import { handleError as handleServerError } from '#lib/server/hooks/handle-error.js';
 import { localeRedirect } from '#lib/server/hooks/locale-redirect.js';
@@ -11,6 +17,12 @@ import { securityHeaders } from '#lib/server/hooks/security-headers.js';
 import { createThemeHandle } from '#lib/server/hooks/theme.js';
 
 export const init: ServerInit = () => {
+  // Before anything listens: a misconfiguration stops the start naming only the variable.
+  checkInternalApiEnv({
+    publicOrigin: PUBLIC_ORIGIN,
+    internalApiUrl: INTERNAL_API_URL,
+    internalApiSecret: INTERNAL_API_SECRET,
+  });
   installProcessHandlers();
   logStartup();
 };
