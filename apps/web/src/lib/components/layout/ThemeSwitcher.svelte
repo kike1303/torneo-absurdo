@@ -9,7 +9,19 @@
   import { THEME_CHOICES, type ThemeChoice } from '#lib/theme/resolve-theme.js';
   import { setTheme, theme } from '#lib/theme/theme.svelte.js';
 
-  let { initial }: { initial: ThemeChoice } = $props();
+  // `onSave` (with a session, 008 RF-D4): also saves the choice in the profile; `false` shows a
+  // message in a live region, and the theme stays applied with the cookie on this device.
+  let {
+    initial,
+    onSave,
+  }: { initial: ThemeChoice; onSave?: (choice: ThemeChoice) => Promise<boolean> } = $props();
+
+  let saveFailed = $state(false);
+  async function choose(choice: ThemeChoice): Promise<void> {
+    setTheme(choice);
+    if (!onSave) return;
+    saveFailed = !(await onSave(choice));
+  }
 
   // The runa is module state: on the server it would be shared between requests, so the SSR
   // label comes from the `initial` prop and the runa takes over once mounted.
@@ -48,7 +60,7 @@
       <DropdownMenu.CheckboxItem
         checked={current === choice}
         closeOnSelect
-        onCheckedChange={() => setTheme(choice)}
+        onCheckedChange={() => choose(choice)}
         data-testid={`theme-option-${choice}`}
       >
         {names[choice]()}
@@ -56,3 +68,10 @@
     {/each}
   </DropdownMenu.Content>
 </DropdownMenu.Root>
+<p
+  class="basis-full text-end text-sm text-muted-foreground empty:hidden"
+  aria-live="polite"
+  data-testid="theme-save-status"
+>
+  {#if saveFailed}{m.preferences_save_failed()}{/if}
+</p>

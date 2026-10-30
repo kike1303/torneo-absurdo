@@ -190,6 +190,15 @@ describe('X-Forwarded-For', () => {
   });
 });
 
+describe('X-Forwarded-Proto', () => {
+  // adapter-node assumes https without PROTOCOL_HEADER, and Kit's CSRF check of form actions
+  // compares the Origin with that: like Traefik, the edge says which scheme the client used.
+  it('drops the client value and says http', async () => {
+    const body = await echo('/es/', { 'x-forwarded-proto': 'https' });
+    expect(body.headers['x-forwarded-proto']).toBe('http');
+  });
+});
+
 describe('upgrade of /ws', () => {
   function upgrade(path: string, headers: Record<string, string>): Promise<string> {
     return new Promise((resolve, reject) => {

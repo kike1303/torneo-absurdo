@@ -1,5 +1,15 @@
 import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
+import {
+  CATALOG_PORT,
+  EDGE_PORT,
+  EGRESS_PORT,
+  EGRESS_PROXY,
+  LOOPBACK,
+  NO_CATALOG_PORT,
+  PUBLIC_ORIGIN,
+  SERVER_PORT,
+} from './e2e/support/topology.js';
 
 // e2e against `node build` and the server (RF-C10, ADR-0009 D5 amended, 008 RF-D7 and plan-d
 // decision 10). Everything listens on 127.0.0.1:
@@ -11,14 +21,6 @@ import { defineConfig, devices } from '@playwright/test';
 //
 // `just _e2e-run` generates the secrets once per run and passes them in the environment; this
 // file only reads them, because Playwright evaluates it again in every worker.
-const EDGE_PORT = 4173;
-const NO_CATALOG_PORT = 4174;
-const CATALOG_PORT = 4175;
-const SERVER_PORT = 4180;
-const EGRESS_PORT = 4190;
-const LOOPBACK = '127.0.0.1';
-/** The origin the browser sees: the edge's (RF-D7). */
-const PUBLIC_ORIGIN = `http://localhost:${EDGE_PORT}`;
 const INTERNAL_API_URL = `http://${LOOPBACK}:${SERVER_PORT}`;
 const LOGS = path.join(import.meta.dirname, 'test-results', 'logs');
 
@@ -46,6 +48,10 @@ const webEnv = {
   // getClientAddress() reads the X-Forwarded-For of the edge (and the canary of logs.spec.ts).
   ADDRESS_HEADER: 'X-Forwarded-For',
   XFF_DEPTH: '1',
+  // The edge says `http` (like Traefik says `https`): without it adapter-node assumes https and
+  // Kit refuses every form action of the http e2e as cross-site. Production needs nothing:
+  // there the default (https) is right.
+  PROTOCOL_HEADER: 'x-forwarded-proto',
 };
 
 /** WebGL by software for /dev/arena, also in the CI container (002 plan-a2). */
@@ -69,7 +75,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     // The network guard (change 1 of architect): what is not loopback goes to the egress proxy,
     // which records it and cuts it, the destination of a redirect included.
-    proxy: { server: `http://${LOOPBACK}:${EGRESS_PORT}`, bypass: 'localhost,127.0.0.1,::1' },
+    proxy: EGRESS_PROXY,
   },
   projects: [
     {

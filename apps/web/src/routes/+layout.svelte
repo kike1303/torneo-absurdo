@@ -2,6 +2,8 @@
   import '../app.css';
   import { onMount } from 'svelte';
   import AppHeader from '#lib/components/layout/AppHeader.svelte';
+  import { saveThemePreference } from '#lib/features/account/preferences.js';
+  import { getLocale } from '#lib/paraglide/runtime.js';
   import { m } from '#lib/paraglide/messages.js';
   import { initTheme } from '#lib/theme/theme.svelte.js';
 
@@ -20,7 +22,12 @@
 >
   {m.skip_to_content()}
 </a>
-<AppHeader theme={data.theme} />
+<AppHeader
+  theme={data.theme}
+  session={data.session}
+  user={data.user}
+  onThemeSave={data.user ? (choice) => saveThemePreference(getLocale(), choice) : undefined}
+/>
 <main id="main" class="mx-auto max-w-5xl px-4 py-8">
   {@render children()}
 </main>

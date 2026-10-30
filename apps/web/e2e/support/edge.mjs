@@ -10,6 +10,7 @@
 //   new one is set: from `x-e2e-client: <id>` (removed before forwarding) a `/64` of
 //   `2001:db8::/32` per test, so each test has its own `IpKey` (the server groups IPv6 by `/64`);
 //   without it, the peer address.
+// - The client's `X-Forwarded-Proto` is dropped and `http` is set, as Traefik does.
 // - `/__e2e/redirect-out` exists only here: a 303 to https://example.com/ for egress.spec.ts.
 import { createHash } from 'node:crypto';
 import http from 'node:http';
@@ -67,9 +68,12 @@ export function forwardHeaders(rawHeaders, peer) {
       clients.push(value);
       continue;
     }
-    if (lower === 'x-forwarded-for') continue;
+    if (lower === 'x-forwarded-for' || lower === 'x-forwarded-proto') continue;
     out.push(name, value);
   }
+  // The scheme the client used, as Traefik sends it: the webs read it through PROTOCOL_HEADER
+  // (adapter-node assumes https otherwise, and Kit's CSRF check of form actions would fail).
+  out.push('X-Forwarded-Proto', 'http');
   if (clients.length > 1) return null;
   if (clients.length === 1) {
     const [id] = clients;
