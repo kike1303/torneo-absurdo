@@ -15,6 +15,7 @@ jobs:
       pull-requests: read
     outputs:
       web: ${{ steps.filter.outputs.web }}
+      e2e: ${{ steps.filter.outputs.e2e }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -24,6 +25,7 @@ jobs:
         with:
           filters: |
             web: ['apps/web/**']
+            e2e: ['apps/web/**', 'apps/server/**']
   policy:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -56,13 +58,35 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$HEAD_REF"
-  e2e:
+  e2e-server:
     needs: changes
+    if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
     steps:
+      - name: Build
+        env:
+          SOMETHING: else
+        run: echo build
+  e2e:
+    needs: [changes, e2e-server]
+    if: needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        env:
+          POSTGRES_USER: torneo
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: server-dev-auth
+          path: bin
       - run: echo e2e
   images:
     needs: changes
@@ -73,7 +97,7 @@ jobs:
     steps:
       - run: echo images
   ci-ok:
-    needs: [changes, policy, rust, web, e2e, images]
+    needs: [changes, policy, rust, web, e2e-server, e2e, images]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5

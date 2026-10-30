@@ -28,6 +28,7 @@ export const JOB_PERMISSIONS = {
     policy: READ,
     rust: READ,
     web: READ,
+    'e2e-server': READ,
     e2e: READ,
     images: READ,
     'ci-ok': {},
@@ -38,6 +39,14 @@ export const JOB_PERMISSIONS = {
     verify: {},
   },
 };
+
+// 008 plan-d decision 12: the artifact of e2e-server is downloaded only by name, from this run.
+const DOWNLOAD_ARTIFACT = /^actions\/download-artifact@/i;
+const DOWNLOAD_FORBIDDEN = ['run-id', 'github-token', 'repository'];
+// rust-cache puts these in its key: with save-if: false, e2e-server would run cold forever.
+const CACHE_KEY_ENV = /^(?:CARGO_|RUST)/;
+const E2E_IF = "needs.changes.outputs.e2e == 'true'";
+const COMPOSE_DEV = 'infra/compose.dev.yml';
 
 const FORBIDDEN_TRIGGERS = ['pull_request_target', 'workflow_run'];
 // Data an outsider controls. Plan-c goes further: no `${{ }}` at all inside `run:` (see below).
@@ -221,6 +230,7 @@ function checkSteps(steps, where, file, problems, local) {
     }
     if (typeof step.uses === 'string') {
       checkUses(step.uses, at, file, problems, local);
+      if (DOWNLOAD_ARTIFACT.test(step.uses)) checkDownload(step, at, file, problems);
       if (CHECKOUT.test(step.uses)) {
         const persist = isMap(step.with) ? step.with['persist-credentials'] : undefined;
         if (persist !== false && persist !== 'false') {
@@ -241,6 +251,87 @@ function checkSteps(steps, where, file, problems, local) {
       problems.push(`${file}: script-expression: ${at} interpolates \${{ }} inside with.script`);
     }
   });
+}
+
+/**
+ * `actions/download-artifact` only by `name`, without `run-id`, `github-token` or `repository`,
+ * which would bring a binary of another run (008 plan-d decision 12, change 10 of devops).
+ */
+function checkDownload(step, at, file, problems) {
+  const withs = isMap(step.with) ? step.with : {};
+  for (const key of DOWNLOAD_FORBIDDEN) {
+    if (key in withs) {
+      problems.push(`${file}: download-artifact: ${at} must not set ${key} (only this run)`);
+    }
+  }
+  if (typeof withs.name !== 'string' || withs.name === '') {
+    problems.push(`${file}: download-artifact: ${at} must download by name`);
+  }
+}
+
+/** The image of the `postgres` service of infra/compose.dev.yml, or `undefined`. */
+function composeDevPostgres(tree) {
+  const text = tree.read(COMPOSE_DEV);
+  if (text === null) return undefined;
+  try {
+    const doc = parseDocument(text).toJS();
+    const image = doc?.services?.postgres?.image;
+    return typeof image === 'string' ? image : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * ci.yml, 008 plan-d decision 12: e2e-server runs exactly when e2e does, without CARGO_* or
+ * RUST* variables of its own, and every Postgres service uses the image of compose.dev.yml (a
+ * Dependabot bump of one fails here, in `policy`, until the other moves too).
+ */
+function checkE2e(jobs, file, problems, tree) {
+  const server = jobs['e2e-server'];
+  const e2e = jobs.e2e;
+  if (isMap(e2e) && String(e2e.if ?? '').trim() !== E2E_IF) {
+    problems.push(`${file}: e2e-server-if: jobs.e2e must run with if: ${E2E_IF}`);
+  }
+  if (isMap(server)) {
+    if (String(server.if ?? '').trim() !== String(e2e?.if ?? '').trim()) {
+      problems.push(
+        `${file}: e2e-server-if: jobs.e2e-server must run with the same if: as jobs.e2e`,
+      );
+    }
+    const envs = [
+      ['jobs.e2e-server.env', server.env],
+      ...(Array.isArray(server.steps) ? server.steps : []).map((step, i) => [
+        `jobs.e2e-server.steps[${i}].env`,
+        isMap(step) ? step.env : undefined,
+      ]),
+    ];
+    for (const [where, env] of envs) {
+      if (!isMap(env)) continue;
+      for (const name of Object.keys(env).filter((k) => CACHE_KEY_ENV.test(k))) {
+        problems.push(
+          `${file}: e2e-server-env: ${where} sets ${name}: rust-cache keys on CARGO_*/RUST*, and with save-if: false the job would run cold`,
+        );
+      }
+    }
+  }
+  const expected = composeDevPostgres(tree);
+  for (const [id, job] of Object.entries(jobs)) {
+    if (!isMap(job) || !isMap(job.services)) continue;
+    for (const [name, service] of Object.entries(job.services)) {
+      const image = isMap(service) ? service.image : service;
+      if (typeof image !== 'string' || !/^postgres:/.test(image)) continue;
+      if (expected === undefined) {
+        problems.push(
+          `${file}: postgres-digest: jobs.${id}.services.${name}: ${COMPOSE_DEV} has no postgres image to compare with`,
+        );
+      } else if (image !== expected) {
+        problems.push(
+          `${file}: postgres-digest: jobs.${id}.services.${name} must use the image of ${COMPOSE_DEV} (${expected})`,
+        );
+      }
+    }
+  }
 }
 
 /**
@@ -271,7 +362,7 @@ function triggersOf(on) {
 }
 
 /** @param {any} doc */
-function checkWorkflow(doc, name, file, problems, local) {
+function checkWorkflow(doc, name, file, problems, local, tree) {
   for (const trigger of triggersOf(doc.on)) {
     if (FORBIDDEN_TRIGGERS.includes(trigger)) {
       problems.push(`${file}: forbidden-trigger: ${trigger} is not allowed`);
@@ -336,6 +427,8 @@ function checkWorkflow(doc, name, file, problems, local) {
       );
     }
   }
+
+  if (name === 'ci.yml') checkE2e(jobs, file, problems, tree);
 
   if (name === 'ci.yml') {
     // RF-C12: policy always runs; ci-ok (the only required check) waits for every other job.
@@ -469,7 +562,7 @@ export function checkWorkflows(tree) {
     if (!parsed) continue;
     checkSecrets(parsed.document, file, problems);
     if (workflows.includes(file))
-      checkWorkflow(parsed.doc, path.posix.basename(file), file, problems, local);
+      checkWorkflow(parsed.doc, path.posix.basename(file), file, problems, local, tree);
     else checkAction(parsed.doc, file, problems, local);
   }
   return problems;

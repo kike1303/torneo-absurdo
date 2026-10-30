@@ -89,6 +89,13 @@ const mutationsRestriction = (relative) => [
     : []),
 ];
 
+const POSTGRES_MESSAGE =
+  'postgres.js is only for the e2e database helpers (e2e/support/db.mjs): it never reaches the app (008 plan-d decision 13).';
+/** @param {boolean} _relative */
+const postgresRestriction = (_relative) => [
+  { regex: '^postgres(?:/.*)?$', message: POSTGRES_MESSAGE },
+];
+
 const UI_MESSAGE =
   'Primitives in `ui/` import nothing from features, domain components or Paraglide messages, not even types (ADR-0009 D4).';
 /**
@@ -292,11 +299,11 @@ export function createConfig({ relativePatterns = true } = {}) {
     {
       files: [SRC],
       ignores: [COMPONENTS],
-      rules: restrictedImports(r, [rendererRestriction, mutationsRestriction]),
+      rules: restrictedImports(r, [rendererRestriction, mutationsRestriction, postgresRestriction]),
     },
     {
       files: MUTATION_IMPORTERS,
-      rules: restrictedImports(r, [rendererRestriction]),
+      rules: restrictedImports(r, [rendererRestriction, postgresRestriction]),
     },
     {
       files: [COMPONENTS],
@@ -305,11 +312,16 @@ export function createConfig({ relativePatterns = true } = {}) {
         rendererRestriction,
         featuresValueRestriction,
         mutationsRestriction,
+        postgresRestriction,
       ]),
     },
     {
       files: [FIGHT_STAGE],
-      rules: restrictedImports(r, [featuresValueRestriction, mutationsRestriction]),
+      rules: restrictedImports(r, [
+        featuresValueRestriction,
+        mutationsRestriction,
+        postgresRestriction,
+      ]),
     },
     ...Array.from({ length: UI_MAX_DEPTH + 1 }, (_, depth) => ({
       files: [`src/lib/components/ui/${'*/'.repeat(depth)}*.{js,ts,svelte}`],
@@ -317,6 +329,7 @@ export function createConfig({ relativePatterns = true } = {}) {
       rules: restrictedImports(r, [
         rendererRestriction,
         mutationsRestriction,
+        postgresRestriction,
         /** @param {boolean} rel */ (rel) => uiRestriction(rel, false, depth),
       ]),
     })),
@@ -325,8 +338,15 @@ export function createConfig({ relativePatterns = true } = {}) {
       rules: restrictedImports(r, [
         rendererRestriction,
         mutationsRestriction,
+        postgresRestriction,
         /** @param {boolean} rel */ (rel) => uiRestriction(rel, true, 0),
       ]),
+    },
+    // The unit tests never talk to Postgres; only tests/e2e-db.test.ts loads db.mjs (decision 13).
+    {
+      files: ['tests/**/*.ts'],
+      ignores: ['tests/e2e-db.test.ts'],
+      rules: restrictedImports(r, [postgresRestriction]),
     },
     // Components never fetch (ADR-0009 D4).
     {

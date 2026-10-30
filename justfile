@@ -146,11 +146,49 @@ _check-pg-log since:
     fi
     echo "check-pg-log: ok"
 
-# End-to-end tests against `node build` (Chromium and WebKit)
-e2e: _web-prepare
+# Needs Docker (Postgres) and compiles the server with dev-auth (008 RF-D7, plan-d decision 10).
+# Everything listens on 127.0.0.1 and the browsers go out only through the egress proxy.
+# End-to-end tests against `node build`, the server and an edge proxy (Chromium and WebKit)
+e2e: _web-prepare db-up
+    cargo build -p server --features dev-auth --locked
+    E2E_DATABASE_URL='postgres://torneo:torneo_dev@127.0.0.1:{{pg_port}}/torneo_e2e' \
+        E2E_SERVER_BIN='{{justfile_directory()}}/target/debug/server' \
+        {{just_executable()}} _e2e-run
+
+# Without Docker (the CI job `e2e` runs it with its own Postgres service and the server binary
+# of `e2e-server`). Needs E2E_DATABASE_URL and an absolute E2E_SERVER_BIN built with dev-auth;
+# E2E_APPLY_A9=1 applies the A9 parameters first (CI only, never on loopback).
+# The e2e with an existing server binary and Postgres: build, checks, torneo_e2e and Playwright
+_e2e-run: _web-prepare
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${E2E_DATABASE_URL:?E2E_DATABASE_URL is required}"
+    : "${E2E_SERVER_BIN:?E2E_SERVER_BIN is required}"
+    case "$E2E_SERVER_BIN" in
+        /*) ;;
+        *) echo "E2E_SERVER_BIN must be an absolute path (Playwright runs in apps/web)" >&2; exit 1 ;;
+    esac
+    # Fails fast if the binary is not the dev-auth one (008 RF-D9).
+    node scripts/check-release-binary.mjs --expect-dev "$E2E_SERVER_BIN"
+    # Once per run, here and never in playwright.config.ts (evaluated again in every worker).
+    # node:crypto, because the Playwright image does not promise openssl.
+    secret() { node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))"; }
+    E2E_INTERNAL_API_SECRET="$(secret)"
+    E2E_IP_HASH_KEY="$(secret)"
+    export E2E_INTERNAL_API_SECRET E2E_IP_HASH_KEY E2E_DATABASE_URL E2E_SERVER_BIN
     pnpm --filter web build
     node scripts/check-renderer-split.mjs
     node scripts/check-no-local-sprites.mjs
+    node apps/web/e2e/support/db.mjs reset
+    if [ "${E2E_APPLY_A9:-}" = 1 ]; then node apps/web/e2e/support/db.mjs a9 --apply; fi
+    node apps/web/e2e/support/db.mjs a9 --check
+    # A leftover of an earlier local run must not declare hosts or canaries for this one.
+    logs=apps/web/test-results/logs
+    mkdir -p "$logs"
+    rm -f "$logs/egress.log"
+    : > "$logs/expected-egress.txt"
+    : > "$logs/dynamic-canaries.txt"
+    : > "$logs/admin-cli.log"
     pnpm --filter web exec playwright test
 
 # HOST is fixed to 127.0.0.1 (never read from the environment): adapter-node listens on 0.0.0.0 by

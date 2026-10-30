@@ -260,24 +260,24 @@ const CASES = [
     {
       [CI]: [
         [
-          '  e2e:\n    needs: changes\n    runs-on: ubuntu-24.04',
-          '  e2e:\n    needs: changes\n    runs-on: macos-15',
+          '  images:\n    needs: changes\n    runs-on: ubuntu-24.04',
+          '  images:\n    needs: changes\n    runs-on: macos-15',
         ],
       ],
     },
-    /runs-on: jobs\.e2e/,
+    /runs-on: jobs\.images/,
   ],
   [
     'runs-on self-hosted list',
     {
       [CI]: [
         [
-          '  e2e:\n    needs: changes\n    runs-on: ubuntu-24.04',
-          '  e2e:\n    needs: changes\n    runs-on: [self-hosted]',
+          '  images:\n    needs: changes\n    runs-on: ubuntu-24.04',
+          '  images:\n    needs: changes\n    runs-on: [self-hosted]',
         ],
       ],
     },
-    /runs-on: jobs\.e2e/,
+    /runs-on: jobs\.images/,
   ],
   // continue-on-error
   [
@@ -290,12 +290,12 @@ const CASES = [
     {
       [CI]: [
         [
-          '  e2e:\n    needs: changes\n',
-          '  e2e:\n    needs: changes\n    continue-on-error: false\n',
+          '  images:\n    needs: changes\n',
+          '  images:\n    needs: changes\n    continue-on-error: false\n',
         ],
       ],
     },
-    /continue-on-error: jobs\.e2e must not/,
+    /continue-on-error: jobs\.images must not/,
   ],
   [
     'continue-on-error in a composite step',
@@ -409,8 +409,8 @@ const CASES = [
     {
       [CI]: [
         [
-          'needs: [changes, policy, rust, web, e2e, images]',
-          'needs: [changes, rust, web, e2e, images]',
+          'needs: [changes, policy, rust, web, e2e-server, e2e, images]',
+          'needs: [changes, rust, web, e2e-server, e2e, images]',
         ],
       ],
     },
@@ -674,6 +674,102 @@ const PLAYWRIGHT_CASES = [
   ],
 ];
 
+// 008 plan-d decision 12 (step 9): the e2e-server job, the artifact and the Postgres service.
+const E2E_SERVER_IF =
+  "  e2e-server:\n    needs: changes\n    if: needs.changes.outputs.e2e == 'true'\n";
+const E2E_SERVER_ENV = '        env:\n          SOMETHING: else\n';
+const DOWNLOAD = '          name: server-dev-auth\n          path: bin\n';
+const PG_IMAGE =
+  'postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193';
+const COMPOSE_DEV = 'infra/compose.dev.yml';
+
+/** @type {[string, Record<string, [string, string][]>, RegExp][]} */
+const E2E_CASES = [
+  [
+    'e2e-server outside ci-ok',
+    {
+      [CI]: [
+        [
+          '[changes, policy, rust, web, e2e-server, e2e, images]',
+          '[changes, policy, rust, web, e2e, images]',
+        ],
+      ],
+    },
+    /ci-ok: jobs\.ci-ok must need every other job/,
+  ],
+  [
+    'e2e-server with another if',
+    {
+      [CI]: [
+        [
+          E2E_SERVER_IF,
+          "  e2e-server:\n    needs: changes\n    if: needs.changes.outputs.web == 'true'\n",
+        ],
+      ],
+    },
+    /e2e-server-if: jobs\.e2e-server must run with the same if: as jobs\.e2e/,
+  ],
+  [
+    'e2e without the e2e filter',
+    {
+      [CI]: [
+        [
+          "    needs: [changes, e2e-server]\n    if: needs.changes.outputs.e2e == 'true'\n",
+          "    needs: [changes, e2e-server]\n    if: needs.changes.outputs.web == 'true'\n",
+        ],
+      ],
+    },
+    /e2e-server-if: jobs\.e2e must run with if: needs\.changes\.outputs\.e2e == 'true'/,
+  ],
+  [
+    'e2e-server with a CARGO_ variable in a step',
+    { [CI]: [[E2E_SERVER_ENV, '        env:\n          CARGO_INCREMENTAL: 0\n']] },
+    /e2e-server-env: jobs\.e2e-server.*CARGO_INCREMENTAL/,
+  ],
+  [
+    'e2e-server with a RUST variable in the job',
+    {
+      [CI]: [[E2E_SERVER_IF, `${E2E_SERVER_IF}    env:\n      RUSTFLAGS: -Dwarnings\n`]],
+    },
+    /e2e-server-env: jobs\.e2e-server.*RUSTFLAGS/,
+  ],
+  [
+    'download-artifact with run-id',
+    { [CI]: [[DOWNLOAD, `${DOWNLOAD}          run-id: 123\n`]] },
+    /download-artifact: .*run-id/,
+  ],
+  [
+    'download-artifact with github-token',
+    { [CI]: [[DOWNLOAD, `${DOWNLOAD}          github-token: x\n`]] },
+    /download-artifact: .*github-token/,
+  ],
+  [
+    'download-artifact with repository',
+    { [CI]: [[DOWNLOAD, `${DOWNLOAD}          repository: someone/else\n`]] },
+    /download-artifact: .*repository/,
+  ],
+  [
+    'download-artifact without a name',
+    { [CI]: [[DOWNLOAD, '          path: bin\n']] },
+    /download-artifact: .*by name/,
+  ],
+  [
+    'Postgres service with another digest',
+    { [CI]: [[PG_IMAGE, `postgres:17.10-alpine@sha256:${'b'.repeat(64)}`]] },
+    /postgres-digest: jobs\.e2e\.services\.postgres/,
+  ],
+  [
+    'Postgres service with another tag',
+    { [CI]: [[PG_IMAGE, PG_IMAGE.replace('17.10', '17.11')]] },
+    /postgres-digest:/,
+  ],
+  [
+    'compose.dev.yml with another digest',
+    { [COMPOSE_DEV]: [[PG_IMAGE, `postgres:17.10-alpine@sha256:${'c'.repeat(64)}`]] },
+    /postgres-digest:/,
+  ],
+];
+
 describe('check-workflows (RF-C12, plan-c decision 23)', () => {
   it('passes on the valid fixture', () => {
     expect(checkWorkflows(valid)).toEqual([]);
@@ -713,6 +809,24 @@ describe('check-workflows (RF-C12, plan-c decision 23)', () => {
       problems.some((p) => pattern.test(p)),
       problems.join('\n') || '(no problems)',
     ).toBe(true);
+  });
+
+  it.each(E2E_CASES)('fails on: %s', (_name, edits, pattern) => {
+    const problems = checkWorkflows(mutated(edits));
+    expect(
+      problems.some((p) => pattern.test(p)),
+      problems.join('\n') || '(no problems)',
+    ).toBe(true);
+  });
+
+  it('fails without infra/compose.dev.yml when ci.yml has a Postgres service', () => {
+    const tree = {
+      read: (rel) => (rel === COMPOSE_DEV ? null : valid.read(rel)),
+      files: valid.files,
+    };
+    expect(checkWorkflows(tree).some((p) => /postgres-digest: .*compose\.dev\.yml/.test(p))).toBe(
+      true,
+    );
   });
 
   it('accepts timeout-minutes on a step (e2e browser install)', () => {
@@ -765,7 +879,7 @@ describe('check-workflows (RF-C12, plan-c decision 23)', () => {
       [CI]: [
         [
           RUST_JOB,
-          `${RUST_JOB}    container: node:22${digest}\n    defaults:\n      run:\n        shell: bash\n    services:\n      pg:\n        image: postgres:17${digest}\n`,
+          `${RUST_JOB}    container: node:22${digest}\n    defaults:\n      run:\n        shell: bash\n    services:\n      cache:\n        image: redis:7${digest}\n`,
         ],
       ],
     });
@@ -837,7 +951,7 @@ describe('ci.yml filters cover what each job runs (review of PR #5)', () => {
     .filter(([, , filter]) => filter);
 
   it('finds the gated jobs', () => {
-    expect(jobs.map(([id]) => id).sort()).toEqual(['e2e', 'images', 'rust', 'web']);
+    expect(jobs.map(([id]) => id).sort()).toEqual(['e2e', 'e2e-server', 'images', 'rust', 'web']);
   });
 
   it.each(jobs)('every script that %s runs is in its filter', (_id, job, filter) => {
