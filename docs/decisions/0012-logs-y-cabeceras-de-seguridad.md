@@ -508,3 +508,16 @@ Cambia B3, B4 (punto nuevo 6), B4.5 y B6. El resto de la Parte B no cambia, y la
 - No bloquean (para el PR de la fase D):
   1. El UT de "esos orígenes solo aparecen en `providers.rs`" tiene que excluir su propio módulo de test, o vivir en `providers.rs`, para no contarse a sí mismo.
   2. Cuando firmen los dos revisores, la línea en cursiva de B3 que dice "pendiente de las firmas" queda vieja. Conviene actualizarla en el PR que aplique la enmienda.
+
+### devops-engineer — 2026-10-30 (2ª ronda) — APPROVE (Enmienda 2026-10-30: `form-action` para el login con Google y Discord)
+**🤖 devops-engineer**
+
+- Verifiqué:
+  - **Cambio 1 (B6.4, punto 7).** Está completo y se puede comprobar. Los nombres de los pasos coinciden con los workflows: "Health, version and headers (RF-C7)" en `ci.yml:413` (job `images`, `b1=` en la línea 467) y "Security headers (ADR-0012 B2)" en `release.yml:245` (job `verify`, `b1=` en la línea 262). Hoy las dos cadenas son idénticas byte a byte, así que el chequeo nuevo pasa en `main` antes de que la fase D toque nada. Pide que cada una exista y aparezca una sola vez, la igualdad byte a byte, los dos casos de `scripts/__tests__/check-workflows.test.mjs` (el archivo existe) y que corra en `policy`. También deja escrito el argumento de transitividad con `images` y que la regla vale para cualquier ampliación de B4, `wss://` de B4.4 incluida.
+  - **Cambio 2 (punto 6).** Ahora es un hecho, sin el "si". Lo comprobé en `docs/architecture.md:242`: el `curl -I` de RF-C18 solo mira `/api/health` y la CSP del server (`default-src 'none'; frame-ancestors 'none'`), que la enmienda no toca. Si alguien agrega después una comparación de la CSP de `web`, queda dentro del punto 7.
+  - **Mis no bloqueantes.** El 1 (los comentarios y el mensaje de error de `images` dicen "B1 más las ampliaciones de B4 en uso (B4.6)") quedó en el punto 7. El 3 (`bypass` con loopback en los dos motores y un teardown que falla si el proxy registra un host no declarado) quedó en "Prueba de que funciona". El 2 no pedía cambios.
+  - **Las recomendaciones 1 a 3 de security-reviewer**, desde lo que me toca a mí. Las tres guardas nuevas son un UT, un IT y un Vitest de web. Corren en `just check` y en los jobs `rust` y `web` que ya existen, sin job nuevo. Que la prueba nombre `CONNECT discord.com:443` no cambia el costo del e2e, porque el proxy es local y corta la conexión.
+  - **Los minutos de CI.** Sin cambios respecto de la 1ª ronda: no hay job ni workflow nuevo, y lo que se agrega a `policy` dura segundos.
+  - El frontmatter: `updated: 2026-10-30`. `approvals` no cambia, según el precedente de ADR-0008 que también sigue security-reviewer.
+- No bloquea: la línea en cursiva de B3 todavía dice "pendiente de las firmas de security-reviewer y devops-engineer". Con esta firma y la de security-reviewer ya no está pendiente. Que architect le quite "pendiente" cuando toque el ADR (en el PR de la fase D, por ejemplo). No afecta a la decisión.
+- **[devops]** Me encargo del punto 7 y de las dos cadenas `b1` en el commit del paso 14 de plan-d, como ya anuncié.
