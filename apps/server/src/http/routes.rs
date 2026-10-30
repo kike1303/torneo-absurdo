@@ -71,6 +71,7 @@ pub enum Handler {
     AuthUnlink,
     AuthCallback,
     AuthProviders,
+    AuthReauthStatus,
     Logout,
     LogoutAll,
     Me,
@@ -141,6 +142,12 @@ pub const ROUTES: &[RouteSpec] = &[
         path: "/api/auth/providers",
         effect: Effect::Read,
         handler: Handler::AuthProviders,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/auth/reauth-status",
+        effect: Effect::Read,
+        handler: Handler::AuthReauthStatus,
     },
     RouteSpec {
         method: RouteMethod::Post,
@@ -255,6 +262,7 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         Handler::AuthCallback => on(filter, auth::callback::handler)
             .layer(auth_ip(rate::http::OnLimit::ExpireFlow(state.auth.cookies))),
         Handler::AuthProviders => on(filter, auth::providers),
+        Handler::AuthReauthStatus => on(filter, auth::reauth_status::handler),
         Handler::Logout => on(filter, auth::logout::logout).layer(body),
         Handler::LogoutAll => on(filter, auth::logout::logout_all).layer(body),
         Handler::Me => on(filter, crate::profile::me::handler),

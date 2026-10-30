@@ -245,6 +245,18 @@ pub async fn me(app: &App, token: &str) -> Response {
     http::send(app.addr, "GET", "/api/me", &[("cookie", cookie.as_str())]).await
 }
 
+/// `GET /api/auth/reauth-status` with the session `token` (009 RF18).
+pub async fn reauth_status(app: &App, token: &str) -> Response {
+    let cookie = session_cookie(token);
+    http::send(
+        app.addr,
+        "GET",
+        "/api/auth/reauth-status",
+        &[("cookie", cookie.as_str())],
+    )
+    .await
+}
+
 /// Moves the authentication of the session `token` `minutes` into the past (Postgres' clock).
 pub async fn age(pool: &sqlx::PgPool, token: &str, minutes: i32) {
     sqlx::query(

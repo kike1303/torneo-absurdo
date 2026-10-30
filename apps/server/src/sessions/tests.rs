@@ -135,6 +135,9 @@ fn the_windows_of_the_sql_are_the_constants() {
         assert_eq!(sql.matches(&admin).count(), 1, "{sql}");
         assert!(!sql.contains(&link), "{sql}");
     }
+    let view = const_format_valid::AUTH_VIEW;
+    assert_eq!(view.matches(&step_up).count(), 1, "{view}");
+    assert!(!view.contains(&link) && !view.contains(&admin), "{view}");
     let lock = const_format_valid::LOCK_AUTH;
     assert_eq!(lock.matches(&step_up).count(), 1, "{lock}");
     assert_eq!(lock.matches(&link).count(), 1, "{lock}");
@@ -175,10 +178,16 @@ fn debug_never_shows_the_ids_of_the_authentication() {
         link_window: true,
         account: Some(account),
     };
+    let view = AuthView {
+        step_up: true,
+        account: Some(account),
+        linked: vec![(protocol::Provider::Google, account)],
+    };
     for shown in [
         format!("{account:?}"),
         format!("{info:?}"),
         format!("{locked:?}"),
+        format!("{view:?}"),
         format!("{:?}", Authentication::Fresh(account)),
         format!("{:?}", Authentication::KeptFrom(session)),
     ] {

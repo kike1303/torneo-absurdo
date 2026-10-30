@@ -17,7 +17,7 @@ use std::fmt;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use protocol::Role;
+use protocol::{Provider, Role};
 use rand_core::{OsRng, TryRngCore};
 use sha2::{Digest, Sha256};
 use sqlx::{PgConnection, PgPool, Row};
@@ -185,6 +185,23 @@ impl fmt::Debug for LockedAuth {
         f.debug_struct("LockedAuth")
             .field("step_up", &self.step_up)
             .field("link_window", &self.link_window)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What `reauth-status` reads of a session (009 RF18): its confirmation, the account of its
+/// authentication and the accounts of the user, in link order. A plain read: every action reads
+/// the rule again under the lock. `Debug` shows only the confirmation.
+pub struct AuthView {
+    pub step_up: bool,
+    pub account: Option<OauthAccountId>,
+    pub linked: Vec<(Provider, OauthAccountId)>,
+}
+
+impl fmt::Debug for AuthView {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthView")
+            .field("step_up", &self.step_up)
             .finish_non_exhaustive()
     }
 }
@@ -430,6 +447,17 @@ mod const_format_valid {
         valid!(),
         " FOR UPDATE OF s"
     );
+
+    /// [`super::auth_view`]: one row per account, or a row of NULLs for a user without one.
+    pub const AUTH_VIEW: &str = concat!(
+        "SELECT ",
+        auth_state!(step_up),
+        ", s.auth_account_id, a.provider, a.id FROM sessions s JOIN users u ON u.id = s.user_id",
+        auth_state!(join),
+        "LEFT JOIN oauth_accounts a ON a.user_id = s.user_id WHERE s.id = $1",
+        valid!(),
+        " ORDER BY a.id"
+    );
 }
 
 async fn finish(
@@ -476,6 +504,30 @@ pub async fn lock_auth(
         step_up: row.try_get(1)?,
         link_window: row.try_get(2)?,
         account: row.try_get::<Option<i64>, _>(3)?.map(OauthAccountId),
+    }))
+}
+
+/// What `reauth-status` needs of the session `id`, or `None` if it is no longer valid.
+pub async fn auth_view(pool: &PgPool, id: SessionId) -> Result<Option<AuthView>, sqlx::Error> {
+    let rows = sqlx::query(const_format_valid::AUTH_VIEW)
+        .bind(id.0)
+        .fetch_all(pool)
+        .await?;
+    let Some(first) = rows.first() else {
+        return Ok(None);
+    };
+    let mut linked = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let provider = row.try_get::<Option<&str>, _>(2)?.and_then(Provider::parse);
+        let account = row.try_get::<Option<i64>, _>(3)?.map(OauthAccountId);
+        if let (Some(provider), Some(account)) = (provider, account) {
+            linked.push((provider, account));
+        }
+    }
+    Ok(Some(AuthView {
+        step_up: first.try_get(0)?,
+        account: first.try_get::<Option<i64>, _>(1)?.map(OauthAccountId),
+        linked,
     }))
 }
 

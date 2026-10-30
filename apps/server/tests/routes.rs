@@ -135,3 +135,19 @@ async fn the_reauth_route_of_009() {
     assert_eq!(reauth.status, 303);
     assert_eq!(reauth.header("location"), Some("/login"));
 }
+
+/// 009 decision 9: `reauth-status` is a read, a static segment beside `providers`, and without a
+/// session it is the 401 of `/api/me`.
+#[tokio::test]
+async fn the_reauth_status_route_of_009() {
+    let route = ROUTES
+        .iter()
+        .find(|r| r.path == "/api/auth/reauth-status")
+        .expect("reauth-status is not in the manifest");
+    assert_eq!(route.method.http().as_str(), "GET");
+    assert_eq!(route.effect, Effect::Read);
+    let app = support::app::start(support::app::state(&[], &Settings::default())).await;
+    let refused = http::send(app.addr, "GET", "/api/auth/reauth-status", &[]).await;
+    assert_eq!(refused.status, 401);
+    assert_eq!(refused.text(), r#"{"error":"auth.unauthenticated"}"#);
+}

@@ -248,6 +248,7 @@ mod tests {
                 ![
                     "link",
                     "reauth",
+                    "reauth-status",
                     "unlink",
                     "start",
                     "callback",

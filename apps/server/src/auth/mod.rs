@@ -12,6 +12,7 @@ pub mod logout;
 pub mod next;
 pub mod providers;
 pub mod reauth;
+pub mod reauth_status;
 pub mod start;
 pub mod unlink;
 
