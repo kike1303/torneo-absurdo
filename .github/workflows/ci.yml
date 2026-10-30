@@ -287,9 +287,11 @@ jobs:
       - name: compose config without IMAGE_TAG fails (RF-C4)
         run: |
           set -uo pipefail
-          # The two secrets of the server are set so IMAGE_TAG is the only missing variable.
-          if out="$(env -u IMAGE_TAG INTERNAL_API_SECRET=x IP_HASH_KEY=x docker compose --env-file infra/local.env \
-            -f infra/docker-compose.yml config 2>&1)"; then
+          # The secrets and the OAuth credentials of the server are set so IMAGE_TAG is the only
+          # missing variable.
+          if out="$(env -u IMAGE_TAG INTERNAL_API_SECRET=x IP_HASH_KEY=x \
+            GOOGLE_CLIENT_ID=x GOOGLE_CLIENT_SECRET=x DISCORD_CLIENT_ID=x DISCORD_CLIENT_SECRET=x \
+            docker compose --env-file infra/local.env -f infra/docker-compose.yml config 2>&1)"; then
             echo "docker compose config succeeded without IMAGE_TAG" >&2
             exit 1
           fi

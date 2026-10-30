@@ -65,13 +65,18 @@ pub async fn warm_up() {
     .await;
 }
 
-/// Variables every server run needs since phase B (008 RF-B18), with test-only values. The
-/// variables of each test go after them, so a test can override or check any of them. With
-/// `dev-auth`, the gate needs a loopback `BIND_ADDR`.
+/// Variables every server run needs since phase B (008 RF-B18) and, outside loopback, phase C
+/// (the OAuth credentials, RF-C1), with test-only values. The variables of each test go after
+/// them, so a test can override or check any of them. With `dev-auth`, the gate needs a
+/// loopback `BIND_ADDR`.
 pub const DEFAULT_ENV: &[(&str, &str)] = &[
     ("INTERNAL_API_SECRET", super::app::SECRET),
     ("IP_HASH_KEY", super::app::IP_HASH_KEY),
     ("DAILY_GRANT", "100"),
+    super::config::PROVIDER_VARS[0],
+    super::config::PROVIDER_VARS[1],
+    super::config::PROVIDER_VARS[2],
+    super::config::PROVIDER_VARS[3],
     #[cfg(feature = "dev-auth")]
     ("BIND_ADDR", "127.0.0.1"),
 ];

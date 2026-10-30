@@ -164,6 +164,70 @@ pub fn parse_public_origin(value: &str) -> Option<Url> {
     (url.origin().ascii_serialization() == value).then_some(url)
 }
 
+/// Longest OAuth client id or secret the server accepts (plan-c decision 3).
+pub const MAX_CREDENTIAL_BYTES: usize = 256;
+
+/// An OAuth client secret. `Debug` never shows it, and there is no `Display`.
+#[derive(Clone)]
+pub struct ClientSecret(String);
+
+impl ClientSecret {
+    pub fn new(text: impl Into<String>) -> Self {
+        Self(text.into())
+    }
+
+    /// The secret, for the token request only.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for ClientSecret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ClientSecret(..)")
+    }
+}
+
+/// The OAuth app of one provider. `Debug` shows neither the id nor the secret.
+#[derive(Clone)]
+pub struct ClientCredentials {
+    pub id: String,
+    pub secret: ClientSecret,
+}
+
+impl fmt::Debug for ClientCredentials {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ClientCredentials(..)")
+    }
+}
+
+/// The real providers with credentials (RF-C1). `None`: the provider is off.
+#[derive(Clone, Default)]
+pub struct OAuthCredentials {
+    pub google: Option<ClientCredentials>,
+    pub discord: Option<ClientCredentials>,
+}
+
+impl OAuthCredentials {
+    /// The names of the configured providers, in the order of the login buttons.
+    pub fn configured(&self) -> Vec<&'static str> {
+        [
+            ("google", self.google.is_some()),
+            ("discord", self.discord.is_some()),
+        ]
+        .into_iter()
+        .filter_map(|(name, on)| on.then_some(name))
+        .collect()
+    }
+}
+
+/// A client id or secret: visible ASCII (no space, no control), 1 to
+/// [`MAX_CREDENTIAL_BYTES`] bytes. The shape of each provider is not checked, so the fillers of
+/// `prod-local` pass (plan-c decision 3).
+fn is_credential(text: &str) -> bool {
+    (1..=MAX_CREDENTIAL_BYTES).contains(&text.len()) && text.bytes().all(|b| b.is_ascii_graphic())
+}
+
 #[derive(Clone)]
 pub struct Config {
     pub database: PgConnectOptions,
@@ -184,6 +248,8 @@ pub struct Config {
     pub daily_grant: Coins,
     /// Cookie names and attributes (RF-B9).
     pub cookies: CookiePolicy,
+    /// Google and Discord (RF-C1): both always outside loopback.
+    pub oauth: OAuthCredentials,
 }
 
 // Hand-written so the connection options (with the password), the internal secret and the
@@ -203,6 +269,7 @@ impl fmt::Debug for Config {
             .field("ip_hash_key", &"<redacted>")
             .field("daily_grant", &self.daily_grant.0)
             .field("cookies", &self.cookies)
+            .field("oauth", &self.oauth.configured())
             .finish()
     }
 }
@@ -318,6 +385,35 @@ impl Config {
         let daily_grant = parse_daily_grant(&required(DAILY_GRANT)?)
             .ok_or(ConfigError::Invalid { var: DAILY_GRANT })?;
 
+        // RF-C1 and plan-c decision 3: a provider with both variables is on, one with neither
+        // is off (only on loopback: outside it the four are required), and a half pair is a
+        // typo that stops the start. An empty value counts as missing.
+        let credential = |var: &'static str| -> Result<Option<String>, ConfigError> {
+            match text(var)? {
+                None => Ok(None),
+                Some(value) if value.is_empty() => Ok(None),
+                Some(value) if is_credential(&value) => Ok(Some(value)),
+                Some(_) => Err(ConfigError::Invalid { var }),
+            }
+        };
+        let pair = |id_var: &'static str,
+                    secret_var: &'static str|
+         -> Result<Option<ClientCredentials>, ConfigError> {
+            match (credential(id_var)?, credential(secret_var)?) {
+                (Some(id), Some(secret)) => Ok(Some(ClientCredentials {
+                    id,
+                    secret: ClientSecret(secret),
+                })),
+                (None, None) if loopback => Ok(None),
+                (None, _) => Err(ConfigError::Invalid { var: id_var }),
+                (Some(_), None) => Err(ConfigError::Invalid { var: secret_var }),
+            }
+        };
+        let oauth = OAuthCredentials {
+            google: pair("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET")?,
+            discord: pair("DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET")?,
+        };
+
         // RF-B6: the dev provider only on a loopback http origin and a loopback BIND_ADDR.
         // `Origin` is a CSRF defense, not authentication: without this gate anyone on the
         // local network could ask for a session of any `dev_identity`.
@@ -345,6 +441,7 @@ impl Config {
             ip_hash_key,
             daily_grant,
             cookies,
+            oauth,
         })
     }
 }
@@ -375,6 +472,10 @@ mod tests {
             ("INTERNAL_API_SECRET", OTHER_SECRET),
             ("IP_HASH_KEY", OTHER_KEY),
             ("DAILY_GRANT", "100"),
+            ("GOOGLE_CLIENT_ID", GOOGLE_ID),
+            ("GOOGLE_CLIENT_SECRET", GOOGLE_SECRET),
+            ("DISCORD_CLIENT_ID", DISCORD_ID),
+            ("DISCORD_CLIENT_SECRET", DISCORD_SECRET),
         ];
         if cfg!(feature = "dev-auth") {
             vars.push(("BIND_ADDR", "127.0.0.1"));
@@ -393,6 +494,159 @@ mod tests {
             vars.push((*k, *v));
         }
         load(&vars)
+    }
+
+    /// Test-only OAuth credentials (never real ones): fillers in the shape of nothing.
+    const GOOGLE_ID: &str = "test-google-id-canary";
+    const GOOGLE_SECRET: &str = "test-google-secret-canary";
+    const DISCORD_ID: &str = "test-discord-id-canary";
+    const DISCORD_SECRET: &str = "test-discord-secret-canary";
+    const PROVIDER_VARS: [&str; 4] = [
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "DISCORD_CLIENT_ID",
+        "DISCORD_CLIENT_SECRET",
+    ];
+
+    /// `base` without `removed`, with `extra` on top.
+    fn without<'a>(removed: &[&str], extra: &[(&'a str, &'a str)]) -> Result<Config, ConfigError> {
+        let mut vars: Vec<_> = base()
+            .into_iter()
+            .filter(|(k, _)| !removed.contains(k))
+            .collect();
+        for (k, v) in extra {
+            vars.retain(|(name, _)| name != k);
+            vars.push((*k, *v));
+        }
+        load(&vars)
+    }
+
+    fn configured(config: &Config) -> (bool, bool) {
+        (
+            config.oauth.google.is_some(),
+            config.oauth.discord.is_some(),
+        )
+    }
+
+    #[test]
+    fn on_loopback_each_provider_follows_its_pair() {
+        assert_eq!(configured(&with(&[]).unwrap()), (true, true));
+        assert_eq!(
+            configured(&without(&PROVIDER_VARS, &[]).unwrap()),
+            (false, false)
+        );
+        assert_eq!(
+            configured(&without(&PROVIDER_VARS[2..], &[]).unwrap()),
+            (true, false)
+        );
+        assert_eq!(
+            configured(&without(&PROVIDER_VARS[..2], &[]).unwrap()),
+            (false, true)
+        );
+        let config = with(&[]).unwrap();
+        let google = config.oauth.google.unwrap();
+        assert_eq!(google.id, GOOGLE_ID);
+        assert_eq!(google.secret.expose(), GOOGLE_SECRET);
+        let discord = config.oauth.discord.unwrap();
+        assert_eq!(discord.id, DISCORD_ID);
+        assert_eq!(discord.secret.expose(), DISCORD_SECRET);
+    }
+
+    /// A half pair is a typo, not "provider off" (plan-c decision 3).
+    #[test]
+    fn on_loopback_a_half_pair_names_the_missing_variable() {
+        for var in PROVIDER_VARS {
+            assert_eq!(without(&[var], &[]).unwrap_err().var(), var, "{var}");
+            // An empty value is the same as a missing one.
+            assert_eq!(with(&[(var, "")]).unwrap_err().var(), var, "{var}");
+        }
+        // Both empty: the provider is off.
+        assert_eq!(
+            configured(&with(&[("GOOGLE_CLIENT_ID", ""), ("GOOGLE_CLIENT_SECRET", "")]).unwrap()),
+            (false, true)
+        );
+    }
+
+    // Non-loopback origins never start with `dev-auth` (see `the_dev_auth_gate`).
+    #[cfg(not(feature = "dev-auth"))]
+    #[test]
+    fn outside_loopback_the_four_credentials_are_required() {
+        for origin in ["https://torneo.example", "https://localhost"] {
+            let public = [("PUBLIC_ORIGIN", origin)];
+            assert_eq!(
+                configured(&with(&public).unwrap()),
+                (true, true),
+                "{origin}"
+            );
+            for var in PROVIDER_VARS {
+                assert_eq!(without(&[var], &public).unwrap_err().var(), var, "{origin}");
+                let mut empty = public.to_vec();
+                empty.push((var, ""));
+                assert_eq!(with(&empty).unwrap_err().var(), var, "{origin}");
+            }
+            // In order: the first missing one is reported.
+            assert_eq!(
+                without(&PROVIDER_VARS, &public).unwrap_err().var(),
+                "GOOGLE_CLIENT_ID"
+            );
+            assert_eq!(
+                without(&PROVIDER_VARS[2..], &public).unwrap_err().var(),
+                "DISCORD_CLIENT_ID"
+            );
+        }
+    }
+
+    #[test]
+    fn credentials_are_visible_ascii_of_1_to_256_bytes() {
+        let longest = "x".repeat(256);
+        let too_long = format!("canary{}", "x".repeat(251));
+        assert_eq!(too_long.len(), 257);
+        for var in PROVIDER_VARS {
+            assert!(with(&[(var, &longest)]).is_ok(), "{var}");
+            assert!(with(&[(var, "!~")]).is_ok(), "{var}");
+            for value in [
+                too_long.as_str(),
+                "canary with spaces",
+                " canary",
+                "canary\t",
+                "canary\u{7f}",
+                "canary\u{f1}",
+                "canary\n",
+            ] {
+                let err = with(&[(var, value)]).unwrap_err();
+                assert_eq!(err.var(), var, "{var} {value:?}");
+                assert!(!err.to_string().contains("canary"));
+                assert!(!format!("{err:?}").contains("canary"));
+            }
+        }
+    }
+
+    /// The provider variables come after `DAILY_GRANT` (plan-c decision 3).
+    #[test]
+    fn provider_variables_are_read_after_the_phase_b_ones() {
+        assert_eq!(
+            without(&PROVIDER_VARS[..1], &[("DAILY_GRANT", "0")])
+                .unwrap_err()
+                .var(),
+            "DAILY_GRANT"
+        );
+    }
+
+    #[test]
+    fn debug_shows_only_which_providers_are_configured() {
+        let config = with(&[]).unwrap();
+        let shown = format!("{config:?}");
+        assert!(shown.contains(r#"oauth: ["google", "discord"]"#), "{shown}");
+        for value in [GOOGLE_ID, GOOGLE_SECRET, DISCORD_ID, DISCORD_SECRET] {
+            assert!(!shown.contains(value), "{value} in {shown}");
+        }
+        assert!(!shown.contains("canary"), "{shown}");
+        let google = config.oauth.google.unwrap();
+        let shown = format!("{google:?} {:?}", google.secret);
+        assert!(!shown.contains(GOOGLE_SECRET), "{shown}");
+        assert!(!shown.contains("canary"), "{shown}");
+        let none = without(&PROVIDER_VARS, &[]).unwrap();
+        assert!(format!("{none:?}").contains("oauth: []"));
     }
 
     fn invalid(var: &'static str) -> Result<Config, ConfigError> {

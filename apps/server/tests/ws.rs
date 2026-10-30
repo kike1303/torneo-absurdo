@@ -178,7 +178,10 @@ async fn echo_disabled_closes_with_1008() {
 #[cfg(not(feature = "dev-auth"))]
 #[tokio::test]
 async fn echo_flag_with_an_https_origin_stays_off() {
-    let config = support::config::config(&[("PUBLIC_ORIGIN", "https://torneo.example")]);
+    // Outside loopback the four OAuth credentials are required (plan-c decision 3).
+    let mut vars = vec![("PUBLIC_ORIGIN", "https://torneo.example")];
+    vars.extend(support::config::PROVIDER_VARS);
+    let config = support::config::config(&vars);
     let settings = Settings {
         ws: SLOW,
         ..Settings::default()
