@@ -14,16 +14,18 @@ use uuid::Uuid;
 
 async fn user(pool: &PgPool, role: &str) -> Uuid {
     let id = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO users (id, display_name, display_name_key, role) VALUES ($1, $2, $3, $4)",
+    // `role` only through the helper of the admin CLI's actor (users_privileged_guard).
+    support::db::privileged(
+        pool,
+        sqlx::query(
+            "INSERT INTO users (id, display_name, display_name_key, role) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(id)
+        .bind(format!("Test{}", id.simple()))
+        .bind(format!("test{}", id.simple()))
+        .bind(role),
     )
-    .bind(id)
-    .bind(format!("Test{}", id.simple()))
-    .bind(format!("test{}", id.simple()))
-    .bind(role)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
     id
 }
 
@@ -40,12 +42,9 @@ async fn issue(
     (issued.id, issued.token)
 }
 
+/// Runs `sql` with the session id; through the helper, since one of them sets `banned_at`.
 async fn set(pool: &PgPool, sql: &'static str, id: sessions::SessionId) {
-    sqlx::query(sql)
-        .bind(id.uuid())
-        .execute(pool)
-        .await
-        .unwrap();
+    support::db::privileged(pool, sqlx::query(sql).bind(id.uuid())).await;
 }
 
 #[tokio::test]

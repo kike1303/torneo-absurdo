@@ -146,6 +146,25 @@ impl Drop for TestDb {
     }
 }
 
+/// Runs `query` the way the admin CLI writes `role` and `banned_at` (008 plan-c decision 10): in
+/// its own transaction with `torneo.actor = 'cli'` set **locally**, so `users_privileged_guard`
+/// lets it through and the actor dies with the commit. The only place of `tests/` that sets it;
+/// never a session-wide `SET` (a pooled connection would keep the guard off for the next
+/// requests of the test).
+pub async fn privileged(
+    pool: &sqlx::PgPool,
+    query: sqlx::query::Query<'_, sqlx::Postgres, sqlx::postgres::PgArguments>,
+) -> sqlx::postgres::PgQueryResult {
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("SELECT set_config('torneo.actor', 'cli', true)")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let done = query.execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+    done
+}
+
 #[test]
 fn test_names_are_validated() {
     assert!(is_test_name("torneo_test_0123456789abcdef0123456789abcdef"));

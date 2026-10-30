@@ -324,10 +324,7 @@ async fn a_banned_user_gets_auth_banned_and_no_session() {
     let db = TestDb::create().await;
     let (app, pool) = app(&db).await;
     flow::login(&app, "ana", None, None).await;
-    sqlx::query("UPDATE users SET banned_at = now()")
-        .execute(&pool)
-        .await
-        .unwrap();
+    support::db::privileged(&pool, sqlx::query("UPDATE users SET banned_at = now()")).await;
     let before = count(&pool, "sessions").await;
     assert_callback_error(&flow::login(&app, "ana", None, None).await, "auth.banned");
     assert_eq!(count(&pool, "sessions").await, before);

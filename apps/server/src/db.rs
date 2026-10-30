@@ -47,6 +47,8 @@ pub fn error_kind(error: &sqlx::Error) -> &'static str {
             "TA001" => return "ledger_immutable",
             "TA002" => return "ledger_unbalanced",
             "TA003" => return "ledger_closed",
+            // `users_privileged_guard` (008 plan-c decision 10).
+            "TA004" => return "privileged_write",
             _ => {}
         }
     }
