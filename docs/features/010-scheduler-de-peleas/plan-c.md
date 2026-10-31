@@ -2,11 +2,13 @@
 id: "010"
 title: Scheduler de peleas en vivo, fase C (reproducción parcial en el renderer)
 type: plan
-status: in-review
+status: approved
 risk: medium
 author: frontend-engineer
 reviewers: [architect]
-approvals: []
+approvals:
+  - by: architect
+    date: 2026-10-31
 linear: TA-13
 depends_on: ["010"]
 created: 2026-10-31
@@ -227,3 +229,74 @@ _Ninguna está aplicada. La spec no se edita desde este plan._
 
 ## Desviaciones durante la implementación
 _(Se llena si la implementación se aparta del plan.)_
+
+## Enmienda propuesta a la spec
+_Redactada por el architect a partir de las desviaciones 1 a 5. **No está aplicada:** `spec.md` recibe en paralelo una enmienda de la fase A en `ta-13-fight-runner`, así que la aplica el cierre de esta fase, cuando las ramas se junten. Cada entrada reemplaza completo el texto citado. El APPROVE de abajo cubre el plan del frontend-engineer, no esta sección, porque el architect no aprueba lo que escribe: RF50 y el RNF cambian una regla o su prueba y los confirma product-owner al aplicarla. RF46, RF47 y la tabla solo precisan lo que ya era cierto._
+
+**RF46** (desviación 1):
+> - **RF46. Timeline parcial.** `validateTimeline(json, manifests, { partial: true })` aplica las mismas reglas salvo las que exigen cierre (`ending_missing` y `closing_missing`). La `timeline_version` sigue siendo 2. La v1 no admite `partial`: da `unsupported_version`. → Vitest.
+
+**RF47** (desviación 4):
+> - **RF47. API.** `RendererHandle` suma `loadLive(timeline, assets)` y `extend(timeline)`. `extend` es síncrono, no recarga hojas y no toca la reproducción ni el cursor. Rechaza lanzando `RendererError('timeline_invalid')`, sin cambiar nada, si no hay un `loadLive` vigente, si la timeline no pasa RF46, si los cues nuevos no empiezan por los anteriores, si cambia el `asset` o el `max_hp` de un luchador, o si cambia `duration_ms` sin que llegue el cierre o después de que llegó. Actualiza `durationMs`, que es interno de `PreparedScene` y no se expone (RF48). `load` no cambia. → Vitest con un `Stage` falso.
+
+**RF50** (desviación 3):
+> - **RF50. Entrar tarde.** `play()` sobre un reloj ya avanzado deja el cursor en `cursorAt(t)`: no dispara `onCue` por lo saltado. Con el reloj negativo (antes de empezar), `t = 0` y no se dispara ningún cue hasta que el reloj llega a 0. → Vitest.
+
+**RNF "CPU"** (desviación 5 y decisión 8):
+> - **CPU:** el motor corre una vez por pelea y al reanudar. Con 2000 sockets, un lote cada ~600 ms. `prepareScene` se ejecuta en la primera carga y `extend` usa la preparación incremental (`prepareSceneFrom`, equivalente por oráculo): ≤ 4 ms en p50 con 200 cues en el dispositivo de referencia de 002. Mientras no se pueda medir en ese dispositivo, la fase C lo prueba por aproximación: en Node, `prepareSceneFrom` con 200 cues y p50 ≤ 0,67 ms (4 ms / 6); en Chromium con la CPU limitada a 6×, `/dev/arena?log=draw&live=1` con `extend_ms` en p50 ≤ 4 ms y p95 ≤ 8 ms. La medición en Android sigue pendiente, junto con la de 002, y se hace antes del primer despliegue público.
+
+**"Componentes afectados", fila `packages/renderer`** (desviación 2):
+> | `packages/renderer` | `timeline/validate.ts`, `player/`, `scene/` (`prepare.ts`, `scene-at.ts`), sin cambios en `Stage` | C |
+
+### Nota para el plan D (RF54, no forma parte de esta enmienda)
+El problema de la desviación 6 es real: RF54 muestra el resultado "por el cue de cierre del renderer", y RF50 no dispara lo saltado, así que quien entra con `t` más allá del cierre nunca recibe ese cue. La ventana va de `ko.t + 5000` a `ko.t + 9000` de tiempo del server, y dura más si la liquidación se atrasa. Esta fase no cambia nada, porque `snapshot().ending` ya es función de `t`. El plan D resuelve y propone la enmienda con este texto de partida:
+
+> El resultado se muestra por `snapshot().ending` del renderer o, sin WebGL, por `t ≥ end.t` en texto, nunca antes por llegar `end`.
+
+El plan D debe decidir además:
+- **Cómo se entera el host.** `snapshot()` es una consulta y no avisa, y justo tras `play()` todavía refleja `t = 0`, porque la escena se pinta en el primer frame. `onCue` no sirve (ese es el problema), y `onState` solo avisa en `finished`, en `end.t`, 2500 ms después del cierre. Hace falta una lectura periódica u otro mecanismo, con su prueba de entrada dentro de la ventana.
+- **`fight_sync` con `events` vacío** justo al pasar a `live`: el host espera al `intro` antes de `loadLive`, porque una lista vacía da `adapter.intro_missing`.
+- **Ráfaga de `onCue`** tras un corte largo: `extend` deja vencidos los cues atrasados, así que los efectos que dependan de `onCue` deben tolerarla.
+
+## Revisión
+### architect — 2026-10-31 — APPROVE (con las correcciones de abajo, antes de la implementación)
+- Verifiqué, contra el código de la rama y sin compilar Rust:
+  - **RF46 y desviación 1:** en `checkEndingV2`, la falta de cierre solo produce `ending_missing` y `closing_missing`, y `ko_count` y `win_count` por falta solo existen en `checkEndingV1`. `hp_zero_without_ko` mira `cues[i + 1]`, y en los 7 dorados el golpe a 0 HP comparte `t` con su `ko`, así que un corte por tiempo no los separa.
+  - **RF48 y desviación 2:** `durationMs` solo se lee en `phaseAt` y en el recorte de `sceneAt`, y el player en los sitios que nombra la decisión 4. Sin tocar `phaseAt`, una pelea sin `end` daría `finished` en 90 000.
+  - **RF50 y desviación 3:** `timeAt` recorta a 0 y `dueCues` daría el `intro` por vencido con el reloj negativo. `INITIAL_PLAYBACK` da `t = clock()`, así que las decisiones 5 y 6 caben sin tocar `playback.ts`.
+  - **Decisión 7:** `frame` corta hoy con `prepared !== p`, y un `extend` dentro de un listener perdería cues. Los índices son estables, porque solo se agrega al final.
+  - **Decisión 8, por separado del plan:** prototipé `prepareSceneFrom` fuera del repo. No hubo diferencias con `prepareScene` en 1329 pares de prefijos de los dorados, ni en 15 012 de timelines generadas con manifests en los límites (windup de 400 ms, acciones de 3000 ms, knockdowns de hasta 3000 ms). `admitFlashes` es voraz hacia adelante, como dice el plan, y `deepFreeze` se detiene en lo congelado.
+  - **Medición, en Node 22.23.4, una llamada cada 25 ms** (repite la del plan, 1,21 ms, con 1,18 ms):
+
+    | Caso | `prepareScene`, p50 / p95 | Prototipo incremental, p50 / p95 |
+    |---|---|---|
+    | 200 cues | 1,18 / 1,65 ms | 0,49 / 0,65 ms |
+    | `draw`, 78 cues | 0,55 / 1,17 ms | 0,28 / 0,46 ms |
+
+    Una llamada cada 600 ms, la cadencia real, da con 200 cues 1,37 / 2,99 ms y 0,50 / 1,53 ms. `validateTimeline` suma 0,18 / 0,43 ms con 200 cues y no estaba en la cuenta del plan.
+  - **Números del plan:** los `t` de los dorados (fin de `ko-knockdown` en 54 169, primer golpe en 4525, `draw` con 78 cues y fin en 90 000) dan las esperas de 8 a 8,5 s de los e2e. `FightLog` y `FighterCard` encajan en `LiveHeader`. RF51 y `fight-boundary.test.ts` son compatibles con el núcleo único. `?t=`, `debug` y `data-ending` ya existen en la arena.
+  - **Riesgo `medium`:** la plantilla dice heredar `high`, pero `process.md` reserva `high` para auth, monedas, seguridad, datos personales y temas legales, y esta fase no toca ninguno. Aceptado: el PR no necesita pase de seguridad.
+- Decisiones que me pidió el plan:
+  1. **Preparación incremental ahora.** Medir antes no decidiría nada, porque no hay dispositivo de referencia donde medir. Con la completa y 200 cues, el p50 pasa de 4 ms con un factor de solo 3,4, y la incremental queda en 2,9 ms a 6×. La spec prevé esta salida, RF47 no cambia y el costo es acotado. El paso 5 sigue siendo un commit propio, pero **no se salta**.
+  2. **Prueba del RNF por aproximación, aceptada,** con el criterio de la corrección 2, que el plan no fijaba. Android sigue pendiente desde 002 y queda con un plazo, en la enmienda.
+  3. **Desviaciones 1 a 4, aceptadas; la 5, aceptada con criterio.** Su texto está en "Enmienda propuesta a la spec". **La 6 pasa al plan D** como nota.
+- Correcciones que el frontend-engineer incorpora al plan antes de empezar. No requieren otra ronda:
+  1. **El oráculo de la decisión 8 no prueba el límite `H`.** La frase "si el límite `H` estuviera mal, este test falla" es falsa con los dorados y los placeholders. Lo comprobé con mutantes: reutilizar todo cue anterior al último (el límite más laxo posible) da 0 diferencias en los dorados, porque los placeholders tienen windups de hasta 320 ms y acciones de hasta 1050 ms. Hay que agregar `packages/renderer/test/prepare-from.test.ts`:
+     - manifests válidos en los límites (windup de 400 ms, reacción de 3000 ms, ataque de 3000 ms en total, que es el tope de `animation_too_long`);
+     - timelines generadas con semilla fija, sin `Math.random`, con golpes a 600 ms, huecos cerca de los 3300 a 4300 ms y knockdowns de hasta 3000 ms, avanzando de a un lote y de a varios;
+     - `toStrictEqual` contra `prepareScene`;
+     - un **control negativo**: con esos datos, algún cue de la zona que `H` prohíbe reutilizar difiere entre un prefijo y la timeline completa. Con mis timelines, el mutante `at_ms + 1000 < últimoAt` falla y `at_ms < últimoAt` también; los cortes de los dorados no sirven de control.
+  2. **"Alcanza" no está definido.** La decisión 8 y el paso 8 dicen qué hacer si no alcanza, pero no con qué número. Queda así:
+     - Node: `prepareSceneFrom` con 200 cues, p50 ≤ 0,67 ms.
+     - Chromium a 6×, `?log=draw&live=1`: `extend_ms` con p50 ≤ 4 ms y p95 ≤ 8 ms, tres corridas tras una de calentamiento, y se reporta la peor. `extend_ms` incluye validar y cotejar, así que es más exigente que el RNF, y es a propósito: lo que importa es el bloqueo del frame.
+     - Si falla, vuelve al architect con los números, antes de pasar a puntos de control.
+  3. **Falta el script de la medición.** Agregar a "Archivos que cambian" `packages/renderer/scripts/bench-prepare.ts` (con `--experimental-strip-types`, como `gen:placeholders`): timeline sintética de 200 cues, una llamada cada 25 ms y los dos caminos. Si no, nadie puede repetir el número ni comparar.
+  4. **Carrera en la decisión 11: el `end` se puede perder y la pelea no termina.** El goteo publica solo cuando hay eventos nuevos y se detiene tras `end`. El orden `loadLive`, `onCue`, `play()`, `subscribe` deja sin suscriptor todo lo que salga mientras cargan las hojas, y si en ese tramo sale `end`, no hay otra publicación: queda en `playing` para siempre. Es además el caso para el que existe la decisión 2. El orden pasa a ser:
+     - `loadLive(session.timeline, assets)`, y sin esperarla, `subscribe`, porque `live` se escribe de forma síncrona;
+     - `subscribe` entrega al momento la timeline vigente si es más nueva que `session.timeline` leída;
+     - después, `await`, `onCue` y `play()`.
+
+     Agregar a `log-drip.test.ts` "suscribir después de `end` entrega el final", y a la decisión 11 que el `catch` y `start()` cancelan la suscripción y que el `push` respeta `id !== run`.
+  5. **`loadedTimeline` en `FightStage`:** cada `extend` aceptado la actualiza. Si no, `currentTimeline()` y `mean_strike_gap_ms` quedan fijos en el primer lote (decisión 11).
+  6. **"`live` vigente" en las decisiones 5 y 6** significa `live?.installed`. Mientras una `loadLive` carga, `prepared` sigue siendo la pelea anterior, y no debe heredar esas reglas.
+  7. **Frontmatter:** `depends_on: ["010"]` apunta a sí mismo. Debe ser `["002", "005"]`, las features cuyo código cambia.
