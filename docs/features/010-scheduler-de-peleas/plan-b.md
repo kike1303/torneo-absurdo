@@ -335,6 +335,7 @@ Sin jobs nuevos. `rust` suma unos 2 a 3 min por tests, dos clippy más y la comp
 - Un canal cuya pelea salió del hub queda en silencio (DP-B5), y el cliente lo cierra: cuenta para el tope de 8.
 - `Channel` es `string` en TypeScript.
 - **DP-B7:** D confirma que un cliente legítimo no llega a 3 `fight_sync` pedidos por socket y minuto, también al cambiar de pelea, al volver a primer plano y con varias pestañas. Si llega, vuelve a security-reviewer. El cierre con `ws.rate_limited` ya no es solo de clientes abusivos, así que D lo trata como cualquier reconexión con backoff.
+- **DP-B9:** `fight_sync` no trae eventos. El cliente conserva los que tiene, y los de `fight_events` se colocan por `from_index`, descartando lo repetido: una página puede solapar lo que ya tiene. Quien entra tarde recibe el `fight_sync` y luego varias páginas, así que `loadLive` espera al `intro`.
 - D escribe el script de `FIGHT_SCRIPT_PATH` del e2e y documenta el feature en el trabajo de cierre.
 
 ## Desviaciones durante la implementación
@@ -342,30 +343,44 @@ Sin jobs nuevos. `rust` suma unos 2 a 3 min por tests, dos clippy más y la comp
 - **`Subscriptions::subscribe` se parte en `check` y `open`.** DP-B7 tiene que cerrar el socket sin abrir el canal, y `check` no cambia nada.
 - **`FightsShared` pierde `derive(Debug)`,** porque el hub no lo tiene. Su `Debug` es fijo, sin contenido.
 - **`FightHub::held`.** Un método público que da los eventos y los bytes en caché de una pelea. Lo usan las pruebas de memoria y para esperar a la liberación. No da más de lo que ya es público.
-- **`fights.orphan_invalid` solo se prueba como unidad (`orphan_outcome`).** Hoy no se puede llegar a él en integración: una fila `settled` decodifica siempre, y un `state` fuera de la lista también aborta `store::unsettled`, código de A que esta fase no cambia. Sin esto, la detención permanente que DP-B8 evita para una huérfana sigue siendo posible por esa otra consulta, y solo con la credencial.
+- **`fights.orphan_invalid` solo se prueba como unidad (`orphan_outcome`).** Hoy no se puede llegar a él en integración: una fila `settled` decodifica siempre, y un `state` fuera de la lista aborta antes `store::unsettled` (ver abajo).
 - **Una fila `settled` sin final que el protocolo pueda decir (`summary()` nulo)** se trata como una que no decodifica: se borra con `fights.orphan_invalid`.
 - **Prueba manual sin `just dev`.** El worktree no tiene `.env`, y `just dev` no admite una rejilla corta sin tocarlo. Corrí el binario con los valores de `.env.example`, una base propia, borrada después, y `FIGHT_CADENCE_SECS=113`, con un cliente de Node. Resultado: la pelea #1 (110 eventos, KO en 68 642 ms) coincide con el log publicado, y quien entró a los 20 024 ms recibió exactamente los 27 eventos de esa hora. Vi las cuatro transiciones por socket, y lag de 2 ms en los lotes de `ko` y `end`.
 - **`fights_fanout.rs`, cómo se mide.** Un proceso por escenario, porque el asignador no devuelve lo que usó, un solo worker, por el vCPU del server, y los clientes en otra copia del proceso de test. F2 quita DP-B7 con una ventana de 1 ms.
 
-### Medición (2026-10-31)
-Mac ARM con páginas de 16 KiB, `--release` y `mimalloc`, carga media de la máquina de 4 a 9 por otras sesiones. Loopback no tiene límite de enlace, y `ps` no ve los buffers del kernel.
+### Primera medición, antes de DP-B9
+Con `fight_sync` llevando todos los eventos: D retuvo 226 MiB y E llegó a 224 + 89 = 313 MiB, por encima de los 200 MiB del criterio. La preocupación 8 volvió a architect, que decidió DP-B9.
 
-| Escenario | Resultado |
-|---|---|
-| A, `read_buffer` de 128 KiB | RSS 281 MiB, 138 KiB por socket. **Pasa de los 256 MiB:** confirma DP-B1 |
-| A, 8 KiB | RSS 46 MiB, 17,5 KiB por socket. El socket 2001 da 503 `ws.capacity` |
-| B, `draw` a su ritmo | 153 lotes, p50 18 ms, p99 39 ms, máximo 46 ms. Los 2000 reciben los mismos bytes, sin cierres |
-| C, `fight_sync` final de unos 14 KB | RSS retenido **121 MiB**, entregado en unos 1 s |
-| D, 418 eventos, unos 47 KB | RSS retenido **226 MiB. Pasa de 200 MiB** |
-| E, 2000 sockets que no leen | Cerrados entre 9,1 y 9,6 s. Pico de RSS 224 MiB, más 89 MiB sin confirmar: **313 MiB. Pasa de 200 MiB y de los 256 MiB** |
-| F1, DP-B7, repartido (1000 + 1000) | 2,9 MB/s de media, 4,4 de pico, p99 de quienes miran 26 ms, 0 cierres |
-| F2, sin DP-B7 | 25,4 MB/s de media, 32,7 de pico, p99 31 ms, 0 cierres |
-| F3, los 3 a la vez, dos ráfagas | 4,8 MB/s de media, **174,5 MB/s de pico**, p99 25 ms, 0 cierres |
-| F4, reconectando (900 + 1000 + 40 IP) | 4,5 MB/s de media, 10,1 de pico, p99 25 ms, 0 cierres |
+### DP-B9 (Enmienda 3, decidida por architect)
+`fight_sync { fight, server_time }` ya no lleva eventos, y estos viajan solo en `fight_events`, en páginas de 8 KiB como máximo. Donde el diseño de arriba habla de un `fight_sync` con eventos, manda esto:
+- **Hub:** páginas fijas de `PAGE_EVENTS` (64), compartidas y serializadas una vez; la última, incompleta, por cada cantidad de eventos. `next_for`, por orden: si cambió la versión, el `fight_sync` pequeño; si el socket está justo detrás de `last_batch`, ese lote; si no, la página que contiene `cursor.released`. Un lote de más de 64 eventos no se guarda como `last_batch`. El `server_time` de una página conserva la hora en que se serializó: solo atrasa la muestra, y el cliente se queda con el máximo.
+- **Sesión:** `subscribed`, `fight_sync` y luego páginas. Un brazo armado mientras queden (`pending`), el último del `select!` y con un mensaje por vuelta, así que ping, apagado y revocación se atienden entre páginas.
+- **`WsConfig`:** `max_write_buffer` de 16 KiB, y `MAX_SERVER_MESSAGE_BYTES` de 8 KiB.
+- **Desviación en `fights_fanout.rs`:** con páginas, suscribirse y desuscribirse de inmediato corta las páginas, y F no mediría nada. Por eso quien insiste se queda suscrito 400 ms (`HOLD_PAGES`) antes de desuscribirse, también al reconectar. La medición de latencia de F empieza después de conectar, porque esas páginas llevan una hora anterior.
 
-- **Preocupación 8: el criterio se incumple en D y E, y por lo tanto vuelve a architect, sin cambios por mi cuenta.** Opciones de "Medición": partir `fight_sync`, no repetir los eventos en la transición a `settled`, bajar el tope o bajar `WS_MAX_CONNECTIONS`.
-- **El piso de DP-B2 era optimista.** Estimé 110 MiB para el peor caso, y es el doble: D retiene unos 92 KiB por socket sobre lo de A, para mensajes de 47 KB. C retiene unos 38 KiB para mensajes de 14 KB. No investigué cuánto de esa diferencia es de las páginas de 16 KiB y de `mimalloc`, y cuánto de `out_buffer`, así que una medición en Linux puede dar menos.
-- **Escenario F: cumple p99 ≤ 1000 ms en las cuatro variantes,** con la salvedad de que en loopback no hay enlace que saturar. Se repite en TA-8.
+### Medición con DP-B9 (2026-10-31)
+Mismo método: Mac ARM con páginas de 16 KiB, `--release`, `mimalloc`, un worker y loopback, con carga de 4 a 10 por otras sesiones. F4 se repitió, porque en la primera corrida su cliente de reconexión aún cortaba sus páginas.
+
+| Escenario | Resultado | Criterio |
+|---|---|---|
+| A, `read_buffer` de 128 KiB | RSS 281 MiB, 138 KiB por socket | Solo confirma DP-B1 |
+| A, 8 KiB | RSS 46 MiB, 17,6 KiB por socket. El socket 2001 da 503 `ws.capacity` | |
+| B, `draw` a su ritmo | p50 19 ms, p99 40 ms, máximo 47 ms. Mismos bytes en los 2000, 0 cierres | p99 ≤ 1000 ms: **cumple** |
+| C, 153 eventos | RSS retenido 58,8 MiB | ≤ 200 MiB: **cumple** |
+| D, 418 eventos | RSS retenido 74,0 MiB | ≤ 200 MiB: **cumple** |
+| D2, 2000 sockets que se suscriben con los 418 ya liberados | RSS retenido 73,0 MiB, 6,1 s en total, 82 MB/s de pico | ≤ 200 MiB: **cumple** |
+| E, 2000 sockets que no leen | Cerrados entre 4,0 y 9,1 s. Pico 74,6 MiB + 2000 × 47 KB (89,6 MiB) = 164,3 MiB | ≤ 200 MiB: **cumple** |
+| F1, DP-B7, repartido (1000 + 1000) | 3,0 MB/s de media, 4,5 de pico, p99 25 ms, 0 cierres | **Cumple** |
+| F2, sin DP-B7 | 25,8 MB/s de media, 33,3 de pico, p99 33 ms, 0 cierres | **Cumple** |
+| F3, los 3 a la vez, dos ráfagas | 4,9 MB/s de media, 126,9 de pico, p99 31 ms, 0 cierres | **Cumple** |
+| F4, reconectando (900 + 1000 + 40 IP, 800 conexiones) | 4,7 MB/s de media, 9,5 de pico, p99 27 ms, 0 cierres | **Cumple** |
+
+- **Preocupación 8: con DP-B9, el criterio se cumple en todos los escenarios.** Son números de una Mac. La confirmación sigue en TA-8, con la memoria del cgroup, y F se repite allí, porque loopback no tiene límite de enlace.
+- **Los 89,6 MiB de E son la cota que fija la enmienda,** no una medición del kernel.
+- **El p99 de D2 no es un criterio.** Sale 796 ms porque mide la hora de páginas serializadas una vez, no el retraso de quien mira.
+
+### Fila con un `state` fuera de la lista: se registra, no se cambia
+Una fila así aborta `store::unsettled`, y con eso cada pasada. No lo trato como DP-B8, porque no es el mismo caso. Una huérfana es una pelea ya terminada cuyo final solo falta difundir, y descartarla no toca nada. Esta fila es una pelea sin liquidar, quizá con commit y apuestas, y saltársela dejaría seguir el vivo con ella sin resolver, contra RF16. Hoy el efecto es el correcto: las pasadas abortan y a los 60 s hay detención, igual que con una fila que no pasa RF5. Solo se llega con la credencial, quitando el `CHECK` y el guard. Lo que no da es un `error_kind` propio. Queda para quien revise RF16 con TA-27, si hace falta distinguirlo.
 
 ## Revisión
 ### architect — 2026-10-31 — REQUEST_CHANGES

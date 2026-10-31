@@ -267,19 +267,23 @@ async fn reconnecting(
         if let Ok(mut client) =
             support::ws::connect_with(addr, ORIGIN, &[("x-forwarded-for", ip.as_str())]).await
         {
+            stats.connected.fetch_add(1, Ordering::Relaxed);
+            // Subscribed long enough to receive its pages, the three of its window.
             for _ in 0..3 {
                 let _ = client
                     .send(Message::Text(subscribe_text(&channel).into()))
                     .await;
+                let until = tokio::time::Instant::now() + HOLD_PAGES;
+                while let Ok(Some(Ok(message))) =
+                    tokio::time::timeout_at(until, client.next()).await
+                {
+                    if let Message::Text(text) = message {
+                        account(&stats, index, text.as_str(), &mut hash);
+                    }
+                }
                 let _ = client
                     .send(Message::Text(unsubscribe_text(&channel).into()))
                     .await;
-            }
-            let until = tokio::time::Instant::now() + Duration::from_millis(1500);
-            while let Ok(Some(Ok(message))) = tokio::time::timeout_at(until, client.next()).await {
-                if let Message::Text(text) = message {
-                    account(&stats, index, text.as_str(), &mut hash);
-                }
             }
             drop(client);
         }
@@ -891,6 +895,11 @@ async fn scenario_f(ctx: &mut Ctx, name: &str) {
     let bytes = ctx.control.ask(json!({"cmd": "bytes"})).await;
     let viewers_end = ctx.control.report("viewers").await;
     let attackers_end = ctx.control.report("attackers").await;
+    let reconnecting = if name == "F4" {
+        ctx.control.report("reconnecting").await
+    } else {
+        json!(null)
+    };
     let p99 = viewers_end["p99_ms"].as_i64().unwrap();
     print(
         name,
@@ -901,6 +910,7 @@ async fn scenario_f(ctx: &mut Ctx, name: &str) {
             "bytes": bytes,
             "viewers": viewers_end,
             "attackers_report": attackers_end,
+            "reconnecting": reconnecting,
             "p99_within_1000_ms": p99 <= 1000,
             "rss_peak_mib": ctx.rss.peak_mib(),
         }),
