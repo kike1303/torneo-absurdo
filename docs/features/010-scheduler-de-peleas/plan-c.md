@@ -244,6 +244,16 @@ _Ninguna está aplicada. La spec no se edita desde este plan._
 
 ## Desviaciones durante la implementación
 1. **Decisión 8, `hp` y coreografía.** El plan decía que `hp` se recalculaba entero y que `choreography.ts` no cambiaba, y con eso `prepareSceneFrom` daba p50 de 0,66 a 0,68 ms en `bench-prepare.ts`, justo en el umbral de 0,67 ms. Tres cambios, sin efecto en el resultado (los dos oráculos y los snapshots siguen iguales): los `HpStep` de los cues fijos se reutilizan, `afterAction` usa búsqueda binaria en vez de `windups.find`, y `curX` ya no copia el segmento. Queda en p50 de 0,57 a 0,58 ms.
+2. **Paso 8, la limitación de CPU no se comporta como un factor 6 en tareas tan cortas.** Los dos umbrales de Chromium se cumplen, pero el p50 limitado sale más bajo que sin limitar, así que ese número no prueba por sí solo el factor. Un bucle de calibración sí se alarga por 6 en la misma página (de 1,9 a 11,6 ms). Corridas de `?log=draw&live=1`, 152 `extend` por corrida, peor de tres tras una de calentamiento:
+
+   | Corrida | GL | `extend_ms` p50 | p95 | máx. |
+   |---|---|---|---|---|
+   | CPU a 6× | SwiftShader | 0,2 ms | 1,4 ms | 2,3 ms |
+   | Sin límite | Metal | 0,4 ms | 0,6 ms | 0,9 ms |
+
+   Como comprobación más exigente, multiplicar por 6 la corrida sin límite da p50 de 2,4 ms y p95 de 3,6 ms, también dentro de los umbrales (p50 ≤ 4 ms y p95 ≤ 8 ms). En Node, `prepareSceneFrom` con 200 cues dio p50 de 0,57 a 0,58 ms (umbral 0,67 ms). El límite hay que ponerlo después de cargar la página.
+3. **Paso 8, fps.** No medí con `just arena-bench` a mano, sino con Playwright contra el build de producción, Chromium sin ventana y Metal: FPS medio de 60,0, p95 de 16,7 ms y 0 frames sobre 33 ms en las tres corridas (umbral: p95 ≤ 18,2 ms y FPS medio ≥ 58). No hay medición en un teléfono.
+4. **e2e.** Además de lo previsto, `arena.spec.ts` suma "Reiniciar" en vivo y `?log=…&live=0`. La parte de RF52 "con los mismos HP que `?t=`" comprueba al perdedor en 0, sin comparar los dos HP.
 
 ## Enmienda propuesta a la spec
 _Redactada por el architect a partir de las desviaciones 1 a 5. **No está aplicada:** `spec.md` recibe en paralelo una enmienda de la fase A en `ta-13-fight-runner`, así que la aplica el cierre de esta fase, cuando las ramas se junten. Cada entrada reemplaza completo el texto citado. El APPROVE de abajo cubre el plan del frontend-engineer, no esta sección, porque el architect no aprueba lo que escribe: RF50 y el RNF cambian una regla o su prueba y los confirma product-owner al aplicarla. RF46, RF47 y la tabla solo precisan lo que ya era cierto._
