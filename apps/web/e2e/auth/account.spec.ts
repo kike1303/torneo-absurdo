@@ -317,3 +317,25 @@ test('8. "sign out everywhere" closes the session of another browser', async ({
   await expect(second.getByTestId('header-sign-in')).toBeVisible();
   await other.close();
 });
+
+test('8b. "sign out everywhere" from a tab with no session does not look like success', async ({
+  page,
+  browser,
+  identity,
+}, info) => {
+  await toAccount(page, identity, 'en');
+  const other = await newContext(browser, info, 'other');
+  const second = await other.newPage();
+  await login(second, identity, 'en', '/en/');
+  await expect(second.getByTestId('header-user')).toBeVisible();
+
+  // An /account tab open from before: its cookie is gone, the page is still there (TA-30).
+  await page.context().clearCookies({ name: /session/ });
+  await press(page.getByTestId('account-logout-all'));
+  await expect(page).toHaveURL(/\/en\/login$/);
+
+  // Nothing was closed: the other session is alive.
+  await second.reload();
+  await expect(second.getByTestId('header-user')).toBeVisible();
+  await other.close();
+});

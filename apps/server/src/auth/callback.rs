@@ -39,9 +39,9 @@ pub fn error_location(code: CallbackErrorCode) -> HeaderValue {
     HeaderValue::from_str(&location).unwrap_or(HeaderValue::from_static("/"))
 }
 
-/// The login page with no query: where `link` without a session sends the browser (008
-/// "Enmienda 2026-10-30" of RF-C2). Built here, beside [`error_location`], so every `Location`
-/// to the login page has one home.
+/// The login page with no query: where `link` without a session (008 "Enmienda 2026-10-30" of
+/// RF-C2) and `logout-all` without one (TA-30) send the browser. Built here, beside
+/// [`error_location`], so every `Location` to the login page has one home.
 pub fn login_location() -> HeaderValue {
     HeaderValue::from_static("/login")
 }

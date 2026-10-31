@@ -527,18 +527,24 @@ async fn logout_and_logout_all() {
     assert_eq!(flow::me(app.addr, &c).await.status, 401);
     assert_eq!(count(&pool, "sessions").await, 0);
 
-    // Idempotent: without a session, or with a dead one, still 303.
+    // Idempotent: without a session, or with a dead one, still 303. `logout-all` closed nothing
+    // it can answer for, so it does not land like a success (TA-30).
     for token in [None, Some(a.as_str())] {
-        for path in ["/api/auth/logout", "/api/auth/logout-all"] {
+        for (path, landing) in [
+            ("/api/auth/logout", "/"),
+            ("/api/auth/logout-all", "/login"),
+        ] {
             let out = logout(&app, path, token).await;
             assert_eq!(out.status, 303, "{path} {token:?}");
-            assert_eq!(out.header("location"), Some("/"));
+            assert_eq!(out.header("location"), Some(landing), "{path} {token:?}");
         }
     }
     // A logout without Origin is a cross-site mutation (D4).
     let cookie = format!("{SESSION}={c}");
-    let forged = http::send(app.addr, "POST", "/api/auth/logout", &[("cookie", &cookie)]).await;
-    assert_eq!(forged.status, 403);
+    for path in ["/api/auth/logout", "/api/auth/logout-all"] {
+        let forged = http::send(app.addr, "POST", path, &[("cookie", &cookie)]).await;
+        assert_eq!(forged.status, 403, "{path}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

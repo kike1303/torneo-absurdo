@@ -109,6 +109,12 @@ Cada RF dice cómo se verifica (→). "T<n>" es el test mínimo número n de ADR
     - **Lo que sigue en JSON.** El 404 de un proveedor desconocido o apagado y el 403 `auth.csrf_origin`. Solo los produce una petición armada a mano, no un formulario de nuestras páginas.
     - **Sin cambios de tipos.** `auth.try_again` ya está en `CallbackErrorCode`, así que `crates/protocol` y `packages/protocol-ts` no cambian. La cuota sigue siendo la misma, y solo cambia la forma de la respuesta.
     → IT por ruta, en rojo primero: con la cuota agotada (reloj controlado), 303 a `/login?error=auth.try_again` sin `Retry-After`, sin cuerpo JSON, con su `Cache-Control` y sin filas nuevas en `oauth_flows` ni en `sessions`; con la BD cortada (`PgProxy`), 303 igual en las rutas que la leen; en `logout` con la cuota agotada, la sesión sigue válida después. E2E: agotar la cuota de `start` con un solo cliente de test termina en `/login` con el texto de `auth.try_again`, sin JSON.
+  - **Enmienda 2026-10-30 (TA-30): `logout-all` sin sesión válida no parece un éxito.** Escrita por backend-engineer en TA-30, a partir del arreglo que sugirió security-reviewer en el PR de 009. Firmada por security-reviewer el 2026-10-30 (ver "Revisión → security-reviewer — 2026-10-30 — APPROVE (ronda 6)"). Toca RF-B11 y la tabla de API. La aprobación del owner la cubre su delegación del 2026-10-29 (ver "Revisión → owner").
+    - **Por qué.** Una cookie muerta no prueba nada, así que `logout-all` solo revoca su propia fila, y eso no cambia. Pero respondía 303 a `/`, igual que un cierre de verdad: la persona creía haber cerrado todo mientras las demás sesiones seguían vivas.
+    - **Regla.** `POST /api/auth/logout-all` sin una sesión válida (cookie vencida por inactividad o por expiración absoluta, revocada, desconocida o ausente) responde **303 a `/login`**, con el `Location` exacto, sin query y sin ningún texto que diga que se cerró algo. Expira la cookie de sesión y, si la hay, revoca por token solo la fila de esa cookie. Nunca revoca otras sesiones ni toma el bloqueo del usuario.
+    - **Sin cookie, lo mismo.** Una petición sin cookie prueba tan poco como una con la cookie muerta, y no es un caso aparte: la cookie lleva `Max-Age` hasta la expiración absoluta, así que el navegador suele llegar a esa muerte sin mandarla. También es lo que pasa en una pestaña de `/account` abierta de antes tras cerrar sesión en otra. Dar la misma respuesta en todos los casos tampoco distingue una cookie vencida de una inventada.
+    - **Lo que no cambia.** `logout` sigue idempotente: 303 a `/` con o sin sesión, porque solo le pidieron cerrar esa. `logout-all` con una sesión válida revoca todas y responde 303 a `/`. La cuota agotada y la BD caída siguen en `/login?error=auth.try_again`, sin revocar ni expirar. `CallbackErrorCode` tampoco cambia.
+    → UT de `decide` e IT en `tests/logout_db.rs`, en rojo primero: sesión muerta por inactividad y por expiración absoluta, cookie desconocida y sin cookie. E2E en `account.spec.ts`: en una pestaña de `/account` sin cookie, el botón termina en el login y la otra sesión sigue viva.
   → T4 adaptado (cada rechazo da 303 a `/login?error=auth.invalid_state`, sin `Set-Cookie` de sesión y con la cookie del flujo expirada), T5 e IT de cada código de la lista.
 - **RF-B6. Proveedor `dev`** (intent, Restricciones).
   - Existe solo con la feature de cargo `dev-auth`, con `PUBLIC_ORIGIN` `http` en loopback **y con `BIND_ADDR` de loopback** (`127.0.0.1` o `::1`). Con la feature activada y otro origen, el server no arranca (`config.invalid`, `var = DEV_AUTH`). Con otro `BIND_ADDR` (incluido el valor por defecto, `0.0.0.0`), tampoco (`config.invalid`, `var = BIND_ADDR`). `Origin` es defensa CSRF, no autenticación: sin este gate, cualquiera en la red local podría pedir una sesión de cualquier `dev_identity`.
@@ -143,6 +149,7 @@ Cada RF dice cómo se verifica (→). "T<n>" es el test mínimo número n de ADR
   → T10 (incluido el cierre del socket sin esperar la revalidación). IT: `pg_terminate_backend` sobre la conexión del listener, `revoke` durante el hueco, y el socket se cierra tras la reconexión, antes de la revalidación de 5 min. Además, un chequeo de CI que falla si `DELETE FROM sessions` aparece fuera de esa función.
 - **RF-B11. Logout (D10).** `POST /api/auth/logout` y `POST /api/auth/logout-all` revocan la sesión o todas, expiran la cookie y responden 303 a `/`. Sin sesión, también 303: el logout es idempotente. → T10.
   - *Enmienda 2026-10-30 (ver la Enmienda 2026-10-30 de RF-B5): con la cuota agotada o la BD caída, 303 a `/login?error=auth.try_again`, sin revocar ni expirar la cookie.*
+  - *Enmienda 2026-10-30 (TA-30; ver la Enmienda 2026-10-30 (TA-30) de RF-B5): `logout-all` sin sesión válida responde 303 a `/login`, no a `/`, y solo revoca la fila de su cookie, si la hay. `logout` sigue idempotente.*
 - **RF-B12. `GET /api/me`.**
   - Devuelve `display_name`, `role`, `balance`, `providers` (lista de `provider`), `locale`, `theme` y `display_name_is_generated`.
   - No devuelve `user_id`, el id de la sesión ni ningún dato del proveedor.
@@ -380,7 +387,7 @@ admin_audit (                             -- fase C; solo inserción (mismo trig
 | `GET /api/auth/providers` | no | `["google","discord","dev"]` (los habilitados) | B |
 | `POST /api/auth/link/{provider}` | sí | 303 al proveedor; sin sesión, 303 a `/login`; 429 o 503: 303 a `/login?error=auth.try_again` (Enmienda 2026-10-30) | C |
 | `POST /api/auth/unlink/{provider}` | sí | 303 a `/` (desde form); 404 `http.not_found` si no está vinculado (Enmienda 2026-10-29) | C |
-| `POST /api/auth/logout`, `/logout-all` | opcional | 303 a `/`; 429 o 503: 303 a `/login?error=auth.try_again` (desviación 16 de plan-b y Enmienda 2026-10-30) | B |
+| `POST /api/auth/logout`, `/logout-all` | opcional | 303 a `/`; `logout-all` sin sesión válida: 303 a `/login` (Enmienda 2026-10-30 (TA-30)); 429 o 503: 303 a `/login?error=auth.try_again` (desviación 16 de plan-b y Enmienda 2026-10-30) | B |
 | `GET /api/me` | sí | `Me` | B |
 | `PUT /api/me/display-name` | sí | `Me`, error de `profile.*` o 422 `http.invalid_body` (Enmienda 2026-10-29) | C |
 | `PUT /api/me/preferences` | sí | `Me` o 422 `http.invalid_body` (Enmienda 2026-10-29) | C |
@@ -580,6 +587,25 @@ Mobile-first a 375 px, con los tokens y las primitivas de ADR-0009 y sin colores
   - `webpki-roots` queda fijado en el binario. Dependabot lo sube, y un CA que se retira solo se refleja tras rebuild y deploy. Se acepta, porque la imagen distroless no tiene otro bundle.
   - **Fuera del alcance de la enmienda, para el owner** (es diseño de ADR-0008 D1): con una sesión robada o un navegador desatendido, alguien puede vincular **su** Google a la cuenta (vincular cuenta como reautenticación) y después desvincular el Discord de la víctima. `unlink` revoca las demás sesiones y la víctima ya no tiene con qué entrar: es una toma de cuenta persistente. Las monedas son ficticias y el requisito previo es fuerte (la cookie es `__Host-`, `HttpOnly` y `Secure`), así que no bloquea esta fase. Propongo un issue: `unlink` exige una autenticación reciente hecha con un proveedor que ya estaba vinculado antes de la sesión actual, o un período de espera para desvincular después de vincular algo nuevo.
 - **Sobre `docker exec server admin ban <user_id> --reason …` (contexto de plan-c):** no hace falta que plan-c lo resuelva en el código. Quien ve los argumentos en `docker events`, en `ps` o en el historial del shell ya es root o del grupo `docker` en el VPS, y eso le da acceso a la BD. Basta una línea en la sección "Admin y ban por CLI" de `apps/server/README.md`: el motivo queda en el historial del shell y en los eventos de Docker, así que nunca lleva datos personales.
+
+### security-reviewer — 2026-10-30 — APPROVE (ronda 6: Enmienda 2026-10-30 (TA-30) de RF-B5, con RF-B11 y tabla de API)
+**🤖 security-reviewer**
+
+- Verifiqué, leyendo el código sobre fbb8111:
+  - El diff de la spec contra `apps/server/src/auth/logout.rs`, `apps/server/src/auth/callback.rs`, `apps/server/src/http/session.rs`, `apps/server/src/http/cookies.rs`, `apps/server/src/sessions/mod.rs` y ADR-0008 D10, que no fija el destino del 303.
+  - **Una cookie no válida no cierra nada ajeno.** `AllOfUser` y su bloqueo solo salen de una sesión validada. Sin ella, `Token` borra como mucho la fila de esa cookie.
+  - **Sin reflexión.** El `Location` es la constante `/login`, sin query y sin datos de la petición.
+  - **Sin oráculo en la respuesta.** Cookie vencida, inventada y ausente dan el mismo estado, las mismas cabeceras y ningún cuerpo. La frase "no distingue una cookie vencida de una inventada" vale para la respuesta, no para el tiempo: hay diferencia de tiempo, no medida, pero solo dice que una fila existió a quien ya tiene ese token, y la primera prueba la borra. Una sesión válida se distingue de una que no lo es, igual que con `GET /api/me`.
+  - **La cuota no cambia.** `mutation_ip` corre antes de leer la cookie y de tocar la BD, y `mutation_user` solo con una sesión válida, así que una cookie muerta no gasta el bucket de la víctima.
+  - **Sin cookie, también a `/login`.** Correcto: la cookie lleva `Max-Age` hasta la expiración absoluta, y esa petición no prueba ni cierra nada, así que responder `/` sería una afirmación falsa.
+  - El frontmatter. Sigo el precedente de las rondas 3, 4 y 5: la firma de una enmienda queda en esta sección y `approvals` no cambia.
+- Hallazgos de seguridad confirmados: ninguno.
+- **Residuo aceptado:** `/login` no dice que las otras sesiones siguen abiertas. No afirma nada falso y el atacante no gana nada. Quien pulsa el botón sin sesión tiene que entrar y repetir el cierre desde `/account`.
+- No bloquean:
+  1. Un issue para un aviso propio en `/login` (código nuevo en `CallbackErrorCode` y texto en/es), antes de abrir el login real.
+     - *Escenario:* alguien que sospecha de un robo pulsa el botón con su sesión ya muerta, entra de nuevo y cree que echó al intruso.
+  2. Una IT que observe que `logout-all` con cookie muerta no espera el bloqueo del usuario, y que la aserción del 403 sin `Origin` de `tests/auth_flow.rs` cubra también `logout-all`.
+- No verifiqué: no compilé ni corrí tests, por las restricciones de la máquina. El gate es `ci-ok`.
 
 ### security-reviewer — 2026-10-30 — APPROVE (ronda 5: Enmienda 2026-10-30 de RF-B5, con RF-A4, RF-B11, RF-C2, tabla de API y Área 13)
 **🤖 security-reviewer**
