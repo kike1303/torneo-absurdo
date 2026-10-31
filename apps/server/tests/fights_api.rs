@@ -225,3 +225,33 @@ async fn bytes_that_are_not_utf8_never_hide_nor_reveal_a_seed() {
         voided.fight.seed_commit.unwrap()
     );
 }
+
+/// RF34: a query waiting for a lock answers 503 in a bounded time, and the pool is fine afterwards.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_query_that_waits_for_a_lock_is_a_503() {
+    let db = TestDb::create().await;
+    let (app, pool, _shared) = f::start_app(&db, &[], &Settings::default()).await;
+    let vector = Vector::of(KO);
+    let id = f::announce(&pool, T0, &vector.a, &vector.b).await;
+    let path = format!("/api/fights/{id}");
+
+    let mut locked = pool.begin().await.unwrap();
+    sqlx::query("LOCK TABLE fights IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *locked)
+        .await
+        .unwrap();
+    let started = std::time::Instant::now();
+    for _ in 0..3 {
+        let response = get(app.addr, &path).await;
+        assert_eq!(response.status, 503, "{}", response.text());
+        assert_eq!(response.text(), r#"{"error":"fight.unavailable"}"#);
+        assert_no_store(&response);
+    }
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(15),
+        "{:?}",
+        started.elapsed()
+    );
+    locked.rollback().await.unwrap();
+    assert_eq!(get(app.addr, &path).await.status, 200);
+}

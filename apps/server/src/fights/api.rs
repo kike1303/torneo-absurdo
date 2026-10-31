@@ -11,6 +11,7 @@ use protocol::{FightDetail, FightErrorCode, FightState};
 use super::state::FightRow;
 use super::{hex, store};
 use crate::app::AppState;
+use crate::db::ACQUIRE_TIMEOUT;
 use crate::http::errors::error_response;
 
 const NO_STORE: HeaderValue = HeaderValue::from_static("no-store");
@@ -65,7 +66,13 @@ pub async fn detail(
             FightErrorCode::NotFound,
         ));
     };
-    let answer = match store::by_id(&state.db, id).await {
+    // The lock of the query, and everything else, including a hung network: never unbounded.
+    let lock_timeout_ms = u64::try_from(ACQUIRE_TIMEOUT.as_millis()).unwrap_or(u64::MAX);
+    let read = tokio::time::timeout(
+        ACQUIRE_TIMEOUT.saturating_mul(3),
+        store::by_id_bounded(&state.db, id, lock_timeout_ms),
+    );
+    let answer = match read.await.unwrap_or(Err(sqlx::Error::PoolTimedOut)) {
         Ok(Some(row)) => match detail_of(row) {
             Some(detail) => Json(detail).into_response(),
             None => error_response(StatusCode::SERVICE_UNAVAILABLE, FightErrorCode::Unavailable),

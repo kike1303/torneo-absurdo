@@ -123,6 +123,23 @@ pub async fn insert(pool: &PgPool, fight: &NewFight<'_>) -> Result<Option<i32>, 
     row.map(|row| row.try_get(0)).transpose()
 }
 
+/// The fight with this id, for a request: it does not wait for a lock longer than `lock_timeout_ms`,
+/// so a held lock is an error and the connection stays clean (RF34).
+pub async fn by_id_bounded(
+    pool: &PgPool,
+    id: i32,
+    lock_timeout_ms: u64,
+) -> Result<Option<FightRow>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    set_lock_timeout(&mut tx, lock_timeout_ms).await?;
+    let row = sqlx::query(concat!("SELECT ", columns!(), " FROM fights WHERE id = $1"))
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    row.as_ref().map(decode).transpose()
+}
+
 /// The fight with this id.
 pub async fn by_id(pool: &PgPool, id: i32) -> Result<Option<FightRow>, sqlx::Error> {
     let row = sqlx::query(concat!("SELECT ", columns!(), " FROM fights WHERE id = $1"))
