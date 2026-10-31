@@ -18,15 +18,20 @@
 
 mod error;
 mod fight;
+mod fights;
 mod health;
 mod me;
 mod ws;
 
 pub use error::{
-    ApiError, ApiErrorCode, AuthErrorCode, CallbackErrorCode, ErrorCode, ProfileErrorCode,
-    WsErrorCode,
+    ApiError, ApiErrorCode, AuthErrorCode, CallbackErrorCode, ErrorCode, FightErrorCode,
+    ProfileErrorCode, WsErrorCode,
 };
 pub use fight::{AbilityKind, EndReason, FightEvent, FightLog, FighterInfo, MomentKind, Side};
+pub use fights::{
+    CancelReason, FightDetail, FightFinal, FightState, FightSummary, FighterCard, FightsCurrent,
+    TimestampMs, VoidReason,
+};
 pub use health::HealthResponse;
 pub use me::{
     DisplayNameRequest, Locale, MAX_SAFE_INTEGER, Me, PreferencesRequest, Provider, ReauthStatus,

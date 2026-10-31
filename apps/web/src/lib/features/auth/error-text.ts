@@ -38,6 +38,8 @@ export const ERROR_TEXT = {
   'profile.display_name_invalid': 'error_profile_display_name_invalid',
   'profile.display_name_reserved': 'error_profile_display_name_reserved',
   'profile.display_name_taken': 'error_profile_display_name_taken',
+  'fight.not_found': 'error_fight_not_found',
+  'fight.unavailable': 'error_fight_unavailable',
 } as const satisfies { readonly [K in ErrorCode]: MessageKey };
 
 /** The closed list of `/login?error=` (ADR-0008, amendment 2026-10-28). */

@@ -34,6 +34,8 @@ const ERROR_CODES: { readonly [K in ErrorCode]: true } = {
   'profile.display_name_invalid': true,
   'profile.display_name_reserved': true,
   'profile.display_name_taken': true,
+  'fight.not_found': true,
+  'fight.unavailable': true,
 };
 
 const CALLBACK_ERROR_CODES: { readonly [K in CallbackErrorCode]: true } = {
