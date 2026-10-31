@@ -729,6 +729,13 @@ mod tests {
                 ErrorCode::Profile(*code)
             );
         }
+        for code in FightErrorCode::ALL {
+            let json = format!("\"{}\"", code.as_str());
+            assert_eq!(
+                serde_json::from_str::<ErrorCode>(&json).unwrap(),
+                ErrorCode::Fight(*code)
+            );
+        }
         assert_eq!(
             serde_json::from_str::<ErrorCode>("\"auth.csrf_origin\"").unwrap(),
             ErrorCode::Auth(AuthErrorCode::CsrfOrigin)
