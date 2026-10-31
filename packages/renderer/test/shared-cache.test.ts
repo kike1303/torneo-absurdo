@@ -50,6 +50,36 @@ describe('shared cache of loaded URLs', () => {
     expect(log).toEqual(['load a', 'unload a', 'load a']);
   });
 
+  it('an acquire during an unload does not load until the unload ends', async () => {
+    const log: string[] = [];
+    let finishUnload = () => {};
+    const cache = createSharedCache<string>({
+      load: async (url) => {
+        log.push(`load ${url}`);
+        return `tex:${url}`;
+      },
+      unload: (url) => {
+        log.push(`unload ${url}`);
+        return new Promise((resolve) => {
+          finishUnload = resolve;
+        });
+      },
+    });
+    // A macrotask runs only after every pending microtask, so nothing here depends on timing.
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    await cache.acquire('a');
+    const unloading = cache.release('a');
+    const again = cache.acquire('a');
+    await settle();
+    expect(log).toEqual(['load a', 'unload a']);
+
+    finishUnload();
+    await unloading;
+    expect(await again).toBe('tex:a');
+    expect(log).toEqual(['load a', 'unload a', 'load a']);
+  });
+
   it('a failed load is forgotten without unloading (F2)', async () => {
     const { cache, log, failNext } = fake();
     failNext(true);
