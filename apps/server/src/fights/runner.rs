@@ -1123,14 +1123,34 @@ async fn heartbeat(mut connection: PgConnection, every: Duration, timeout: Durat
 
 #[cfg(test)]
 mod tests {
+    use super::super::state::tests::row;
     use super::*;
 
+    /// Amendment DP-B8: only a settled summary is a final.
     #[test]
-    fn a_row_that_does_not_decode_ends_the_orphan_without_stopping_the_pass() {
+    fn only_a_settled_row_is_the_final_of_an_orphan() {
         let invalid = orphan_outcome(Err(sqlx::Error::Protocol("state".to_owned())));
         assert!(matches!(invalid, Ok(Orphan::Invalid)));
         assert!(matches!(orphan_outcome(Ok(None)), Ok(Orphan::Gone)));
         // A database that is down is another thing: the pass aborts, and it is read again.
         assert!(orphan_outcome(Err(sqlx::Error::PoolTimedOut)).is_err());
+        // Another state, as after restoring a backup.
+        for state in [FightState::Scheduled, FightState::Live] {
+            assert!(matches!(
+                orphan_outcome(Ok(Some(row(state)))),
+                Ok(Orphan::Gone)
+            ));
+        }
+        // Settled with no final that the protocol can say: as a row that does not decode.
+        assert!(matches!(
+            orphan_outcome(Ok(Some(row(FightState::Settled)))),
+            Ok(Orphan::Invalid)
+        ));
+        let mut settled = row(FightState::Settled);
+        settled.cancel_reason = Some("missed_window".to_owned());
+        assert!(matches!(
+            orphan_outcome(Ok(Some(settled))),
+            Ok(Orphan::Settled(fight)) if fight.events.is_none()
+        ));
     }
 }

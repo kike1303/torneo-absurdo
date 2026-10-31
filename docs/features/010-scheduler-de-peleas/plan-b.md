@@ -338,7 +338,34 @@ Sin jobs nuevos. `rust` suma unos 2 a 3 min por tests, dos clippy más y la comp
 - D escribe el script de `FIGHT_SCRIPT_PATH` del e2e y documenta el feature en el trabajo de cierre.
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+- **Reparto de commits.** Hub y runner (pasos 3 y 4) van en un commit, porque `publish` cambia de firma y uno no compila sin el otro. Las barreras (paso 8) entraron después de `dev-fights` (paso 9), porque varias nombran lo que este agrega. En el primer commit, `self` sigue siendo el único canal que se puede abrir, hasta el paso 5, para que los tests de cada commit sigan en verde.
+- **`Subscriptions::subscribe` se parte en `check` y `open`.** DP-B7 tiene que cerrar el socket sin abrir el canal, y `check` no cambia nada.
+- **`FightsShared` pierde `derive(Debug)`,** porque el hub no lo tiene. Su `Debug` es fijo, sin contenido.
+- **`FightHub::held`.** Un método público que da los eventos y los bytes en caché de una pelea. Lo usan las pruebas de memoria y para esperar a la liberación. No da más de lo que ya es público.
+- **`fights.orphan_invalid` solo se prueba como unidad (`orphan_outcome`).** Hoy no se puede llegar a él en integración: una fila `settled` decodifica siempre, y un `state` fuera de la lista también aborta `store::unsettled`, código de A que esta fase no cambia. Sin esto, la detención permanente que DP-B8 evita para una huérfana sigue siendo posible por esa otra consulta, y solo con la credencial.
+- **Una fila `settled` sin final que el protocolo pueda decir (`summary()` nulo)** se trata como una que no decodifica: se borra con `fights.orphan_invalid`.
+- **Prueba manual sin `just dev`.** El worktree no tiene `.env`, y `just dev` no admite una rejilla corta sin tocarlo. Corrí el binario con los valores de `.env.example`, una base propia, borrada después, y `FIGHT_CADENCE_SECS=113`, con un cliente de Node. Resultado: la pelea #1 (110 eventos, KO en 68 642 ms) coincide con el log publicado, y quien entró a los 20 024 ms recibió exactamente los 27 eventos de esa hora. Vi las cuatro transiciones por socket, y lag de 2 ms en los lotes de `ko` y `end`.
+- **`fights_fanout.rs`, cómo se mide.** Un proceso por escenario, porque el asignador no devuelve lo que usó, un solo worker, por el vCPU del server, y los clientes en otra copia del proceso de test. F2 quita DP-B7 con una ventana de 1 ms.
+
+### Medición (2026-10-31)
+Mac ARM con páginas de 16 KiB, `--release` y `mimalloc`, carga media de la máquina de 4 a 9 por otras sesiones. Loopback no tiene límite de enlace, y `ps` no ve los buffers del kernel.
+
+| Escenario | Resultado |
+|---|---|
+| A, `read_buffer` de 128 KiB | RSS 281 MiB, 138 KiB por socket. **Pasa de los 256 MiB:** confirma DP-B1 |
+| A, 8 KiB | RSS 46 MiB, 17,5 KiB por socket. El socket 2001 da 503 `ws.capacity` |
+| B, `draw` a su ritmo | 153 lotes, p50 18 ms, p99 39 ms, máximo 46 ms. Los 2000 reciben los mismos bytes, sin cierres |
+| C, `fight_sync` final de unos 14 KB | RSS retenido **121 MiB**, entregado en unos 1 s |
+| D, 418 eventos, unos 47 KB | RSS retenido **226 MiB. Pasa de 200 MiB** |
+| E, 2000 sockets que no leen | Cerrados entre 9,1 y 9,6 s. Pico de RSS 224 MiB, más 89 MiB sin confirmar: **313 MiB. Pasa de 200 MiB y de los 256 MiB** |
+| F1, DP-B7, repartido (1000 + 1000) | 2,9 MB/s de media, 4,4 de pico, p99 de quienes miran 26 ms, 0 cierres |
+| F2, sin DP-B7 | 25,4 MB/s de media, 32,7 de pico, p99 31 ms, 0 cierres |
+| F3, los 3 a la vez, dos ráfagas | 4,8 MB/s de media, **174,5 MB/s de pico**, p99 25 ms, 0 cierres |
+| F4, reconectando (900 + 1000 + 40 IP) | 4,5 MB/s de media, 10,1 de pico, p99 25 ms, 0 cierres |
+
+- **Preocupación 8: el criterio se incumple en D y E, y por lo tanto vuelve a architect, sin cambios por mi cuenta.** Opciones de "Medición": partir `fight_sync`, no repetir los eventos en la transición a `settled`, bajar el tope o bajar `WS_MAX_CONNECTIONS`.
+- **El piso de DP-B2 era optimista.** Estimé 110 MiB para el peor caso, y es el doble: D retiene unos 92 KiB por socket sobre lo de A, para mensajes de 47 KB. C retiene unos 38 KiB para mensajes de 14 KB. No investigué cuánto de esa diferencia es de las páginas de 16 KiB y de `mimalloc`, y cuánto de `out_buffer`, así que una medición en Linux puede dar menos.
+- **Escenario F: cumple p99 ≤ 1000 ms en las cuatro variantes,** con la salvedad de que en loopback no hay enlace que saturar. Se repite en TA-8.
 
 ## Revisión
 ### architect — 2026-10-31 — REQUEST_CHANGES

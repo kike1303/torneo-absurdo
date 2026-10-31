@@ -214,7 +214,7 @@ pub fn target_slot(now_ms: i64, cadence_ms: i64) -> i64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use engine::{Ruleset, canonical_spec_json};
     use protocol::FightState::{BettingClosed, BettingOpen, Live, Scheduled, Settled};
 
