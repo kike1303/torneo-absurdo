@@ -6,8 +6,12 @@
 //! Once the commit is published the runner never ends a fight without a result: if it cannot go
 //! on, it stops until someone fixes it (RF16).
 
+pub mod bets_contract;
+pub mod board;
 pub mod clock;
+pub mod hook;
 pub mod matchup;
+pub mod roster;
 pub mod sealed;
 pub mod snapshot;
 pub mod state;
@@ -15,6 +19,7 @@ pub mod store;
 
 use std::path::PathBuf;
 
+pub use board::FightsShared;
 pub use clock::FightClock;
 
 /// The ruleset of the new fights (RF22).
