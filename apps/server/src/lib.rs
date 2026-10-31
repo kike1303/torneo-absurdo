@@ -9,6 +9,7 @@ pub mod auth;
 mod cli;
 pub mod config;
 pub mod db;
+pub mod fights;
 pub mod healthcheck;
 pub mod http;
 pub mod jobs;
