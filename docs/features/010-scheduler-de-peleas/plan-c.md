@@ -154,10 +154,12 @@ La muestra sigue el margen de la spec: el cierre es lo que manda, y **no hace fa
 | `packages/renderer/test/timeline-partial.test.ts` | nuevo: RF46 |
 | `packages/renderer/test/player-live.test.ts` | nuevo: RF47, RF48 y RF50 |
 | `packages/renderer/test/prepare-from.test.ts` | nuevo: oráculo del límite `H`, con control negativo |
+| `packages/renderer/package.json` | modificado: script `bench:prepare` |
 | `packages/renderer/scripts/bench-prepare.ts` | nuevo: 200 cues sintéticos, una llamada cada 25 ms y los dos caminos (`--experimental-strip-types`, como `gen:placeholders`) |
 | `apps/web/src/lib/features/fight/timeline-from-fight-log.ts` | modificado: núcleo y `liveTimelineFromEvents` |
 | `apps/web/src/lib/features/fight/engine-logs.ts` | modificado: `loadEngineLog` |
 | `apps/web/src/lib/features/arena/log-drip.ts` | nuevo: goteo |
+| `apps/web/src/lib/features/fight/live-session.ts` | nuevo: solo el tipo `LiveSession`, lo que `FightStage` necesita de una fuente en vivo (el goteo hoy, el WS en D) |
 | `apps/web/src/lib/components/fight/FightStage.svelte` | modificado: prop `live` y `extend_ms` |
 | `apps/web/src/lib/components/fight/ArenaControls.svelte` | modificado: prop `live` |
 | `apps/web/src/lib/components/fight/ArenaStats.svelte` | modificado: `extend_ms` en el contexto del JSON |
@@ -253,10 +255,11 @@ _Ninguna está aplicada. La spec no se edita desde este plan._
 
    Como comprobación más exigente, multiplicar por 6 la corrida sin límite da p50 de 2,4 ms y p95 de 3,6 ms, también dentro de los umbrales (p50 ≤ 4 ms y p95 ≤ 8 ms). En Node, `prepareSceneFrom` con 200 cues dio p50 de 0,57 a 0,58 ms (umbral 0,67 ms). El límite hay que ponerlo después de cargar la página.
 3. **Paso 8, fps.** No medí con `just arena-bench` a mano, sino con Playwright contra el build de producción, Chromium sin ventana y Metal: FPS medio de 60,0, p95 de 16,7 ms y 0 frames sobre 33 ms en las tres corridas (umbral: p95 ≤ 18,2 ms y FPS medio ≥ 58). No hay medición en un teléfono.
-4. **e2e.** Además de lo previsto, `arena.spec.ts` suma "Reiniciar" en vivo y `?log=…&live=0`. La parte de RF52 "con los mismos HP que `?t=`" comprueba al perdedor en 0, sin comparar los dos HP.
+4. **Tras la revisión de QA, el primer `play()` en vivo pinta.** La decisión 5 solo movía el cursor, y quien entraba con la pelea terminada quedaba en `finished` con la escena de `t = 0`, sin resultado. `play()` llama a `render(p, t)` en esa rama, con tests sin `frame()` y e2e con `?t=99999999999`. `load` no cambia.
+5. **e2e.** Además de lo previsto, `arena.spec.ts` suma "Reiniciar" en vivo y `?log=…&live=0`. La parte de RF52 "con los mismos HP que `?t=`" comprueba al perdedor en 0, sin comparar los dos HP.
 
 ## Enmienda propuesta a la spec
-_Redactada por el architect a partir de las desviaciones 1 a 5. **No está aplicada:** `spec.md` recibe en paralelo una enmienda de la fase A en `ta-13-fight-runner`, así que la aplica el cierre de esta fase, cuando las ramas se junten. Cada entrada reemplaza completo el texto citado. El APPROVE de abajo cubre el plan del frontend-engineer, no esta sección, porque el architect no aprueba lo que escribe: RF50 y el RNF cambian una regla o su prueba y los confirma product-owner al aplicarla. RF46, RF47 y la tabla solo precisan lo que ya era cierto._
+_Redactada por el architect a partir de las desviaciones 1 a 5. **No está aplicada. Se aplica en la fase D, al cierre,** porque `spec.md` recibe en paralelo una enmienda de la fase A en `ta-13-fight-runner`, y va con la confirmación de product-owner para RF50 y el RNF. Lo aplica el plan D, que lo lista en su trabajo de cierre, y con eso queda escrito en la spec el plazo de la medición en Android: antes del primer despliegue público. Hasta entonces, `spec.md` sigue diciendo que `prepareScene` corre en cada `extend`, y lo vigente es esta sección. Cada entrada reemplaza completo el texto citado. El APPROVE de abajo cubre el plan del frontend-engineer, no esta sección, porque el architect no aprueba lo que escribe: RF50 y el RNF cambian una regla o su prueba y los confirma product-owner al aplicarla. RF46, RF47 y la tabla solo precisan lo que ya era cierto._
 
 **RF46** (desviación 1):
 > - **RF46. Timeline parcial.** `validateTimeline(json, manifests, { partial: true })` aplica las mismas reglas salvo las que exigen cierre (`ending_missing` y `closing_missing`). La `timeline_version` sigue siendo 2. La v1 no admite `partial`: da `unsupported_version`. → Vitest.
@@ -279,9 +282,10 @@ El problema de la desviación 6 es real: RF54 muestra el resultado "por el cue d
 > El resultado se muestra por `snapshot().ending` del renderer o, sin WebGL, por `t ≥ end.t` en texto, nunca antes por llegar `end`.
 
 El plan D debe decidir además:
-- **Cómo se entera el host.** `snapshot()` es una consulta y no avisa, y justo tras `play()` todavía refleja `t = 0`, porque la escena se pinta en el primer frame. `onCue` no sirve (ese es el problema), y `onState` solo avisa en `finished`, en `end.t`, 2500 ms después del cierre. Hace falta una lectura periódica u otro mecanismo, con su prueba de entrada dentro de la ventana.
+- **Cómo se entera el host.** `snapshot()` es una consulta y no avisa. El primer `play()` en vivo ya pinta `t`, así que justo después `snapshot()` da el resultado de quien entra tarde (corregido tras la revisión de QA), pero el cierre de quien ya está mirando no avisa por ahí. `onCue` no sirve para quien entra tarde (ese es el problema), y `onState` solo avisa en `finished`, en `end.t`, 2500 ms después del cierre. Hace falta una lectura periódica u otro mecanismo, con su prueba de entrada dentro de la ventana.
 - **`fight_sync` con `events` vacío** justo al pasar a `live`: el host espera al `intro` antes de `loadLive`, porque una lista vacía da `adapter.intro_missing`.
 - **Ráfaga de `onCue`** tras un corte largo: `extend` deja vencidos los cues atrasados, así que los efectos que dependan de `onCue` deben tolerarla.
+- **`extend` rechazado en `FightStage`, con test.** Hoy no se alcanza, porque el goteo solo publica dorados válidos, y el WS de D es la primera fuente real. Criterio: un test de un `extend` rechazado, tanto en la entrega inmediata de `subscribe` como en una posterior, que compruebe el estado de error y la suscripción cancelada.
 
 ## Revisión
 ### architect — 2026-10-31 — APPROVE (con las correcciones de abajo, antes de la implementación)
