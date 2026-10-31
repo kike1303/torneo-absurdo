@@ -51,6 +51,8 @@ const FEET_ROWS = 4;
 const ALPHA_CUT = 128;
 
 const CELL = GUIDE_LIMITS.cellPx;
+/** Nothing larger than a few pixels of art fits in the cell beyond this. */
+const MAX_SCALE = 16;
 
 const RECIPE_KEYS = new Set([
   'format',
@@ -95,13 +97,18 @@ export function validateRecipe(value: unknown): Issue[] {
   if (!isId(r.id)) {
     issues.push({ code: C.recipeInvalid, path: '/id' });
   }
-  if (!Number.isInteger(r.scale) || (r.scale ?? 0) < 1) {
+  if (!Number.isInteger(r.scale) || (r.scale ?? 0) < 1 || (r.scale ?? 0) > MAX_SCALE) {
     issues.push({ code: C.recipeInvalid, path: '/scale' });
   }
   if (r.max_colors !== undefined && (!Number.isInteger(r.max_colors) || r.max_colors < 2)) {
     issues.push({ code: C.recipeInvalid, path: '/max_colors' });
   }
-  if (typeof r.animations !== 'object' || r.animations === null) {
+  if (
+    typeof r.animations !== 'object' ||
+    r.animations === null ||
+    Array.isArray(r.animations) ||
+    Object.keys(r.animations).length === 0
+  ) {
     issues.push({ code: C.recipeInvalid, path: '/animations' });
     return issues;
   }

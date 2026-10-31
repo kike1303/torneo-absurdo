@@ -26,7 +26,10 @@ const EXPORT_DIR = ['content', '_local', 'export'] as const;
 function overlaps(a: string, b: string): boolean {
   const inside = (parent: string, child: string): boolean => {
     const relative = path.relative(parent, child);
-    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+    return (
+      relative === '' ||
+      (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+    );
   };
   return inside(a, b) || inside(b, a);
 }

@@ -181,6 +181,9 @@ describe('normalize: recipe', () => {
     ['scale', { ...VALID, scale: 1.5 }, '/scale'],
     ['max_colors', { ...VALID, max_colors: 1 }, '/max_colors'],
     ['animations', { ...VALID, animations: null }, '/animations'],
+    ['a huge scale', { ...VALID, scale: 1000 }, '/scale'],
+    ['no animations', { ...VALID, animations: {} }, '/animations'],
+    ['a list of animations', { ...VALID, animations: [] }, '/animations'],
     ['a null animation', { ...VALID, animations: { idle: null } }, '/animations/idle'],
     ['an unknown key', { ...VALID, prompt: 'a text' }, '/prompt'],
     [
@@ -407,6 +410,13 @@ describe('normalize: destination', () => {
   ])('refuses %s', (_name, parts) => {
     const { root, inDir } = repo();
     expect(checkOut(root, path.join(root, ...parts), 'x', inDir)).toBe('cli.out_forbidden');
+  });
+
+  it('sees a source folder whose name starts with dots inside the destination', () => {
+    const { root, out } = repo();
+    const inDir = path.join(out, '..raw');
+    mkdirSync(inDir, { recursive: true });
+    expect(checkOut(root, out, 'x', inDir)).toBe('cli.out_forbidden');
   });
 
   it('refuses a path outside the root', () => {

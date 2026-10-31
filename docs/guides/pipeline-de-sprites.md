@@ -17,7 +17,7 @@ updated: 2026-10-30
 
 # Receta del pipeline de sprites
 
-> Decisión: ADR-0013 · Estándar: [guía de arte](sprites.md) · Herramienta: [`tools/sprite-importer`](../../tools/sprite-importer/README.md)
+> Decisión: ADR-0013 (`proposed`, falta que el owner la acepte) · Estándar: [guía de arte](sprites.md) · Herramienta: [`tools/sprite-importer`](../../tools/sprite-importer/README.md)
 
 Lleva a un personaje de "idea" a un set en `content/sprites/<id>/`. No hace falta saber dibujar. Se puede seguir sin haber visto el personaje de prueba.
 
