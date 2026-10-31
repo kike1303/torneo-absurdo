@@ -1,4 +1,4 @@
-<!-- MODIFICADO: black overlay → bg-background/80 (RF-A12, no new token); duration from the --duration-base token (reduced motion, D6). No backdrop blur: under software rendering it stalls the browser (TA-34). -->
+<!-- MODIFICADO: black overlay → bg-background/80 (RF-A12, no new token); duration from the --duration-base token (reduced motion, D6). No backdrop blur: under SwiftShader it held up the next browser context (TA-34). -->
 <script lang="ts">
   import { Dialog as DialogPrimitive } from 'bits-ui';
   import { cn } from '#lib/utils.js';
