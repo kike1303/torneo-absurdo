@@ -104,7 +104,10 @@ export function frameAt(timing: AnimationTiming, elapsed: number): { step: numbe
   return { step, frame: timing.frames[step] ?? 0 };
 }
 
-export function xAt(segment: Segment, t: number): number {
+export function xAt(
+  segment: Pick<Segment, 'x0' | 'x1' | 'moveStart' | 'moveEnd'>,
+  t: number,
+): number {
   if (segment.moveEnd <= segment.moveStart || t >= segment.moveEnd) return segment.x1;
   if (t <= segment.moveStart) return segment.x0;
   const p = (t - segment.moveStart) / (segment.moveEnd - segment.moveStart);
@@ -144,9 +147,20 @@ interface Sim {
 
 const MOVE_EPSILON = 0.5;
 
+/** The first element ≥ `x` of a sorted array: this runs for each action of a timeline. */
+function firstAtOrAfter(sorted: readonly number[], x: number): number | undefined {
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if ((sorted[mid] ?? 0) < x) lo = mid + 1;
+    else hi = mid;
+  }
+  return sorted[lo];
+}
+
 function curX(sim: Sim, t: number): number {
-  const c = sim.cur;
-  return xAt({ ...c, side: sim.side, kind: 'return' }, t);
+  return xAt(sim.cur, t);
 }
 
 function close(sim: Sim, t: number): void {
@@ -199,7 +213,7 @@ function idle(sim: Sim, t: number): Open {
 function afterAction(sim: Sim, e: number, x: number, owner: number): Open {
   const mark = MARK_X[sim.side];
   if (Math.abs(x - mark) < MOVE_EPSILON) return idle(sim, e);
-  const next = sim.windups.find((w) => w >= e);
+  const next = firstAtOrAfter(sim.windups, e);
   if (next !== undefined && next < e + RETURN_MS) {
     // Rule 2: the next windup starts before the return would end, so stay at contact.
     return still('contact', e, Number.POSITIVE_INFINITY, 'idle', x, owner);

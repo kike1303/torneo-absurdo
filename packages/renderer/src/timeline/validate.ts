@@ -1,5 +1,5 @@
-// validateTimeline (RF-A7, plan-a1 decision 14; v2 in 005 RF2 and RF3). Pure; the input is
-// untrusted.
+// validateTimeline (RF-A7, plan-a1 decision 14; v2 in 005 RF2 and RF3; `partial` in 010 RF46).
+// Pure; the input is untrusted.
 import {
   ErrorSink,
   StopValidation,
@@ -36,6 +36,14 @@ export type TimelineResult =
 
 /** Manifests by asset id (a Map, so no id can collide with a prototype key). */
 export type ManifestsById = ReadonlyMap<string, SpriteManifest>;
+
+export interface ValidateOptions {
+  /**
+   * A fight still in progress (010 RF46): v2 only, and the same rules except the two that ask for
+   * the closing, `ending_missing` and `closing_missing`.
+   */
+  readonly partial?: boolean;
+}
 
 type Sink = ErrorSink<TimelineErrorCode>;
 
@@ -249,7 +257,7 @@ function checkEndingV1(sink: Sink, hp: HpBySide): EndingCheck {
  * The closing rules of v2 (005 RF3): exactly one ending, a `ko` (then the `win` of the other side)
  * or a `time_up` (then one closing, `win` or `draw`). After a `ko` the closing is that `win`.
  */
-function checkEndingV2(sink: Sink, hp: HpBySide): EndingCheck {
+function checkEndingV2(sink: Sink, hp: HpBySide, partial: boolean): EndingCheck {
   let ko: { side: Side; at: number; i: number } | undefined;
   let timeUp: { at: number; i: number } | undefined;
   let closing: { type: 'win' | 'draw'; at: number; i: number } | undefined;
@@ -322,10 +330,12 @@ function checkEndingV2(sink: Sink, hp: HpBySide): EndingCheck {
       }
     },
     finish(duration, knockdowns) {
-      if (ko === undefined && timeUp === undefined) {
-        sink.add(C.endingMissing, pointer('cues'));
-      } else if (closing === undefined) {
-        sink.add(C.closingMissing, pointer('cues'));
+      if (!partial) {
+        if (ko === undefined && timeUp === undefined) {
+          sink.add(C.endingMissing, pointer('cues'));
+        } else if (closing === undefined) {
+          sink.add(C.closingMissing, pointer('cues'));
+        }
       }
       if (closing === undefined) return;
       // Nobody on the ground at the closing. A valid KO already meets it: no strike lands inside
@@ -347,9 +357,10 @@ function checkCues(
   fighters: Record<Side, TimelineFighter> | undefined,
   duration: number | undefined,
   version: TimelineVersion,
+  partial: boolean,
 ): void {
   const hp: HpBySide = fighters ? { a: fighters.a.max_hp, b: fighters.b.max_hp } : {};
-  const ending = version === 1 ? checkEndingV1(sink, hp) : checkEndingV2(sink, hp);
+  const ending = version === 1 ? checkEndingV1(sink, hp) : checkEndingV2(sink, hp, partial);
 
   if (cues.length === 0) {
     sink.add(C.introFirst, pointer('cues'));
@@ -440,7 +451,12 @@ function checkCues(
   ending.finish(duration, knockdowns);
 }
 
-function run(sink: Sink, json: unknown, manifests: ManifestsById | undefined): Timeline | null {
+function run(
+  sink: Sink,
+  json: unknown,
+  manifests: ManifestsById | undefined,
+  partial: boolean,
+): Timeline | null {
   if (!isPlainObject(json)) {
     sink.add(C.notObject, '');
     return null;
@@ -450,7 +466,7 @@ function run(sink: Sink, json: unknown, manifests: ManifestsById | undefined): T
     sink.add(C.missingField, pointer('timeline_version'));
     return null;
   }
-  if (!(TIMELINE_VERSIONS as readonly unknown[]).includes(version)) {
+  if (!(TIMELINE_VERSIONS as readonly unknown[]).includes(version) || (partial && version === 1)) {
     sink.add(C.unsupportedVersion, pointer('timeline_version'));
     return null;
   }
@@ -484,7 +500,7 @@ function run(sink: Sink, json: unknown, manifests: ManifestsById | undefined): T
   }
   const cues: (Cue | undefined)[] = [];
   for (let i = 0; i < cuesValue.length; i++) cues.push(parseCue(sink, cuesValue[i], i, v));
-  checkCues(sink, cues, fighters, duration, v);
+  checkCues(sink, cues, fighters, duration, v, partial);
 
   if (sink.count > 0 || fighters === undefined || duration === undefined) return null;
   return {
@@ -499,11 +515,15 @@ function run(sink: Sink, json: unknown, manifests: ManifestsById | undefined): T
  * Validates an untrusted timeline. With `manifests`, every fighter asset must be among them
  * (`timeline.unknown_asset`).
  */
-export function validateTimeline(json: unknown, manifests?: ManifestsById): TimelineResult {
+export function validateTimeline(
+  json: unknown,
+  manifests?: ManifestsById,
+  options?: ValidateOptions,
+): TimelineResult {
   const sink: Sink = new ErrorSink<TimelineErrorCode>(L.maxErrors, C.tooManyErrors);
   let timeline: Timeline | null = null;
   try {
-    timeline = run(sink, json, manifests);
+    timeline = run(sink, json, manifests, options?.partial === true);
   } catch (error) {
     if (!(error instanceof StopValidation)) throw error;
   }

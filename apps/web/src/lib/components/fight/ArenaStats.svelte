@@ -18,6 +18,8 @@
       fighters: readonly string[];
       /** Mean gap between strikes of the script played (`?pace=`, 002 RF-B9); not shown. */
       mean_strike_gap_ms?: number | null;
+      /** How long each `extend` took, with `?live=1` (010 plan-c decision 13); not shown. */
+      extend_ms?: { count: number; p50: number; p95: number; max: number };
     };
     /** How `?pace=` resolved (006 RF16); without it there is no pace row. */
     pace?: PaceResolution;
