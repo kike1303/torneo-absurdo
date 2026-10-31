@@ -249,6 +249,8 @@
             fail(error);
           }
         });
+        // `fail` may have run inside `subscribe`, in its immediate delivery, with nothing to cancel.
+        if (renderer !== handle) cancelLive();
         await loading;
         if (id !== run) {
           handle.destroy();
