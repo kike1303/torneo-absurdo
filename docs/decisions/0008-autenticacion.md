@@ -59,6 +59,7 @@ updated: 2026-10-30
   - Errores: `profile.display_name_invalid`, `profile.display_name_reserved`, `profile.display_name_taken`.
 - **Nunca se vincula en automático.** Vincular un segundo proveedor solo desde una sesión iniciada (`POST /api/auth/link/{provider}`), con el flujo atado a esa sesión (D2). Si `(provider, id)` ya pertenece a otro `user`, se responde `auth.already_linked` y no se fusiona nada.
 - Desvincular exige que quede al menos otro proveedor y revoca todas las demás sesiones del usuario.
+  - *Ver la "Enmienda 2026-10-30: reautenticación para vincular, desvincular y admin" (security-reviewer firmó el 2026-10-30, ver "Revisión"): vincular exige una autenticación reciente y vigente, y desvincular P exige además que su identidad no sea más nueva que P. Reemplaza la frase anterior sobre desvincular.*
 - Los access/refresh tokens de Google y Discord se usan una sola vez para leer la identidad y se descartan; nunca se persisten.
 
 ### D2. Flujo OAuth (Authorization Code + PKCE)
@@ -77,6 +78,7 @@ updated: 2026-10-30
 - Columnas: `token_hash`, `user_id`, `created_at`, `authenticated_at`, `last_seen_at`, `expires_at` (absoluta), `ip_hash`, `user_agent_family`.
 - **Expiración por inactividad: 7 días. Expiración absoluta: 30 días.** `last_seen_at` se actualiza como máximo una vez cada 5 min.
 - Cada login emite un token nuevo; si la petición traía una `__Host-session` previa, esa fila se borra. Vincular un proveedor también rota el token.
+  - *Ver la "Enmienda 2026-10-30: reautenticación para vincular, desvincular y admin" (security-reviewer firmó el 2026-10-30, ver "Revisión"): la sesión también guarda `auth_account_id` y `auth_link_seq`, y la rotación al vincular conserva esos dos valores, `authenticated_at` y `expires_at`, así que vincular nunca cuenta como reautenticación ni alarga la expiración.*
 - **Borrar una fila de `sessions`, por cualquier motivo, cierra sus sockets** (D6): logout, rotación en login o vinculación, ban, desvincular, cerrar todas, revocación por admin y la limpieza de sesiones expiradas. Todo borrado pasa por una sola función del server que borra la fila y cierra los sockets; ningún otro código hace `DELETE FROM sessions`.
 - Logs: `tower-http::trace` redacta `Cookie`, `Set-Cookie`, `Authorization`, `X-Internal-Secret` y `X-Client-Ip`; las rutas `/api/auth/*/callback` se registran sin query string. Ni token, ni `code`, ni `state` van a logs.
 
@@ -208,6 +210,7 @@ Los valores absolutos de `B`, `m` y `r` los fija la spec de apuestas. Todos son 
 - `users.role ∈ {user, admin}`. Se asigna **solo** con el subcomando `server admin grant|revoke <user_id>` ejecutado en el contenedor. Ningún endpoint escribe `role`, y ningún atributo de OAuth lo influye.
 - `server admin grant` y `revoke` revocan todas las sesiones vigentes del usuario, para que la regla de 12 h aplique desde la primera sesión de admin.
 - Sesiones de admin: expiración absoluta de 12 h. Toda acción de admin exige `authenticated_at` de hace menos de 60 min; si no, 403 `auth.reauth_required`.
+  - *Ver la "Enmienda 2026-10-30: reautenticación para vincular, desvincular y admin" (security-reviewer firmó el 2026-10-30, ver "Revisión"): la autenticación, además de tener menos de 60 min, tiene que ser vigente y con una identidad vinculada antes del `server admin grant` vigente (`users.admin_account_cutoff`). Reemplaza el requisito de la frase anterior.*
 - Las acciones de admin pasan por el mismo middleware de `Origin` (D4) y se registran en `admin_audit` (`admin_id`, `action`, `target`, `payload`, `at`), solo de inserción.
 - **Ningún rol** puede leer `seed` antes de `Settled` (ADR-0002) ni editar saldos. Un ajuste es un asiento `admin_adjustment` del ledger con motivo obligatorio y su fila en `admin_audit` (ADR-0005).
 
@@ -344,7 +347,7 @@ Viene del hallazgo de security-reviewer en esa revisión: con la letra de D1, un
 ## Enmienda 2026-10-30: reautenticación para vincular, desvincular y admin
 **Firmas:** escrita por architect, como autor de este ADR, desde la spec de la feature 009 (`docs/features/009-reautenticacion-desvincular/spec.md`, TA-29), y viaja en el mismo PR. Necesita la firma de security-reviewer. security-reviewer firmó el 2026-10-30 (ADR-0008, "Revisión", y la spec de 009, "Revisión"). El gate del owner de `docs/process.md` ("aceptar o reemplazar un ADR") lo cubre su delegación del 2026-10-29, citada textual en el intent de 009 ("Decisiones → Delegación"): "todo lo que falte" la extiende a 009 y a esta enmienda mientras no haya nada desplegado. No cubre un tag `v*` ni un deploy, ni aceptar un riesgo residual, que sigue siendo del owner (ver "Riesgo residual" abajo).
 
-**Estado:** en revisión. Entra en vigor cuando firme security-reviewer y la aplica el PR de 009. Al entrar en vigor, D1, D3 y D9 llevan una nota que apunta aquí, como la Enmienda 2026-10-29.
+**Estado:** en vigor. security-reviewer firmó el 2026-10-30 y la aplica el PR de 009. D1, D3 y D9 llevan una nota que apunta aquí, como la Enmienda 2026-10-29.
 
 Viene del hallazgo de security-reviewer en la revisión de 008 (TA-29). Con la letra de D1, D3 y D9, una sesión robada podía vincular un proveedor X (la rotación salía con `authenticated_at = now()`), desvincular el proveedor de la víctima y dejarla fuera para siempre, y con una sesión de admin, pasar el chequeo de 60 min sin volver a probar quién es. Cambia D1 (vincular y desvincular), D2 (un `purpose` nuevo y la lista cerrada de la Enmienda 2026-10-28), D3 (qué guarda la sesión y qué conserva la rotación) y D9 (qué cuenta como reautenticación de admin). El resto no cambia, incluidos los 60 min de admin, las 12 h y los 30 días.
 
