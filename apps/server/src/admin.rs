@@ -632,10 +632,20 @@ mod source_rules {
         out
     }
 
-    /// The text of a migration as the rules read it: no comments, and no quotes of literals or of
-    /// `$$`, so `tokens` also sees what a `do` block runs through `execute '…'`.
+    /// The text of a migration as the rules read it: no comments, and no quotes of literals, so
+    /// `tokens` also sees what a `do` block runs through `execute '…'`. `$` stays as a token: a
+    /// bare `do` from `$do$` would read the next `update` as a `do update`.
     fn migration_sql(text: &str) -> String {
-        without_sql_comments(text).replace(['\'', '$'], " ")
+        without_sql_comments(text)
+            .replace('\'', " ")
+            .replace('$', " $ ")
+    }
+
+    /// Both readings of a migration: with the literals open (`execute '…'`), and with them closed
+    /// (`'{}'` or `'from'` as a value does not end a `set`).
+    fn migration_writes_session_auth(text: &str) -> bool {
+        writes_session_auth(&migration_sql(text))
+            || writes_session_auth(&without_sql_comments(text))
     }
 
     /// Each `(form, target)` of the SQL of a migration that switches a guard off. By statement and
@@ -920,7 +930,7 @@ mod source_rules {
         }
         for (_, name, text) in migrations() {
             assert!(
-                !writes_session_auth(&migration_sql(&text)),
+                !migration_writes_session_auth(&text),
                 "{name} writes the authentication of a session"
             );
         }
@@ -962,8 +972,11 @@ mod source_rules {
             "DO $$ BEGIN EXECUTE 'UPDATE sessions SET authenticated_at = now()'; END $$;",
             "DO $do$ BEGIN EXECUTE 'INSERT INTO sessions (auth_link_seq) VALUES (1)'; END $do$;",
             "/* '--' */ UPDATE sessions SET auth_account_id = NULL; -- it's over",
+            "DO $do$ BEGIN PERFORM 1; END $do$;\nUPDATE sessions SET authenticated_at = now();",
+            "UPDATE sessions SET ip_hash = '{}', authenticated_at = now();",
+            "UPDATE sessions SET ip_hash = 'from x', authenticated_at = now();",
         ] {
-            assert!(writes_session_auth(&migration_sql(sql)), "{sql}");
+            assert!(migration_writes_session_auth(sql), "{sql}");
         }
         for sql in [
             r#"sqlx::query("SELECT authenticated_at, auth_account_id, auth_link_seq FROM sessions")"#,
