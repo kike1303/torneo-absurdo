@@ -133,6 +133,14 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+/**
+ * The fight is over at `t`. Without the closing it is still in progress, whatever the clock says:
+ * its `durationMs` is only provisional (010 RF48). A timeline of `load` always has a closing.
+ */
+export function reachedEnd(prepared: PreparedScene, t: number): boolean {
+  return t >= prepared.durationMs && (prepared.win ?? prepared.draw) !== null;
+}
+
 /** Index of the first element ≥ `x` in a sorted array. */
 export function lowerBound(sorted: readonly number[], x: number): number {
   let lo = 0;
