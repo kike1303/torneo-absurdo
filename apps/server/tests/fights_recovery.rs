@@ -416,7 +416,20 @@ async fn assert_halts_and_recovers(
         assert_eq!(row(pool, id).await.state, state);
     }
     allow(pool).await;
-    f::wait_state_advancing(pool, clock, id, next).await;
+    // With the clock this far ahead, it may go through `next` in between two looks.
+    let order = [
+        FightState::Scheduled,
+        FightState::BettingOpen,
+        FightState::BettingClosed,
+        FightState::Live,
+        FightState::Settled,
+    ];
+    let rank = |state: FightState| order.iter().position(|s| *s == state);
+    wait_for("the next state", || async {
+        clock.advance(2000);
+        rank(row(pool, id).await.state) >= rank(next)
+    })
+    .await;
     wait_for("the end of the halt", || async {
         clock.advance(2000);
         shared.current().halted == Some(false)
