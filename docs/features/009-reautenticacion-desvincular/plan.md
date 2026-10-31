@@ -692,6 +692,7 @@ Sin cambios en los workflows.
     - El comentario de `auth_state!` nombra los dos casos reales de la desviación 5, y dice por qué una sesión anterior a 009 no es uno de ellos.
     - La prueba manual del README dice que el paso 4 pide confirmar otra vez, porque el `unlink` del paso 3 consumió la confirmación. El paso 5 dice que el intento fallido del paso 4 no la consume (la transacción de `link` hace rollback), con el límite de 10 minutos.
 26. **Revisión del PR: los campos de los eventos de `grant`.** `tests/admin_cli_logs.rs` ya prometía "no event has more than its fields" en el caso de dos proveedores. Lo compruebo en lugar de quitar la frase, con la misma comprobación del otro test, ahora en un helper. La lista de `telemetry.rs` no lo hace redundante, porque deja pasar cualquier campo permitido. Mutante "`admin.grant_applied` con `status`, que está en la lista": **muere**.
+27. **Revisión del PR: `reauth_with` usa `unlink_allowed`.** `other_id <= id` era una segunda expresión del orden de RF13. La sugerencia de architect encaja: `reauth_with` pregunta si una confirmación recién hecha con `other` permitiría quitar `id`, y eso es `unlink_allowed(true, Some(other_id), id)`. Mutante de control, como el de la desviación 15 pero sobre la forma nueva: **muere**.
 
 ## Revisión
 

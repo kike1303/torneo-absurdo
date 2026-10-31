@@ -43,13 +43,14 @@ pub fn status_of(view: &AuthView, enabled: &[Provider]) -> ReauthStatus {
             provider,
             ready: unlink_allowed(view.step_up, view.account, id),
             // The enabled ones a reauthentication could use: P itself and those linked before.
+            // That is the rule of unlink for a confirmation just made with each of them.
             reauth_with: enabled
                 .iter()
                 .copied()
                 .filter(|wanted| {
-                    view.linked
-                        .iter()
-                        .any(|&(other, other_id)| other == *wanted && other_id <= id)
+                    view.linked.iter().any(|&(other, other_id)| {
+                        other == *wanted && unlink_allowed(true, Some(other_id), id)
+                    })
                 })
                 .collect(),
         })
