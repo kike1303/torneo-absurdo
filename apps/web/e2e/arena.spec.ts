@@ -22,6 +22,7 @@ const ORIGIN = 'http://localhost:4173';
 const DIR = 'test-results/screenshots';
 const DURATION = spike.duration_ms;
 const stage = (page: Page) => page.getByTestId('fight-stage');
+const F1_LIMIT_MS = 180_000;
 
 /** TA-20: the arena loads paused (`ready`); playback only starts with Play. */
 async function play(page: Page): Promise<void> {
@@ -37,6 +38,29 @@ async function staysPaused(page: Page, ms: number): Promise<void> {
   await page.waitForTimeout(ms);
   await expect(stage(page)).toHaveAttribute('data-state', 'ready');
   expect(await stage(page).getAttribute('data-last-cue')).toBe(cue);
+}
+
+/** Resolves after `count` frames of the page, which take longer the busier the machine is. */
+async function animationFrames(page: Page, count: number): Promise<void> {
+  await page.evaluate(async (frames) => {
+    for (let i = 0; i < frames; i++) await new Promise(requestAnimationFrame);
+  }, count);
+}
+
+/**
+ * Runs `body` with the trace of the context paused: on this canvas the trace multiplies the time by
+ * four (TA-32), and `trace` is a worker option, so `test.use` cannot turn it off for one test. The
+ * chunk comes back afterwards because the runner stops it when the context closes.
+ */
+async function withoutTracing(page: Page, body: () => Promise<void>): Promise<void> {
+  const { tracing } = page.context();
+  await tracing.stopChunk();
+  try {
+    await body();
+  } finally {
+    // It rejects in a run that records no trace (`stopChunk` does nothing there): nothing to restore.
+    await tracing.startChunk().catch(() => {});
+  }
 }
 
 function trackErrors(page: Page): string[] {
@@ -186,22 +210,34 @@ for (const size of SIZES) {
 test('F1: switching a fighter quickly many times leaves one paused arena, without errors', async ({
   browser,
 }) => {
+  // Each switch builds a renderer with WebGL by software, so the time goes to real work that grows
+  // with the load of the machine, not to the waits: it gets its own limit (TA-32).
+  test.setTimeout(F1_LIMIT_MS);
   // The race is timing dependent, so it runs on several fresh pages (the unit test of
   // shared-cache.ts is the deterministic one).
   for (let run = 0; run < 4; run++) {
     const page = await browser.newPage();
-    const errors = trackErrors(page);
-    await page.goto('/es/dev/arena?t=1500');
-    await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
-    const select = page.getByTestId('arena-fighter-b');
-    for (let i = 0; i < 6; i++) {
-      await select.selectOption(i % 2 ? 'dummy_b' : 'dummy_a', { force: true }).catch(() => {});
-      await page.waitForTimeout(i * 40);
-    }
-    await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
-    await page.waitForTimeout(1500);
-    expect(errors, `run ${run}`).toEqual([]);
-    await expect(page.locator('[data-testid="fight-stage"] canvas')).toHaveCount(1);
+    await withoutTracing(page, async () => {
+      const errors = trackErrors(page);
+      await page.goto('/es/dev/arena?t=1500');
+      // Not `ready`: the race needs a superseded renderer still loading a sheet, and once the first
+      // load is over the sheets come from the cache (TA-32: with the race back, 0 of 16 pages
+      // failed when the burst waited for `ready`).
+      await waitForHydration(page);
+      const select = page.getByTestId('arena-fighter-b');
+      for (let i = 0; i < 6; i++) {
+        // `force`: the select is disabled while loading, which is when the race can happen.
+        await select.selectOption(i % 2 ? 'dummy_b' : 'dummy_a', { force: true });
+        // Not a settling wait: the growing gaps make the switches land on different load stages.
+        await page.waitForTimeout(i * 40);
+      }
+      await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
+      // A broken texture throws when it is drawn: the frames, however long they take, have to pass.
+      await animationFrames(page, 10);
+      await expect(stage(page)).toHaveAttribute('data-state', 'ready');
+      expect(errors, `run ${run}`).toEqual([]);
+      await expect(page.locator('[data-testid="fight-stage"] canvas')).toHaveCount(1);
+    });
     await page.close();
   }
 });
