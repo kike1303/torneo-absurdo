@@ -2,7 +2,7 @@
 id: "009"
 title: Reautenticación para desvincular y para admin
 type: plan
-status: approved
+status: done
 risk: high
 author: backend-engineer
 reviewers: [architect, frontend-engineer]
@@ -686,14 +686,14 @@ Sin cambios en los workflows.
 22. **Paso 13: más vistas de las que pide el plan.** Las capturas y axe cubren el panel en sus dos lugares (`account-reauth-link` y `account-reauth-row`) y `/login` con `auth.reauth_mismatch` y sesión (`login-reauth-mismatch`). `expectPanelButtons` mide el ancho completo y los 44 px a 375 px, y `sm:w-auto` a 1280 px, sobre el botón de `dev`. Revisé a ojo cuatro de las capturas (móvil y escritorio, `es` y `en`, los dos temas) contra la UI de la spec, y no hizo falta ajustar nada.
 
 23. **Revisión del PR: la cuota de `reauth` (RF11) no tenía test.** Sumo `reauth_over_the_quota_is_try_again_without_a_flow` a `tests/navigation_errors.rs`, copia del de `link` más la comprobación de que, con el balde lleno, la misma petición empieza un flujo. Mutante "`Handler::AuthReauth` sin `auth_ip`": **muere**, falla ese test (8 passed, 1 failed).
-24. **Revisión del PR: el status del redirect de `reauth`.** Ningún test lo leía: `tests/reauth.rs:262` lee el 303 de un error, a `auth.invalid_state`, y `oauth::start_reauth` no mira el status. Para que el comentario de `auth/mod.rs` sea cierto sin cambiarlo, `tests/oauth_providers.rs` suma `the_reauth_redirect_to_a_real_provider_is_a_303_to_its_authorize_constant`. Es un test aparte, con su propio server, porque el existente hace 4 de los 5 POST de la ráfaga de `AUTH_IP` y dos más darían `auth.try_again`. Mutante "el redirect de `reauth` es un 307": **muere**.
+24. **Revisión del PR: el status del redirect de `reauth`.** Ningún test lo leía contra las URL reales de authorize: `tests/reauth.rs:262` lee el 303 de un error, a `auth.invalid_state`, `oauth::start_reauth` no mira el status, y `oauth::finish` afirma el 303 solo contra el proveedor simulado. Para que el comentario de `auth/mod.rs` sea cierto sin cambiarlo, `tests/oauth_providers.rs` suma `the_reauth_redirect_to_a_real_provider_is_a_303_to_its_authorize_constant`. Es un test aparte, con su propio server, porque el existente hace 4 de los 5 POST de la ráfaga de `AUTH_IP` y dos más darían `auth.try_again`. Mutante "el redirect de `reauth` es un 307": **muere**.
 25. **Revisión del PR: el aviso, el comentario de `auth_state!` y el README.**
     - La fila "Historial de eventos de seguridad" del aviso declara el proveedor, con el texto de security-reviewer. La sección 8 no cambia.
     - El comentario de `auth_state!` nombra los dos casos reales de la desviación 5, y dice por qué una sesión anterior a 009 no es uno de ellos.
     - La prueba manual del README dice que el paso 4 pide confirmar otra vez, porque el `unlink` del paso 3 consumió la confirmación. El paso 5 dice que el intento fallido del paso 4 no la consume (la transacción de `link` hace rollback), con el límite de 10 minutos.
 26. **Revisión del PR: los campos de los eventos de `grant`.** `tests/admin_cli_logs.rs` ya prometía "no event has more than its fields" en el caso de dos proveedores. Lo compruebo en lugar de quitar la frase, con la misma comprobación del otro test, ahora en un helper. La lista de `telemetry.rs` no lo hace redundante, porque deja pasar cualquier campo permitido. Mutante "`admin.grant_applied` con `status`, que está en la lista": **muere**.
 27. **Revisión del PR: `reauth_with` usa `unlink_allowed`.** `other_id <= id` era una segunda expresión del orden de RF13. La sugerencia de architect encaja: `reauth_with` pregunta si una confirmación recién hecha con `other` permitiría quitar `id`, y eso es `unlink_allowed(true, Some(other_id), id)`. Mutante de control, como el de la desviación 15 pero sobre la forma nueva: **muere**.
-28. **Revisión del PR: un test de SSR para la prioridad del `status`.** `tests/components/account-page.test.ts` renderiza `/account` con `reauthDone` y el resultado de `rename` o `unlink`, que es lo que produce el POST armado de la desviación 19. Mutante "`reauthDone` antes que la action": **muere** en los dos casos. Es el único cambio en `apps/web`, y es un test.
+28. **Revisión del PR: un test de SSR para la prioridad del `status`.** `tests/components/account-page.test.ts` renderiza `/account` con `reauthDone` y el resultado de `rename` o `unlink`, que es lo que produce el POST armado de la desviación 19 con `rename`. Con `unlink` el POST armado no llega a esa combinación, porque un `unlink` exitoso consume la confirmación y `reauthDone` es falso; el test la renderiza igual, como seguro de la prioridad. Mutante "`reauthDone` antes que la action": **muere** en los dos casos. Es el único cambio en `apps/web`, y es un test.
 29. **Paso 15: la lista de mutantes.** El plan la pide en la descripción del PR, y el PR traía un resumen. La lista completa entra en la descripción del PR desde el reporte de esta ronda, sin archivo nuevo en el repo. Al armarla, `plan.md` no registraba el resultado de seis mutantes de web de los pasos 10 y 11, así que los volví a correr: los seis mueren.
 
 ## Revisión

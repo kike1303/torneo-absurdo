@@ -9,6 +9,8 @@ reviewers: [security-reviewer, owner]
 approvals:
   - by: security-reviewer
     date: 2026-10-21
+  - by: security-reviewer
+    date: 2026-10-30
 linear: TA-5
 depends_on: ["0005", "0006", "0007", "0008"]
 created: 2026-10-21
@@ -175,3 +177,9 @@ Cuando estén resueltos 1 a 5, apruebo sin otra ronda completa: verifico solo es
   5. **Verificación ARCO obligatoria:** la sección 9 dice "siempre confirmamos tu identidad", pide iniciar sesión y confirmar desde la cuenta y aclara que conocer el alias no basta. La respuesta de acceso incluye solo datos propios. El punto 9 de "Pendiente" excluye las cuentas correlacionadas, `farm-report` sobre terceros e `IP_HASH_KEY`. Resuelto.
 - Nota para la spec de cuentas (no bloquea): definir cómo ejerce sus derechos ARCO un usuario baneado o que perdió el acceso a su proveedor, porque si no puede iniciar sesión, no puede verificarse. Esto no debe abrir una vía de verificación más débil que la sesión.
 - Cuando la spec de auth fije lo que registra `tower-http::trace` sobre el usuario, hay que actualizar la fila "Registros técnicos" si incluye el `user_id`.
+
+### security-reviewer — 2026-10-30 — APPROVE
+**🤖 security-reviewer**
+
+- Verifiqué las líneas nuevas de la sección 3 de la feature 009 y `provider` en "Historial de eventos de seguridad" contra el esquema y el código. Los plazos de la sección 8 no cambian.
+- Detalle: https://github.com/kike1303/torneo-absurdo/pull/57#issuecomment-6538025085

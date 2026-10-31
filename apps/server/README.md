@@ -50,7 +50,7 @@ Con dos cuentas de Google o de Discord a mano:
 
 1. Login con Google; logout; login con Discord (es otro usuario).
 2. Desde la sesión de Google, vincular Discord: vuelves con una sesión nueva, y `/api/me` lista los dos proveedores.
-3. Desvincular uno: la web pide primero confirmar tu identidad, porque lo que vinculaste en el paso 2 es posterior a tu autenticación. Después de confirmar, la sesión actual sigue y las demás se cierran.
+3. Desvincular Discord: la web pide primero confirmar tu identidad, porque lo que vinculaste en el paso 2 es posterior a tu autenticación. Después de confirmar, la sesión actual sigue y las demás se cierran.
 4. Vincular una cuenta que ya es de otro usuario. El desvincular del paso 3 consumió la confirmación, así que `/account` muestra otra vez el panel en lugar de los botones de vincular: confirma tu identidad y vincula. Resultado: `/login?error=auth.already_linked`, sin fusión.
 5. Volver a `/account`, empezar a vincular y cancelar en la pantalla del proveedor: `/login?error=auth.provider_error`. El intento fallido del paso 4 no consume la confirmación: los botones siguen ahí mientras la confirmación tenga menos de 10 minutos. Si ya pasaron, la web vuelve a pedirla.
 

@@ -2,7 +2,7 @@
 id: "009"
 title: Reautenticación para desvincular y para admin
 type: intent
-status: approved
+status: done
 risk: high
 author: product-owner
 reviewers: [architect, security-reviewer]
