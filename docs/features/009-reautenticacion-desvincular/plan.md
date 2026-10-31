@@ -685,6 +685,8 @@ Sin cambios en los workflows.
     - **Los casos no se vieron en rojo contra una UI ausente,** porque la UI entró en el paso 11. Para comprobar que pueden fallar corrí mutantes de web: `next` sin `?reauth=1` y el panel de la fila que no abre con el 403. Los dos mueren.
 22. **Paso 13: más vistas de las que pide el plan.** Las capturas y axe cubren el panel en sus dos lugares (`account-reauth-link` y `account-reauth-row`) y `/login` con `auth.reauth_mismatch` y sesión (`login-reauth-mismatch`). `expectPanelButtons` mide el ancho completo y los 44 px a 375 px, y `sm:w-auto` a 1280 px, sobre el botón de `dev`. Revisé a ojo cuatro de las capturas (móvil y escritorio, `es` y `en`, los dos temas) contra la UI de la spec, y no hizo falta ajustar nada.
 
+23. **Revisión del PR: la cuota de `reauth` (RF11) no tenía test.** Sumo `reauth_over_the_quota_is_try_again_without_a_flow` a `tests/navigation_errors.rs`, copia del de `link` más la comprobación de que, con el balde lleno, la misma petición empieza un flujo. Mutante "`Handler::AuthReauth` sin `auth_ip`": **muere**, falla ese test (8 passed, 1 failed).
+
 ## Revisión
 
 ### architect — 2026-10-30 — REQUEST_CHANGES

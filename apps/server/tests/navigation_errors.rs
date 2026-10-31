@@ -4,7 +4,7 @@
 //! `Retry-After` or a body, with `no-store` (`private, no-store` for the logouts), never with
 //! `next`, and without touching the database in the quota branch. `link` without a session is a
 //! 303 to `/login` with no query. The 404 of an unknown provider and the 403 of `Origin` stay
-//! JSON.
+//! JSON. 009 RF11 gives `reauth` the same quota and the same answer as `link`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod support;
@@ -122,6 +122,33 @@ async fn link_over_the_quota_is_try_again_without_a_flow() {
     );
     assert_eq!(rows(&pool).await, before);
     assert_eq!(oauth::me(&app, &token).await.status, 200);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reauth_over_the_quota_is_try_again_without_a_flow() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let token = oauth::session_of(&oauth::login(&app, Kind::Google, "g-sub-quota").await);
+    drain_auth_ip(&app).await;
+    let before = rows(&pool).await;
+    let cookie = oauth::session_cookie(&token);
+    let limited = post(app.addr, "/api/auth/reauth/google", Some(&cookie)).await;
+    assert_try_again(&limited, "no-store");
+    assert!(
+        limited.set_cookies().is_empty(),
+        "{:?}",
+        limited.set_cookies()
+    );
+    assert_eq!(rows(&pool).await, before);
+    assert_eq!(oauth::me(&app, &token).await.status, 200);
+    // Once the bucket refills, the same request starts a flow again.
+    app.refill();
+    let started = post(app.addr, "/api/auth/reauth/google", Some(&cookie)).await;
+    assert!(
+        started
+            .cookie(oauth::flow_name())
+            .is_some_and(|v| !v.is_empty())
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
