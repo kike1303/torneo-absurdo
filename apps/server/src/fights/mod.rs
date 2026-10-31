@@ -11,6 +11,7 @@ pub mod bets_contract;
 pub mod board;
 pub mod clock;
 pub mod hook;
+pub mod hub;
 pub mod matchup;
 pub mod release;
 pub mod roster;
