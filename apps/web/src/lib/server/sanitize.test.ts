@@ -260,8 +260,23 @@ describe('sanitize: truncation without whitespace (PR #2 review)', () => {
 });
 
 describe('sanitize: every pattern is linear on 8 KB, the worst real case (PR #2 review)', () => {
-  const n = 8 * 1024;
-  const unit = (s: string) => s.repeat(Math.ceil(n / s.length)).slice(0, n);
+  // How much the time grows with the input, not a limit in ms, which only measures the load of the
+  // machine (TA-38). 4x the input takes 4x the time if linear and 16x if quadratic. The small size
+  // stays above the 1 KB bound of URL_CREDENTIALS, whose cost per start only grows up to there
+  // (4.9x on `a://b:`), and the limit sits halfway between that and 16x.
+  const small = 2 * 1024;
+  const large = 8 * 1024;
+  const maxGrowth = 9;
+  // Each size keeps its fastest run, the one the load touched least. A spike or a JIT tier-up can
+  // still skew a few rounds, so a growth over the limit gets more rounds before it fails.
+  const minRounds = 5;
+  const maxRounds = 50;
+  const unit = (s: string, n: number) => s.repeat(Math.ceil(n / s.length)).slice(0, n);
+  const elapsed = (input: string) => {
+    const start = performance.now();
+    sanitize(input);
+    return performance.now() - start;
+  };
   it.each(
     [
       'a:',
@@ -299,13 +314,22 @@ describe('sanitize: every pattern is linear on 8 KB, the worst real case (PR #2 
       'x-client-',
       'forwarded:',
     ].map((s) => [s]),
-  )('%j', (s) => {
-    const input = unit(s);
-    sanitize(input);
-    const start = performance.now();
-    sanitize(input);
-    expect(performance.now() - start).toBeLessThan(50);
-  });
+  )(
+    '%j',
+    (s) => {
+      const smallInput = unit(s, small);
+      const largeInput = unit(s, large);
+      let fastestSmall = Infinity;
+      let fastestLarge = Infinity;
+      for (let round = 1; round <= maxRounds; round++) {
+        fastestSmall = Math.min(fastestSmall, elapsed(smallInput));
+        fastestLarge = Math.min(fastestLarge, elapsed(largeInput));
+        if (round >= minRounds && fastestLarge / fastestSmall < maxGrowth) break;
+      }
+      expect(fastestLarge / fastestSmall).toBeLessThan(maxGrowth);
+    },
+    60_000,
+  );
 });
 
 describe('sanitize: IPv6 after a key that looks like hex (TA-11)', () => {
