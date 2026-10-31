@@ -22,6 +22,21 @@
 //! display::<SealedSeed>();
 //! ```
 //! ```compile_fail,E0277
+//! use server::fights::sealed::SealedSeed;
+//! fn serialize<T: serde::Serialize>() {}
+//! serialize::<SealedSeed>();
+//! ```
+//! ```compile_fail,E0277
+//! use server::fights::sealed::SealedLog;
+//! fn clone<T: Clone>() {}
+//! clone::<SealedLog>();
+//! ```
+//! ```compile_fail,E0277
+//! use server::fights::sealed::SealedLog;
+//! fn display<T: std::fmt::Display>() {}
+//! display::<SealedLog>();
+//! ```
+//! ```compile_fail,E0277
 //! use server::fights::sealed::SealedLog;
 //! fn debug<T: std::fmt::Debug>() {}
 //! debug::<SealedLog>();
