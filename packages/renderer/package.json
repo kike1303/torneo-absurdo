@@ -32,7 +32,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "gen:placeholders": "node --experimental-strip-types scripts/gen-placeholders.ts"
+    "gen:placeholders": "node --experimental-strip-types scripts/gen-placeholders.ts",
+    "bench:prepare": "node --experimental-strip-types scripts/bench-prepare.ts"
   },
   "dependencies": {
     "pixi.js": "8.22.0"

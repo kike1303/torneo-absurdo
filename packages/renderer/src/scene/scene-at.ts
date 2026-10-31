@@ -11,7 +11,13 @@ import { bannersAt } from './banners.ts';
 import { cameraFrom } from './camera.ts';
 import { frameAt, xAt, type Segment } from './choreography.ts';
 import { hudFighterAt } from './hud.ts';
-import { cueWindow, prepareScene, type PreparedCue, type PreparedScene } from './prepare.ts';
+import {
+  cueWindow,
+  prepareScene,
+  reachedEnd,
+  type PreparedCue,
+  type PreparedScene,
+} from './prepare.ts';
 import {
   FACING,
   GROUND_Y,
@@ -71,7 +77,7 @@ function fighterAt(
 }
 
 function phaseAt(prepared: PreparedScene, t: number): Phase {
-  if (t >= prepared.durationMs) return 'finished';
+  if (reachedEnd(prepared, t)) return 'finished';
   if (prepared.draw !== null && t >= prepared.draw.at) return 'draw';
   if (prepared.win !== null && t >= prepared.win.at) return 'win';
   if (prepared.timeUp !== null && t >= prepared.timeUp.at) return 'time_up';

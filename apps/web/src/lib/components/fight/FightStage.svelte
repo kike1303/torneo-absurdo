@@ -17,6 +17,7 @@
   import { Skeleton } from '#lib/components/ui/skeleton/index.js';
   import type { Timeline } from '@torneo/renderer/timeline';
   import type { ArenaFighterId, PlaceholderFighterId } from '#lib/features/arena/fighters.js';
+  import type { LiveSession } from '#lib/features/fight/live-session.js';
   import type { LocalAssets } from '#lib/features/arena/local-fighters.js';
   import { formatInteger } from '#lib/i18n/format.js';
   import { m } from '#lib/paraglide/messages.js';
@@ -46,6 +47,11 @@
      * it, the spike script with these assets.
      */
     source?: (assets: Readonly<Record<Side, string>>) => Promise<Timeline>;
+    /**
+     * A fight in progress (010 RF47, RF50): it plays on its own by the clock of the session, with
+     * no pause nor seek. `source`, `retime` and `initialT` do not apply.
+     */
+    live?: (assets: Readonly<Record<Side, string>>) => Promise<LiveSession>;
   }
 
   let {
@@ -57,6 +63,7 @@
     local,
     retime,
     source,
+    live,
   }: Props = $props();
 
   type Loader<T> = () => Promise<{ default: T }>;
@@ -90,6 +97,9 @@
   let mounted = $state(false);
   let run = 0;
   let loadedTimeline: Timeline | null = null;
+  let stopLive: (() => void) | null = null;
+  /** How long each `extend` took, in ms, for the stats JSON (010 plan-c decision 13). */
+  let extendSamples: number[] = [];
 
   function isPlaceholder(id: ArenaFighterId): id is PlaceholderFighterId {
     return Object.hasOwn(MANIFESTS, id);
@@ -135,8 +145,27 @@
     snapshot = renderer?.snapshot() ?? null;
   }
 
+  function cancelLive(): void {
+    stopLive?.();
+    stopLive = null;
+  }
+
+  function fail(error: unknown): void {
+    cancelLive();
+    renderer?.destroy();
+    renderer = null;
+    const code = (error as { code?: unknown } | null)?.code;
+    errorCode =
+      typeof code === 'string' && code in ERROR_MESSAGES
+        ? (code as RendererErrorCode)
+        : 'asset_load_failed';
+    phase = 'error';
+  }
+
   async function start(): Promise<void> {
     const id = ++run;
+    cancelLive();
+    extendSamples = [];
     renderer?.destroy();
     renderer = null;
     phase = 'loading';
@@ -148,9 +177,12 @@
     const side = { a: fighters.a, b: fighters.b };
     try {
       const ids = [...new Set([side.a, side.b])];
+      const opening = live?.(side);
       const [rendererModule, cast, ...manifestModules] = await Promise.all([
         import('@torneo/renderer'),
-        (source ?? spikeTimeline)(side),
+        opening === undefined
+          ? (source ?? spikeTimeline)(side)
+          : opening.then((session) => session.timeline),
         ...ids.map((fid) => loadManifest(fid)),
       ]);
       const urls = (
@@ -169,15 +201,18 @@
       if (id !== run) return;
       rendererLoaded = true;
       const assets = new Map<string, unknown>(ids.map((fid, i) => [fid, manifestModules[i]]));
+      const session = opening === undefined ? null : await opening;
       const timeline =
-        retime === undefined ? cast : retime(cast, (t) => rendererModule.validateTimeline(t).ok);
+        session !== null || retime === undefined
+          ? cast
+          : retime(cast, (t) => rendererModule.validateTimeline(t).ok);
       loadedTimeline = timeline;
       const start = performance.now();
       const locale = getLocale();
       const handle = rendererModule.createRenderer(container, {
         theme: currentRendererTheme(),
         reducedMotion: motionReduced,
-        clock: () => performance.now() - start,
+        clock: session?.clock ?? (() => performance.now() - start),
         labels: {
           names,
           banners: {
@@ -199,6 +234,34 @@
         phase = next;
         refresh();
       });
+      if (session !== null) {
+        // Not awaited before subscribing: `loadLive` takes each `extend` while the sheets load, and
+        // `end` may come out in that time (010 plan-c decision 11).
+        const loading = handle.loadLive(timeline, assets);
+        stopLive = session.subscribe((next) => {
+          if (id !== run) return;
+          try {
+            const before = performance.now();
+            handle.extend(next);
+            extendSamples.push(performance.now() - before);
+            loadedTimeline = next;
+          } catch (error) {
+            fail(error);
+          }
+        });
+        // `fail` may have run inside `subscribe`, in its immediate delivery, with nothing to cancel.
+        if (renderer !== handle) cancelLive();
+        await loading;
+        if (id !== run) {
+          handle.destroy();
+          return;
+        }
+        if (renderer !== handle) return;
+        if (debug) handle.onCue(refresh);
+        handle.play();
+        refresh();
+        return;
+      }
       await handle.load(timeline, assets);
       if (id !== run) {
         // Superseded by a newer start (a fighter switched quickly): never leave it running.
@@ -211,19 +274,13 @@
       refresh();
     } catch (error) {
       if (id !== run) return;
-      renderer?.destroy();
-      renderer = null;
-      const code = (error as { code?: unknown } | null)?.code;
-      errorCode =
-        typeof code === 'string' && code in ERROR_MESSAGES
-          ? (code as RendererErrorCode)
-          : 'asset_load_failed';
-      phase = 'error';
+      fail(error);
     }
   }
 
   export function toggle(): void {
-    if (renderer === null) return;
+    // A pause would break `t = clock()`, and live playback has no way back to it.
+    if (renderer === null || live !== undefined) return;
     if (phase === 'playing') renderer.pause();
     else if (phase === 'finished') restart();
     else renderer.play();
@@ -231,6 +288,10 @@
 
   export function restart(): void {
     if (renderer === null) return;
+    if (live !== undefined) {
+      void start();
+      return;
+    }
     renderer.seek(0);
     renderer.play();
     refresh();
@@ -238,6 +299,11 @@
 
   export function getFrameStats(): FrameStats | null {
     return renderer?.getFrameStats() ?? null;
+  }
+
+  /** How long each `extend` took so far, in ms, for the stats JSON. */
+  export function extendDurations(): readonly number[] {
+    return extendSamples;
   }
 
   /** The timeline given to the renderer (after `retime`), for the stats JSON. */
@@ -259,6 +325,7 @@
     return () => {
       query.removeEventListener('change', onChange);
       run++;
+      cancelLive();
       renderer?.destroy();
       renderer = null;
     };
