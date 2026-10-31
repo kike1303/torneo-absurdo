@@ -6,21 +6,31 @@
 mod support;
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
+use axum::Router;
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use axum::routing::get;
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use protocol::FightState;
-use server::app::Settings;
+use server::admin::{AdminAction, AdminCommand};
+use server::app::{AppState, Settings};
 use server::fights::{FightClock, hex};
+use server::http::admin::RecentAdmin;
 use server::http::routes::{Handler, ROUTES, RouteSpec};
 use sqlx::PgPool;
-use support::app::{ORIGIN, TRUST_LOOPBACK, session_for, user_with_dev_account, user_with_session};
-use support::db::{TestDb, privileged};
+use support::app::{
+    AlwaysUp, ORIGIN, TRUST_LOOPBACK, session_for, user_with_dev_account, user_with_session,
+};
+use support::db::TestDb;
 use support::fights::{self as f, KO, T0, Vector, wait_for, wait_state};
 use support::http::{self, Response};
 use support::ws;
+use tower::ServiceExt;
 
 /// What must not appear before `Settled`, in every encoding.
 fn canaries(vector: &Vector) -> Vec<String> {
@@ -38,6 +48,25 @@ fn canaries(vector: &Vector) -> Vec<String> {
     // Every event, with its `t` and its data, `ko` and `end` included.
     for event in &vector.log.events {
         out.push(serde_json::to_string(event).unwrap());
+        out.push(format!(r#""t":{}"#, event.t()));
+    }
+    // The fragments of a log, on their own: no public shape has them.
+    for fragment in [
+        r#""t":"#,
+        r#""type":"ko""#,
+        r#""type":"end""#,
+        r#""attacker":"#,
+    ] {
+        out.push(fragment.to_owned());
+    }
+    out
+}
+
+/// What delates the result, and is only public once the fight is settled: the final of the summary.
+fn result_canaries(canaries: &[String]) -> Vec<String> {
+    let mut out = canaries.to_vec();
+    for fragment in [r#""winner":"#, r#""reason":"#, r#""kind":"decided""#] {
+        out.push(fragment.to_owned());
     }
     out
 }
@@ -77,15 +106,22 @@ fn request_of(route: &RouteSpec, id: i32) -> (String, Vec<(&'static str, &'stati
 struct Identities {
     user: uuid::Uuid,
     admin: uuid::Uuid,
+    admin_account: i64,
+    /// The state of the app, for the route that proves what an admin session is.
+    state: AppState,
 }
 
-async fn admin_session(pool: &PgPool, admin: uuid::Uuid) -> String {
+/// A session of an admin as RF27 asks for it: its role, a current authentication, with an account
+/// the last `server admin grant` covers. So `RecentAdmin` lets it through.
+async fn admin_session(pool: &PgPool, who: &Identities) -> String {
     let mut tx = pool.begin().await.unwrap();
     let issued = server::sessions::issue(
         &mut tx,
-        admin,
+        who.admin,
         protocol::Role::Admin,
-        server::sessions::Authentication::None,
+        server::sessions::Authentication::Fresh(server::sessions::OauthAccountId::new(
+            who.admin_account,
+        )),
         &[0; 32],
         server::sessions::UaFamily::Other,
     )
@@ -93,6 +129,22 @@ async fn admin_session(pool: &PgPool, admin: uuid::Uuid) -> String {
     .unwrap();
     tx.commit().await.unwrap();
     issued.token.as_str().to_owned()
+}
+
+/// The status of a route protected by `RecentAdmin`, with this session.
+async fn recent_admin_status(state: &AppState, cookie: &str) -> StatusCode {
+    async fn only_recent_admins(_admin: RecentAdmin) -> StatusCode {
+        StatusCode::NO_CONTENT
+    }
+    let router = Router::new()
+        .route("/test/recent-admin", get(only_recent_admins))
+        .with_state(state.clone());
+    let request = Request::builder()
+        .uri("/test/recent-admin")
+        .header("cookie", cookie)
+        .body(Body::empty())
+        .unwrap();
+    router.oneshot(request).await.unwrap().status()
 }
 
 /// A different client for each request, so no quota gets in the way.
@@ -118,8 +170,23 @@ fn assert_clean(what: &str, response: &Response, canaries: &[String]) {
             );
         }
     }
-    // No fight data travels in a header, whatever its encoding.
-    assert!(response.status.as_u16() < 600);
+    assert!(
+        !response.status.is_server_error(),
+        "{what}: {}",
+        response.status
+    );
+}
+
+/// The status of the routes whose answer does not depend on a flow: the proof that the request
+/// reached its handler, so a clean body is not just the body of a rejection.
+fn expected_status(handler: Handler, identity: &str) -> Option<u16> {
+    match (handler, identity) {
+        (Handler::Health | Handler::FightsCurrent | Handler::FightDetail, _) => Some(200),
+        (Handler::AuthProviders, _) => Some(200),
+        (Handler::Me, "anonymous") => Some(401),
+        (Handler::Me, _) => Some(200),
+        _ => None,
+    }
 }
 
 /// Every route, with each identity. In `Settled` the detail of the fight is the one that publishes.
@@ -142,7 +209,7 @@ async fn sweep(
             let cookie = match identity {
                 "anonymous" => None,
                 "user" => Some(session(session_for(pool, who.user).await)),
-                _ => Some(session(admin_session(pool, who.admin).await)),
+                _ => Some(session(admin_session(pool, who).await)),
             };
             let (path, headers, body) = request_of(route, id);
             let ip = next_ip();
@@ -155,10 +222,24 @@ async fn sweep(
             let method = route.method.http();
             let response = http::send_body(addr, method.as_str(), &path, &all, &body).await;
             let what = format!("{state:?} {identity} {method} {path}");
-            assert_ne!(response.status.as_u16(), 500, "{what}");
+            if let Some(expected) = expected_status(route.handler, identity) {
+                assert_eq!(response.status.as_u16(), expected, "{what}");
+            }
             assert_clean(&what, &response, canaries);
         }
     }
+    // What each identity is, proved against a route protected by `RecentAdmin`.
+    let admin_cookie = session(admin_session(pool, who).await);
+    assert_eq!(
+        recent_admin_status(&who.state, &admin_cookie).await,
+        StatusCode::NO_CONTENT
+    );
+    let user_cookie = session(session_for(pool, who.user).await);
+    assert_eq!(
+        recent_admin_status(&who.state, &user_cookie).await,
+        StatusCode::FORBIDDEN
+    );
+
     // The channels of `/ws` that exist in phase A: `self`, with a session, and the refusal of the
     // others. Anything that arrives is checked too.
     let token = session_for(pool, who.user).await;
@@ -189,19 +270,41 @@ async fn nothing_leaks_in_any_state_with_any_identity() {
 
     let (user, _) = user_with_session(&pool).await;
     let (admin, _) = user_with_dev_account(&pool).await;
-    privileged(
-        &pool,
-        sqlx::query("UPDATE users SET role = 'admin' WHERE id = $1").bind(admin),
+    let admin_account: i64 = sqlx::query_scalar("SELECT id FROM oauth_accounts WHERE user_id = $1")
+        .bind(admin)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    // The real command: the role, and the cutoff of the accounts it covers.
+    let grant = AdminCommand {
+        action: AdminAction::Grant,
+        user: admin,
+        reason: None,
+    };
+    server::admin::run(&db.options(), &grant).await.unwrap();
+    let url = db.url();
+    let config = support::config::config(&[("DATABASE_URL", url.as_str())]);
+    let state = AppState::from_config(
+        &config,
+        &Settings::default(),
+        pool.clone(),
+        Arc::new(AlwaysUp),
     )
-    .await;
-    let who = Identities { user, admin };
+    .unwrap();
+    let who = Identities {
+        user,
+        admin,
+        admin_account,
+        state,
+    };
     let cookie_name = {
         let config = support::config::config(&[]);
         config.cookies.session_name().to_owned()
     };
 
     let vector = Vector::of(KO);
-    let canaries = canaries(&vector);
+    let settled_canaries = canaries(&vector);
+    let canaries = result_canaries(&settled_canaries);
     let id = f::announce(&pool, T0, &vector.a, &vector.b).await;
     let _runner = f::spawn_runner(&pool, &shared, f::config_without_roster(), fight_settings);
     wait_for("the board", || async {
@@ -276,7 +379,7 @@ async fn nothing_leaks_in_any_state_with_any_identity() {
         &cookie_name,
         id,
         FightState::Settled,
-        &canaries,
+        &settled_canaries,
     )
     .await;
     let published = http::send(app.addr, "GET", &format!("/api/fights/{id}"), &[]).await;
