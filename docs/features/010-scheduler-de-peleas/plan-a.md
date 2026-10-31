@@ -34,7 +34,7 @@ updated: 2026-10-31
 **Se puede probar al terminar:** con `just dev` hay peleas en la base, de principio a fin y sin WS, y cada una se verifica con `GET /api/fights/{id}`.
 
 ## Desviaciones de la spec
-Architect aceptó estos puntos y están en la ["Enmienda (fase A, 2026-10-31)"](./spec.md#enmienda-fase-a-2026-10-31) de la spec, con el mismo número. DP-3, DP-4, DP-5, DP-6, DP-7, DP-10 y M6 siguen pendientes de security-reviewer: si cambia alguno, se ajusta este plan antes de tocar código.
+Architect aceptó estos puntos y están en la ["Enmienda (fase A, 2026-10-31)"](./spec.md#enmienda-fase-a-2026-10-31) de la spec, con el mismo número. Security-reviewer ya revisó DP-3, DP-4, DP-5, DP-6, DP-7, DP-10 y M6: su resultado, y las recomendaciones R1 a R8, están aplicados aquí y en esa enmienda.
 
 ### Problemas que impedían cumplir la spec original
 - **DP-1. El mínimo de 60 s cancela toda pelea con una ventana corta.** La tabla de RF15 cancela una `scheduled` si queda menos de 60 s de ventana, sin mirar `FIGHT_BETTING_WINDOW_SECS`. Con la rejilla mínima que RF11 admite y que usa la preocupación 9 (`ventana = 5`), al llegar `opens_at` quedan 5 s y sale `cancelled(missed_window)`, siempre. El e2e, la prueba "Sola" y cualquier valor menor de 60 no podrían abrir ninguna pelea. **Resolución:** el mínimo es `min(60 s, ventana / 2)`, calculado en ms: con `ventana = 1 s` es 500 ms, no 0. RF11 exige además `ventana > 0`, y `config.rs` rechaza `0` con `config.invalid`. Con los valores por defecto sigue en 60 s.
@@ -56,7 +56,7 @@ Architect aceptó estos puntos y están en la ["Enmienda (fase A, 2026-10-31)"](
 - **M2.** Un `CHECK` no puede lanzar `TA006`. El guard corre antes y da `TA006` en todas las reglas; los `CHECK` quedan como segunda barrera (`23514`), que el test comprueba con el trigger deshabilitado.
 - **M3.** `ci.yml` no tiene un filtro `e2e-server`: el job usa el filtro `e2e`, que es el que se ajusta.
 - **M4.** `server --help` no existe (da `Invalid`). La parte de RF16 se prueba con `cli::parse` y con el texto de `admin --help`.
-- **M5.** "`cancel` solo se llama desde `next_action`" se prueba así: `Action::Cancel` solo se construye en `state.rs`, y `store::cancel` solo se llama en el brazo de ese `Action` en `runner.rs`.
+- **M5.** "`cancel` solo se llama desde `next_action`" se prueba así: `Action::Cancel` solo se construye en `state.rs`, y una cancelación solo la escribe un intento del runner, con `sealed::cancel_fight`, el único que llama a `store::cancel`.
 
 ### Cambia el comportamiento
 - **M6.** RF5 suma `spec.validate(ruleset)` a la construcción del snapshot: un spec que `simulate` rechazaría da `fight_unrunnable` en `scheduled`, antes del commit, y parada segura después. `SnapshotError` lleva una variante propia, `SpecInvalid`, para el log. En RF59 se trata como el paso 4: se niega, porque `validate` es pura y pasó antes del commit, y un fallo posterior con los bytes intactos viene del binario. `engine_error` queda para `EventLimit`, `encode_failed` o un pánico de `compute`.
@@ -120,7 +120,7 @@ Sin librería de fechas ni funciones nuevas: lectura `(extract(epoch FROM col) *
 ### Tipos sellados y límites
 - `FightSnapshot::from_row(&FightRow) -> Result<FightSnapshot, SnapshotError>`: versión, decodificación (`deny_unknown_fields` ya está en `CharacterSpec`), reserialización idéntica, hash de RF2, `slug_*`, `max_hp_*`, cotas (DP-3) y `validate` (M6, con su variante `SpecInvalid`). `SnapshotError::code()` es de lista cerrada.
 - `SealedSeed::load(conn, id, commit)` compara `sha256` y da `Missing` o `Mismatch`, sin bytes. Campo privado y sin traits.
-- `SealedLog::compute(seed, &snapshot, &ClosedWindow) -> Result<SealedLog, (SealedSeed, ComputeError)>`. `ClosedWindow` tiene campo privado, y solo lo crean `store::close` tras su `COMMIT` y `store::closed_window(&FightRow)` si la fila está en `betting_closed` o `live`.
+- `SealedLog::compute(seed, &snapshot, &ClosedWindow) -> Result<SealedLog, (SealedSeed, ComputeError)>`. `ClosedWindow` tiene campo privado, y solo lo crean `store::close` tras su `COMMIT` y `store::read_closed_window(pool, id)`, que lee la fila de la base y solo lo da si está en `betting_closed` o `live`.
 - El nombre `canonical_json` está prohibido fuera de `sealed.rs`, así que `FinalLog` no expone nada con ese nombre ni sus bytes fuera del módulo. La escritura va en `sealed::settle_decided(conn, &FinalLog, at)`, que pasa `&[u8]` a `store::write_decided` y luego borra el secreto. Así, `store` sigue siendo el único SQL de `fights`, y `sealed` el único de `fight_secrets`.
 - `sealed::open_window(tx, id, at)`: `store::lock_scheduled` (`FOR UPDATE`; sin fila, nada), semilla de `OsRng`, `INSERT` del secreto y `store::mark_open`. El orden evita que dos runners choquen en la clave primaria. Si `OsRng` falla, reintenta con `error_kind = os_rng`.
 
@@ -133,7 +133,7 @@ Sin librería de fechas ni funciones nuevas: lectura `(extract(epoch FROM col) *
 Una tarea supervisora y un bucle, con el reloj inyectado:
 
 1. **Roster**, una vez, antes de pedir el bloqueo (RF22). Un fallo solo impide crear filas.
-2. **Bloqueo:** una sola conexión retenida todo el tiempo que dure el bloqueo, con `PgConnection::connect_with` como en `admin.rs` y `application_name = torneo-fight-runner`; nunca un pool, porque un `acquire` tras una caída abriría otra conexión y el `SELECT 1` pasaría sin tener el bloqueo. `pg_try_advisory_lock` con una clave fija, reintento cada 5 s. Mientras se tiene, un `SELECT 1` cada 5 s sobre esa misma conexión, con un tiempo máximo de 3 s: cualquier fallo o vencimiento cuenta como bloqueo perdido, se descarta la conexión y se vuelve a pedir. La conexión lleva `tcp_keepalives_idle`, `tcp_keepalives_interval`, `tcp_keepalives_count` y `tcp_user_timeout` en sus `options` (R5), para que Postgres suelte el bloqueo de un cliente que quedó colgado.
+2. **Bloqueo:** una sola conexión retenida todo el tiempo que dure el bloqueo, con `PgConnection::connect_with` como en `admin.rs` y `application_name = torneo-fight-runner`; nunca un pool, porque un `acquire` tras una caída abriría otra conexión y el `SELECT 1` pasaría sin tener el bloqueo. `pg_try_advisory_lock` con una clave fija, reintento cada 5 s. Mientras se tiene, una tarea propia hace `ping` cada 5 s sobre esa misma conexión, con un tiempo máximo de 3 s: cualquier fallo o vencimiento cuenta como bloqueo perdido, se registra `fights.lock_lost`, se descarta la conexión y se vuelve a pedir. La conexión lleva `idle_session_timeout` (30 s), para que Postgres cierre la sesión de un cliente colgado aunque el TCP siga vivo, y `tcp_keepalives_idle`, `tcp_keepalives_interval`, `tcp_keepalives_count` y `tcp_user_timeout` para una partición de red (R5).
 3. **Pasada:** cada plazo vencido, y al menos cada 60 s, relee las no liquidadas.
    - Reconcilia: una fila que ya está `settled` aborta su emisión.
    - Evalúa de la más antigua a la más nueva, **primero las transiciones y después la creación de la fila siguiente**.
@@ -142,7 +142,7 @@ Una tarea supervisora y un bucle, con el reloj inyectado:
 
 **Cierre y cálculo:** `store::close` hace `COMMIT` y da `ClosedWindow`. Después corre la puerta de prueba (`compute_gate`), y `compute` en `spawn_blocking`: un pánico del motor se trata como un fallo de reconstrucción (parada segura), y la semilla se vuelve a leer en el siguiente intento.
 
-**Liberación:** una tarea por pelea, sin acceso al pool, con tick de 50 ms. Al salir `end`, entrega el `FinalLog` por un `oneshot`, y el runner agenda `settle_at`. Perder el bloqueo no la detiene (DP-4), y al recuperarlo la emisión en curso se conserva: nunca hay dos por pelea (R6). `elapsed` usa resta saturada: con `live_started_at` en el futuro no se libera nada, ni `intro` (R4). Si una tarea muere sin entregar el `FinalLog`, la pelea vuelve a `Recompute` (R7). `release.rs` y `EventSink` no registran ningún evento: ni `tracing` ni contenido de los lotes, y `fights_logs.rs` busca sus fragmentos como canarios.
+**Liberación:** una tarea por pelea, sin acceso al pool, con tick de 50 ms. Al salir `end`, la tarea del `JoinSet` del bucle devuelve el `FinalLog`, y el runner agenda `settle_at`. Perder el bloqueo no la detiene (DP-4), y al recuperarlo la emisión en curso se conserva: nunca hay dos por pelea (R6). `elapsed` usa resta saturada: con `live_started_at` en el futuro no se libera nada, ni `intro` (R4). Si una tarea muere sin entregar el `FinalLog`, la pelea vuelve a `Recompute` (R7). `release.rs` y `EventSink` no registran ningún evento: ni `tracing` ni contenido de los lotes, y `fights_logs.rs` busca sus fragmentos como canarios.
 
 **Liquidación (RF18):** el `FinalLog` vive en un `Arc`, para que un pánico no lo pierda. Cada intento es un `tokio::spawn` con tiempo máximo de 30 s, que abre la transacción, aplica `lock_timeout`, llama a `settle_decided`, al gancho y confirma. Resultados:
 
@@ -156,7 +156,7 @@ Una tarea supervisora y un bucle, con el reloj inyectado:
 
 **Supervisión:** las tareas de liberación y los intentos de liquidación viven en un `JoinSet` del bucle. Si el bucle entra en pánico, `fights.runner_panic` en `error`, se abortan las tareas de esa vuelta y se reinicia con backoff, partiendo de la base, para que una pelea nunca tenga dos emisiones. El apagado solo cancela: ninguna transición se ejecuta por apagarse, y una transacción abierta se revierte.
 
-**Arranque:** `app::serve` crea un `CancellationToken`, hace `spawn` y envuelve `shutdown` para cancelarlo. `serve_listener` y `run_until_shutdown` no cambian. Los tests lo arrancan con `fights::spawn` y `Settings.fights`.
+**Arranque:** `app::serve` crea un `CancellationToken`, hace `spawn` y envuelve `shutdown` para cancelarlo. `serve_listener` y `run_until_shutdown` no cambian. Los tests lo arrancan con `fights::runner::run` y `Settings.fights`.
 
 ### Ajustes de prueba
 `Settings.fights`, nunca variables de entorno, como `LinkGateConfig`: `clock`, `hook`, `compute_gate`, `sink` y tiempos de reintento. La fuente de semillas de RF45 no entra en A.
@@ -172,7 +172,7 @@ RF45 es de B. En A, un test obtiene la semilla de dos formas: la lee de `fight_s
 - `current` no toca la base; `server_time` se calcula en cada petición con `FightClock`.
 
 ### Logs
-Eventos nuevos, solo con `event` y `error_kind`, sin `fight_id`: en `debug`, `fights.opened`, `fights.closed`, `fights.live`, `fights.settled`; en `warn`, `fights.lock_timeout`, `fights.db_unavailable`; en `error`, `fights.safe_stop`, `fights.settle_failed`, `fights.roster_invalid`, `fights.runner_panic`. `error_kind` sale de `db::error_kind`, `SnapshotError::code`, `ContentError::code` o `SpecError::code`.
+Eventos nuevos, solo con `event` y `error_kind`, sin `fight_id`: en `debug`, `fights.opened`, `fights.closed`, `fights.live`, `fights.settled`; en `warn`, `fights.lock_timeout`, `fights.db_unavailable`, `fights.row_failed`, `fights.lock_lost`; en `error`, `fights.safe_stop`, `fights.settle_failed`, `fights.roster_invalid`, `fights.runner_panic`. `error_kind` sale de `db::error_kind`, `SnapshotError::code`, `ContentError::code` o `SpecError::code`.
 
 ## Orden de trabajo
 Un commit por paso con `feat(server): … (TA-13)` o similar. Cada paso termina con sus tests en verde, ejecutando solo `cargo test -p server --test <archivo>`.
