@@ -134,6 +134,8 @@ export default defineConfig({
         IP_HASH_KEY: ipHashKey,
         DAILY_GRANT: '100',
         RUST_LOG: 'info',
+        // serve-with-log.mjs starts the server in apps/web, and the default is relative to the root.
+        CONTENT_DIR: path.resolve(import.meta.dirname, '../../content/characters'),
         // Fillers, so the Google and Discord buttons exist (plan-d open question 1); the egress
         // proxy cuts the redirect to the provider.
         GOOGLE_CLIENT_ID: 'e2e-filler-google-id',

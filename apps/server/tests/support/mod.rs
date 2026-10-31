@@ -7,10 +7,12 @@ pub mod bin;
 pub mod config;
 pub mod db;
 pub mod fake_provider;
+pub mod fights;
 pub mod http;
 pub mod logs;
 pub mod oauth;
 pub mod pg_proxy;
+
 pub mod ws;
 
 /// A port that was free a moment ago (the listener is dropped before returning).
