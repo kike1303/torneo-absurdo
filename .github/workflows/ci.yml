@@ -263,8 +263,8 @@ jobs:
         with:
           shared-key: ci
           save-if: false
-      - name: Server with dev-auth (dev profile)
-        run: cargo build -p server --features dev-auth --locked
+      - name: Server with dev-auth and dev-fights (dev profile)
+        run: cargo build -p server --features dev-auth,dev-fights --locked
       - name: The binary is the dev-auth one (RF-D9)
         run: node scripts/check-release-binary.mjs --expect-dev target/debug/server
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

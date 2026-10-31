@@ -84,6 +84,8 @@ check-rust:
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cargo clippy -p protocol --features ts --all-targets --locked -- -D warnings
     cargo clippy -p server --features dev-auth --all-targets --locked -- -D warnings
+    cargo clippy -p server --features dev-fights --all-targets --locked -- -D warnings
+    cargo clippy -p server --features dev-auth,dev-fights --all-targets --locked -- -D warnings
     {{just_executable()}} _check-engine
     {{just_executable()}} _check-wasm
     {{just_executable()}} db-up
@@ -103,8 +105,9 @@ test: _web-prepare
     {{just_executable()}} _test-rust
 
 # The Rust tests with Postgres (008 plan-b decision 15): the workspace without `dev-auth` (the
-# production cookie policy and routes), the server with it, then the A9 check of the Postgres
-# log of the run.
+# production cookie policy and routes), the server with it and `dev-fights`, the gate of `dev-fights`
+# with that feature alone (with both, the one of `dev-auth` comes first and hides it), then the A9
+# check of the Postgres log of the run.
 _test-rust:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -114,7 +117,8 @@ _test-rust:
     # clock, which drifts inside a VM (Colima, Docker Desktop).
     since="$(docker compose -f infra/compose.dev.yml exec -T postgres date -u +%Y-%m-%dT%H:%M:%SZ)"
     DATABASE_URL='{{test_db_url}}' cargo test --workspace --locked
-    DATABASE_URL='{{test_db_url}}' cargo test -p server --features dev-auth --locked
+    DATABASE_URL='{{test_db_url}}' cargo test -p server --features dev-auth,dev-fights --locked
+    DATABASE_URL='{{test_db_url}}' cargo test -p server --features dev-fights --locked --test startup dev_fights_needs_a_loopback_origin_and_bind_addr
     {{just_executable()}} _check-pg-log "$since"
 
 # ADR-0012 A9: the canary of tests/pg_log.rs never reaches the Postgres log, and the log of the
@@ -146,18 +150,19 @@ _check-pg-log since:
     fi
     echo "check-pg-log: ok"
 
-# Needs Docker (Postgres) and compiles the server with dev-auth (008 RF-D7, plan-d decision 10).
+# Needs Docker (Postgres) and compiles the server with dev-auth and dev-fights (008 RF-D7, plan-d
+# decision 10, 010 RF45).
 # _web-prepare runs once, in _e2e-run: a `just` sub-invocation does not share the dedupe.
 # Everything listens on 127.0.0.1 and the browsers go out only through the egress proxy.
 # End-to-end tests against `node build`, the server and an edge proxy (Chromium and WebKit)
 e2e: db-up
-    cargo build -p server --features dev-auth --locked
+    cargo build -p server --features dev-auth,dev-fights --locked
     E2E_DATABASE_URL='postgres://torneo:torneo_dev@127.0.0.1:{{pg_port}}/torneo_e2e' \
         E2E_SERVER_BIN='{{justfile_directory()}}/target/debug/server' \
         {{just_executable()}} _e2e-run
 
 # Without Docker (the CI job `e2e` runs it with its own Postgres service and the server binary
-# of `e2e-server`). Needs E2E_DATABASE_URL and an absolute E2E_SERVER_BIN built with dev-auth;
+# of `e2e-server`). Needs E2E_DATABASE_URL and an absolute E2E_SERVER_BIN built with both features;
 # E2E_APPLY_A9=1 applies the A9 parameters first (CI only, never on loopback).
 # The e2e with an existing server binary and Postgres: build, checks, torneo_e2e and Playwright
 _e2e-run: _web-prepare
@@ -169,7 +174,7 @@ _e2e-run: _web-prepare
         /*) ;;
         *) echo "E2E_SERVER_BIN must be an absolute path (Playwright runs in apps/web)" >&2; exit 1 ;;
     esac
-    # Fails fast if the binary is not the dev-auth one (008 RF-D9).
+    # Fails fast if the binary is not the one with both features (008 RF-D9, 010 RF45).
     node scripts/check-release-binary.mjs --expect-dev "$E2E_SERVER_BIN"
     # Once per run, here and never in playwright.config.ts (evaluated again in every worker).
     # node:crypto, because the Playwright image does not promise openssl.

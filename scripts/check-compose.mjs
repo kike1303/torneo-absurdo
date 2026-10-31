@@ -880,6 +880,13 @@ const FEATURE_FLAGS = [
   { flag: '-F', pattern: /(?:^|[\s"'=])-[A-Za-z]*F/ },
 ];
 
+/** What no instruction of the server Dockerfile may name (008 RF-D9, 010 RF45). */
+const DEV_WORDS = [
+  { word: 'dev-auth', rule: 'no-dev-auth' },
+  { word: 'dev-fights', rule: 'no-dev-fights' },
+  { word: 'FIGHT_SCRIPT_PATH', rule: 'no-fight-script' },
+];
+
 /**
  * 008 RF-D9: no instruction of the server Dockerfile selects a feature or names dev-auth.
  * Fails closed on what this reader does not model: an escape directive (it changes what `\`
@@ -904,8 +911,10 @@ function checkServerDockerfileFeatures(text, problems) {
         problems.push(`${at}: no-features: ${keyword} uses ${flag} (the release has no features)`);
       }
     }
-    if (args.includes('dev-auth')) {
-      problems.push(`${at}: no-dev-auth: ${keyword} names dev-auth (never in the release image)`);
+    for (const { word, rule } of DEV_WORDS) {
+      if (args.includes(word)) {
+        problems.push(`${at}: ${rule}: ${keyword} names ${word} (never in the release image)`);
+      }
     }
   }
 }
@@ -937,7 +946,8 @@ function checkServerFinalStage(text, problems) {
 
 const FEATURE_KEY = /^[A-Za-z0-9_-]+$/;
 const FEATURE_VALUE = /^"([A-Za-z0-9_?/:-]+)"$/;
-const DEV_AUTH_DEFINITION = 'dev-auth = []';
+/** The features of development (008 RF-D9, 010 RF45): each defined once, and empty. */
+const DEV_FEATURES = ['dev-auth', 'dev-fights'];
 
 /** The text of a TOML line before a `#` comment (the values read here never contain `#`). */
 const codeOf = (line) => line.replace(/#.*$/, '').trim();
@@ -1044,17 +1054,20 @@ function checkServerCargo(text, problems) {
 
   // The word counts everywhere, comments included: the strictest reading (devops, ronda 2).
   const lines = text.split('\n');
-  let definitions = 0;
-  lines.forEach((raw, index) => {
-    if (!raw.includes('dev-auth')) return;
-    if (raw.trim() === DEV_AUTH_DEFINITION && features.get('dev-auth')?.line === index + 1) {
-      definitions += 1;
-      return;
+  for (const feature of DEV_FEATURES) {
+    const definition = `${feature} = []`;
+    let definitions = 0;
+    lines.forEach((raw, index) => {
+      if (!raw.includes(feature)) return;
+      if (raw.trim() === definition && features.get(feature)?.line === index + 1) {
+        definitions += 1;
+        return;
+      }
+      problems.push(`${file}:${index + 1}: ${rule}: ${feature} outside its definition`);
+    });
+    if (definitions !== 1) {
+      problems.push(`${file}: ${rule}: [features] must define exactly ${definition}`);
     }
-    problems.push(`${file}:${index + 1}: ${rule}: dev-auth outside its definition`);
-  });
-  if (definitions !== 1) {
-    problems.push(`${file}: ${rule}: [features] must define exactly ${DEV_AUTH_DEFINITION}`);
   }
 
   // Transitive closure from default. `dep:x` names a dependency, not a feature, and `x/y` or
@@ -1066,17 +1079,18 @@ function checkServerCargo(text, problems) {
     visited.add(name);
     for (const value of features.get(name)?.values ?? []) {
       const through = via ?? (name === 'default' ? null : name);
-      const reach = (what) =>
+      const reach = (feature, what) =>
         problems.push(
-          `${file}: ${rule}: default reaches dev-auth${through ? ` through ${through}` : ''} (${what})`,
+          `${file}: ${rule}: default reaches ${feature}${through ? ` through ${through}` : ''} (${what})`,
         );
       if (value.startsWith('dep:')) continue;
       const slash = value.indexOf('/');
       if (slash !== -1) {
-        if (value.slice(slash + 1) === 'dev-auth') reach(value);
+        const feature = value.slice(slash + 1);
+        if (DEV_FEATURES.includes(feature)) reach(feature, value);
         continue;
       }
-      if (value === 'dev-auth') reach(value);
+      if (DEV_FEATURES.includes(value)) reach(value, value);
       else if (features.has(value)) visit(value, through ?? value);
       else
         problems.push(
