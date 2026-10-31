@@ -70,7 +70,7 @@ Architect aceptó estos puntos y están en la ["Enmienda (fase A, 2026-10-31)"](
 | `apps/web/src/lib/features/auth/{codes,error-text}.ts`, `apps/web/messages/{en,es}.json` | DP-9 |
 | `Cargo.toml`, `Cargo.lock`, `apps/server/Cargo.toml` | `engine` y `content` normales; `engine-wasm` en `[workspace.dependencies]` y como dev-dependency. Ninguna versión nueva |
 | `apps/server/migrations/20261031000000_fights.sql` | Nuevo: tablas, restricciones y triggers |
-| `apps/server/src/fights/mod.rs` | Nuevo: constantes (`RULESET_VERSION`, 3500, 5000, 10 s), `FightSettings`, `FightsShared`, `spawn` y hex |
+| `apps/server/src/fights/mod.rs` | Nuevo: constantes (`RULESET_VERSION`, 3500, 5000, 10 s), `FightSettings`, `FightsShared` y hex (el arranque está en `runner::run`) |
 | `apps/server/src/fights/clock.rs` | Nuevo: `FightClock` (`Real`, `Manual`) con pared, monotónico y espera despertable |
 | `apps/server/src/fights/snapshot.rs` | Nuevo: `snapshot_sha256`, `FightSnapshot::from_row` y `max_hp` |
 | `apps/server/src/fights/sealed.rs` | Nuevo: `SealedSeed`, `ClosedWindow`, `SealedLog`, `FinalLog`, `events_of_settled`; único SQL de `fight_secrets`; doctests. Sin `tracing` |
