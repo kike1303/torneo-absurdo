@@ -562,3 +562,59 @@ async fn a_cancelled_fight_gives_back_its_pair_before_the_next_announcement() {
     assert_eq!((next.slug_a, next.slug_b), (b.slug, a.slug));
     assert_eq!(next.matchup_round, 1);
 }
+
+/// RF20: a fight whose opening keeps failing may still lose its window, so its pair is not free until
+/// then: nothing is announced behind it, and when it is cancelled its pair is the next one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_fight_that_cannot_open_keeps_its_pair_until_it_is_cancelled() {
+    let (_db, pool) = database().await;
+    let content = f::content_with("failing-open", 2);
+    let ruleset = engine::Ruleset::for_version(1).unwrap();
+    let characters = content::load_roster(&content, &ruleset).unwrap();
+    let (a, b) = (characters[0].spec().clone(), characters[1].spec().clone());
+    let roster = server::fights::matchup::roster_sha256(&[a.slug.clone(), b.slug.clone()]).to_vec();
+    let same_roster = |raw: &mut f::RawFight| raw.roster_sha256.clone_from(&roster);
+
+    let first = f::announce_with(&pool, T0 - 2 * CADENCE, &a, &b, same_roster).await;
+    f::open_with(&pool, first, &[5; 32], T0 - 2 * CADENCE).await;
+    f::close_by_sql(&pool, first, T0 - 2 * CADENCE + WINDOW).await;
+    let mut tx = pool.begin().await.unwrap();
+    f::void_by_sql(&mut tx, first, &[5; 32], "engine_error").await;
+    tx.commit().await.unwrap();
+    // Its opening fails every time: a planted seed collides with the new one.
+    let failing = f::announce_with(&pool, T0 - CADENCE, &b, &a, same_roster).await;
+    sqlx::query("INSERT INTO fight_secrets (fight_id, seed) VALUES ($1, $2)")
+        .bind(failing)
+        .bind([6_u8; 32].as_slice())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (settings, clock) = f::settings_at(T0 - CADENCE);
+    let shared = Arc::new(FightsShared::new(settings.clock.clone()));
+    let _runner = f::spawn_runner(&pool, &shared, f::config_on(&content), settings);
+    let rows = || async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM fights")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    wait_for("the first evaluation", || async {
+        shared.current().halted == Some(false)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(row(&pool, failing).await.state, FightState::Scheduled);
+    assert_eq!(rows().await, 2, "announced with its pair still undecided");
+
+    clock.set(T0 - CADENCE + WINDOW);
+    wait_state(&pool, failing, FightState::Settled).await;
+    wait_for("the announcement", || async { rows().await == 3 }).await;
+    let id: i32 = sqlx::query_scalar("SELECT max(id) FROM fights")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let next = row(&pool, id).await;
+    assert_eq!((next.slug_a, next.slug_b), (b.slug, a.slug));
+    assert_eq!(next.matchup_round, 1);
+}

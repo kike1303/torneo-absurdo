@@ -328,27 +328,31 @@ fn only_the_store_makes_a_closed_window() {
     }
 }
 
-/// RF16 (amendment M5): `Action::Cancel` is only built by the decision, and the store only cancels
-/// in the arm of the runner that takes it, through its attempts.
+/// RF16 (amendment M5): `Action::Cancel` is only built by the decision, and a cancellation is only
+/// written by an attempt of the runner, through `sealed::cancel_fight`, the only caller of the store.
 #[test]
 fn a_cancel_only_comes_from_next_action() {
-    let (state, runner) = (
+    let (state, runner, sealed) = (
         src().join("fights/state.rs"),
         src().join("fights/runner.rs"),
+        src().join("fights/sealed.rs"),
     );
     for (path, text) in sources() {
         let code = strip_comments(&text);
         if path != state && path != runner {
             assert!(!code.contains("Action::Cancel"), "{}", path.display());
         }
-        if path != runner {
+        if path != sealed {
             assert!(!code.contains("store::cancel"), "{}", path.display());
+        }
+        if path != runner {
+            assert!(!code.contains("sealed::cancel_fight"), "{}", path.display());
         }
     }
     let code = strip_comments(&std::fs::read_to_string(runner).unwrap());
     assert_eq!(code.matches("Action::Cancel(reason) =>").count(), 1);
     assert_eq!(code.matches("Action::Cancel").count(), 1);
-    assert_eq!(code.matches("store::cancel").count(), 1);
+    assert_eq!(code.matches("sealed::cancel_fight").count(), 1);
 }
 
 /// RF16 and RF59: nothing in the server writes `voided`, and the runner does not even name it.

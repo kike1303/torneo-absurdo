@@ -114,7 +114,7 @@
 //! ```
 
 use engine::{FightLog, Seed, canonical_json, simulate};
-use protocol::{FightEvent, FightFinal};
+use protocol::{CancelReason, FightEvent, FightFinal};
 use rand_core::{OsRng, TryRngCore};
 use sha2::{Digest, Sha256};
 use sqlx::{PgConnection, Row};
@@ -397,6 +397,28 @@ pub async fn settle_decided(
     }
     sqlx::query("DELETE FROM fight_secrets WHERE fight_id = $1")
         .bind(log.id)
+        .execute(&mut *conn)
+        .await?;
+    Ok(true)
+}
+
+/// The writes of a cancelled final, in the caller's transaction (RF19). A cancelled fight never has
+/// a seed: if one was planted in its table, it goes too, since nobody committed to it. `Ok(false)` if
+/// the row is no longer `scheduled`.
+///
+/// # Errors
+/// The database error, and the caller's transaction reverts.
+pub async fn cancel_fight(
+    conn: &mut PgConnection,
+    id: i32,
+    reason: CancelReason,
+    at_ms: i64,
+) -> Result<bool, sqlx::Error> {
+    if !store::cancel(&mut *conn, id, reason, at_ms).await? {
+        return Ok(false);
+    }
+    sqlx::query("DELETE FROM fight_secrets WHERE fight_id = $1")
+        .bind(id)
         .execute(&mut *conn)
         .await?;
     Ok(true)

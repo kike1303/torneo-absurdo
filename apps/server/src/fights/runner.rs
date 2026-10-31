@@ -121,6 +121,13 @@ struct Settling {
     backoff_ms: i64,
 }
 
+/// A row whose step failed with an error of the database.
+struct RowFailure {
+    since: i64,
+    /// Its state then: reaching another one is what ends the failure.
+    state: FightState,
+}
+
 /// A fight whose log cannot be rebuilt (RF16).
 struct SafeStop {
     next_retry: i64,
@@ -141,7 +148,9 @@ struct Runner {
     safe_stops: BTreeMap<i32, SafeStop>,
     /// The rows whose last step failed with an error of the database, and since when. They do not
     /// stop the other rows, and they are tried again at the backoff of the database.
-    row_failures: BTreeMap<i32, i64>,
+    row_failures: BTreeMap<i32, RowFailure>,
+    /// Since when the passes keep aborting, with the lock alive.
+    passes_failing_since: Option<i64>,
     /// The result of `FightSnapshot::from_row` of each row, until the next reread: a row repaired
     /// by hand has to be seen (only with its guard off, but that is the way out of a corrupt one).
     snapshot_errors: BTreeMap<i32, Option<&'static str>>,
@@ -174,6 +183,7 @@ impl Runner {
             finals: BTreeMap::new(),
             safe_stops: BTreeMap::new(),
             row_failures: BTreeMap::new(),
+            passes_failing_since: None,
             snapshot_errors: BTreeMap::new(),
             snapshot_logged: BTreeMap::new(),
             tasks: JoinSet::new(),
@@ -236,6 +246,7 @@ impl Runner {
         loop {
             // A hung database must not hide a lost lock, and a pass cut short is safe: an open
             // transaction reverts, and the rows are read again.
+            let started = self.now();
             let pass =
                 tokio::time::timeout(Duration::from_millis(timings.pass_timeout_ms), self.pass());
             let passed = tokio::select! {
@@ -267,6 +278,13 @@ impl Runner {
                         tracing::warn!(event = "fights.db_unavailable", error_kind = kind);
                     }
                     self.dirty = true;
+                    // A pass that aborts publishes nothing by itself. What it reaches is a halt, as
+                    // a failing settlement does, and it says so from memory.
+                    self.passes_failing_since.get_or_insert(started);
+                    if self.halted() {
+                        self.shared.initial_evaluation_done();
+                    }
+                    self.publish();
                     let retry = Duration::from_millis(db_backoff);
                     db_backoff = db_backoff.saturating_mul(2).min(timings.db_backoff_max_ms);
                     (i64::MAX, Some(retry))
@@ -291,6 +309,16 @@ impl Runner {
     }
 
     fn halted(&self) -> bool {
+        self.halted_in_pass() || self.passes_have_been_failing()
+    }
+
+    /// What a pass that is running goes by: if it got this far, passes are not failing anymore.
+    fn halted_in_pass(&self) -> bool {
+        self.halted_by_a_fight() || self.halted_by_a_failing_row()
+    }
+
+    /// Every cause except the failures of the database.
+    fn halted_by_a_fight(&self) -> bool {
         if !self.safe_stops.is_empty() {
             return true;
         }
@@ -306,23 +334,42 @@ impl Runner {
         }
         let now = self.now();
         let halt_after = self.settings.timings.settle_halt_ms;
-        let settlement = self.finals.values().any(|settling| {
+        self.finals.values().any(|settling| {
             settling
                 .first_failed_at
                 .is_some_and(|first| now.saturating_sub(first) >= halt_after)
-        });
-        settlement
-            || self
-                .commit_row_failures()
-                .any(|first| now.saturating_sub(first) >= halt_after)
+        })
+    }
+
+    fn halted_by_a_failing_row(&self) -> bool {
+        let now = self.now();
+        let halt_after = self.settings.timings.settle_halt_ms;
+        self.commit_row_failures()
+            .any(|first| now.saturating_sub(first) >= halt_after)
+    }
+
+    fn passes_have_been_failing(&self) -> bool {
+        let halt_after = self.settings.timings.settle_halt_ms;
+        self.passes_failing_since
+            .is_some_and(|first| self.now().saturating_sub(first) >= halt_after)
+    }
+
+    /// The halt a row has to respect. One that is failing ignores what failing rows cause, its own
+    /// or another's: they have to keep trying, or the halt they cause would never end.
+    fn halted_for(&self, id: i32) -> bool {
+        if self.row_failures.contains_key(&id) {
+            self.halted_by_a_fight()
+        } else {
+            self.halted_in_pass()
+        }
     }
 
     /// Since when each failing row with a commit has been failing. One without a commit never halts
     /// anything: it has no seed nor bets, and it ends cancelled when it loses its window.
     fn commit_row_failures(&self) -> impl Iterator<Item = i64> + '_ {
-        self.row_failures.iter().filter_map(|(id, first)| {
+        self.row_failures.iter().filter_map(|(id, failure)| {
             let row = self.rows.get(id)?;
-            (row.state != FightState::Scheduled).then_some(*first)
+            (row.state != FightState::Scheduled).then_some(failure.since)
         })
     }
 
@@ -345,7 +392,7 @@ impl Runner {
         for (_, id) in order {
             match self.step(id, now).await {
                 Ok(deadline) => {
-                    self.row_failures.remove(&id);
+                    self.row_recovered(id);
                     if let Some(deadline) = deadline {
                         wake = wake.min(deadline);
                     }
@@ -360,22 +407,27 @@ impl Runner {
         self.spawn_attempts(now, &mut wake);
 
         // After the transitions: a fight of this hour that is cancelled does not leave a later row
-        // ahead of it, so its pair is not lost (RF20). A cancellation runs in its own task, and its
-        // pair counts as used until its `COMMIT`, so nothing is announced while one is pending; its
-        // end wakes this loop. No rows during a halt (RF16).
+        // ahead of it, so its pair is not lost (RF20). A row past its hour and still scheduled is
+        // being cancelled, in its own task, or cannot open and may still lose its window. Its pair
+        // counts as used until then, so nothing is announced behind it, and the end of its
+        // cancellation wakes this loop. No rows during a halt (RF16).
         let cadence = self.config.cadence_ms;
         let target = target_slot(now, cadence);
-        let cancelling = self
-            .finals
+        let undecided = self
+            .rows
             .values()
-            .any(|settling| matches!(settling.kind, SettleKind::Cancelled(_)));
-        if !self.halted() && !cancelling && !self.rows.values().any(|row| row.opens_at == target) {
+            .any(|row| row.state == FightState::Scheduled && row.opens_at <= now);
+        if !self.halted_in_pass()
+            && !undecided
+            && !self.rows.values().any(|row| row.opens_at == target)
+        {
             self.announce(now).await?;
         }
         wake = wake.min(target);
         if let Some(until_halt) = self.next_halt_check(now) {
             wake = wake.min(until_halt);
         }
+        self.passes_failing_since = None;
         self.publish();
         Ok(wake)
     }
@@ -400,8 +452,27 @@ impl Runner {
         } else {
             tracing::warn!(event = "fights.row_failed", error_kind = kind);
         }
-        self.row_failures.entry(id).or_insert(now);
+        let state = self.rows.get(&id).map(|row| row.state);
+        self.row_failures.entry(id).or_insert(RowFailure {
+            since: now,
+            state: state.unwrap_or(FightState::Scheduled),
+        });
         self.dirty = true;
+    }
+
+    /// A step without an error ends the failure of a row, unless the row only sat out a halt: it
+    /// tried nothing, so that says nothing. Reaching another state always does.
+    fn row_recovered(&mut self, id: i32) {
+        let Some(failure) = self.row_failures.get(&id) else {
+            return;
+        };
+        let moved = self
+            .rows
+            .get(&id)
+            .is_none_or(|row| row.state != failure.state);
+        if moved || !self.halted_by_a_fight() {
+            self.row_failures.remove(&id);
+        }
     }
 
     async fn reload(&mut self, now: i64) -> Result<(), sqlx::Error> {
@@ -479,7 +550,7 @@ impl Runner {
                     .rows
                     .values()
                     .any(|other| other.id != id && other.state == FightState::Live),
-                halted: self.halted(),
+                halted: self.halted_for(id),
                 log_ready: self.sealed.contains_key(&id) || self.emissions.contains_key(&id),
             };
             let closes_at = row.closes_at;
@@ -819,7 +890,7 @@ impl Attempt {
                 final_log.final_result(),
             ),
             SettleKind::Cancelled(reason) => (
-                store::cancel(&mut tx, self.id, *reason, self.at).await?,
+                sealed::cancel_fight(&mut tx, self.id, *reason, self.at).await?,
                 protocol::FightFinal::Cancelled { reason: *reason },
             ),
         };

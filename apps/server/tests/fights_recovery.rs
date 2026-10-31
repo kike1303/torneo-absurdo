@@ -368,50 +368,232 @@ async fn a_scheduled_row_that_keeps_failing_does_not_stop_the_others() {
             reason: protocol::CancelReason::MissedWindow
         })
     );
+    // The seed nobody committed to does not stay behind.
+    assert_eq!(f::secrets_of(&pool, bad).await, 0);
 }
 
-/// With a commit published, a row that keeps failing does not stop the others either, and after the
-/// time of a failed settlement it halts the new ones (RF16). When it is fixed, it all goes on.
+/// A database that refuses the updates of `when`, whatever the server tries.
+async fn refuse(pool: &PgPool, when: &str) {
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+        "CREATE FUNCTION test_refuse() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN \
+         RAISE EXCEPTION USING ERRCODE = 'TA999', MESSAGE = 'test'; END; $$; \
+         CREATE TRIGGER test_refuse BEFORE UPDATE ON fights FOR EACH ROW \
+         WHEN ({when}) EXECUTE FUNCTION test_refuse();"
+    )))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn allow(pool: &PgPool) {
+    sqlx::raw_sql("DROP TRIGGER test_refuse ON fights")
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// What every edge of a row with a commit owes: with the clock going by it reaches the halt and stays
+/// there, the row does not move, and the bets of the others close. When the database lets it, the
+/// row goes on by itself and the halt ends.
+async fn assert_halts_and_recovers(
+    pool: &PgPool,
+    shared: &Arc<FightsShared>,
+    clock: &server::fights::FightClock,
+    id: i32,
+    state: FightState,
+    next: FightState,
+) {
+    wait_for("the halt", || async {
+        clock.advance(2000);
+        shared.current().halted == Some(true)
+    })
+    .await;
+    for _ in 0..20 {
+        clock.advance(2000);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(shared.current().halted, Some(true), "the halt did not last");
+        assert!(!shared.accepts_bets());
+        assert_eq!(row(pool, id).await.state, state);
+    }
+    allow(pool).await;
+    f::wait_state_advancing(pool, clock, id, next).await;
+    wait_for("the end of the halt", || async {
+        clock.advance(2000);
+        shared.current().halted == Some(false)
+    })
+    .await;
+}
+
+/// With a commit published, a row that keeps failing does not stop the others, and after the time of
+/// a failed settlement it halts the new ones (RF16). `betting_open` to `betting_closed`, starting with
+/// the failure already there at startup: bets stay out until it knows.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_row_with_a_commit_that_keeps_failing_halts_after_a_minute() {
+async fn a_row_that_cannot_close_halts_after_a_minute() {
     let db = TestDb::create().await;
     let pool = db.migrated_pool().await;
     let vector = Vector::of(KO);
     let bad = f::open_vector(&pool, T0, &vector).await;
     let good = f::open_vector(&pool, T0 + 1000, &vector).await;
-    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
-        "CREATE FUNCTION test_refuse() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN \
-         RAISE EXCEPTION USING ERRCODE = 'TA999', MESSAGE = 'test'; END; $$; \
-         CREATE TRIGGER test_refuse BEFORE UPDATE ON fights FOR EACH ROW \
-         WHEN (OLD.id = {bad}) EXECUTE FUNCTION test_refuse();"
-    )))
-    .execute(&pool)
-    .await
-    .unwrap();
+    refuse(&pool, &format!("OLD.id = {bad}")).await;
     let (good_closes, _) = f::hours(T0 + 1000);
     let (settings, clock) = f::settings_at(good_closes);
     let (shared, _runner) = f::start(&pool, &settings);
 
     wait_state(&pool, good, FightState::BettingClosed).await;
     assert_eq!(row(&pool, bad).await.state, FightState::BettingOpen);
-    // Bets stay out while the first evaluation has a row with a commit that it could not finish.
     assert_eq!(shared.current().halted, None);
-    clock.advance(61_000);
-    wait_for("the halt", || async {
-        // Past the minute, it knows enough to say so.
-        shared.current().halted == Some(true) || {
-            clock.advance(1000);
-            false
-        }
-    })
+    assert_halts_and_recovers(
+        &pool,
+        &shared,
+        &clock,
+        bad,
+        FightState::BettingOpen,
+        FightState::BettingClosed,
+    )
     .await;
+}
 
-    sqlx::raw_sql("DROP TRIGGER test_refuse ON fights")
-        .execute(&pool)
+/// The same edge in the middle of a run: until the minute it says `false`, because a row that fails
+/// once must not close the bets of the others (plan, "Una fila que falla").
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_row_that_stops_closing_mid_run_halts_after_a_minute() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let vector = Vector::of(KO);
+    let bad = f::open_vector(&pool, T0, &vector).await;
+    let (settings, clock) = f::settings_at(T0 + 1);
+    let (shared, _runner) = f::start(&pool, &settings);
+    wait_halted(&shared, false).await;
+    refuse(&pool, "NEW.state = 'betting_closed'").await;
+    clock.set(T0 + WINDOW);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(shared.current().halted, Some(false));
+    assert_halts_and_recovers(
+        &pool,
+        &shared,
+        &clock,
+        bad,
+        FightState::BettingOpen,
+        FightState::BettingClosed,
+    )
+    .await;
+}
+
+/// `betting_closed` to `live`. A halt makes a closed fight wait, and that wait must not read as its
+/// failure being over: the row that causes the halt keeps trying, or it would never end.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_row_that_cannot_go_live_halts_after_a_minute() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let vector = Vector::of(KO);
+    let bad = closed_fight(&pool, &vector).await;
+    // Another window, in its time: it stops accepting bets at the halt.
+    let (_, live_at) = f::hours(T0);
+    let other = f::open_vector(&pool, live_at, &vector).await;
+    refuse(&pool, "NEW.state = 'live'").await;
+    let (settings, clock) = f::settings_at(live_at);
+    let (shared, _runner) = f::start(&pool, &settings);
+    assert_halts_and_recovers(
+        &pool,
+        &shared,
+        &clock,
+        bad,
+        FightState::BettingClosed,
+        FightState::Live,
+    )
+    .await;
+    assert_ne!(row(&pool, other).await.state, FightState::Scheduled);
+}
+
+/// Two rows that cannot go live: each one's failure must not stop the other from trying.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn two_rows_that_cannot_go_live_both_recover() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let vector = Vector::of(KO);
+    let first = closed_fight(&pool, &vector).await;
+    let second = f::open_vector(&pool, T0 + 1000, &vector).await;
+    f::close_by_sql(&pool, second, T0 + 1000 + WINDOW).await;
+    refuse(&pool, "NEW.state = 'live'").await;
+    let (_, live_at) = f::hours(T0 + 1000);
+    let (settings, clock) = f::settings_at(live_at);
+    let (shared, _runner) = f::start(&pool, &settings);
+    assert_halts_and_recovers(
+        &pool,
+        &shared,
+        &clock,
+        first,
+        FightState::BettingClosed,
+        FightState::Live,
+    )
+    .await;
+    assert!(matches!(
+        row(&pool, second).await.state,
+        FightState::BettingClosed | FightState::Live | FightState::Settled
+    ));
+    f::wait_state_advancing(&pool, &clock, second, FightState::Settled).await;
+}
+
+/// `live` to `settled`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_row_that_cannot_settle_halts_after_a_minute() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let vector = Vector::of(KO);
+    let bad = closed_fight(&pool, &vector).await;
+    let (_, live_at) = f::hours(T0);
+    f::live_by_sql(&pool, bad, live_at).await;
+    refuse(&pool, "NEW.state = 'settled'").await;
+    let (settings, clock) = f::settings_at(live_at + 100_000);
+    let (shared, _runner) = f::start(&pool, &settings);
+    assert_halts_and_recovers(
+        &pool,
+        &shared,
+        &clock,
+        bad,
+        FightState::Live,
+        FightState::Settled,
+    )
+    .await;
+    assert_eq!(f::secrets_of(&pool, bad).await, 0);
+}
+
+/// A pass that keeps aborting with the lock alive reaches the halt too: here a table lock, which the
+/// heartbeat of the lock does not notice. When it ends, so does the halt.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn passes_that_keep_aborting_reach_the_halt() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let vector = Vector::of(KO);
+    f::open_vector(&pool, T0, &vector).await;
+    let (settings, clock) = f::settings_at(T0 + 1);
+    let settings = FightSettings {
+        timings: server::fights::RunnerTimings {
+            pass_timeout_ms: 200,
+            ..f::quick_timings()
+        },
+        ..settings
+    };
+    let (shared, _runner) = f::start(&pool, &settings);
+    wait_halted(&shared, false).await;
+
+    let mut locked = pool.begin().await.unwrap();
+    sqlx::query("LOCK TABLE fights IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *locked)
         .await
         .unwrap();
-    wait_state(&pool, bad, FightState::BettingClosed).await;
-    wait_halted(&shared, false).await;
+    wait_for("the halt", || async {
+        clock.advance(5000);
+        shared.current().halted == Some(true)
+    })
+    .await;
+    assert!(!shared.accepts_bets());
+    locked.rollback().await.unwrap();
+    wait_for("the end of the halt", || async {
+        clock.advance(1000);
+        shared.current().halted == Some(false)
+    })
+    .await;
 }
 
 /// A snapshot repaired by hand is seen in the next reread: the halt does not need a restart.
