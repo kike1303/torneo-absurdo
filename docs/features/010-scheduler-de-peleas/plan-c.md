@@ -243,7 +243,7 @@ _Ninguna está aplicada. La spec no se edita desde este plan._
    - Tras un corte largo, `extend` dispara en ráfaga los cues atrasados, así que los efectos que dependan de `onCue` deben tolerarlo.
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+1. **Decisión 8, `hp` y coreografía.** El plan decía que `hp` se recalculaba entero y que `choreography.ts` no cambiaba, y con eso `prepareSceneFrom` daba p50 de 0,66 a 0,68 ms en `bench-prepare.ts`, justo en el umbral de 0,67 ms. Tres cambios, sin efecto en el resultado (los dos oráculos y los snapshots siguen iguales): los `HpStep` de los cues fijos se reutilizan, `afterAction` usa búsqueda binaria en vez de `windups.find`, y `curX` ya no copia el segmento. Queda en p50 de 0,57 a 0,58 ms.
 
 ## Enmienda propuesta a la spec
 _Redactada por el architect a partir de las desviaciones 1 a 5. **No está aplicada:** `spec.md` recibe en paralelo una enmienda de la fase A en `ta-13-fight-runner`, así que la aplica el cierre de esta fase, cuando las ramas se junten. Cada entrada reemplaza completo el texto citado. El APPROVE de abajo cubre el plan del frontend-engineer, no esta sección, porque el architect no aprueba lo que escribe: RF50 y el RNF cambian una regla o su prueba y los confirma product-owner al aplicarla. RF46, RF47 y la tabla solo precisan lo que ya era cierto._

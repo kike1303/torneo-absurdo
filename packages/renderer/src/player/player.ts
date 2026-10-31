@@ -2,7 +2,12 @@
 // from `options.clock`, frames from `Stage.onFrame`, and the scene from `sceneAt`.
 import { validateManifest } from '../manifest/validate.ts';
 import type { SpriteManifest } from '../manifest/types.ts';
-import { prepareScene, reachedEnd, type PreparedScene } from '../scene/prepare.ts';
+import {
+  prepareScene,
+  prepareSceneFrom,
+  reachedEnd,
+  type PreparedScene,
+} from '../scene/prepare.ts';
 import { sceneAt } from '../scene/scene-at.ts';
 import type { Scene } from '../scene/types.ts';
 import { EMPTY_STATS, createFrameRecorder } from '../stats/frame-stats.ts';
@@ -197,7 +202,8 @@ export function createPlayer(options: RendererOptions, stage: Stage): RendererHa
       if (!result.ok || !continues(fight.timeline, result.timeline)) {
         throw new RendererError('timeline_invalid');
       }
-      const next = fight.installed ? prepareScene(result.timeline, fight.manifests) : null;
+      const next =
+        fight.installed && prepared !== null ? prepareSceneFrom(prepared, result.timeline) : null;
       fight.timeline = result.timeline;
       if (next !== null) prepared = next;
     },

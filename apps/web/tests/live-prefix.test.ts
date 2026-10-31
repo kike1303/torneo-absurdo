@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { validateManifest } from '@torneo/renderer/manifest';
-import { prepareScene, sceneAt, type PreparedScene } from '@torneo/renderer/scene';
+import {
+  prepareScene,
+  prepareSceneFrom,
+  sceneAt,
+  type PreparedScene,
+} from '@torneo/renderer/scene';
 import { validateTimeline, type Timeline } from '@torneo/renderer/timeline';
 import dummyA from '@torneo/renderer/placeholders/dummy_a/manifest.json';
 import dummyB from '@torneo/renderer/placeholders/dummy_b/manifest.json';
@@ -69,6 +74,23 @@ function instants(tMax: number, sweep: boolean): number[] {
 const sceneJson = (prepared: PreparedScene, t: number, reducedMotion: boolean) =>
   JSON.stringify(sceneAt(prepared, t, { reducedMotion }));
 
+// 010 plan-c decision 8. These do not test the limit of what is reused: the placeholders are too
+// short for it, and packages/renderer/test/prepare-from.test.ts does that.
+describe('prepareSceneFrom over the goldens', () => {
+  it.each(NAMES)('%s: the same as prepareScene, one batch and several at a time', (name) => {
+    const times = [...new Set(readGoldenLog(name).events.map((event) => event.t))];
+    for (const batch of [1, 5]) {
+      let previous = prepareScene(prefixTimeline(name, 0), MANIFESTS);
+      for (let i = batch; i < times.length + batch; i += batch) {
+        const c = times[Math.min(i, times.length - 1)] as number;
+        const timeline = prefixTimeline(name, c);
+        previous = prepareSceneFrom(previous, timeline);
+        expect(previous).toStrictEqual(prepareScene(timeline, MANIFESTS));
+      }
+    }
+  });
+});
+
 describe('prefixes of a fight (010 RF49)', () => {
   it.each(NAMES)('%s: same scene as the whole log for t ≤ c − 3500', (name) => {
     const full = prepareScene(fullTimeline(name), MANIFESTS);
@@ -76,7 +98,9 @@ describe('prefixes of a fight (010 RF49)', () => {
     cutsOf(name).forEach((c, index) => {
       const tMax = c - PLAYBACK_DELAY_MS;
       if (tMax < 0) return;
-      const prefix = prepareScene(prefixTimeline(name, c), MANIFESTS);
+      const previous = prepareScene(prefixTimeline(name, Math.max(0, c - 2000)), MANIFESTS);
+      // The way the player gets it: from the scene of an earlier batch.
+      const prefix = prepareSceneFrom(previous, prefixTimeline(name, c));
       for (const t of instants(tMax, index % SWEEP_EVERY === 0)) {
         for (const reducedMotion of [false, true]) {
           checks++;

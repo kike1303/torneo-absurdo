@@ -18,6 +18,7 @@ export {
   LOOKBACK_MS,
   cueWindow,
   prepareScene,
+  prepareSceneFrom,
   type HpStep,
   type ImpactKind,
   type PreparedCue,

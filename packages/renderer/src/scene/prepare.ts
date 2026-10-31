@@ -1,5 +1,7 @@
 // prepareScene: one pass per `load` that builds immutable indices, so `sceneAt` only does
-// binary searches and looks at a bounded window of cues (plan-a1 decision 2).
+// binary searches and looks at a bounded window of cues (plan-a1 decision 2). `prepareSceneFrom`
+// gives the same result for each `extend` of a fight in progress, reusing what cannot change (010
+// plan-c decision 8).
 import { CHANNEL, hashSeed } from '../fx/hash.ts';
 import { admitFlashes } from '../fx/flash.ts';
 import { resolveAnimation } from '../manifest/resolve.ts';
@@ -185,9 +187,51 @@ export function prepareScene(timeline: Timeline, manifests: ManifestsById): Prep
     if (manifest === undefined) throw new Error('timeline.unknown_asset');
     return manifest;
   };
-  const manifestsBySide = { a: manifestOf('a'), b: manifestOf('b') };
-  const timings = { a: timingTable(manifestsBySide.a), b: timingTable(manifestsBySide.b) };
+  const a = manifestOf('a');
+  const b = manifestOf('b');
+  return assemble(
+    timeline,
+    { a: timingTable(a), b: timingTable(b) },
+    { a: a.scale ?? 1, b: b.scale ?? 1 },
+    null,
+  );
+}
+
+/**
+ * The same result as `prepareScene(timeline, manifests)`, for a `timeline` with the same fighters
+ * and whose cues start with those of `previous` (the caller checks it, RF47). Reuses the timing
+ * tables and the `PreparedCue` that no new cue can change: those of `cuesFixedBy`.
+ */
+export function prepareSceneFrom(previous: PreparedScene, timeline: Timeline): PreparedScene {
+  return assemble(
+    timeline,
+    { a: previous.fighters.a.timing, b: previous.fighters.b.timing },
+    { a: previous.fighters.a.scale, b: previous.fighters.b.scale },
+    previous,
+  );
+}
+
+/**
+ * How many leading cues of `previous` no later cue can change. A new cue has `at_ms ≥ last`, so
+ * its windup starts at `≥ last − MAX_WINDUP_MS`; the only reading of the future is the return to
+ * the mark, which looks RETURN_MS ahead (`afterAction`). Before H nothing changes, and a segment
+ * ends by `at_ms + LOOKBACK_MS` (see `Segment.owner`).
+ */
+function cuesFixedBy(previous: PreparedScene): number {
+  const last = previous.cueTimes.at(-1);
+  if (last === undefined) return 0;
+  const h = last - MAX_WINDUP_MS - RETURN_MS;
+  return lowerBound(previous.cueTimes, h - LOOKBACK_MS);
+}
+
+function assemble(
+  timeline: Timeline,
+  timings: Readonly<Record<Side, TimingTable>>,
+  scales: Readonly<Record<Side, number>>,
+  previous: PreparedScene | null,
+): PreparedScene {
   const choreography = buildChoreography(timeline, timings);
+  const fixed = previous === null ? 0 : cuesFixedBy(previous);
 
   const hp: Record<Side, HpStep[]> = { a: [], b: [] };
   const current: Record<Side, number> = {
@@ -200,7 +244,9 @@ export function prepareScene(timeline: Timeline, manifests: ManifestsById): Prep
   timeline.cues.forEach((cue, index) => {
     if (cue.type !== 'strike') return;
     const target = otherSide(cue.actor);
-    hp[target].push({ at: cue.at_ms, before: current[target], after: cue.target_hp });
+    // Each side's steps follow the cues, so a fixed cue has its step at the same place as before.
+    const fixedStep = index < fixed ? previous?.fighters[target].hp[hp[target].length] : undefined;
+    hp[target].push(fixedStep ?? { at: cue.at_ms, before: current[target], after: cue.target_hp });
     current[target] = cue.target_hp;
     if (cue.result === 'hit' || cue.result === 'crit') {
       flashCandidates.push(cue.at_ms);
@@ -220,9 +266,22 @@ export function prepareScene(timeline: Timeline, manifests: ManifestsById): Prep
   let draw: PreparedScene['draw'] = null;
 
   const cues: PreparedCue[] = timeline.cues.map((cue, index) => {
+    if (cue.type === 'strike' && firstStrikeAt === null) {
+      firstStrikeAt = cue.at_ms;
+    } else if (cue.type === 'ko' && ko === null) {
+      ko = { at: cue.at_ms, fighter: cue.fighter };
+    } else if (cue.type === 'win' && win === null) {
+      win = { at: cue.at_ms, fighter: cue.fighter };
+    } else if (cue.type === 'time_up' && timeUp === null) {
+      timeUp = { at: cue.at_ms };
+    } else if (cue.type === 'draw' && draw === null) {
+      draw = { at: cue.at_ms };
+    }
+    const reused = index < fixed ? previous?.cues[index] : undefined;
+    if (reused !== undefined) return reused;
+
     let strike: PreparedStrike | null = null;
     if (cue.type === 'strike') {
-      if (firstStrikeAt === null) firstStrikeAt = cue.at_ms;
       const impact: Impact = choreography.impacts[index] ?? {
         attackerX: MARK_X[cue.actor],
         defenderX: MARK_X[otherSide(cue.actor)],
@@ -247,14 +306,6 @@ export function prepareScene(timeline: Timeline, manifests: ManifestsById): Prep
           numbers: hashSeed(index, CHANNEL.NUMBERS),
         },
       };
-    } else if (cue.type === 'ko' && ko === null) {
-      ko = { at: cue.at_ms, fighter: cue.fighter };
-    } else if (cue.type === 'win' && win === null) {
-      win = { at: cue.at_ms, fighter: cue.fighter };
-    } else if (cue.type === 'time_up' && timeUp === null) {
-      timeUp = { at: cue.at_ms };
-    } else if (cue.type === 'draw' && draw === null) {
-      draw = { at: cue.at_ms };
     }
     return {
       index,
@@ -269,7 +320,7 @@ export function prepareScene(timeline: Timeline, manifests: ManifestsById): Prep
     side,
     asset: timeline.fighters[side].asset,
     maxHp: timeline.fighters[side].max_hp,
-    scale: manifestsBySide[side].scale ?? 1,
+    scale: scales[side],
     timing: timings[side],
     hold: choreography.holds[side],
     hp: hp[side],
