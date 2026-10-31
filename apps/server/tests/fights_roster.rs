@@ -4,46 +4,18 @@
 
 mod support;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use engine::{CharacterSpec, Ruleset, Seed, canonical_json, simulate};
 use protocol::FightState;
+use server::fights::FightsShared;
 use server::fights::roster::Roster;
-use server::fights::{FightsConfig, FightsShared};
 use support::db::TestDb;
 use support::fights::{
     self as f, CADENCE, KO, T0, Vector, drive_to_settled, row, wait_for, wait_state,
 };
-
-/// A copy of the characters, in a directory of this test.
-fn copy_of_content(name: &str) -> PathBuf {
-    let target = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
-        "fights-roster-{name}-{}",
-        uuid::Uuid::new_v4().simple()
-    ));
-    let source = f::repo_root().join("content/characters");
-    for entry in std::fs::read_dir(source).unwrap() {
-        let path = entry.unwrap().path();
-        if path.is_dir() {
-            let dir = target.join(path.file_name().unwrap());
-            std::fs::create_dir_all(&dir).unwrap();
-            for file in std::fs::read_dir(&path).unwrap() {
-                let file = file.unwrap().path();
-                std::fs::copy(&file, dir.join(file.file_name().unwrap())).unwrap();
-            }
-        }
-    }
-    target
-}
-
-fn config_on(dir: &Path) -> FightsConfig {
-    FightsConfig {
-        content_dir: dir.to_owned(),
-        ..f::config()
-    }
-}
 
 #[test]
 fn the_real_roster_loads_sorted_and_a_bad_one_has_a_code() {
@@ -69,18 +41,7 @@ fn the_real_roster_loads_sorted_and_a_bad_one_has_a_code() {
     );
 
     // One character is not enough: fewer than 2.
-    let one = copy_of_content("one");
-    let mut entries = std::fs::read_dir(&one).unwrap();
-    let keep = entries.next().unwrap().unwrap().path();
-    for entry in entries {
-        std::fs::remove_dir_all(entry.unwrap().path()).unwrap();
-    }
-    // Its rivals are gone with them.
-    let file = keep.join("character.json");
-    let mut json: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
-    json["rivals"] = serde_json::json!([]);
-    std::fs::write(&file, serde_json::to_vec(&json).unwrap()).unwrap();
+    let one = f::content_with("one", 1);
     assert_eq!(
         Roster::load_blocking(&one).map(|_| ()).map_err(|e| e.kind),
         Err("too_few_characters")
@@ -116,10 +77,10 @@ async fn a_bad_roster_only_stops_the_new_fights() {
 async fn a_fight_runs_from_its_snapshot_whatever_happens_to_the_content() {
     let db = TestDb::create().await;
     let pool = db.migrated_pool().await;
-    let content = copy_of_content("snapshot");
+    let content = f::copy_of_content("snapshot");
     let (settings, clock) = f::settings_at(T0 + 1);
     let shared = Arc::new(FightsShared::new(clock.clone()));
-    let runner = f::spawn_runner(&pool, &shared, config_on(&content), settings.clone());
+    let runner = f::spawn_runner(&pool, &shared, f::config_on(&content), settings.clone());
     wait_for("the announcement", || async {
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM fights")
             .fetch_one(&pool)
@@ -151,7 +112,7 @@ async fn a_fight_runs_from_its_snapshot_whatever_happens_to_the_content() {
         .await
         .unwrap();
     let shared = Arc::new(FightsShared::new(clock.clone()));
-    let _runner = f::spawn_runner(&pool, &shared, config_on(&content), settings);
+    let _runner = f::spawn_runner(&pool, &shared, f::config_on(&content), settings);
     wait_for("the evaluation", || async {
         shared.current().halted == Some(false)
     })

@@ -25,6 +25,8 @@ enum Mode {
     Fail,
     Panic,
     Hang,
+    /// Holds its transaction open until the test releases it.
+    Hold,
 }
 
 /// Counts the passes of the runner. The result of a task is taken before the next pass, so a pass
@@ -45,6 +47,7 @@ struct TestHook {
     entered: AtomicBool,
     passes: Arc<Passes>,
     passes_at_call: AtomicU32,
+    release: tokio::sync::Notify,
 }
 
 impl TestHook {
@@ -55,6 +58,7 @@ impl TestHook {
             entered: AtomicBool::new(false),
             passes: Arc::new(Passes::default()),
             passes_at_call: AtomicU32::new(0),
+            release: tokio::sync::Notify::new(),
         })
     }
 
@@ -84,6 +88,10 @@ impl SettlementHook for TestHook {
                 Mode::Ok => Ok(()),
                 Mode::Fail => Err(SettlementError { kind: "test" }),
                 Mode::Panic => panic!("the test hook"),
+                Mode::Hold => {
+                    self.release.notified().await;
+                    Ok(())
+                }
                 Mode::Hang => {
                     std::future::pending::<()>().await;
                     Ok(())
@@ -493,4 +501,64 @@ async fn a_long_failure_opens_no_windows_and_leaves_one_final_per_fight() {
             <= 1
     })
     .await;
+}
+
+/// RF20, "the pair lost in a round": while the cancellation of a fight is not committed its pair
+/// still counts as used, so nothing may be announced. With the hook holding that transaction open
+/// this does not depend on who wins a race: the row of the next slot can only be right if it waits.
+/// With two characters a round has two pairs: the other one is what must come, in the same round.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cancelled_fight_gives_back_its_pair_before_the_next_announcement() {
+    let (_db, pool) = database().await;
+    let content = f::content_with("pair", 2);
+    let ruleset = engine::Ruleset::for_version(1).unwrap();
+    let characters = content::load_roster(&content, &ruleset).unwrap();
+    let (a, b) = (characters[0].spec().clone(), characters[1].spec().clone());
+    let roster = server::fights::matchup::roster_sha256(&[a.slug.clone(), b.slug.clone()]).to_vec();
+    let same_roster = |raw: &mut f::RawFight| raw.roster_sha256.clone_from(&roster);
+
+    // X: `(a, b)` in round 1, already settled.
+    let first = f::announce_with(&pool, T0 - 2 * CADENCE, &a, &b, same_roster).await;
+    f::open_with(&pool, first, &[5; 32], T0 - 2 * CADENCE).await;
+    f::close_by_sql(&pool, first, T0 - 2 * CADENCE + WINDOW).await;
+    let mut tx = pool.begin().await.unwrap();
+    f::void_by_sql(&mut tx, first, &[5; 32], "engine_error").await;
+    tx.commit().await.unwrap();
+    // Y: `(b, a)` in round 1, with its window gone.
+    let missed = f::announce_with(&pool, T0 - CADENCE, &b, &a, same_roster).await;
+
+    let hook = TestHook::new(Mode::Hold);
+    let (settings, _clock) = f::settings_at(T0 - CADENCE + WINDOW + 1);
+    let shared = Arc::new(FightsShared::new(settings.clock.clone()));
+    let _runner = f::spawn_runner(
+        &pool,
+        &shared,
+        f::config_on(&content),
+        with_hook(settings, &hook),
+    );
+
+    wait_for("the cancellation", || async {
+        hook.entered.load(Ordering::SeqCst)
+    })
+    .await;
+    let rows = || async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM fights")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    // Several passes' worth of time: the cancellation is pending, and nothing is announced.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(rows().await, 2, "announced before the pair was given back");
+
+    hook.release.notify_one();
+    wait_state(&pool, missed, FightState::Settled).await;
+    wait_for("the announcement", || async { rows().await == 3 }).await;
+    let id: i32 = sqlx::query_scalar("SELECT max(id) FROM fights")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let next = row(&pool, id).await;
+    assert_eq!((next.slug_a, next.slug_b), (b.slug, a.slug));
+    assert_eq!(next.matchup_round, 1);
 }

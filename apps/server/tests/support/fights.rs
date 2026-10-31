@@ -53,6 +53,56 @@ pub fn config_without_roster() -> FightsConfig {
     }
 }
 
+/// A copy of the real characters in a directory of this test run.
+pub fn copy_of_content(name: &str) -> PathBuf {
+    let target = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "fights-content-{name}-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    for entry in std::fs::read_dir(repo_root().join("content/characters")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            let dir = target.join(path.file_name().unwrap());
+            std::fs::create_dir_all(&dir).unwrap();
+            for file in std::fs::read_dir(&path).unwrap() {
+                let file = file.unwrap().path();
+                std::fs::copy(&file, dir.join(file.file_name().unwrap())).unwrap();
+            }
+        }
+    }
+    target
+}
+
+/// A copy with only the first `count` characters, and no rivals, which may be gone.
+pub fn content_with(name: &str, count: usize) -> PathBuf {
+    let target = copy_of_content(name);
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(&target)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    dirs.sort();
+    for (i, dir) in dirs.iter().enumerate() {
+        if i >= count {
+            std::fs::remove_dir_all(dir).unwrap();
+            continue;
+        }
+        let file = dir.join("character.json");
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        json["rivals"] = serde_json::json!([]);
+        std::fs::write(&file, serde_json::to_vec(&json).unwrap()).unwrap();
+    }
+    target
+}
+
+/// The schedule of [`config`], with the characters of `dir`.
+pub fn config_on(dir: &std::path::Path) -> FightsConfig {
+    FightsConfig {
+        content_dir: dir.to_owned(),
+        ..config()
+    }
+}
+
 /// A spec of `crates/engine/tests/golden`: `striker`, `tank`, `trickster` or `turtle`.
 pub fn golden_spec(name: &str) -> CharacterSpec {
     let path = repo_root().join(format!("crates/engine/tests/golden/spec-{name}.json"));
@@ -118,6 +168,8 @@ pub struct RawFight {
     pub slug_b: String,
     pub max_hp_a: i32,
     pub max_hp_b: i32,
+    pub matchup_round: i32,
+    pub roster_sha256: Vec<u8>,
 }
 
 /// Like [`announce`], with `change` applied to the fields.
@@ -140,6 +192,8 @@ pub async fn announce_with(
         slug_b: b.slug.clone(),
         max_hp_a: i32::from(max_hp(&ruleset, a).unwrap()),
         max_hp_b: i32::from(max_hp(&ruleset, b).unwrap()),
+        matchup_round: 1,
+        roster_sha256: vec![1; 32],
     };
     change(&mut raw);
     let (closes_at, live_at) = hours(opens_at);
@@ -159,8 +213,8 @@ pub async fn announce_with(
             max_hp_b: raw.max_hp_b,
             time_limit_ms: i32::try_from(ruleset.time_limit_ms()).unwrap(),
             max_duration_ms: i32::try_from(max_duration_ms(&ruleset).unwrap()).unwrap(),
-            matchup_round: 1,
-            roster_sha256: &[1; 32],
+            matchup_round: raw.matchup_round,
+            roster_sha256: &raw.roster_sha256,
         },
     )
     .await

@@ -318,10 +318,16 @@ impl Runner {
         self.spawn_attempts(now, &mut wake);
 
         // After the transitions: a fight of this hour that is cancelled does not leave a later row
-        // ahead of it, so its pair is not lost (RF20). No rows during a halt (RF16).
+        // ahead of it, so its pair is not lost (RF20). A cancellation runs in its own task, and its
+        // pair counts as used until its `COMMIT`, so nothing is announced while one is pending; its
+        // end wakes this loop. No rows during a halt (RF16).
         let cadence = self.config.cadence_ms;
         let target = target_slot(now, cadence);
-        if !self.halted() && !self.rows.values().any(|row| row.opens_at == target) {
+        let cancelling = self
+            .finals
+            .values()
+            .any(|settling| matches!(settling.kind, SettleKind::Cancelled(_)));
+        if !self.halted() && !cancelling && !self.rows.values().any(|row| row.opens_at == target) {
             self.announce(now).await?;
         }
         wake = wake.min(target);
