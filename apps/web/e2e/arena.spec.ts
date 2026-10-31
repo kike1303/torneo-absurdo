@@ -54,15 +54,12 @@ async function animationFrames(page: Page, count: number): Promise<void> {
  */
 async function withoutTracing(page: Page, body: () => Promise<void>): Promise<void> {
   const { tracing } = page.context();
-  // It rejects when this run records no trace, whatever the trace mode says.
-  const traced = await tracing.stopChunk().then(
-    () => true,
-    () => false,
-  );
+  await tracing.stopChunk();
   try {
     await body();
   } finally {
-    if (traced) await tracing.startChunk();
+    // It rejects in a run that records no trace (`stopChunk` does nothing there): nothing to restore.
+    await tracing.startChunk().catch(() => {});
   }
 }
 
