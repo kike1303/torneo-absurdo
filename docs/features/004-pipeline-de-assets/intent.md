@@ -2,7 +2,7 @@
 id: "004"
 title: Pipeline de assets originales
 type: intent
-status: approved
+status: done
 risk: medium
 author: product-owner
 reviewers: [architect, game-designer]
@@ -12,7 +12,7 @@ approvals:
 linear: TA-4
 depends_on: ["002", "007"]
 created: 2026-10-20
-updated: 2026-10-30
+updated: 2026-10-31
 ---
 
 # Intent: Pipeline de assets originales
@@ -44,22 +44,35 @@ Opciones a evaluar (como mínimo):
 - Quién decide: son del owner el visto bueno visual del personaje, aceptar el ADR y aceptar los términos de licencia de lo generado (tema legal). Adoptar una dependencia de pago o un servicio externo, aunque sea gratuito o un MCP comunitario, requiere su OK previo (gate de `docs/process.md`).
 
 ## Criterios de éxito
-- [ ] Tabla comparativa con calidad, tiempo por personaje, costo y licencia. Los términos de licencia se leen en la fuente y llevan fecha; los datos se miden donde se pueda, y lo no medido se marca como estimado. Esto último no vale para la opción ganadora: su tiempo y su costo por personaje, retoque incluido, salen medidos del personaje de prueba.
-- [ ] La columna de calidad mide, como mínimo: silueta legible a 375 px sobre los dos temas; silueta y paleta consistentes entre frames y animaciones; los tres ataques se distinguen entre sí; y `colors` y `partial_alpha_pixels` del resumen del importador.
-- [ ] `ogro-del-pantano`, del roster existente, queda como personaje de prueba completo (todas las animaciones obligatorias de `docs/guides/sprites.md`) hecho con la opción ganadora, que pasa `run import` y se reproduce en `/[lang]/dev/arena`. Solo se le agrega el campo `sprites`, sin tocar su balance, y `just sim --check` se corre de todos modos.
+- [x] Tabla comparativa con calidad, tiempo por personaje, costo y licencia. Los términos de licencia se leen en la fuente y llevan fecha; los datos se miden donde se pueda, y lo no medido se marca como estimado. Esto último no vale para la opción ganadora: su tiempo y su costo por personaje, retoque incluido, salen medidos del personaje de prueba.
+  - Estado (2026-10-31): la tabla está en la [Evaluación de la spec](./spec.md#evaluación). De la ganadora, costo medido de 19 generaciones cobradas y 0 min de retoque. Tiempo: ~45 min como mínimo, porque el ajuste de la receta en la regeneración no se cronometró aparte.
+  - La marco porque todo lo que la fila 5 afirma sale del personaje de prueba, y lo que falta está declarado y solo puede subir el total; ~45 min es un mínimo de esta prueba, no el tiempo medido de un personaje completo ni de una corrida limpia.
+  - Casi todas las licencias se leyeron con un lector web que resume. Sirve para comparar, no para aceptarlas.
+- [x] La columna de calidad mide, como mínimo: silueta legible a 375 px sobre los dos temas; silueta y paleta consistentes entre frames y animaciones; los tres ataques se distinguen entre sí; y `colors` y `partial_alpha_pixels` del resumen del importador.
+  - Estado (2026-10-31): fila 5 de la tabla. La revisión fue con imágenes y frames fijos, no con movimiento. Los tres ataques a 375 px se compararon con frames escalados por script, no en el renderer.
+- [x] `ogro-del-pantano`, del roster existente, queda como personaje de prueba completo (todas las animaciones obligatorias de `docs/guides/sprites.md`) hecho con la opción ganadora, que pasa `run import` y se reproduce en `/[lang]/dev/arena`. Solo se le agrega el campo `sprites`, sin tocar su balance, y `just sim --check` se corre de todos modos.
+  - Estado (2026-10-31): `sprites` no se agrega porque RF7 de la spec y la casilla siguiente lo condicionan a que el set esté en `content/sprites/`, y se queda en local.
+  - `just sim --check` pasó el 2026-10-31 (exit 0).
+  - Las 9 acciones están en el set y `run import` pasa. La arena reprodujo la pelea sin errores en escritorio con tema claro (ataques, golpe, KO y victoria) y un log con `block` y `dodge` en tema oscuro; la calidad de las poses de `block` y `dodge` queda sin juzgar (ver el plan).
 - [ ] El set se commitea en `content/sprites/<id>/` y pasa `check`, si la licencia lo permite sin duda y el owner da su OK. Si falta alguna de las dos, se queda en `content/_local/` y esta casilla no se marca.
-- [ ] Ese personaje pasa el checklist "¿se parece demasiado?" de `write-character`, con su ítem de diseño visual ya aplicado a los sprites. Lo aprueba game-designer o product-owner, distinto del autor, con el OK del owner.
-- [ ] El owner da su visto bueno visual al personaje.
-- [ ] Un ADR con el pipeline elegido, que incluye cómo se declara `origin` en un set hecho con AI.
-- [ ] Una receta paso a paso de idea a export, en el ADR o en un doc que él enlace, que se pueda seguir sin depender de lo que recuerde quien hizo la prueba.
+  - Estado (2026-10-31): no se marca. El owner no acepta la licencia para publicar, por ahora, porque es un personaje de prueba y no arte final. El set se queda en `content/_local/`.
+- [x] Ese personaje pasa el checklist "¿se parece demasiado?" de `write-character`, con su ítem de diseño visual ya aplicado a los sprites. Lo aprueba game-designer o product-owner, distinto del autor, con el OK del owner.
+  - Estado (2026-10-31): `APPROVE` de game-designer, prompts incluidos, y OK del owner transmitido por el coordinador. Vale **solo como personaje de prueba local**: no sirve para publicar el set ni para llevarlo a arte final.
+  - El motivo del lore se corrige en TA-41, por decisión del owner. El comentario firmado que pide `write-character` está en el PR de cierre (#72).
+- [x] El owner da su visto bueno visual al personaje.
+  - Estado (2026-10-31): dado sobre el set regenerado, transmitido por el coordinador.
+- [x] Un ADR con el pipeline elegido, que incluye cómo se declara `origin` en un set hecho con AI.
+  - Estado (2026-10-31): [ADR-0013](../../decisions/0013-pipeline-de-sprites.md), aceptado por el owner con D4.
+- [x] Una receta paso a paso de idea a export, en el ADR o en un doc que él enlace, que se pueda seguir sin depender de lo que recuerde quien hizo la prueba.
+  - Estado (2026-10-31): [receta del pipeline](../../guides/pipeline-de-sprites.md). Sus cambios de esta fecha los aprobaron game-designer y architect. Nadie la ha seguido todavía desde cero con otro personaje.
 
 ## Fuera de alcance
 Producir el roster completo del MVP.
 
 ## Preguntas abiertas
-- ¿Estilo visual objetivo? Respondida en parte: 007 fijó la celda de 192×192 y recomendaciones de paleta y contorno. El estilo final sigue pendiente y se define con la identidad visual.
-- ¿Vale la pena saltar directo a esqueletal? 007 dejó esqueletal fuera del formato (solo sheet + manifest), así que esqueletal solo sirve si hornea a frames.
-- ¿Qué `origin` declara en `provenance.json` un set hecho con AI (la opción híbrida y la de solo AI)? RF-B4 de 007 define `generated` como "lo genera código de este repo", `original` como "owner o equipo" y `commission` como encargo, y lo que sale de un servicio de AI de terceros no encaja claro en ninguno. Propongo resolverla en el ADR de esta feature, partiendo de la propuesta de game-designer (`original` con `ai_assisted: true`). Si hace falta cambiar el enum, es una enmienda al estándar de 007, no un parche de 004.
+- ¿Estilo visual objetivo? Respondida en parte: 007 fijó la celda de 192×192 y recomendaciones de paleta y contorno. El estilo final sigue pendiente y se define con la identidad visual: la spec la arrastra allí.
+- ¿Vale la pena saltar directo a esqueletal? 007 dejó esqueletal fuera del formato (solo sheet + manifest), así que esqueletal solo sirve si hornea a frames. **Respondida:** no en esta fase (ADR-0013 D7). Se puede reabrir si aparecen piezas hechas por una persona.
+- ¿Qué `origin` declara en `provenance.json` un set hecho con AI (la opción híbrida y la de solo AI)? RF-B4 de 007 define `generated` como "lo genera código de este repo", `original` como "owner o equipo" y `commission` como encargo, y lo que sale de un servicio de AI de terceros no encaja claro en ninguno. Propongo resolverla en el ADR de esta feature, partiendo de la propuesta de game-designer (`original` con `ai_assisted: true`). Si hace falta cambiar el enum, es una enmienda al estándar de 007, no un parche de 004. **Respondida:** `original` con `ai_assisted: true`, sin cambiar el enum (ADR-0013 D4, lectura confirmada por el owner el 2026-10-31).
 
 ## Revisión
 ### game-designer — 2026-10-30 — REQUEST_CHANGES

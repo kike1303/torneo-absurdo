@@ -6,35 +6,45 @@
   "max_colors": 32,
   "animations": {
     "idle": {
-      "frames": [0, 1, 2, 3, 4, 5, 6, 7],
+      "source": "idle_v3",
+      "frames": [4, 5, 6, 7, 8, 7, 6, 5],
       "frame_ms": [130, 110, 140, 120, 130, 110, 150, 120],
       "loop": true,
       "ground": "each"
     },
     "attack_light": {
-      "frames": [0, 1, 2],
-      "frame_ms": [120, 100, 180],
+      "source": "attack_light_v3",
+      "frames": [2, 3, 4, 5, 6],
+      "frame_ms": [60, 70, 100, 90, 70],
       "loop": false,
-      "impact_frame": 1
+      "impact_frame": 2
     },
     "attack_heavy": {
-      "frames": [0, 1, 2, 3, 4, 5],
-      "frame_ms": [60, 60, 60, 60, 60, 240],
+      "source": "attack_heavy_v3b",
+      "frames": [1, 2, 3, 4, 5, 6, 7, 8],
+      "frame_ms": [60, 60, 70, 70, 120, 100, 80, 80],
       "loop": false,
-      "impact_frame": 5
+      "impact_frame": 4
     },
     "special": {
+      "source": "special_v3b",
       "frames": [2, 3, 4, 5, 6, 7, 8],
-      "frame_ms": [100, 100, 120, 90, 140, 100, 80],
+      "frame_ms": [70, 70, 90, 80, 140, 100, 100],
       "loop": false,
-      "impact_frame": 3
+      "impact_frame": 4
     },
-    "hit": { "frames": [0, 1, 2, 3, 4, 5], "frame_ms": [70, 70, 70, 70, 70, 70], "loop": false },
+    "hit": {
+      "source": "hit_v3",
+      "frames": [3, 4, 5, 6],
+      "frame_ms": [80, 120, 100, 80],
+      "loop": false
+    },
     "block": { "frames": [3, 4], "frame_ms": [100, 250], "loop": false },
     "dodge": { "frames": [3, 4, 5, 6], "frame_ms": [70, 90, 70, 70], "loop": false },
     "ko": {
-      "frames": [0, 1, 2, 3, 4, 5, 6],
-      "frame_ms": [100, 100, 100, 100, 100, 100, 600],
+      "source": "ko_v3",
+      "frames": [2, 3, 4, 5, 6, 7, 8],
+      "frame_ms": [100, 100, 100, 100, 120, 150, 600],
       "loop": false,
       "ground": "each"
     },
