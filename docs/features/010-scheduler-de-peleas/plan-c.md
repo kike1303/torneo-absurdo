@@ -10,7 +10,7 @@ approvals:
   - by: architect
     date: 2026-10-31
 linear: TA-13
-depends_on: ["010"]
+depends_on: ["002", "005"]
 created: 2026-10-31
 updated: 2026-10-31
 ---
@@ -25,10 +25,11 @@ updated: 2026-10-31
 
 **Riesgo `medium`, no el `high` de la spec:** el riesgo alto de 010 está en el server (semilla, ledger, recuperación). Esta fase corre solo en `/dev/arena`, no maneja secretos ni monedas, y `load` queda igual, con sus tests sin cambios. El paso delicado (preparación incremental) tiene un oráculo exacto.
 
-## Para el architect: lo que tienes que decidir
-1. **El RNF de `prepareScene` probablemente no se cumple con la preparación completa, y propongo la incremental desde el principio** (decisión 8). Medí el código actual con 200 cues sintéticos, una llamada cada 25 ms, en un Apple M2 Pro con Node 22.23.4, sin navegador: **p50 de 1,21 ms y p95 de 2,09 ms**. El límite es 4 ms en un Android de gama media. Con un factor de 3 a 6 entre esta máquina y ese Android (supuesto mío, sin medir), serían de 3,6 a 7,3 ms en p50 y de 6,3 a 12,5 ms en p95. La spec prevé esta salida ("Si no, el plan C lo vuelve incremental, sin cambiar RF47"). Si prefieres medir antes, el paso 5 es un commit separado que se puede saltar: el resto del plan no depende de él.
-2. **El RNF no se puede comprobar hoy en el dispositivo de referencia.** La medición en Android de gama media sigue pendiente desde 002 (nota del owner en su `## Revisión`). Propongo aceptar en este PR la prueba por aproximación del paso 8 y dejar la medición real como pendiente anotada. Ver desviación 5.
-3. **Las desviaciones de la spec** están en su sección. La 1 y la 2 piden ajustar la spec. La 6 afecta al plan D.
+## Decisiones del architect
+Resueltas en `## Revisión`, abajo:
+1. **Preparación incremental ahora:** el paso 5 es un commit propio y no se salta. La medición que lo motivó: con 200 cues sintéticos, una llamada cada 25 ms, en un Apple M2 Pro con Node 22.23.4, `prepareScene` da p50 de 1,21 ms y p95 de 2,09 ms, y el límite es 4 ms en un Android de gama media.
+2. **Prueba del RNF por aproximación aceptada,** con los umbrales de la decisión 8. La medición en Android sigue pendiente desde 002.
+3. **Desviaciones 1 a 5 aceptadas,** con su texto en "Enmienda propuesta a la spec". **La 6 pasa al plan D.**
 
 ## Comprobación previa de RF49
 Con un script de solo lectura, sin commitear, comprobé la propiedad contra el código actual. Simula el resultado del adaptador parcial: corta los cues por `t ≤ c`, quita el cierre mientras no llega `end` y usa `duration_ms = 90 000`. Cubre los 7 dorados, el corte más fuerte de cada prefijo y unos 208 000 instantes en sus últimos 4,5 s, con y sin movimiento reducido.
@@ -70,8 +71,8 @@ La muestra sigue el margen de la spec: el cierre es lo que manda, y **no hace fa
    - `phaseAt` usa la misma condición. Si no, una pelea sin `end` daría la fase `finished` en `t = 90 000` (server detenido, por ejemplo), contra RF48.
    - Una timeline de `load` siempre tiene cierre, así que `load` no cambia.
    - `snapshot()` no suma la duración ni el progreso (RF48). `durationMs` de RF47 es el campo interno de `PreparedScene`.
-5. **Entrar tarde, solo en vivo.** En `play()`, con `live` vigente y `playback === INITIAL_PLAYBACK`, `cursor = cursorAt(p.cueTimes, timeAt(...))`. Reanudar tras una pausa no lo mueve.
-6. **Reloj negativo, solo en vivo.** `timeAt` ya recorta a `t = 0`, pero `dueCues` daría por vencido el `intro` en `at_ms = 0`, hasta 3,5 s antes de su hora. `frame` pinta y no dispara cues mientras el reloj sea negativo. El `intro` sale al llegar a 0, en todos los clientes a la vez. Ver desviación 3.
+5. **Entrar tarde, solo en vivo.** En `play()`, con `live?.installed` y `playback === INITIAL_PLAYBACK`, `cursor = cursorAt(p.cueTimes, timeAt(...))`. Reanudar tras una pausa no lo mueve. Mientras una `loadLive` carga, `prepared` sigue siendo la pelea anterior y no hereda esta regla.
+6. **Reloj negativo, solo en vivo.** `timeAt` ya recorta a `t = 0`, pero `dueCues` daría por vencido el `intro` en `at_ms = 0`, hasta 3,5 s antes de su hora. Con `live?.installed`, `frame` pinta y no dispara cues mientras el reloj sea negativo. El `intro` sale al llegar a 0, en todos los clientes a la vez. Ver desviación 3.
 7. **Un listener de cue puede llamar a `extend`.** Hoy, `frame` corta el bucle con `prepared !== p`, y un `extend` dentro de un listener perdería para siempre los cues restantes del lote, porque `cursor` ya avanzó. La condición pasa a usar un contador `installs`, que solo suben `load` y `loadLive` al instalar. `seek` ya se detecta con `cursor !== due.to`. El bucle sigue con `p.cues`: los índices son estables porque los cues nuevos solo se agregan al final.
 
 ### Preparación incremental (RNF, sin cambiar RF47)
@@ -87,9 +88,19 @@ La muestra sigue el margen de la spec: el cierre es lo que manda, y **no hace fa
    | `deepFreeze` | Ya se detiene en lo congelado, así que solo camina lo nuevo y los arreglos | Sin cambios |
    | `hp`, `admitFlashes` | Se recalculan sobre los cues completos | Son O(n) muy baratos, y la admisión es voraz hacia adelante |
 
-   **Oráculo:** `prepareSceneFrom(prev, t)` es profundamente igual a `prepareScene(t, manifests)`, para los 7 dorados y todos los cortes, avanzando de a un lote y de a varios. Si el límite `H` estuviera mal, este test falla.
+   **Oráculo con los dorados:** `prepareSceneFrom(prev, t)` es profundamente igual a `prepareScene(t, manifests)`, para los 7 dorados y todos los cortes, avanzando de a un lote y de a varios. **No prueba el límite `H`:** los placeholders tienen windups de hasta 320 ms y acciones de hasta 1050 ms, así que un límite demasiado laxo también pasa.
 
-   Costo esperado en la misma máquina: unos 0,5 ms en p50 (estimación, se mide en el paso 5). Si con la aproximación del paso 8 no alcanza, no improviso: la siguiente opción son puntos de control de la simulación, y se trae al architect como desviación.
+   **Oráculo del límite, en `packages/renderer/test/prepare-from.test.ts`:**
+   - manifests válidos en los límites: windup de 400 ms, reacción de 3000 ms y ataque de 3000 ms en total (el tope de `animation_too_long`);
+   - timelines generadas con semilla fija, sin `Math.random`, con golpes a 600 ms, huecos cerca de los 3300 a 4300 ms y knockdowns de hasta 3000 ms, avanzando de a un lote y de a varios;
+   - `toStrictEqual` contra `prepareScene`;
+   - **control negativo:** con esos datos, algún cue de la zona que `H` prohíbe reutilizar difiere entre un prefijo y la timeline completa. Sin eso, el test no demuestra nada.
+
+   **Cuándo alcanza:**
+   - Node, con `packages/renderer/scripts/bench-prepare.ts`: `prepareSceneFrom` con 200 cues, p50 ≤ 0,67 ms.
+   - Chromium con la CPU a 6×, `?log=draw&live=1`: `extend_ms` con p50 ≤ 4 ms y p95 ≤ 8 ms, tres corridas tras una de calentamiento, y se reporta la peor. `extend_ms` incluye validar y cotejar, a propósito: lo que importa es el bloqueo del frame.
+
+   Si falla, vuelve al architect con los números, antes de pasar a puntos de control de la simulación.
 
    `prepareScene` sigue igual para `load` y para la primera preparación de `loadLive`.
 
@@ -117,8 +128,10 @@ La muestra sigue el margen de la spec: el cierre es lo que manda, y **no hace fa
     - Constantes: `DRIP_TICK_MS = 50`, `PLAYBACK_DELAY_MS = 3500`, y `MAX_DURATION_MS = 90 000`, solo de la arena: en D viene de `FightSummary`.
     - `loadEngineLog(name)` se separa de `loadEngineLogTimeline` en `engine-logs.ts`.
 11. **`FightStage.svelte`** suma una prop opcional `live?: (assets) => Promise<LiveSession>`, el punto que D conecta al WS.
-    - Con ella: `loadLive`, `onCue`, `play()` y `subscribe`, sin `seek`. El reloj es `session.clock`. `retime` e `initialT` no se aplican.
-    - `restart` vuelve a llamar a `start()`, así que "Reiniciar" y "Repetir" reabren el goteo. `toggle` no hace nada. `start()` y el desmontaje cancelan la suscripción.
+    - Con ella, sin `seek`: `loadLive(session.timeline, assets)` y, sin esperarla, `subscribe`, porque `live` se escribe de forma síncrona (decisión 2). `subscribe` entrega al momento la timeline vigente si es más nueva que `session.timeline`, para no perder un `end` publicado mientras se abre o carga. Después, `await`, `onCue` y `play()`. El reloj es `session.clock`. `retime` e `initialT` no se aplican.
+    - Cada `extend` aceptado actualiza `loadedTimeline`, para que `currentTimeline()` y `mean_strike_gap_ms` no queden fijos en el primer lote.
+    - El `push` respeta `id !== run`.
+    - `restart` vuelve a llamar a `start()`, así que "Reiniciar" y "Repetir" reabren el goteo. `toggle` no hace nada. `start()`, el `catch` y el desmontaje cancelan la suscripción.
     - Un `extend` que lanza pasa al estado de error existente (`timeline_invalid`).
 12. **`/dev/arena`:** `live` vale solo con `?live=1` exacto y un `?log=` válido. Si no, todo sigue como hoy.
     - `?t=` es el tiempo del server ya transcurrido al abrir, lo que permite probar "entrar tarde" y mantener cortos los e2e.
@@ -140,6 +153,8 @@ La muestra sigue el margen de la spec: el cierre es lo que manda, y **no hace fa
 | `packages/renderer/README.md` | modificado: vivo, `extend` y método de medición. "Una vez por carga" deja de ser cierto en `prepareScene` |
 | `packages/renderer/test/timeline-partial.test.ts` | nuevo: RF46 |
 | `packages/renderer/test/player-live.test.ts` | nuevo: RF47, RF48 y RF50 |
+| `packages/renderer/test/prepare-from.test.ts` | nuevo: oráculo del límite `H`, con control negativo |
+| `packages/renderer/scripts/bench-prepare.ts` | nuevo: 200 cues sintéticos, una llamada cada 25 ms y los dos caminos (`--experimental-strip-types`, como `gen:placeholders`) |
 | `apps/web/src/lib/features/fight/timeline-from-fight-log.ts` | modificado: núcleo y `liveTimelineFromEvents` |
 | `apps/web/src/lib/features/fight/engine-logs.ts` | modificado: `loadEngineLog` |
 | `apps/web/src/lib/features/arena/log-drip.ts` | nuevo: goteo |
@@ -161,19 +176,19 @@ Cada paso es un commit con sus tests en verde. Se trabaja en la rama `ta-13-rend
 2. **Player y `phaseAt`:** decisiones 2 a 7 con `prepareScene` completo en `extend`, y `player-live.test.ts`. Depende del paso 1.
 3. **Adaptador** y sus tests. *Paralelizable con el paso 1.*
 4. **`live-prefix.test.ts`, RF49.** Depende de los pasos 1 y 3.
-5. **`prepareSceneFrom`**, con el oráculo y su medición en Node (misma máquina, mismo método). Es el paso más riesgoso, y por eso va después de que RF49 ya esté protegido y en un commit propio. El player pasa a usarlo con una sola línea. Depende de los pasos 2 y 4.
+5. **`prepareSceneFrom`**, con los dos oráculos, `bench-prepare.ts` y su medición en Node. Es el paso más riesgoso, y por eso va después de que RF49 ya esté protegido y en un commit propio. El player pasa a usarlo con una sola línea. Depende de los pasos 2 y 4.
 6. **`log-drip.ts`, `FightStage`, `ArenaControls`, `ArenaStats`, la página** y `log-drip.test.ts`. Depende de los pasos 2 y 3.
 7. **e2e de RF52** y capturas a 375 px y en escritorio, en dark y light, comparadas con la spec. Depende del paso 6.
 8. **Medición y documentos.**
    - `just arena-bench`: fps con `?log=draw&live=1` según el README, con el mismo umbral (p95 ≤ 18,2 ms, FPS medio ≥ 58).
-   - `extend_ms` en Chromium con la CPU limitada a 6× (DevTools) con `?log=draw&live=1`, el dorado con más eventos.
-   - Node con 200 cues para el número de la spec. Se pegan los tres en el PR, junto con Android si el owner lo tiene a mano.
+   - `extend_ms` en Chromium con la CPU limitada a 6× con `?log=draw&live=1`, el dorado con más eventos: tres corridas tras una de calentamiento, y se reporta la peor, contra los umbrales de la decisión 8.
+   - Node con 200 cues, `bench-prepare.ts`, contra su umbral. Se pegan los tres en el PR, junto con Android si el owner lo tiene a mano.
    - README del renderer.
 9. **`just check` y `just e2e`**, con la salida en el PR.
 
 ## Riesgos
 - **`load` cambia sin querer** → `reachedEnd` solo difiere sin cierre, algo que `load` nunca acepta. Las decisiones 5 y 6 exigen `live`. `player.test.ts`, `timeline-v1.test.ts`, `timeline-v2.test.ts` y sus snapshots no se editan.
-- **El límite `H` de la preparación incremental es erróneo y una escena difiere** → el oráculo compara la estructura completa en todos los cortes. Además, RF49 corre contra el camino que usa el player.
+- **El límite `H` de la preparación incremental es erróneo y una escena difiere** → `prepare-from.test.ts` lo prueba con manifests en los límites y un control negativo. Los dorados no sirven para esto. Además, RF49 corre contra el camino que usa el player.
 - **RF49 pasa sin probar nada (test vacuo)** → el mismo test exige que con un retraso de 2499 ms la escena **sí** difiera en `t = cierre`, con `c = end.t − 1`, en cada uno de los 7 dorados. Eso fija además el mínimo de 2500 ms que deduce la spec.
 - **Cues perdidos por llamar a `extend` dentro de un listener** → decisión 7, con su test.
 - **La pelea queda en `finished` sin `end`** → decisión 4, con un test en el que el reloj pasa de `duration_ms` sin cierre: ni el estado ni la fase son `finished`, y al llegar el `end` terminan.
@@ -197,7 +212,7 @@ Cada paso es un commit con sus tests en verde. Se trabaja en la rama `ta-13-rend
 - [ ] **RF47, con `FakeStage`:** `extend` no llama a `loadAssets`, no mueve `t` ni el cursor, y actualiza la duración. Rechaza cada caso de la decisión 3 con `timeline_invalid` y deja el estado intacto. Acepta los mismos cues. Durante `loadLive` en curso, la instalación usa la timeline más nueva. `load` reemplaza a un vivo y entonces `extend` lanza. `extend` dentro de un listener no pierde cues.
 - [ ] **RF48:** sin cierre no hay `finished`, ni estado ni fase, tampoco con el reloj más allá de 90 000. Con cierre, termina en `end.t`. `snapshot()` no tiene duración.
 - [ ] **RF49, en `live-prefix.test.ts` (importa `@torneo/renderer/scene`, que no carga Pixi):** para los 7 dorados, sin y con movimiento reducido, en el corte más fuerte de cada prefijo (`c` = siguiente `t` distinto − 1) y en `c` = cada `t`. Los instantes son `t = c − 3500`, una rejilla en los últimos 4,5 s y una pasada completa cada 10 cortes. `sceneAt` da lo mismo que con el log completo, por `liveTimelineFromEvents`, `validateTimeline` parcial y el camino incremental. Más el caso de 2499 ms que debe diferir. Comparación rápida por JSON y `expect` solo al fallar, con un presupuesto de pocos segundos.
-- [ ] **RNF:** oráculo `prepareSceneFrom` ≡ `prepareScene`. Medición en el PR (paso 8). El tiempo no se comprueba en CI, igual que los fps en 002 (RF-A19).
+- [ ] **RNF:** `prepareSceneFrom` ≡ `prepareScene` con los dorados y en `prepare-from.test.ts`, con control negativo. Medición en el PR (paso 8), contra los umbrales de la decisión 8. El tiempo no se comprueba en CI, igual que los fps en 002 (RF-A19).
 - [ ] **RF50:** `play()` con el reloj en 30 000 no dispara lo anterior y dispara lo siguiente. Un cue justo en `t` sale en el siguiente frame. Con el reloj en −3500, `t = 0`, sin `onCue`, y el `intro` sale al llegar a 0.
 - [ ] **RF51:** `liveTimelineFromEvents(log, log.events, …)` es igual a `timelineFromFightLog(log, …)` en los 7 dorados. `attack` al final sin resolver y falta de `end` dan `ok`. Un `attack` sin resolver en medio sigue fallando. Con `t > maxDurationMs` da `past_max_duration`. Los tests existentes y `fight-boundary.test.ts` no cambian.
 - [ ] **RF52, e2e en Chromium:**
@@ -205,7 +220,7 @@ Cada paso es un commit con sus tests en verde. Se trabaja en la rama `ta-13-rend
   - `?log=draw&live=1&t=85000`: termina en `data-ending="draw"`.
   - `?log=ko-knockdown&live=1`: empieza en `playing` y llega al primer golpe (8 s).
   - `?live=1` sin `?log=`: la arena carga en pausa, como hoy.
-- [ ] **Goteo, con Vitest y reloj falso:** ningún evento antes de su `t`, los de mismo `t` van juntos, el último estado es igual a `timelineFromFightLog`, y la suscripción se cancela.
+- [ ] **Goteo, con Vitest y reloj falso:** ningún evento antes de su `t`, los de mismo `t` van juntos, el último estado es igual a `timelineFromFightLog`, suscribir después de `end` entrega el final, y la suscripción se cancela.
 - [ ] Capturas de `?live=1` a 375 px y en escritorio, en dark y light y en es y en, con los controles deshabilitados y sin scroll horizontal
 - [ ] `just arena-bench` con `?live=1` en el umbral de fps, con la salida en el PR
 
