@@ -58,6 +58,19 @@ export interface RendererHandle {
    * untrusted JSON; rejects with a `RendererError`.
    */
   load(timeline: unknown, assets: ReadonlyMap<string, unknown>): Promise<void>;
+  /**
+   * Like `load`, for a fight in progress (010 RF47): a partial timeline (RF46), and the new one of
+   * each `extend` called before this settles is the one that gets installed.
+   */
+  loadLive(timeline: unknown, assets: ReadonlyMap<string, unknown>): Promise<void>;
+  /**
+   * Replaces the timeline of `loadLive` with one whose cues start with the previous ones. Never
+   * reloads sheets nor moves the playback or the cursor. Throws `RendererError('timeline_invalid')`
+   * and changes nothing if there is no current `loadLive`, if the timeline is not valid, if any
+   * earlier cue or a fighter changes, or if `duration_ms` changes without the closing arriving or
+   * after it arrived.
+   */
+  extend(timeline: unknown): void;
   play(): void;
   pause(): void;
   seek(ms: number): void;
