@@ -7,6 +7,7 @@
 //! on, it stops until someone fixes it (RF16).
 
 pub mod clock;
+pub mod matchup;
 pub mod sealed;
 pub mod snapshot;
 pub mod state;

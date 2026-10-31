@@ -95,7 +95,8 @@ async fn the_port_opens_only_after_the_database_and_the_migrations() {
             20_261_028_000_000,
             20_261_029_000_000,
             20_261_029_100_000,
-            20_261_030_000_000
+            20_261_030_000_000,
+            20_261_031_000_000
         ]
     );
     assert!(rows.iter().all(|r| r.get::<bool, _>("success")));
@@ -146,6 +147,21 @@ async fn an_invalid_value_never_reaches_the_output() {
         assert!(!text.contains("canario"), "{text}");
     }
     assert!(finished.stderr.is_empty());
+}
+
+/// 010 RF11: a fight that does not fit in its cadence stops the start, naming the variable.
+#[tokio::test]
+async fn a_fight_that_does_not_fit_in_its_cadence_is_config_invalid() {
+    let finished = run_to_exit(&[
+        ("DATABASE_URL", "postgres://u:p@127.0.0.1:1/x"),
+        ("PUBLIC_ORIGIN", "http://localhost:5173"),
+        ("FIGHT_CADENCE_SECS", "60"),
+    ])
+    .await;
+    assert_eq!(finished.status.code(), Some(1));
+    let line = single_json_line(&finished.stdout);
+    assert_eq!(line["event"], "config.invalid");
+    assert_eq!(line["var"], "FIGHT_CADENCE_SECS");
 }
 
 #[tokio::test]
