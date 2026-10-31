@@ -20,6 +20,8 @@
     showStats: boolean;
     ontoggle: () => void;
     onrestart: () => void;
+    /** A fight in progress plays by its clock: no play nor pause (010 RF52). */
+    live?: boolean;
     /** Prefix of the element ids, for more than one instance on a page (the catalog). */
     idPrefix?: string;
   }
@@ -33,6 +35,7 @@
     showStats = $bindable(false),
     ontoggle,
     onrestart,
+    live = false,
     idPrefix = 'arena',
   }: Props = $props();
 
@@ -46,7 +49,7 @@
 </script>
 
 <div class="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-end" data-testid="arena-controls">
-  <Button onclick={ontoggle} disabled={busy} data-testid="arena-toggle">
+  <Button onclick={ontoggle} disabled={busy || live} data-testid="arena-toggle">
     {phase === 'playing' ? m.arena_pause() : m.arena_play()}
   </Button>
   <Button variant="outline" onclick={onrestart} disabled={busy} data-testid="arena-restart">

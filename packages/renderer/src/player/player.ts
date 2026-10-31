@@ -2,11 +2,17 @@
 // from `options.clock`, frames from `Stage.onFrame`, and the scene from `sceneAt`.
 import { validateManifest } from '../manifest/validate.ts';
 import type { SpriteManifest } from '../manifest/types.ts';
-import { prepareScene, type PreparedScene } from '../scene/prepare.ts';
+import {
+  prepareScene,
+  prepareSceneFrom,
+  reachedEnd,
+  type PreparedScene,
+} from '../scene/prepare.ts';
 import { sceneAt } from '../scene/scene-at.ts';
 import type { Scene } from '../scene/types.ts';
 import { EMPTY_STATS, createFrameRecorder } from '../stats/frame-stats.ts';
-import { validateTimeline } from '../timeline/validate.ts';
+import type { Cue, Timeline } from '../timeline/types.ts';
+import { validateTimeline, type ManifestsById } from '../timeline/validate.ts';
 import { cursorAt, dueCues, lastCueAt } from './cues.ts';
 import { RendererError } from './errors.ts';
 import {
@@ -38,6 +44,37 @@ function validateAssets(assets: ReadonlyMap<string, unknown>): Map<string, Sprit
   return manifests;
 }
 
+/** The fight of `loadLive`. `installed` once its sheets are in: until then `prepared` is older. */
+interface LiveFight {
+  timeline: Timeline;
+  readonly manifests: ManifestsById;
+  installed: boolean;
+}
+
+function sameCue(a: Cue, b: Cue): boolean {
+  if (a.type !== b.type) return false;
+  const left = a as unknown as Readonly<Record<string, unknown>>;
+  const right = b as unknown as Readonly<Record<string, unknown>>;
+  return Object.keys(left).every((key) => left[key] === right[key]);
+}
+
+const isClosed = (timeline: Timeline): boolean => {
+  const last = timeline.cues.at(-1)?.type;
+  return last === 'win' || last === 'draw';
+};
+
+/** Whether `next` can follow `previous` without touching the sheets nor what was played (RF47). */
+function continues(previous: Timeline, next: Timeline): boolean {
+  if (next.cues.length < previous.cues.length) return false;
+  if (!previous.cues.every((cue, i) => sameCue(cue, next.cues[i] as Cue))) return false;
+  const sameFighter = (side: 'a' | 'b'): boolean =>
+    previous.fighters[side].asset === next.fighters[side].asset &&
+    previous.fighters[side].max_hp === next.fighters[side].max_hp;
+  if (!sameFighter('a') || !sameFighter('b')) return false;
+  const closing = !isClosed(previous) && isClosed(next);
+  return closing || previous.duration_ms === next.duration_ms;
+}
+
 export function createPlayer(options: RendererOptions, stage: Stage): RendererHandle {
   let reducedMotion = options.reducedMotion;
   let prepared: PreparedScene | null = null;
@@ -47,6 +84,9 @@ export function createPlayer(options: RendererOptions, stage: Stage): RendererHa
   let scene: Scene | null = null;
   let destroyed = false;
   let loadId = 0;
+  let live: LiveFight | null = null;
+  /** Goes up when another timeline takes over; an `extend` keeps the indices, so it does not. */
+  let installs = 0;
   const cueListeners = new Set<CueListener>();
   const stateListeners = new Set<StateListener>();
   const recorder = createFrameRecorder();
@@ -60,17 +100,20 @@ export function createPlayer(options: RendererOptions, stage: Stage): RendererHa
   };
 
   const settledState = (p: PreparedScene, t: number): PlayerState => {
-    if (t >= p.durationMs) return 'finished';
+    if (reachedEnd(p, t)) return 'finished';
     return playback.playing ? 'playing' : state === 'ready' ? 'ready' : 'paused';
   };
 
   function frame(elapsedMs: number): void {
     const p = prepared;
     if (destroyed || p === null) return;
-    const t = timeAt(playback, now(), p.durationMs);
+    const clock = now();
+    const t = timeAt(playback, clock, p.durationMs);
     // The scene first, so `snapshot()` inside a cue listener already shows that cue.
     render(p, t);
     if (!playback.playing) return;
+    // Before the start, `t` is held at 0: the `intro` is not due yet (010 RF50).
+    if (live?.installed === true && playback.anchorT + clock - playback.anchorClock < 0) return;
     // From the first strike to the closing cue (`win` or `draw`, 005 RF8).
     const closing = p.win ?? p.draw;
     if (p.firstStrikeAt !== null && t >= p.firstStrikeAt && (closing === null || t <= closing.at)) {
@@ -78,14 +121,16 @@ export function createPlayer(options: RendererOptions, stage: Stage): RendererHa
     }
     const due = dueCues(p.cueTimes, cursor, t);
     cursor = due.to;
+    const installsNow = installs;
     for (let i = due.from; i < due.to; i++) {
       const pc = p.cues[i];
       if (pc === undefined) continue;
       for (const listener of [...cueListeners]) listener(pc.cue, i);
-      // A listener may pause, seek, destroy the handle or load another timeline.
-      if (destroyed || prepared !== p || cursor !== due.to) return;
+      // A listener may pause, seek, destroy the handle or load another timeline. An `extend` only
+      // adds cues at the end, so the rest of these still have to fire.
+      if (destroyed || installs !== installsNow || cursor !== due.to) return;
     }
-    if (playback.playing && t >= p.durationMs) setState('finished');
+    if (playback.playing && reachedEnd(p, t)) setState('finished');
   }
 
   function render(p: PreparedScene, t: number): void {
@@ -102,9 +147,21 @@ export function createPlayer(options: RendererOptions, stage: Stage): RendererHa
   // Rejections surface through `load`; never as an unhandled rejection.
   ready.catch(() => undefined);
 
+  function install(next: PreparedScene): void {
+    prepared = next;
+    installs++;
+    playback = INITIAL_PLAYBACK;
+    cursor = 0;
+    recorder.reset();
+    state = null;
+    render(next, 0);
+    setState('ready');
+  }
+
   return {
     async load(timelineJson, assets) {
       const id = ++loadId;
+      live = null;
       const manifests = validateAssets(assets);
       const result = validateTimeline(timelineJson, manifests);
       if (!result.ok) throw new RendererError('timeline_invalid');
@@ -113,27 +170,63 @@ export function createPlayer(options: RendererOptions, stage: Stage): RendererHa
       if (destroyed || id !== loadId) return;
       await stage.loadAssets(manifests, options.resolveAsset);
       if (destroyed || id !== loadId) return;
-      prepared = next;
-      playback = INITIAL_PLAYBACK;
-      cursor = 0;
-      recorder.reset();
-      state = null;
-      render(next, 0);
-      setState('ready');
+      install(next);
+    },
+    async loadLive(timelineJson, assets) {
+      const id = ++loadId;
+      live = null;
+      const manifests = validateAssets(assets);
+      const result = validateTimeline(timelineJson, manifests, { partial: true });
+      if (!result.ok) throw new RendererError('timeline_invalid');
+      // Written now, so an `extend` that comes while the sheets load is not lost.
+      const fight: LiveFight = { timeline: result.timeline, manifests, installed: false };
+      live = fight;
+      try {
+        await ready;
+        if (destroyed || id !== loadId) return;
+        await stage.loadAssets(manifests, options.resolveAsset);
+      } catch (error) {
+        if (id === loadId) live = null;
+        throw error;
+      }
+      if (destroyed || id !== loadId) return;
+      const next = prepareScene(fight.timeline, manifests);
+      fight.installed = true;
+      install(next);
+    },
+    extend(timelineJson) {
+      if (destroyed) return;
+      const fight = live;
+      if (fight === null) throw new RendererError('timeline_invalid');
+      const result = validateTimeline(timelineJson, fight.manifests, { partial: true });
+      if (!result.ok || !continues(fight.timeline, result.timeline)) {
+        throw new RendererError('timeline_invalid');
+      }
+      const next =
+        fight.installed && prepared !== null ? prepareSceneFrom(prepared, result.timeline) : null;
+      fight.timeline = result.timeline;
+      if (next !== null) prepared = next;
     },
     play() {
       const p = prepared;
       if (destroyed || p === null) return;
+      const first = playback === INITIAL_PLAYBACK;
       playback = playPlayback(playback, now(), p.durationMs);
       const t = timeAt(playback, now(), p.durationMs);
-      setState(t >= p.durationMs ? 'finished' : 'playing');
+      // Coming in late: what was skipped does not fire (010 RF50), and the scene and `snapshot()`
+      // already show that moment, because if the fight is over no frame will announce it.
+      if (first && live?.installed === true) {
+        cursor = cursorAt(p.cueTimes, t);
+        render(p, t);
+      }
+      setState(reachedEnd(p, t) ? 'finished' : 'playing');
     },
     pause() {
       const p = prepared;
       if (destroyed || p === null) return;
       playback = pausePlayback(playback, now(), p.durationMs);
       const t = timeAt(playback, now(), p.durationMs);
-      setState(t >= p.durationMs ? 'finished' : 'paused');
+      setState(reachedEnd(p, t) ? 'finished' : 'paused');
     },
     seek(ms) {
       const p = prepared;

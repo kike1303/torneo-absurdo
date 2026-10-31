@@ -1,12 +1,13 @@
 # @torneo/renderer
 
-Reproductor de peleas de Torneo Absurdo. Agnóstico de framework: no importa Svelte, Kit ni `@torneo/protocol`. Fases A1 (núcleo puro) y A2 (reproductor, capa Pixi y medición) de [002](../../docs/features/002-spike-renderer/spec.md).
+Reproductor de peleas de Torneo Absurdo. Agnóstico de framework: no importa Svelte, Kit ni `@torneo/protocol`. Fases A1 (núcleo puro) y A2 (reproductor, capa Pixi y medición) de [002](../../docs/features/002-spike-renderer/spec.md), y fase C (pelea en curso) de [010](../../docs/features/010-scheduler-de-peleas/spec.md).
 
 ## Subpaths
 
 - `.`: `createRenderer`, los tipos públicos (`RendererTheme`, `RendererOptions`, `RendererHandle`, `RendererError`, `FrameStats`) y los módulos puros. Es el único subpath que carga Pixi.
 - `./manifest`: formato de sprites v1, `validateManifest`, `resolveAnimation` y `windupMs`.
-- `./timeline`: `Timeline` v1 y `validateTimeline`.
+- `./timeline`: `Timeline` v1 y v2, y `validateTimeline`.
+- `./scene`: `prepareScene`, `prepareSceneFrom` y `sceneAt`, sin Pixi.
 - `./placeholders/*`: `dummy_a` y `dummy_b` (`manifest.json` y `sheet-0.png`).
 - `./fixtures/*`: el guion del spike (`spike.timeline.json`).
 
@@ -18,7 +19,7 @@ El formato de assets, la `Timeline` y las reglas de coreografía están en la sp
 
 ## Escena pura
 
-`prepareScene(timeline, manifests)` se llama una vez por carga y devuelve una estructura congelada. `sceneAt(prepared, t, { reducedMotion })` describe la escena en `t`: luchadores, HUD (solo valores), cámara, banners y efectos. Es función pura de `t`, así que `seek` muestra lo mismo que reproducir hasta ahí. El layout del HUD en px CSS es `layoutHud(viewport, measure, names)`.
+`prepareScene(timeline, manifests)` se llama una vez por carga y devuelve una estructura congelada. `prepareSceneFrom(previa, timeline)` da el mismo resultado en cada `extend`, reutilizando lo que ningún cue nuevo puede cambiar. `sceneAt(prepared, t, { reducedMotion })` describe la escena en `t`: luchadores, HUD (solo valores), cámara, banners y efectos. Es función pura de `t`, así que `seek` muestra lo mismo que reproducir hasta ahí. El layout del HUD en px CSS es `layoutHud(viewport, measure, names)`.
 
 ## `createRenderer` y ciclo de vida
 
@@ -37,6 +38,24 @@ handle.destroy();
 - **Cues:** `onCue` dispara cada cue una vez, en orden, cuando la reproducción pasa su `at_ms`. Un `seek` no dispara lo que salta; un salto del reloj (volver de una pestaña oculta) dispara todo el intervalo. `snapshot()` da `t`, fase, ganador, HP y el último cue de la escena aplicada, sin texto.
 - **`Assets` de Pixi es global:** por eso las hojas pasan por una caché compartida con conteo de referencias (`src/stage/shared-cache.ts`). Cada URL se carga una vez, `destroy` solo suelta las referencias de su renderer, una hoja se descarga cuando la suelta su último dueño y una carga nueva espera a la descarga en curso. Dos renderers que se solapan (un cambio rápido de luchador, un reintento) no se destruyen las texturas entre sí.
 
+## Pelea en curso
+
+```ts
+const handle = createRenderer(container, { …, clock: () => serverNow - liveStartedAt - 3500 });
+const loading = handle.loadLive(partialTimeline, assets); // `validateTimeline` con `partial: true`
+// Cada lote, también mientras cargan las hojas:
+handle.extend(longerTimeline);
+await loading;
+handle.play();
+```
+
+- **Sin `seek` ni `pause`:** `t = clock()`, así que todos los espectadores ven lo mismo.
+- **Timeline parcial:** las mismas reglas de la v2, sin `ending_missing` ni `closing_missing`. Mientras no llega el cierre, `duration_ms` es la cota de la pelea, y `finished` no existe ni como estado ni como fase, aunque el reloj la pase. Cuando llega el cierre, `duration_ms` es el fin real.
+- **`extend`** es síncrono, no recarga hojas y no mueve la reproducción ni el cursor. Lanza `RendererError('timeline_invalid')` sin cambiar nada si no hay un `loadLive` vigente, si la timeline no es válida, si cambia un cue anterior o un luchador, o si cambia `duration_ms` sin que llegue el cierre o después de que llegó.
+- **Cues:** el primer `play()` deja el cursor en `t` y pinta ese instante, así que quien entra tarde no recibe `onCue` por lo saltado, y `snapshot()` ya muestra el HP y el resultado. Con el reloj negativo, `t = 0` y no sale ningún cue. Un lote atrasado dispara sus cues en el siguiente frame, en ráfaga si son varios.
+
+`/dev/arena?log=<nombre>&live=1` entrega un dorado por lotes según su `t`, sin server. `?t=` es el tiempo del server ya transcurrido al abrir, y sirve para probar una entrada tarde.
+
 ## Condiciones de CSP (ADR-0012 B4.2)
 
 - `src/index.ts` importa `pixi.js/unsafe-eval` en su primera línea, antes de crear cualquier renderer.
@@ -54,6 +73,11 @@ handle.destroy();
 3. Después de cada una, "Copiar JSON" y pégalo en el PR con el modelo, el SO y la versión del navegador. Fuera de un contexto seguro (la IP de la LAN en el iPhone) no hay portapapeles: el JSON aparece seleccionado en un cuadro de texto para copiarlo a mano.
 
 Umbral por corrida: p95 ≤ 18.2 ms y FPS medio ≥ 58 (o ≥ 0.95 × la tasa nativa en pantallas de 90/120 Hz).
+
+El bloqueo de cada `extend` (RNF "CPU" de 010) se mide de dos formas:
+
+- `pnpm --filter @torneo/renderer bench:prepare` da en Node el costo con 200 cues. Umbral: `prepareSceneFrom` con p50 ≤ 0,67 ms.
+- `/es/dev/arena?log=draw&live=1`, con la pelea entera, deja `extend_ms` en el JSON de "Copiar JSON". Umbral con la CPU limitada a 6×: p50 ≤ 4 ms y p95 ≤ 8 ms, en la peor de tres corridas tras una de calentamiento. Pon el límite después de cargar la página, porque la navegación lo puede quitar, y compara con una corrida sin límite: el límite no siempre alarga por igual las tareas tan cortas.
 
 - **Android:** Chrome → `chrome://inspect` → _Port forwarding_ `3000 → localhost:3000` por USB. No publica nada en la LAN.
 - **iPhone:** Safari no reenvía puertos por USB. Solo con el OK previo del owner, anotado en el PR, y solo mientras dura la medición, a mano y fuera de `just`: `HOST=<ip-de-la-LAN> PORT=3000 PUBLIC_ORIGIN=http://<ip-de-la-LAN>:3000 ENABLE_DEV_CATALOG=1 node apps/web/build` (después de `just build`).
