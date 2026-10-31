@@ -107,6 +107,12 @@ test('4. with a session, the error and a link to the account', async ({ page, id
   await page.goto('/es/login?error=auth.already_linked');
   await expect(page.getByTestId('login-error')).toHaveText(text('es', 'error_auth_already_linked'));
   await expect(page.getByTestId('login-account-link')).toHaveAttribute('href', '/es/account');
+  // TA-31: nothing asks to sign in to someone who is signed in.
+  await expect(page.getByTestId('login-title')).toHaveText(text('es', 'login_signed_in_title'));
+  await expect(page.getByRole('alert')).toContainText(text('es', 'login_signed_in_error_title'));
+  await expect(page.getByText(text('es', 'login_lead'))).toHaveCount(0);
+  await expect(page.getByText(text('es', 'login_error_title'))).toHaveCount(0);
+  await expect(page).toHaveTitle(new RegExp(`^${text('es', 'login_signed_in_title')} `));
 });
 
 /**

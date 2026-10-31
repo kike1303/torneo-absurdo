@@ -8,7 +8,7 @@
   import DevIdentityField from '#lib/components/auth/DevIdentityField.svelte';
   import ProviderButton from '#lib/components/auth/ProviderButton.svelte';
   import * as Alert from '#lib/components/ui/alert/index.js';
-  import { linkPanel, providerRows } from '#lib/features/account/providers.js';
+  import { linkBlocked, linkPanel, providerRows } from '#lib/features/account/providers.js';
   import Section from './Section.svelte';
 
   // 008 plan-d decision 9: every new component and its states (demo texts exempt from i18n).
@@ -27,6 +27,10 @@
   const notReady: ReauthStatus = {
     link_ready: false,
     unlink: [{ provider: 'dev', ready: false, reauth_with: ['dev'] }],
+  };
+  const linkOff: ReauthStatus = {
+    link_ready: false,
+    unlink: [{ provider: 'discord', ready: false, reauth_with: [] }],
   };
 </script>
 
@@ -90,6 +94,13 @@
       linkPanel={linkPanel(notReady, ['dev'], ['google', 'dev'])}
       locale="en"
       idPrefix="catalog-link-panel-"
+    />
+    <!-- TA-31: the only linked provider is switched off, so nothing can confirm a link. -->
+    <ProviderList
+      rows={providerRows(['discord'], ['google', 'dev'], linkOff)}
+      linkBlocked={linkBlocked(linkOff, ['discord'], ['google', 'dev'])}
+      locale="en"
+      idPrefix="catalog-link-blocked-"
     />
     <ReauthPanel
       providers={['google', 'discord']}

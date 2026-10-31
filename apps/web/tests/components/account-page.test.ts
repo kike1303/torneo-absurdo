@@ -40,3 +40,37 @@ describe('/account with reauthDone and the result of an action', () => {
     expect(status(form)).toBe(text);
   });
 });
+
+// TA-31: the page hands `linkBlocked` to the list, from what `load` returns.
+describe('/account, the only linked provider is switched off', () => {
+  const page = (linkReady: boolean) =>
+    render(AccountPage, {
+      props: {
+        data: {
+          state: 'ready',
+          displayName: 'Ana',
+          balance: 100,
+          linked: ['discord'],
+          enabled: ['google', 'dev'],
+          reauth: {
+            link_ready: linkReady,
+            unlink: [{ provider: 'discord', ready: false, reauth_with: [] }],
+          },
+          reauthDone: false,
+        },
+        form: null,
+      } as never,
+    }).body;
+
+  it('without a confirmation: the explanation, not the link buttons', () => {
+    const body = page(false);
+    expect(body).toContain('data-testid="link-blocked"');
+    expect(body).not.toContain('data-testid="link-google"');
+  });
+
+  it('with a confirmation: the link buttons work', () => {
+    const body = page(true);
+    expect(body).toContain('data-testid="link-google"');
+    expect(body).not.toContain('data-testid="link-blocked"');
+  });
+});

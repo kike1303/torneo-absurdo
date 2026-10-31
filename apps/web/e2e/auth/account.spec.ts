@@ -220,6 +220,9 @@ for (const locale of ['es', 'en'] as const) {
     await expect(page.getByTestId('login-error')).toHaveText(
       text(locale, 'error_auth_reauth_mismatch'),
     );
+    // TA-31: the session is still there, so nothing asks to sign in.
+    await expect(page.getByTestId('login-title')).toHaveText(text(locale, 'login_signed_in_title'));
+    await expect(page.getByText(text(locale, 'login_lead'))).toHaveCount(0);
     const back = page.getByTestId('login-account-link');
     await expect(back).toHaveText(text(locale, 'login_back_to_account'));
     await waitForHydration(page);

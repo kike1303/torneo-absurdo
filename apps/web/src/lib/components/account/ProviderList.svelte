@@ -13,18 +13,21 @@
   // The providers of the account (008 RF-C2, RF-C3, plan-d decision 9). Linking posts straight
   // to /api (the server sets the flow cookie and redirects to the provider); unlinking is a form
   // action, so its errors arrive as text, never as raw JSON. A missing confirmation opens the
-  // panel of 009 RF21; `linkPanel` is the panel that replaces the link buttons (RF20).
+  // panel of 009 RF21; `linkPanel` is the panel that replaces the link buttons (RF20), and
+  // `linkBlocked` replaces them with an explanation when nothing can confirm (TA-31).
   let {
     rows,
     locale,
     error = null,
     linkPanel = [],
+    linkBlocked = false,
     idPrefix = '',
   }: {
     rows: ProviderRow[];
     locale: Locale;
     error?: { provider: Provider; key: ErrorTextKey; code?: unknown } | null;
     linkPanel?: readonly Provider[];
+    linkBlocked?: boolean;
     idPrefix?: string;
   } = $props();
 
@@ -91,7 +94,7 @@
             {m.account_last_provider_hint()}
           </p>
         {/if}
-      {:else if linkPanel.length === 0}
+      {:else if linkPanel.length === 0 && !linkBlocked}
         <form method="post" action={`/api/auth/link/${row.provider}`}>
           <input type="hidden" name="next" value={`/${locale}/account`} />
           <Button
@@ -129,4 +132,8 @@
   <div class="mt-3">
     <ReauthPanel providers={linkPanel} {locale} {idPrefix} testid="reauth-panel-link" />
   </div>
+{:else if linkBlocked}
+  <p class="mt-3 text-sm text-muted-foreground" data-testid="link-blocked">
+    {m.account_link_unavailable()}
+  </p>
 {/if}
