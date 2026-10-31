@@ -53,7 +53,7 @@ Opciones a evaluar (como mínimo):
 - [x] `ogro-del-pantano`, del roster existente, queda como personaje de prueba completo (todas las animaciones obligatorias de `docs/guides/sprites.md`) hecho con la opción ganadora, que pasa `run import` y se reproduce en `/[lang]/dev/arena`. Solo se le agrega el campo `sprites`, sin tocar su balance, y `just sim --check` se corre de todos modos.
   - Estado (2026-10-31): `sprites` no se agrega porque RF7 de la spec y la casilla siguiente lo condicionan a que el set esté en `content/sprites/`, y se queda en local.
   - `just sim --check` pasó el 2026-10-31 (exit 0).
-  - Las 9 acciones están en el set y `run import` pasa. La arena reprodujo las 9 acciones sin errores, también en escritorio con tema claro; la calidad de las poses de `block` y `dodge` queda sin juzgar (ver el plan).
+  - Las 9 acciones están en el set y `run import` pasa. La arena reprodujo la pelea sin errores en escritorio con tema claro (ataques, golpe, KO y victoria) y un log con `block` y `dodge` en tema oscuro; la calidad de las poses de `block` y `dodge` queda sin juzgar (ver el plan).
 - [ ] El set se commitea en `content/sprites/<id>/` y pasa `check`, si la licencia lo permite sin duda y el owner da su OK. Si falta alguna de las dos, se queda en `content/_local/` y esta casilla no se marca.
   - Estado (2026-10-31): no se marca. El owner no acepta la licencia para publicar, por ahora, porque es un personaje de prueba y no arte final. El set se queda en `content/_local/`.
 - [x] Ese personaje pasa el checklist "¿se parece demasiado?" de `write-character`, con su ítem de diseño visual ya aplicado a los sprites. Lo aprueba game-designer o product-owner, distinto del autor, con el OK del owner.
