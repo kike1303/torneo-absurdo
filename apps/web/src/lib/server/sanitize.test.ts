@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { REDACTED_IP, sanitize } from './sanitize.js';
+import { MAX_INPUT, REDACTED_IP, sanitize } from './sanitize.js';
+
+// A limit in ms applies to the fastest run, the one the load touched least, because a single run
+// measures the load of the machine (TA-38). A run over the limit gets more rounds before it fails.
+const MAX_MS = 50;
+const MAX_ROUNDS = 50;
+
+function elapsed(input: string): number {
+  const start = performance.now();
+  sanitize(input);
+  return performance.now() - start;
+}
 
 // Every fragment of an address that must not survive sanitizing.
 function expectNoFragments(out: string, address: string): void {
@@ -171,9 +182,11 @@ describe('sanitize: bounded input (TA-10)', () => {
   it.each(adversarial)('sanitizes 160 KB of %s in under 50 ms', (_name, input) => {
     expect(input.length).toBeGreaterThanOrEqual(160_000);
     sanitize('warm up 2001:db8::1 203.0.113.5');
-    const start = performance.now();
-    sanitize(input);
-    expect(performance.now() - start).toBeLessThan(50);
+    let fastest = Infinity;
+    for (let round = 1; round <= MAX_ROUNDS && fastest >= MAX_MS; round++) {
+      fastest = Math.min(fastest, elapsed(input));
+    }
+    expect(fastest).toBeLessThan(MAX_MS);
   });
 
   it('truncates to 8 KB and marks it', () => {
@@ -260,23 +273,16 @@ describe('sanitize: truncation without whitespace (PR #2 review)', () => {
 });
 
 describe('sanitize: every pattern is linear on 8 KB, the worst real case (PR #2 review)', () => {
-  // How much the time grows with the input, not a limit in ms, which only measures the load of the
-  // machine (TA-38). 4x the input takes 4x the time if linear and 16x if quadratic. The small size
-  // stays above the 1 KB bound of URL_CREDENTIALS, whose cost per start only grows up to there
-  // (4.9x on `a://b:`), and the limit sits halfway between that and 16x.
-  const small = 2 * 1024;
-  const large = 8 * 1024;
+  // How much the time grows with the input (TA-38): 4x the input takes 4x the time if linear and 16x
+  // if quadratic. The small size stays above the 1 KB bound of URL_CREDENTIALS, whose cost per start
+  // only grows up to there (4.9x on `a://b:`), and the limit is the geometric mean of that and 16x.
+  // Growth alone misses a linear pattern that is simply slow, so MAX_MS still applies.
+  const large = MAX_INPUT;
+  const small = large / 4;
   const maxGrowth = 9;
-  // Each size keeps its fastest run, the one the load touched least. A spike or a JIT tier-up can
-  // still skew a few rounds, so a growth over the limit gets more rounds before it fails.
+  // A spike or a JIT tier-up can skew a ratio even between fastest runs, so a few rounds always run.
   const minRounds = 5;
-  const maxRounds = 50;
   const unit = (s: string, n: number) => s.repeat(Math.ceil(n / s.length)).slice(0, n);
-  const elapsed = (input: string) => {
-    const start = performance.now();
-    sanitize(input);
-    return performance.now() - start;
-  };
   it.each(
     [
       'a:',
@@ -321,12 +327,14 @@ describe('sanitize: every pattern is linear on 8 KB, the worst real case (PR #2 
       const largeInput = unit(s, large);
       let fastestSmall = Infinity;
       let fastestLarge = Infinity;
-      for (let round = 1; round <= maxRounds; round++) {
+      for (let round = 1; round <= MAX_ROUNDS; round++) {
         fastestSmall = Math.min(fastestSmall, elapsed(smallInput));
         fastestLarge = Math.min(fastestLarge, elapsed(largeInput));
-        if (round >= minRounds && fastestLarge / fastestSmall < maxGrowth) break;
+        const ok = fastestLarge / fastestSmall < maxGrowth && fastestLarge < MAX_MS;
+        if (round >= minRounds && ok) break;
       }
       expect(fastestLarge / fastestSmall).toBeLessThan(maxGrowth);
+      expect(fastestLarge).toBeLessThan(MAX_MS);
     },
     60_000,
   );
