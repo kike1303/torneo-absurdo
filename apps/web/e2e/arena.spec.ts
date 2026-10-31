@@ -497,6 +497,111 @@ test('?log=ko-knockdown&pace=0.8: the copied JSON has the requested, effective a
   expect(errors).toEqual([]);
 });
 
+// 010 RF52: ?live=1 releases the golden by its `t` and plays it by itself, 3500 ms behind. `?t=` is
+// the server time already elapsed, so each wait stays near 8.5 s.
+const LIVE_TAIL_MS = 8500;
+const LIVE_TIMEOUT_MS = 30_000;
+const PLAYBACK_DELAY_MS = 3500;
+
+function lastT(log: { events: readonly { t: number }[] }): number {
+  return (log.events.at(-1) as { t: number }).t;
+}
+
+function firstStrikeIndex(log: unknown): number {
+  return adapted(log).cues.findIndex((cue) => cue.type === 'strike');
+}
+
+test('?live=1 with a KO: plays alone, ends as the whole log, without console errors', async ({
+  page,
+}) => {
+  const errors = trackErrors(page);
+  const { loser } = koWinner(knockdownLog);
+  const start = lastT(knockdownLog) + PLAYBACK_DELAY_MS - LIVE_TAIL_MS;
+  await page.goto(`/es/dev/arena?log=ko-knockdown&live=1&t=${start}`);
+  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+  await expect(page.getByTestId('arena-toggle')).toBeDisabled();
+  await expect(stage(page)).toHaveAttribute('data-state', 'finished', {
+    timeout: LIVE_TIMEOUT_MS,
+  });
+  await expect(stage(page)).toHaveAttribute('data-ending', 'ko');
+  await expect(stage(page)).toHaveAttribute(`data-hp-${loser}`, '0');
+  await expect(page.getByTestId('fight-winner')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('?live=1 with a draw: the closing arrives with end and ends the fight', async ({ page }) => {
+  const errors = trackErrors(page);
+  const start = lastT(draw) + PLAYBACK_DELAY_MS - LIVE_TAIL_MS;
+  await page.goto(`/en/dev/arena?log=draw&live=1&t=${start}`);
+  await expect(stage(page)).toHaveAttribute('data-state', 'finished', {
+    timeout: LIVE_TIMEOUT_MS,
+  });
+  await expect(stage(page)).toHaveAttribute('data-ending', 'draw');
+  await expect(page.getByTestId('fight-draw')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('?live=1 from the start: playing at once, then the first strike', async ({ page }) => {
+  const errors = trackErrors(page);
+  await page.goto('/es/dev/arena?log=ko-knockdown&live=1');
+  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+  await expect(stage(page)).toHaveAttribute(
+    'data-last-cue',
+    String(firstStrikeIndex(knockdownLog)),
+    { timeout: LIVE_TIMEOUT_MS },
+  );
+  expect(errors).toEqual([]);
+});
+
+test('?live=1 opens the release again with "Restart"', async ({ page }) => {
+  const errors = trackErrors(page);
+  const start = lastT(knockdownLog) + PLAYBACK_DELAY_MS - 4000;
+  await page.goto(`/es/dev/arena?log=ko-knockdown&live=1&t=${start}`);
+  await expect(stage(page)).toHaveAttribute('data-state', 'finished', {
+    timeout: LIVE_TIMEOUT_MS,
+  });
+  await waitForHydration(page);
+  await page.getByTestId('arena-restart').click();
+  await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+  await expect(stage(page)).toHaveAttribute('data-state', 'finished', {
+    timeout: LIVE_TIMEOUT_MS,
+  });
+  expect(errors).toEqual([]);
+});
+
+for (const url of ['/es/dev/arena?live=1', '/es/dev/arena?log=ko-knockdown&live=0']) {
+  test(`${url} is not live: it loads paused, as without it`, async ({ page }) => {
+    await page.goto(url);
+    await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
+    await expect(page.getByTestId('arena-toggle')).toBeEnabled();
+    await staysPaused(page, 500);
+  });
+}
+
+for (const lang of ['es', 'en'] as const) {
+  for (const size of SIZES) {
+    for (const theme of ['light', 'dark'] as const) {
+      test(`screenshot ?live=1 ${lang} ${size.name} ${theme}, without horizontal scroll`, async ({
+        page,
+      }) => {
+        await page.context().addCookies([{ name: 'theme', value: theme, url: ORIGIN }]);
+        await page.setViewportSize(size);
+        await page.goto(`/${lang}/dev/arena?log=ko-knockdown&live=1&t=30000`);
+        await expect(stage(page)).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
+        await expect(page.getByTestId('arena-toggle')).toBeDisabled();
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow).toBeLessThanOrEqual(0);
+        await page.screenshot({
+          path: `${DIR}/arena-live-${lang}-${size.name}-${theme}.png`,
+          fullPage: true,
+        });
+      });
+    }
+  }
+}
+
 // 005 RF18: the engine logs that end by time. `time_up` at 86 000, the closing (`win` or `draw`) at
 // 87 500 and the end at 90 000.
 const TIME_LOGS = [

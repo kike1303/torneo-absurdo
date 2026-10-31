@@ -62,7 +62,10 @@ describe('validateTimeline with partial (010 RF46)', () => {
     for (const golden of GOLDENS) {
       for (const cue of golden.cues) {
         const prefix = cut(golden, cue.at_ms);
-        expect(validateTimeline(prefix, MANIFESTS, PARTIAL)).toEqual({ ok: true, timeline: prefix });
+        expect(validateTimeline(prefix, MANIFESTS, PARTIAL)).toEqual({
+          ok: true,
+          timeline: prefix,
+        });
         const codes = errorsOf(validateTimeline(prefix, MANIFESTS)).map((e) => e.code);
         expect(codes.length).toBe(1);
         expect(CLOSING_ONLY).toContain(codes[0]);

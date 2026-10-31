@@ -2,7 +2,8 @@
   // Test arena of 002 (RF-A16), behind the /dev/** guard. It only composes: every visible text
   // lives in lib/components/fight/ (ADR-0009 D5). Phase B adds the local fighters (only in
   // `vite dev`) and `?pace=` (RF-B7, RF-B9); phase C, `?log=` to play an engine log (RF-C3). 006
-  // clamps `?pace=` to the smallest valid factor of the timeline (RF16) and reports it (RF17).
+  // clamps `?pace=` to the smallest valid factor of the timeline (RF16) and reports it (RF17). 010
+  // adds `?live=1`: an engine log released by its `t`, with `?t=` as the time already elapsed.
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import type { FrameStats, Side } from '@torneo/renderer';
@@ -12,7 +13,12 @@
   import FightStage, { type FightStageState } from '#lib/components/fight/FightStage.svelte';
   import { ARENA_FIGHTERS, type ArenaFighterId } from '#lib/features/arena/fighters.js';
   import { createLocalAssets, loadLocalFighterIds } from '#lib/features/arena/local-fighters.js';
-  import { loadEngineLogTimeline, parseEngineLog } from '#lib/features/fight/engine-logs.js';
+  import { durationStats, openLogDrip, type DurationStats } from '#lib/features/arena/log-drip.js';
+  import {
+    loadEngineLog,
+    loadEngineLogTimeline,
+    parseEngineLog,
+  } from '#lib/features/fight/engine-logs.js';
   import {
     meanStrikeGapMs,
     parsePace,
@@ -43,6 +49,7 @@
   let meanGap = $state<number | null>(null);
   let dpr = $state(1);
   let paceInfo = $state<PaceResolution | null>(null);
+  let extendMs = $state<DurationStats | undefined>(undefined);
   const start = initialT();
   const pace = parsePace(page.url.searchParams.get('pace'));
   const retime =
@@ -58,6 +65,14 @@
     log === null
       ? undefined
       : (assets: Readonly<Record<Side, string>>) => loadEngineLogTimeline(log, assets);
+  const live =
+    log === null || page.url.searchParams.get('live') !== '1'
+      ? undefined
+      : async (assets: Readonly<Record<Side, string>>) =>
+          openLogDrip(await loadEngineLog(log), assets, {
+            startElapsedMs: start,
+            now: () => performance.now(),
+          });
   const local = createLocalAssets((url) => fetch(url));
 
   onMount(() => {
@@ -72,6 +87,7 @@
       canvasWidth = stage?.canvasWidth() ?? 0;
       const timeline = stage?.currentTimeline() ?? null;
       meanGap = timeline === null ? null : meanStrikeGapMs(timeline);
+      if (live !== undefined) extendMs = durationStats(stage?.extendDurations() ?? []);
     };
     read();
     const timer = setInterval(read, STATS_REFRESH_MS);
@@ -93,6 +109,7 @@
     {local}
     {retime}
     {source}
+    {live}
     debug
   />
   <ArenaControls
@@ -102,6 +119,7 @@
     bind:fighters
     bind:reducedMotion
     bind:showStats
+    live={live !== undefined}
     ontoggle={() => stage?.toggle()}
     onrestart={() => stage?.restart()}
   />
@@ -113,6 +131,7 @@
         canvasWidth,
         fighters: [fighters.a, fighters.b],
         mean_strike_gap_ms: meanGap,
+        ...(extendMs === undefined ? {} : { extend_ms: extendMs }),
       }}
       pace={paceInfo ?? undefined}
     />

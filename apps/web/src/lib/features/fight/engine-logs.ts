@@ -27,6 +27,12 @@ export function parseEngineLog(raw: string | null): EngineLogName | null {
   return raw !== null && Object.hasOwn(ENGINE_LOGS, raw) ? (raw as EngineLogName) : null;
 }
 
+/** An engine log of the allow-list. */
+export async function loadEngineLog(name: EngineLogName): Promise<AdapterLog> {
+  // JSON imports type `type` as `string`: the cast stays here, the adapter checks the content.
+  return (await ENGINE_LOGS[name]()).default as unknown as AdapterLog;
+}
+
 /**
  * The timeline of an engine log, with the given assets. A log the adapter rejects throws the
  * error `FightStage` already shows (`timeline_invalid`); nothing goes to the console (ADR-0012).
@@ -35,8 +41,7 @@ export async function loadEngineLogTimeline(
   name: EngineLogName,
   assets: Readonly<Record<FighterSide, string>>,
 ): Promise<AdaptedTimeline> {
-  // JSON imports type `type` as `string`: the cast stays here, the adapter checks the content.
-  const log = (await ENGINE_LOGS[name]()).default as unknown as AdapterLog;
+  const log = await loadEngineLog(name);
   const result = timelineFromFightLog(log, { a: { asset: assets.a }, b: { asset: assets.b } });
   if (!result.ok)
     throw Object.assign(new Error('timeline_invalid'), { code: 'timeline_invalid' as const });
