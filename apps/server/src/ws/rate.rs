@@ -8,6 +8,12 @@ use tokio::time::Instant;
 pub const LIMIT: usize = 10;
 pub const WINDOW: Duration = Duration::from_secs(10);
 
+/// How many `fight_sync` a socket can ask for by subscribing, per minute (010 amendment DP-B7). A
+/// message of 40 bytes asks for up to 47 KB, and the way out of the server is shared. The ones the
+/// server sends by itself do not count.
+pub const SUBSCRIBE_SYNC_LIMIT: usize = 3;
+pub const SUBSCRIBE_SYNC_WINDOW: Duration = Duration::from_secs(60);
+
 #[derive(Debug)]
 pub struct RateWindow {
     limit: usize,

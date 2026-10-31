@@ -1,14 +1,16 @@
-//! One socket's life (RF-B13, 008 RF-B14, RF-B15): limits, ping/pong, idleness, echo,
-//! subscriptions, the `self` channel, the session (revocation and periodic revalidation) and
-//! shutdown. Nothing here is logged at `info`; at `debug` only `ws.closed` with the close code.
+//! One socket's life (RF-B13, 008 RF-B14, RF-B15, 010 RF38 to RF43): limits, ping/pong, idleness,
+//! echo, subscriptions, the `self` channel, the channels of the fights, the session (revocation and
+//! periodic revalidation) and shutdown. Nothing here is logged at `info`; at `debug` only `ws.closed`
+//! with the close code.
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
-use protocol::{AuthErrorCode, ClientMessage, ErrorCode, ServerMessage, WsErrorCode};
+use protocol::{AuthErrorCode, Channel, ClientMessage, ErrorCode, ServerMessage, WsErrorCode};
 use sqlx::PgPool;
 use tokio::sync::mpsc;
 use tokio::time::{Instant, MissedTickBehavior};
@@ -20,6 +22,7 @@ use super::channels::Subscriptions;
 use super::rate::RateWindow;
 use super::registry::Registration;
 use super::self_hub::{QUEUE, SelfHub, SelfSubscription};
+use crate::fights::hub::{Cursor, FightHub};
 use crate::sessions;
 
 /// The session of a socket that passed its second validation.
@@ -73,9 +76,10 @@ pub async fn run(
     context: Context,
     shutdown: CancellationToken,
     auth: Option<SocketAuth>,
+    hub: Arc<FightHub>,
 ) {
     let config = context.config;
-    let end = serve(&mut socket, context, &shutdown, auth.as_ref()).await;
+    let end = serve(&mut socket, context, &shutdown, auth.as_ref(), &hub).await;
     if let End::Close(code, reason) = end {
         tracing::debug!(event = "ws.closed", close_code = code);
         close(&mut socket, code, reason, config.close_grace).await;
@@ -105,10 +109,18 @@ async fn serve(
     context: Context,
     shutdown: &CancellationToken,
     auth: Option<&SocketAuth>,
+    hub: &Arc<FightHub>,
 ) -> End {
     let config = context.config;
     let mut rate = RateWindow::default();
     let mut subscriptions = Subscriptions::default();
+    // The `fight_sync` this socket can ask for by subscribing (010 amendment DP-B7).
+    let (sync_limit, sync_window) = config.subscribe_sync_limit;
+    let mut sync_requests = RateWindow::new(sync_limit, sync_window);
+    // Where this socket is in each public channel: all its state, at most 8 entries (RF43).
+    let mut hub_changes = hub.watch();
+    let mut schedule: Option<u64> = None;
+    let mut fights: BTreeMap<i32, Cursor> = BTreeMap::new();
     // One queue for the life of the socket; the hub holds its sender only while subscribed.
     let (self_tx, mut self_rx) = mpsc::channel(QUEUE);
     let mut self_subscription: Option<SelfSubscription> = None;
@@ -169,10 +181,27 @@ async fn serve(
                     return End::Drop;
                 }
             }
+            // A slow socket skips ahead: changes join, and each channel says what it needs (RF43).
+            _ = hub_changes.changed(), if schedule.is_some() || !fights.is_empty() => {
+                if let Some(seen) = schedule.as_mut()
+                    && let Some(text) = hub.next_schedule(seen)
+                    && !send(socket, Message::Text(text), config.close_grace).await
+                {
+                    return End::Drop;
+                }
+                for (id, cursor) in &mut fights {
+                    if let Some(text) = hub.next_for(*id, cursor)
+                        && !send(socket, Message::Text(text), config.close_grace).await
+                    {
+                        return End::Drop;
+                    }
+                }
+            }
             () = tokio::time::sleep_until(pong_deadline) => {
                 return policy(WsErrorCode::PongTimeout);
             }
-            () = tokio::time::sleep_until(idle_deadline) => {
+            // A viewer sends nothing for minutes (RF42). Pings and their timeout still apply.
+            () = tokio::time::sleep_until(idle_deadline), if subscriptions.is_empty() => {
                 return policy(WsErrorCode::IdleTimeout);
             }
             _ = pings.tick() => {
@@ -212,6 +241,7 @@ async fn serve(
                                 else {
                                     return policy(WsErrorCode::InvalidMessage);
                                 };
+                                let mut initial = None;
                                 let answer = match message {
                                     ClientMessage::Echo { payload } => {
                                         if !context.echo {
@@ -220,14 +250,47 @@ async fn serve(
                                         ServerMessage::Echo { payload }
                                     }
                                     ClientMessage::Subscribe { channel } => {
-                                        match subscriptions.subscribe(&channel, auth.is_some()) {
-                                            Ok(channel) => {
-                                                // `self` is the only channel: resolved from
-                                                // the session, never from the client.
-                                                if let (Some(auth), None) = (auth, &self_subscription) {
-                                                    self_subscription = Some(
-                                                        auth.hub.subscribe(auth.user_id, self_tx.clone()),
-                                                    );
+                                        let checked = subscriptions.check(
+                                            &channel,
+                                            auth.is_some(),
+                                            |id| i32::try_from(id.get()).is_ok_and(|id| hub.knows(id)),
+                                        );
+                                        match checked {
+                                            Ok((channel, already_open)) => {
+                                                // Open: `subscribed` and nothing else, or a message
+                                                // of 40 bytes would ask for one of 50 KB (RF38).
+                                                if !already_open {
+                                                    if matches!(channel, Channel::Fight(_))
+                                                        && !sync_requests.allow(now)
+                                                    {
+                                                        return policy(WsErrorCode::RateLimited);
+                                                    }
+                                                    subscriptions.open(channel);
+                                                    match channel {
+                                                        // Resolved from the session, never from
+                                                        // the client.
+                                                        Channel::SelfChannel => {
+                                                            if let (Some(auth), None) = (auth, &self_subscription) {
+                                                                self_subscription = Some(
+                                                                    auth.hub.subscribe(auth.user_id, self_tx.clone()),
+                                                                );
+                                                            }
+                                                        }
+                                                        Channel::Schedule => {
+                                                            let (seen, text) = hub.subscribe_schedule();
+                                                            schedule = Some(seen);
+                                                            initial = text;
+                                                        }
+                                                        Channel::Fight(id) => {
+                                                            let opened = i32::try_from(id.get()).ok().and_then(|id| {
+                                                                hub.subscribe_fight(id).map(|sub| (id, sub))
+                                                            });
+                                                            if let Some((id, (cursor, text))) = opened {
+                                                                fights.insert(id, cursor);
+                                                                initial = text;
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                                 ServerMessage::Subscribed { channel }
                                             }
@@ -237,7 +300,15 @@ async fn serve(
                                     ClientMessage::Unsubscribe { channel } => {
                                         match subscriptions.unsubscribe(&channel) {
                                             Ok(channel) => {
-                                                self_subscription = None;
+                                                match channel {
+                                                    Channel::SelfChannel => self_subscription = None,
+                                                    Channel::Schedule => schedule = None,
+                                                    Channel::Fight(id) => {
+                                                        if let Ok(id) = i32::try_from(id.get()) {
+                                                            fights.remove(&id);
+                                                        }
+                                                    }
+                                                }
                                                 ServerMessage::Unsubscribed { channel }
                                             }
                                             Err(code) => ServerMessage::Error { code: code.into() },
@@ -245,6 +316,11 @@ async fn serve(
                                     }
                                 };
                                 if !reply(socket, &answer, config.close_grace).await {
+                                    return End::Drop;
+                                }
+                                if let Some(text) = initial
+                                    && !send(socket, Message::Text(text), config.close_grace).await
+                                {
                                     return End::Drop;
                                 }
                                 last_data = now;

@@ -68,6 +68,16 @@ pub struct WsConfig {
     /// socket closes with `auth.try_again`. Its own setting, so a test that shortens the
     /// periodic check never closes sockets in their handshake (round 4 of #54).
     pub handshake_validate_timeout: Duration,
+    /// The read buffer of a socket. It is written whole on every read, so it stays resident: the
+    /// default of 128 KiB would be 250 MiB with 2000 sockets (010 amendment DP-B1).
+    pub read_buffer: usize,
+    /// From this size on, a socket writes to the network instead of buffering (010 RF43).
+    pub write_buffer: usize,
+    /// The most a socket buffers. It has to exceed `write_buffer` (tungstenite panics otherwise) and
+    /// hold a `fight_sync` at the bound of events, about 47 KB.
+    pub max_write_buffer: usize,
+    /// How many `fight_sync` a socket can ask for by subscribing, and in what window (DP-B7).
+    pub subscribe_sync_limit: (usize, Duration),
 }
 
 impl Default for WsConfig {
@@ -80,6 +90,10 @@ impl Default for WsConfig {
             revalidate_interval: Duration::from_secs(300),
             revalidate_timeout: Duration::from_secs(5),
             handshake_validate_timeout: Duration::from_secs(5),
+            read_buffer: 8 * 1024,
+            write_buffer: 8 * 1024,
+            max_write_buffer: 72 * 1024,
+            subscribe_sync_limit: (rate::SUBSCRIBE_SYNC_LIMIT, rate::SUBSCRIBE_SYNC_WINDOW),
         }
     }
 }
@@ -169,5 +183,19 @@ impl WsState {
     /// Free permits of the global socket cap.
     pub fn available_permits(&self) -> usize {
         self.permits.available_permits()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// tungstenite panics when it is built with a maximum that does not exceed the write buffer.
+    #[test]
+    fn the_default_buffers_are_valid() {
+        let config = WsConfig::default();
+        assert!(config.max_write_buffer > config.write_buffer);
+        assert!(config.read_buffer > MAX_MESSAGE_BYTES);
+        assert!(config.max_write_buffer >= 57 * 1024);
     }
 }
