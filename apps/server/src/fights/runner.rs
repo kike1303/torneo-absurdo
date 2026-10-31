@@ -281,10 +281,11 @@ impl Runner {
                     // A pass that aborts publishes nothing by itself. What it reaches is a halt, as
                     // a failing settlement does, and it says so from memory.
                     self.passes_failing_since.get_or_insert(started);
+                    // In this order: nobody may read a finished evaluation with an old `halted`.
+                    self.publish();
                     if self.halted() {
                         self.shared.initial_evaluation_done();
                     }
-                    self.publish();
                     let retry = Duration::from_millis(db_backoff);
                     db_backoff = db_backoff.saturating_mul(2).min(timings.db_backoff_max_ms);
                     (i64::MAX, Some(retry))
