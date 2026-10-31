@@ -68,6 +68,9 @@ RUN cargo zigbuild --release --locked --target x86_64-unknown-linux-musl -p serv
 # distroless/static-debian13:nonroot, index digest (uid 65532, no shell).
 FROM gcr.io/distroless/static-debian13:nonroot@sha256:516757106de35205efb70b91ba03f6f1298424a0678c603255cf2852a7000087
 COPY --from=build /app/target/x86_64-unknown-linux-musl/release/server /server
+# The characters of the new fights (010 RNF "Imagen"). Public in the repo; their license does not change.
+COPY content/characters /content/characters
+ENV CONTENT_DIR=/content/characters
 EXPOSE 8080
 # No CMD: without arguments the binary runs `serve`.
 ENTRYPOINT ["/server"]

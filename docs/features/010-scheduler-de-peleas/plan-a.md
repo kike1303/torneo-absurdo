@@ -254,7 +254,15 @@ También:
 Sin jobs nuevos. Más ejecuciones de `rust`, `e2e` e `images`, porque sus filtros crecen. Los tests nuevos usan reloj manual y suman unos 1 a 2 min a `rust`. `fights_binary.rs` usa un `live_started_at` en el pasado para no esperar una pelea entera.
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+- **R5, `idle_session_timeout` en la sesión del bloqueo.** Las opciones `tcp_*` que pidió security-reviewer no bastan para el caso que pide probar: con el `pg_proxy` colgado, el kernel del proxy responde los keepalives y el backend sigue vivo, con el bloqueo. Por eso la sesión del bloqueo también lleva `idle_session_timeout` (30 s por defecto), muy por encima del latido de 5 s: sin latido, el propio Postgres cierra la sesión y suelta el bloqueo. Las opciones `tcp_*` siguen para una partición real. El latido va en su propia tarea, para que una pasada lenta no lo retrase.
+- **Tiempo máximo de una pasada (`pass_timeout_ms`, 30 s), y una pasada se interrumpe si se pierde el bloqueo.** Con una base colgada, una consulta del pool no vuelve nunca, y `halted` y `accepts_bets` seguirían diciendo que todo va bien. Cortar una pasada es seguro: una transacción abierta se revierte y las filas se releen.
+- **`next_action` no recibe `&Timing`.** La ventana mínima sale de las horas de la propia fila, así que un cambio de configuración nunca toca una pelea ya anunciada. Con la configuración por defecto da lo mismo que DP-1.
+- **Una cancelación también es un intento en su tarea.** RF19 llama al gancho y RF18 pide que un pánico del gancho no mate al runner. `Settling` cubre los dos finales, en lugar de una ruta aparte.
+- **Causas de detención.** `version_missing(id)` se implementa como "`from_row` falla en `betting_open`, `betting_closed` o `live`" (R8), con `fights.safe_stop` en `error`, igual que una parada segura.
+- **Reparto de commits.** `store.rs` entra con `sealed.rs`, porque se necesitan entre sí, y `fights_source_guard.rs` y `fights_bets_contract.rs` entran con el runner, porque leen o arrancan su código.
+- **Doctests `compile_fail`.** En Rust estable, rustdoc no comprueba el código de error `E0xxx`, solo que no compile. Por eso hay un doctest positivo con las mismas formas, que falla si un `use` queda mal.
+- **`lazy_pool` de los tests** usa `ACQUIRE_TIMEOUT`, como el pool real. `/api/fights/{id}` es la primera ruta sin sesión que toca la base, y los tests sin base esperarían 30 s.
+- **`tests/startup.rs`** suma la migración nueva a su lista exacta.
 
 ## Revisión
 ### architect — 2026-10-31 — REQUEST_CHANGES

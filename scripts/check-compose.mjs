@@ -910,6 +910,31 @@ function checkServerDockerfileFeatures(text, problems) {
   }
 }
 
+/**
+ * 010 RNF "Imagen": the final stage carries the characters and says where they are, and has no RUN
+ * (distroless has no shell to run it with).
+ * @param {string} text
+ * @param {string[]} problems
+ */
+function checkServerFinalStage(text, problems) {
+  const file = FILES.serverDockerfile;
+  const instructions = dockerInstructions(text);
+  const start = instructions.map((i) => i.keyword).lastIndexOf('FROM');
+  const final = instructions.slice(start + 1);
+  for (const { line, keyword } of final) {
+    if (keyword === 'RUN') problems.push(`${file}:${line}: final-stage: RUN is not allowed`);
+  }
+  const has = (keyword, args) => final.some((i) => i.keyword === keyword && i.args === args);
+  for (const [keyword, args] of [
+    ['COPY', 'content/characters /content/characters'],
+    ['ENV', 'CONTENT_DIR=/content/characters'],
+  ]) {
+    if (!has(keyword, args)) {
+      problems.push(`${file}: final-stage: ${keyword} ${args} is required`);
+    }
+  }
+}
+
 const FEATURE_KEY = /^[A-Za-z0-9_-]+$/;
 const FEATURE_VALUE = /^"([A-Za-z0-9_?/:-]+)"$/;
 const DEV_AUTH_DEFINITION = 'dev-auth = []';
@@ -1101,7 +1126,10 @@ export function checkCompose(tree) {
   checkDockerignore(tree.read(FILES.dockerignore), tree.files, problems);
   checkDockerfiles(tree.read, problems);
   const serverDockerfile = tree.read(FILES.serverDockerfile);
-  if (serverDockerfile !== null) checkServerDockerfileFeatures(serverDockerfile, problems);
+  if (serverDockerfile !== null) {
+    checkServerDockerfileFeatures(serverDockerfile, problems);
+    checkServerFinalStage(serverDockerfile, problems);
+  }
   checkServerCargo(tree.read(FILES.serverCargo), problems);
   return problems;
 }
