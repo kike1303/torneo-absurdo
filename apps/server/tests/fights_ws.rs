@@ -16,7 +16,7 @@ use server::app::Settings;
 use server::fights::hook::{SettleFuture, SettlementError, SettlementHook, SettlingFight};
 use server::fights::release::EventSink;
 use server::fights::{FightClock, FightSettings, FightsShared, PassProbe};
-use server::ws::{WsConfig, WsState};
+use server::ws::{MAX_SERVER_MESSAGE_BYTES, WsConfig, WsState};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use support::app::{ORIGIN, RunningApp, TRUST_LOOPBACK, user_with_session};
@@ -103,45 +103,40 @@ async fn on_air(db: &TestDb, vector: &Vector) -> (Harness, i32, i64) {
     (harness, id, live_at)
 }
 
-fn sync_of(message: Option<ServerMessage>) -> (Box<FightSummary>, TimestampMs, Vec<FightEvent>) {
+fn sync_of(message: Option<ServerMessage>) -> (Box<FightSummary>, TimestampMs) {
     match message {
-        Some(ServerMessage::FightSync {
-            fight,
-            server_time,
-            events,
-        }) => (fight, server_time, events),
+        Some(ServerMessage::FightSync { fight, server_time }) => (fight, server_time),
         other => panic!("{other:?}"),
     }
 }
 
-/// Everything a socket holds of a fight, as a client would: the sync replaces, and the batches are
-/// checked to be in their place, with nothing repeated and no gap.
+/// Everything a socket holds of a fight, as a client would: the sync says the state, and the events
+/// go in their place, discarding what repeats by `from_index`, with no gap.
 #[derive(Default)]
 struct Viewer {
     events: Vec<FightEvent>,
     state: Option<FightState>,
     final_result: Option<FightFinal>,
     syncs: usize,
+    repeated: usize,
 }
 
 impl Viewer {
     fn apply(&mut self, message: ServerMessage) {
         match message {
-            ServerMessage::FightSync { fight, events, .. } => {
+            ServerMessage::FightSync { fight, .. } => {
                 self.state = Some(fight.state);
                 self.final_result = fight.final_result;
-                self.events = events;
                 self.syncs += 1;
             }
             ServerMessage::FightEvents {
                 from_index, events, ..
             } => {
-                assert_eq!(
-                    usize::try_from(from_index).unwrap(),
-                    self.events.len(),
-                    "a batch out of its place"
-                );
-                self.events.extend(events);
+                let from = usize::try_from(from_index).unwrap();
+                assert!(from <= self.events.len(), "a gap");
+                let skip = self.events.len() - from;
+                self.repeated += skip.min(events.len());
+                self.events.extend(events.into_iter().skip(skip));
             }
             other => panic!("{other:?}"),
         }
@@ -155,6 +150,13 @@ impl Viewer {
             if let Some(message) = ws::next_message(client, Duration::from_secs(1)).await {
                 self.apply(message);
             }
+        }
+    }
+
+    /// Reads until the socket stays quiet.
+    async fn read_quiet(&mut self, client: &mut Client) {
+        for message in ws::drain(client, SEVERAL_TICKS).await {
+            self.apply(message);
         }
     }
 }
@@ -185,12 +187,10 @@ async fn a_viewer_follows_every_transition_in_order() {
     .await;
 
     let mut fight = h.watch(id).await;
-    let (summary, time, events) =
-        sync_of(ws::next_message(&mut fight, Duration::from_secs(5)).await);
+    let (summary, time) = sync_of(ws::next_message(&mut fight, Duration::from_secs(5)).await);
     assert_eq!(summary.state, FightState::Scheduled);
     assert_eq!(summary.id, u32::try_from(id).unwrap());
     assert_eq!(time.as_ms(), Some(T0 - 1));
-    assert!(events.is_empty());
 
     let mut schedule = h.connect().await;
     ws::subscribe(&mut schedule, "schedule").await;
@@ -211,10 +211,9 @@ async fn a_viewer_follows_every_transition_in_order() {
     ] {
         h.clock.set(hour);
         wait_state(&pool, id, state).await;
-        let (summary, time, events) = sync_of(ws::next_message(&mut fight, IN_TIME).await);
+        let (summary, time) = sync_of(ws::next_message(&mut fight, IN_TIME).await);
         assert_eq!(summary.state, state);
         assert_eq!(time.as_ms(), Some(hour));
-        assert!(events.is_empty());
         let Some(ServerMessage::ScheduleUpdate { board }) =
             ws::next_message(&mut schedule, IN_TIME).await
         else {
@@ -332,13 +331,12 @@ async fn before_its_hour_a_live_fight_has_no_events_with_the_clock_behind() {
 
 async fn assert_late_start(h: &Harness, id: i32, started: i64, vector: &Vector) {
     let mut client = h.watch(id).await;
-    let (summary, _, events) = sync_of(ws::next_message(&mut client, IN_TIME).await);
+    let (summary, _) = sync_of(ws::next_message(&mut client, IN_TIME).await);
     assert_eq!(summary.state, FightState::Live);
     assert_eq!(
         summary.live_started_at.and_then(|hour| hour.as_ms()),
         Some(started)
     );
-    assert!(events.is_empty());
     assert!(ws::drain(&mut client, SEVERAL_TICKS).await.is_empty());
     h.clock.set(started - 1);
     assert!(ws::drain(&mut client, SEVERAL_TICKS).await.is_empty());
@@ -388,7 +386,7 @@ async fn only_a_fight_of_the_hub_can_be_subscribed_and_never_twice() {
     h.pool.close().await;
     let mut late = h.connect().await;
     ws::subscribe(&mut late, &format!("fight:{id}")).await;
-    let (summary, _, _) = sync_of(ws::next_message(&mut late, Duration::from_secs(5)).await);
+    let (summary, _) = sync_of(ws::next_message(&mut late, Duration::from_secs(5)).await);
     assert_eq!(summary.state, FightState::Live);
 }
 
@@ -469,6 +467,7 @@ async fn a_socket_cannot_keep_asking_for_the_whole_fight() {
             ws::next_message(&mut client, Duration::from_secs(5)).await,
             Some(ServerMessage::FightSync { .. })
         ));
+        let _ = ws::drain(&mut client, SEVERAL_TICKS).await;
     }
     ws::send_text(&mut client, &unsubscribe).await;
     assert!(
@@ -495,7 +494,7 @@ async fn two_sockets_get_the_same_bytes_and_a_late_one_what_was_released() {
     let (h, id, live_at) = on_air(&db, &vector).await;
     let mut a = h.watch(id).await;
     let mut b = h.watch(id).await;
-    // After the first sync they are the same from here on.
+    // Both up to date, from here on they get the same messages.
     wait_for("the intro", || async {
         h.shared
             .hub()
@@ -503,8 +502,8 @@ async fn two_sockets_get_the_same_bytes_and_a_late_one_what_was_released() {
             .is_some_and(|(events, _)| events > 0)
     })
     .await;
-    let _ = ws::next_data(&mut a, IN_TIME).await;
-    let _ = ws::next_data(&mut b, IN_TIME).await;
+    let _ = ws::drain(&mut a, SEVERAL_TICKS).await;
+    let _ = ws::drain(&mut b, SEVERAL_TICKS).await;
     let t = i64::from(vector.log.events[10].t());
     h.clock.set(live_at + t);
     let (mine, theirs) = (
@@ -523,19 +522,18 @@ async fn two_sockets_get_the_same_bytes_and_a_late_one_what_was_released() {
     })
     .await;
     let mut late = h.watch(id).await;
-    let (_, _, events) = sync_of(ws::next_message(&mut late, IN_TIME).await);
-    assert_eq!(events, released);
+    let mut viewer = Viewer::default();
+    viewer.read_quiet(&mut late).await;
+    assert_eq!(viewer.syncs, 1);
+    assert_eq!(viewer.events, released);
 
-    // Reconnecting is the same: the state, and from there on.
+    // Reconnecting is the same: the state, what was released, and from there on.
     drop(late);
     let mut again = h.watch(id).await;
-    let (_, _, events) = sync_of(ws::next_message(&mut again, IN_TIME).await);
-    assert_eq!(events, released);
+    let mut viewer = Viewer::default();
+    viewer.read_quiet(&mut again).await;
+    assert_eq!(viewer.events, released);
     h.clock.set(live_at + vector.end_t());
-    let mut viewer = Viewer {
-        events,
-        ..Viewer::default()
-    };
     viewer
         .read_until(&mut again, |v| v.events.len() == vector.log.events.len())
         .await;
@@ -630,8 +628,11 @@ async fn a_task_that_dies_repeats_nothing_on_the_socket() {
     viewer
         .read_until(&mut client, |v| !v.events.is_empty())
         .await;
+    // The second emission started over from the first event, and nothing came twice.
+    viewer.read_quiet(&mut client).await;
+    assert_eq!(viewer.repeated, 0);
+    assert_eq!(viewer.events, due(&vector, 0));
     h.clock.set(live_at + vector.end_t());
-    // `Viewer` fails on a batch out of its place.
     viewer
         .read_until(&mut client, |v| v.events.len() == vector.log.events.len())
         .await;
@@ -808,9 +809,11 @@ async fn after_a_restart_the_last_fight_has_the_events_of_its_log() {
 
     let mut h = harness(&db, live_at + 200_000, |_| {}).await;
     let mut client = h.watch(id).await;
-    let (summary, _, events) = sync_of(ws::next_message(&mut client, IN_TIME).await);
+    let (summary, _) = sync_of(ws::next_message(&mut client, IN_TIME).await);
     assert_eq!(summary.state, FightState::Settled);
-    assert_eq!(events, vector.log.events);
+    let mut viewer = Viewer::default();
+    viewer.read_quiet(&mut client).await;
+    assert_eq!(viewer.events, vector.log.events);
     h.stop_runner().await;
 
     // With the guard off, as only someone with the credential can.
@@ -831,9 +834,9 @@ async fn after_a_restart_the_last_fight_has_the_events_of_its_log() {
     tx.commit().await.unwrap();
     let h = harness(&db, live_at + 300_000, |_| {}).await;
     let mut client = h.watch(id).await;
-    let (summary, _, events) = sync_of(ws::next_message(&mut client, IN_TIME).await);
+    let (summary, _) = sync_of(ws::next_message(&mut client, IN_TIME).await);
     assert_eq!(summary.state, FightState::Settled);
-    assert!(events.is_empty());
+    assert!(ws::drain(&mut client, SEVERAL_TICKS).await.is_empty());
     assert_eq!(h.shared.current().halted, Some(false));
 }
 
@@ -848,12 +851,14 @@ fn events_at_the_bound(vector: &Vector, count: usize) -> Vec<FightEvent> {
     vec![longest.clone(); count]
 }
 
-/// RF43: a `fight_sync` at the bound of events fits the write buffer, with the default settings.
+/// DP-B9: the 418 events of the bound reach whoever comes late in pages, with the default settings,
+/// and no message of any kind passes 8 KiB. A batch that large does not go out as it is either.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_sync_at_the_bound_of_events_is_sent() {
+async fn the_bound_of_events_goes_in_pages_of_at_most_8_kib() {
     let db = TestDb::create().await;
     let vector = Vector::of(KO);
     let (h, id, _) = on_air(&db, &vector).await;
+    let mut on_air_socket = h.watch(id).await;
     wait_for("the intro", || async {
         h.shared
             .hub()
@@ -861,17 +866,90 @@ async fn a_sync_at_the_bound_of_events_is_sent() {
             .is_some_and(|(events, _)| events == 1)
     })
     .await;
+    let _ = ws::drain(&mut on_air_socket, SEVERAL_TICKS).await;
     let bound = events_at_the_bound(&vector, 417);
     h.shared.hub().publish(id, 1, &bound);
+
+    let mut late = h.connect().await;
+    ws::subscribe(&mut late, &format!("fight:{id}")).await;
+    ws::send_text(&mut late, r#"{"type":"subscribe","channel":"schedule"}"#).await;
+    for (name, client) in [("late", &mut late), ("on air", &mut on_air_socket)] {
+        let mut viewer = Viewer::default();
+        let mut pages = 0;
+        while let Some(message) = ws::next_data(client, SEVERAL_TICKS).await {
+            let text = message.into_text().unwrap();
+            assert!(
+                text.len() <= MAX_SERVER_MESSAGE_BYTES,
+                "{name}: {}",
+                text.len()
+            );
+            let parsed: ServerMessage = serde_json::from_str(text.as_str()).unwrap();
+            match parsed {
+                ServerMessage::Subscribed { .. } | ServerMessage::ScheduleUpdate { .. } => {}
+                other => {
+                    pages += usize::from(matches!(other, ServerMessage::FightEvents { .. }));
+                    viewer.apply(other);
+                }
+            }
+        }
+        if name == "late" {
+            assert_eq!(viewer.events.len(), 418, "{name}");
+            assert_eq!(pages, 7, "{name}");
+        } else {
+            // It already had the first one: it asks from there, and it discards the repeated part.
+            assert_eq!(viewer.repeated + viewer.events.len(), 418, "{name}");
+        }
+    }
+}
+
+/// DP-B9: a socket up to date gets, at the final, the state with no events.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_socket_up_to_date_gets_no_events_at_the_final() {
+    let db = TestDb::create().await;
+    let vector = Vector::of(KO);
+    let (h, id, live_at) = on_air(&db, &vector).await;
     let mut client = h.watch(id).await;
+    let mut viewer = Viewer::default();
+    h.clock.set(live_at + vector.end_t());
+    viewer
+        .read_until(&mut client, |v| v.events.len() == vector.log.events.len())
+        .await;
+    viewer.read_quiet(&mut client).await;
+
+    h.clock.set(live_at + 100_000);
     let Some(Message::Text(text)) = ws::next_data(&mut client, IN_TIME).await else {
-        panic!("the sync did not arrive");
+        panic!("no final");
     };
-    assert!(text.len() > 40_000, "{}", text.len());
-    assert!(text.len() < WsConfig::default().max_write_buffer);
-    let parsed: ServerMessage = serde_json::from_str(text.as_str()).unwrap();
-    let (_, _, events) = sync_of(Some(parsed));
-    assert_eq!(events.len(), 418);
+    assert!(!text.contains("\"events\""), "{text}");
+    let (summary, _) = sync_of(Some(serde_json::from_str(text.as_str()).unwrap()));
+    assert_eq!(summary.state, FightState::Settled);
+    assert!(ws::drain(&mut client, SEVERAL_TICKS).await.is_empty());
+}
+
+/// RF43 and DP-B9: whoever falls behind rebuilds exactly the prefix, discarding what the pages repeat.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_socket_that_falls_behind_rebuilds_exactly_the_prefix() {
+    let db = TestDb::create().await;
+    let vector = Vector::of(KO);
+    let (h, id, _) = on_air(&db, &vector).await;
+    let mut client = h.watch(id).await;
+    let mut viewer = Viewer::default();
+    viewer
+        .read_until(&mut client, |v| !v.events.is_empty())
+        .await;
+    viewer.read_quiet(&mut client).await;
+    // Not read for now: two batches pass it. When it reads, it has fallen behind or not depending on
+    // when the socket looks, and either way what it holds is the same.
+    let extra = events_at_the_bound(&vector, 100);
+    let mut released = viewer.events.len();
+    for chunk in extra.chunks(30) {
+        h.shared.hub().publish(id, released, chunk);
+        released += chunk.len();
+    }
+    viewer.read_quiet(&mut client).await;
+    assert_eq!(viewer.events.len(), released);
+    assert_eq!(viewer.events[0], vector.log.events[0]);
+    assert!(viewer.events[1..].iter().all(|event| *event == extra[0]));
 }
 
 /// A socket that never reads, with the smallest buffer the system gives.
@@ -903,21 +981,18 @@ async fn stuck_socket(addr: SocketAddr, channel: &str) -> Client {
     client
 }
 
-/// RF43: a socket that does not read holds nothing in the hub, the others stay on time, it closes in
-/// `close_grace`, and when it comes back it catches up.
+/// RF43 and DP-B9: a socket that does not read, in the middle of its pages, holds nothing in the hub,
+/// the others stay on time, it closes in `close_grace`, and when it comes back it catches up.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_socket_that_does_not_read_is_closed_and_the_others_go_on() {
+async fn a_socket_that_does_not_read_is_closed_in_the_middle_of_its_pages() {
     let db = TestDb::create().await;
     let vector = Vector::of(KO);
     let pool = db.migrated_pool().await;
     let id = f::open_vector(&pool, T0, &vector).await;
     let (closes_at, live_at) = f::hours(T0);
     f::close_by_sql(&pool, id, closes_at).await;
-    // Room for the sync of a healthy socket that happens to fall behind: this test sends far more
-    // than a fight has.
     let config = WsConfig {
         close_grace: Duration::from_millis(300),
-        max_write_buffer: 16 * 1024 * 1024,
         ..WsConfig::default()
     };
     let h = harness_with(&db, live_at, config, |_| {}).await;
@@ -929,7 +1004,12 @@ async fn a_socket_that_does_not_read_is_closed_and_the_others_go_on() {
             .is_some_and(|(events, _)| events == 1)
     })
     .await;
+    // Far more pages than the buffers of the system hold, whatever they are.
+    let flood = events_at_the_bound(&vector, 200_000);
+    h.shared.hub().publish(id, 1, &flood);
+    let total = 1 + flood.len();
     let free = h.sockets.available_permits();
+    let before = h.shared.hub().held(id).unwrap().0;
 
     let stuck = stuck_socket(h.app.addr, &format!("fight:{id}")).await;
     wait_for("the stuck socket", || async {
@@ -937,57 +1017,23 @@ async fn a_socket_that_does_not_read_is_closed_and_the_others_go_on() {
     })
     .await;
     let mut healthy = h.watch(id).await;
-    let reading = tokio::spawn(async move {
-        let mut seen = 0_usize;
-        while let Some(message) = ws::next_message(&mut healthy, Duration::from_secs(10)).await {
-            match message {
-                ServerMessage::FightSync { events, .. } => seen = events.len(),
-                ServerMessage::FightEvents {
-                    from_index, events, ..
-                } => {
-                    assert_eq!(usize::try_from(from_index).unwrap(), seen);
-                    seen += events.len();
-                }
-                other => panic!("{other:?}"),
-            }
-        }
-        seen
-    });
-
-    // Batches until the buffers of the system are full and the send of the stuck one times out.
-    let batch = events_at_the_bound(&vector, 400);
-    let mut released = 1;
-    let mut rounds = 0;
-    // The healthy one keeps its permit.
-    while h.sockets.available_permits() != free - 1 {
-        assert!(rounds < 2000, "the stuck socket stayed open");
-        h.shared.hub().publish(id, released, &batch);
-        released += batch.len();
-        rounds += 1;
-        // The hub holds the events and one batch, and nothing for a socket.
-        let (events, _) = h.shared.hub().held(id).unwrap();
-        assert_eq!(events, released);
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    drop(stuck);
-
-    // The one that was reading got everything, in its place.
-    h.shared.hub().publish(id, released, &batch[..1]);
-    released += 1;
-    let total = released;
-    wait_for("the healthy socket", || async {
-        h.shared
-            .hub()
-            .held(id)
-            .is_some_and(|(events, _)| events == total)
+    wait_for("the stuck socket to close", || async {
+        h.sockets.available_permits() == free - 1
     })
     .await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    assert!(!reading.is_finished());
-    reading.abort();
+    // The healthy one kept reading meanwhile, and the stuck one holds nothing in the hub.
+    let mut viewer = Viewer::default();
+    viewer
+        .read_until(&mut healthy, |v| v.events.len() == total)
+        .await;
+    assert_eq!(h.shared.hub().held(id).unwrap().0, before);
+    drop(stuck);
 
-    // It comes back and it is up to date, with a sync.
+    // It comes back and it is up to date.
     let mut back = h.watch(id).await;
-    let (_, _, events) = sync_of(ws::next_message(&mut back, IN_TIME).await);
-    assert_eq!(events.len(), total);
+    let mut viewer = Viewer::default();
+    viewer
+        .read_until(&mut back, |v| v.events.len() == total)
+        .await;
+    assert_eq!(viewer.events.len(), total);
 }

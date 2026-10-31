@@ -9,7 +9,7 @@
 //! ulimit -n 8192  # at least 5000
 //! bin=$(cargo test --release -p server --test fights_fanout --no-run --message-format=json \
 //!   | jq -r 'select(.executable != null and .target.name == "fights_fanout").executable')
-//! for s in A B C D E F1 F2 F3 F4; do
+//! for s in A B C D D2 E F1 F2 F3 F4; do
 //!   DATABASE_URL=… FANOUT_SCENARIO=$s "$bin" --ignored --exact fanout_server --nocapture
 //! done
 //! FANOUT_READ_BUFFER=131072 FANOUT_SCENARIO=A … # DP-B1: the default of tungstenite
@@ -53,6 +53,10 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 const SOCKETS: usize = 2000;
 const BOUND_EVENTS: usize = 418;
+/// How long a socket that asks for the whole fight stays to receive it.
+const HOLD_PAGES: Duration = Duration::from_millis(400);
+/// What a stuck socket can have in the kernel: the whole log (amendment DP-B9).
+const STUCK_LOG_BYTES: usize = 47_000;
 
 fn now_ms() -> i64 {
     i64::try_from(
@@ -159,8 +163,8 @@ async fn run_socket(
         }
     }
     let (every, burst) = match kind {
-        Kind::Alternate { every_ms, burst } => (Duration::from_millis(every_ms), burst),
-        _ => (Duration::from_secs(3600), 0),
+        Kind::Alternate { every_ms, burst } => (Duration::from_millis(every_ms), burst.max(1)),
+        _ => (Duration::from_secs(3600), 1),
     };
     // Evenly over a period, unless they go all at once.
     let stagger = if burst > 1 {
@@ -168,16 +172,31 @@ async fn run_socket(
     } else {
         every.mul_f64(f64::from(u32::try_from(index % 1000).unwrap()) / 1000.0)
     };
-    let mut next = tokio::time::Instant::now() + stagger;
+    // Subscribed for long enough to receive its pages: unsubscribing at once would stop them.
+    let mut cycle = tokio::time::Instant::now() + stagger;
+    let mut next = cycle;
+    let mut subscribed = false;
+    let mut left = burst;
     loop {
         tokio::select! {
             () = stop.cancelled() => return,
             () = tokio::time::sleep_until(next), if alternate.is_some() => {
-                next += every;
                 let channel = alternate.as_deref().unwrap_or_default();
-                for _ in 0..burst.max(1) {
-                    let _ = client.send(Message::Text(subscribe_text(channel).into())).await;
+                if subscribed {
                     let _ = client.send(Message::Text(unsubscribe_text(channel).into())).await;
+                    subscribed = false;
+                    left -= 1;
+                    if left == 0 {
+                        left = burst;
+                        cycle += every;
+                        next = cycle;
+                    } else {
+                        next = tokio::time::Instant::now() + Duration::from_millis(50);
+                    }
+                } else {
+                    let _ = client.send(Message::Text(subscribe_text(channel).into())).await;
+                    subscribed = true;
+                    next = tokio::time::Instant::now() + HOLD_PAGES;
                 }
             }
             read = client.next() => match read {
@@ -378,6 +397,12 @@ async fn fanout_clients() {
                     "mean_bytes_per_s": sum / count,
                     "peak_bytes_per_s": taken.iter().max().copied().unwrap_or(0),
                 })
+            }
+            // What came while connecting is not what is measured: those pages carry an older hour.
+            "reset" => {
+                let (stats, _) = groups.get(&group).unwrap();
+                stats.latencies.lock().unwrap().clear();
+                json!({"ok": true})
             }
             "stop" => {
                 if let Some((_, stop)) = groups.get(&group) {
@@ -717,6 +742,39 @@ async fn scenario_final(ctx: &mut Ctx, name: &str, events: Vec<FightEvent>) {
     );
 }
 
+/// D2. 2000 sockets that subscribe when the 418 events are already out: everyone goes through the pages.
+async fn scenario_d2(ctx: &mut Ctx) {
+    let events = longest_events(&ctx.vector, BOUND_EVENTS);
+    ctx.publish(0, &events);
+    let base = ctx.rss.now_mib().await;
+    let channels = fight_channel(ctx.id);
+    let started = Instant::now();
+    let connected = viewers(ctx, SOCKETS, channels).await;
+    let expected = u64::try_from(SOCKETS).unwrap();
+    let report = ctx
+        .wait("viewers", Duration::from_secs(60), |r| {
+            r["syncs"].as_u64().unwrap() >= expected
+        })
+        .await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let bytes = ctx.control.ask(json!({"cmd": "bytes"})).await;
+    print(
+        "D2",
+        &json!({
+            "events": events.len(),
+            "connected": connected["connected"],
+            "failed": connected["failed"],
+            "hub_held": ctx.shared.hub().held(ctx.id),
+            "rss_before_mib": base,
+            "rss_after_mib": ctx.rss.now_mib().await,
+            "rss_peak_mib": ctx.rss.peak_mib(),
+            "ms_total": started.elapsed().as_millis(),
+            "bytes": bytes,
+            "report": report,
+        }),
+    );
+}
+
 /// E. 2000 sockets that do not read, with one notice after another.
 async fn scenario_e(ctx: &mut Ctx) {
     let free = ctx.sockets.available_permits();
@@ -743,16 +801,12 @@ async fn scenario_e(ctx: &mut Ctx) {
     let mut rounds = 0;
     let started = Instant::now();
     let mut first_close = None;
-    let mut last_message = 0;
     let mut most_open = 0;
     // Half a second per batch, until they are closed or the pong timeout would do it.
     while Instant::now() < started + Duration::from_secs(50) {
         ctx.publish(from, &batch);
         from += batch.len();
         rounds += 1;
-        if let Some((_, held)) = ctx.shared.hub().held(ctx.id) {
-            last_message = held;
-        }
         tokio::time::sleep(Duration::from_millis(500)).await;
         let open = free.saturating_sub(ctx.sockets.available_permits());
         most_open = most_open.max(open);
@@ -765,14 +819,15 @@ async fn scenario_e(ctx: &mut Ctx) {
     }
     let open_at_end = free.saturating_sub(ctx.sockets.available_permits());
     let peak = ctx.rss.peak_mib();
-    let unconfirmed = f64::from(u32::try_from(most_open * last_message / 1024).unwrap()) / 1024.0;
+    // Not the size of a page: a stuck socket can have the whole log in the kernel (DP-B9).
+    let unconfirmed = f64::from(u32::try_from(SOCKETS * STUCK_LOG_BYTES / 1024).unwrap()) / 1024.0;
     print(
         "E",
         &json!({
             "connected": connected["connected"],
             "failed": connected["failed"],
             "rounds": rounds,
-            "message_bytes": last_message,
+            "most_open": most_open,
             "ms_to_first_close": first_close,
             "ms_to_last_close": (open_at_end == 0).then(|| started.elapsed().as_millis()),
             "open_at_end": open_at_end,
@@ -821,6 +876,9 @@ async fn scenario_f(ctx: &mut Ctx, name: &str) {
             .await;
     }
     ctx.control.ask(json!({"cmd": "bytes"})).await;
+    ctx.control
+        .ask(json!({"cmd": "reset", "group": "viewers"}))
+        .await;
     // What the viewers measure: a small batch every 600 ms, as in a fight.
     let small = longest_events(&ctx.vector, 1);
     let started = Instant::now();
@@ -897,6 +955,7 @@ fn fanout_server() {
                 let events = longest_events(&ctx.vector, BOUND_EVENTS);
                 scenario_final(&mut ctx, "D", events).await;
             }
+            "D2" => scenario_d2(&mut ctx).await,
             "E" => scenario_e(&mut ctx).await,
             name => scenario_f(&mut ctx, name).await,
         }

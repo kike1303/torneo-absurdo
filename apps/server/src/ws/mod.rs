@@ -49,6 +49,9 @@ impl ValidationGate for NoGate {
 /// Largest message and frame the server reads, fixed in the protocol (RF-B13).
 pub const MAX_MESSAGE_BYTES: usize = 4096;
 
+/// The largest message the server sends: a socket keeps that capacity until it closes (010 DP-B9).
+pub const MAX_SERVER_MESSAGE_BYTES: usize = 8 * 1024;
+
 /// Socket lifetimes. Not environment variables; the tests shorten them.
 #[derive(Debug, Clone, Copy)]
 pub struct WsConfig {
@@ -73,8 +76,8 @@ pub struct WsConfig {
     pub read_buffer: usize,
     /// From this size on, a socket writes to the network instead of buffering (010 RF43).
     pub write_buffer: usize,
-    /// The most a socket buffers. It has to exceed `write_buffer` (tungstenite panics otherwise) and
-    /// hold a `fight_sync` at the bound of events, about 47 KB.
+    /// The most a socket buffers. It has to exceed `write_buffer` (tungstenite panics otherwise). No
+    /// message of the server passes [`MAX_SERVER_MESSAGE_BYTES`] (010 amendment DP-B9).
     pub max_write_buffer: usize,
     /// How many `fight_sync` a socket can ask for by subscribing, and in what window (DP-B7).
     pub subscribe_sync_limit: (usize, Duration),
@@ -92,7 +95,7 @@ impl Default for WsConfig {
             handshake_validate_timeout: Duration::from_secs(5),
             read_buffer: 8 * 1024,
             write_buffer: 8 * 1024,
-            max_write_buffer: 72 * 1024,
+            max_write_buffer: 16 * 1024,
             subscribe_sync_limit: (rate::SUBSCRIBE_SYNC_LIMIT, rate::SUBSCRIBE_SYNC_WINDOW),
         }
     }
@@ -196,6 +199,6 @@ mod tests {
         let config = WsConfig::default();
         assert!(config.max_write_buffer > config.write_buffer);
         assert!(config.read_buffer > MAX_MESSAGE_BYTES);
-        assert!(config.max_write_buffer >= 57 * 1024);
+        assert!(config.max_write_buffer >= 2 * MAX_SERVER_MESSAGE_BYTES);
     }
 }

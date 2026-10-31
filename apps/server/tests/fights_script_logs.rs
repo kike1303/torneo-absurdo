@@ -55,13 +55,17 @@ fn a_run_with_a_script_does_not_log_its_seed() {
         );
         // The positive control: the socket saw it to the end.
         let mut settled = false;
-        while !settled {
+        let mut released = 0;
+        while !settled || released < vector.log.events.len() {
             let message = ws::next_message(&mut client, Duration::from_secs(30)).await;
-            if let ServerMessage::FightSync { fight, events, .. } =
-                message.expect("the socket did not see the final")
-            {
-                settled = fight.state == FightState::Settled;
-                assert!(!settled || events == vector.log.events);
+            match message.expect("the socket did not see the final") {
+                ServerMessage::FightSync { fight, .. } => {
+                    settled = fight.state == FightState::Settled;
+                }
+                ServerMessage::FightEvents {
+                    from_index, events, ..
+                } => released = usize::try_from(from_index).unwrap() + events.len(),
+                _ => {}
             }
         }
         runner.stop().await;

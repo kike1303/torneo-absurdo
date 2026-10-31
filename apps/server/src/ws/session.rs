@@ -121,6 +121,8 @@ async fn serve(
     let mut hub_changes = hub.watch();
     let mut schedule: Option<u64> = None;
     let mut fights: BTreeMap<i32, Cursor> = BTreeMap::new();
+    // Whether a channel may still have something to send.
+    let mut pending = false;
     // One queue for the life of the socket; the hub holds its sender only while subscribed.
     let (self_tx, mut self_rx) = mpsc::channel(QUEUE);
     let mut self_subscription: Option<SelfSubscription> = None;
@@ -181,21 +183,9 @@ async fn serve(
                     return End::Drop;
                 }
             }
-            // A slow socket skips ahead: changes join, and each channel says what it needs (RF43).
+            // Changes join. A slow socket skips ahead when it looks (RF43).
             _ = hub_changes.changed(), if schedule.is_some() || !fights.is_empty() => {
-                if let Some(seen) = schedule.as_mut()
-                    && let Some(text) = hub.next_schedule(seen)
-                    && !send(socket, Message::Text(text), config.close_grace).await
-                {
-                    return End::Drop;
-                }
-                for (id, cursor) in &mut fights {
-                    if let Some(text) = hub.next_for(*id, cursor)
-                        && !send(socket, Message::Text(text), config.close_grace).await
-                    {
-                        return End::Drop;
-                    }
-                }
+                pending = true;
             }
             () = tokio::time::sleep_until(pong_deadline) => {
                 return policy(WsErrorCode::PongTimeout);
@@ -318,16 +308,37 @@ async fn serve(
                                 if !reply(socket, &answer, config.close_grace).await {
                                     return End::Drop;
                                 }
-                                if let Some(text) = initial
-                                    && !send(socket, Message::Text(text), config.close_grace).await
-                                {
-                                    return End::Drop;
+                                if let Some(text) = initial {
+                                    if !send(socket, Message::Text(text), config.close_grace).await {
+                                        return End::Drop;
+                                    }
+                                    pending = true;
                                 }
                                 last_data = now;
                             }
                             _ => {}
                         }
                     }
+                }
+            }
+            // Last, and one message per turn: pings, the shutdown and a revocation are served between
+            // two pages (010 amendment DP-B9).
+            () = std::future::ready(()), if pending => {
+                let next = schedule
+                    .as_mut()
+                    .and_then(|seen| hub.next_schedule(seen))
+                    .or_else(|| {
+                        fights
+                            .iter_mut()
+                            .find_map(|(id, cursor)| hub.next_for(*id, cursor))
+                    });
+                match next {
+                    Some(text) => {
+                        if !send(socket, Message::Text(text), config.close_grace).await {
+                            return End::Drop;
+                        }
+                    }
+                    None => pending = false,
                 }
             }
         }

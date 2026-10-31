@@ -24,7 +24,7 @@ const SLOW: WsConfig = WsConfig {
     handshake_validate_timeout: Duration::from_secs(5),
     read_buffer: 8 * 1024,
     write_buffer: 8 * 1024,
-    max_write_buffer: 72 * 1024,
+    max_write_buffer: 16 * 1024,
     subscribe_sync_limit: (3, Duration::from_secs(60)),
 };
 

@@ -135,15 +135,14 @@ pub enum ServerMessage {
     ScheduleUpdate {
         board: Box<FightsCurrent>,
     },
-    /// All the events already released of a fight: on subscribing to `fight:{id}`, on each
-    /// transition and to a socket that fell behind. Never an event that is not due.
+    /// The state of a fight, with no events, so nobody takes "no events yet" for "forget yours": on
+    /// subscribing to `fight:{id}` and on each transition (amendment DP-B9).
     FightSync {
         fight: Box<FightSummary>,
         server_time: TimestampMs,
-        events: Vec<FightEvent>,
     },
-    /// A batch of released events. `from_index` is the index of the first one: the client discards
-    /// what it already has.
+    /// Released events, and only those: a batch or, for whoever came late or fell behind, a page of at
+    /// most 64. `from_index` is the index of the first one: the client discards what it already has.
     FightEvents {
         fight_id: u32,
         from_index: u32,
@@ -342,10 +341,9 @@ mod tests {
                 ServerMessage::FightSync {
                     fight: Box::new(summary()),
                     server_time: TimestampMs::from_ms(9),
-                    events: vec![intro()],
                 },
                 format!(
-                    r#"{{"type":"fight_sync","fight":{},"server_time":"9","events":[{{"type":"intro","t":0}}]}}"#,
+                    r#"{{"type":"fight_sync","fight":{},"server_time":"9"}}"#,
                     serde_json::to_string(&summary()).unwrap()
                 ),
             ),

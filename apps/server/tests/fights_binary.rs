@@ -135,11 +135,16 @@ async fn a_socket_on_the_real_binary_sees_the_fight_and_the_logs_see_nothing() {
             Some(ServerMessage::Subscribed { channel }) if channel.to_string() != "schedule" => {
                 subscribed = true;
             }
-            Some(ServerMessage::FightSync { fight, events, .. }) => {
+            Some(ServerMessage::FightSync { fight, .. }) => {
                 settled = fight.state == FightState::Settled;
-                released = events;
             }
-            Some(ServerMessage::FightEvents { events, .. }) => released.extend(events),
+            Some(ServerMessage::FightEvents {
+                from_index, events, ..
+            }) => {
+                let from = usize::try_from(from_index).unwrap();
+                released.truncate(from);
+                released.extend(events);
+            }
             _ => {}
         }
     }

@@ -94,11 +94,14 @@ fn a_whole_run_logs_no_seed_and_no_fragment_of_the_log() {
         while !seen_final || seen_events < vector.log.events.len() {
             let message = ws::next_message(&mut client, Duration::from_secs(30)).await;
             match message.expect("the socket did not see the whole fight") {
-                ServerMessage::FightSync { fight, events, .. } => {
+                ServerMessage::FightSync { fight, .. } => {
                     seen_final = fight.state == FightState::Settled;
-                    seen_events = events.len();
                 }
-                ServerMessage::FightEvents { events, .. } => seen_events += events.len(),
+                ServerMessage::FightEvents {
+                    from_index, events, ..
+                } => {
+                    seen_events = usize::try_from(from_index).unwrap() + events.len();
+                }
                 _ => {}
             }
         }

@@ -2,6 +2,10 @@
 //! each message serialized once. Nothing here is per socket: a socket keeps its own [`Cursor`], and a
 //! `watch` says that something changed, so one that falls behind skips ahead instead of piling up.
 //!
+//! No message passes 8 KiB (amendment DP-B9): the write buffer of a socket keeps the capacity of its
+//! largest message until it closes. `fight_sync` has no events, and whoever came late or fell behind
+//! gets fixed pages of [`PAGE_EVENTS`], shared by every socket that needs them.
+//!
 //! Nothing here knows an hour or asks when the next event is: the events only come from the release
 //! (through [`EventSink`]) and, for a settled fight, from its published log. This module writes no
 //! log line.
@@ -16,6 +20,10 @@ use tokio::sync::watch;
 use super::FightClock;
 use super::release::EventSink;
 
+/// The events of a page, and of the longest batch kept to send as it is. With the longest event of the
+/// golden logs, 111 bytes, that is under 8 KiB.
+pub const PAGE_EVENTS: usize = 64;
+
 /// A shared `fight_sync` or `schedule_update` older than this is serialized again when served: its
 /// `server_time` can only delay the sample, and the client keeps the maximum (amendment DP-B4).
 pub const SHARED_MAX_AGE_MS: i64 = 250;
@@ -28,17 +36,24 @@ pub const SETTLED_RETENTION_MS: i64 = 60_000;
 #[derive(Clone)]
 struct Cached {
     version: u64,
-    released: usize,
     at_ms: i64,
     text: Utf8Bytes,
 }
 
 impl Cached {
-    fn is_fresh(&self, version: u64, released: usize, now_ms: i64) -> bool {
+    fn is_fresh(&self, version: u64, now_ms: i64) -> bool {
         self.version == version
-            && self.released == released
             && (0..SHARED_MAX_AGE_MS).contains(&now_ms.saturating_sub(self.at_ms))
     }
+}
+
+/// The pages already serialized: the full ones never change, and the last one only until the next
+/// event. Its `server_time` can only delay the sample of a client, which keeps the maximum.
+#[derive(Default)]
+struct Pages {
+    full: Vec<Utf8Bytes>,
+    /// The last one, incomplete, with how many events it had.
+    partial: Option<(usize, Utf8Bytes)>,
 }
 
 struct FightEntry {
@@ -48,31 +63,67 @@ struct FightEntry {
     /// When its `settled` summary arrived.
     settled_seen_at_ms: Option<i64>,
     released: Vec<FightEvent>,
-    /// The last batch: its first index and the message, already serialized.
+    /// The last batch, if it is small enough: its first index and the message, already serialized.
     last_batch: Option<(usize, Utf8Bytes)>,
     sync: Mutex<Option<Cached>>,
+    pages: Mutex<Pages>,
 }
 
 impl FightEntry {
     fn sync_text(&self, now_ms: i64) -> Option<Utf8Bytes> {
         let mut cached = self.sync.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(sync) = cached.as_ref()
-            && sync.is_fresh(self.version, self.released.len(), now_ms)
+            && sync.is_fresh(self.version, now_ms)
         {
             return Some(sync.text.clone());
         }
         let text = encode(&ServerMessage::FightSync {
             fight: Box::new(self.summary.clone()),
             server_time: TimestampMs::from_ms(now_ms),
-            events: self.released.clone(),
         })?;
         *cached = Some(Cached {
             version: self.version,
-            released: self.released.len(),
             at_ms: now_ms,
             text: text.clone(),
         });
         Some(text)
+    }
+
+    fn encode_events(&self, from: usize, events: &[FightEvent], now_ms: i64) -> Option<Utf8Bytes> {
+        encode(&ServerMessage::FightEvents {
+            fight_id: self.summary.id,
+            from_index: u32::try_from(from).ok()?,
+            events: events.to_vec(),
+            server_time: TimestampMs::from_ms(now_ms),
+        })
+    }
+
+    /// The page with the event of this index, serialized once, and the index after it.
+    fn page_with(&self, index: usize, now_ms: i64) -> Option<(usize, Utf8Bytes)> {
+        let page = index.checked_div(PAGE_EVENTS)?;
+        let from = page.checked_mul(PAGE_EVENTS)?;
+        let end = from.checked_add(PAGE_EVENTS)?;
+        let mut pages = self.pages.lock().unwrap_or_else(PoisonError::into_inner);
+        if end > self.released.len() {
+            let have = self.released.len();
+            if let Some((count, text)) = &pages.partial
+                && *count == have
+            {
+                return Some((have, text.clone()));
+            }
+            let text = self.encode_events(from, self.released.get(from..)?, now_ms)?;
+            pages.partial = Some((have, text.clone()));
+            return Some((have, text));
+        }
+        // In order, so a page is always where its number says.
+        while pages.full.len() <= page {
+            let number = pages.full.len();
+            let start = number.checked_mul(PAGE_EVENTS)?;
+            let events = self.released.get(start..start.checked_add(PAGE_EVENTS)?)?;
+            let text = self.encode_events(start, events, now_ms)?;
+            pages.full.push(text);
+        }
+        Some((end, pages.full.get(page)?.clone()))
     }
 }
 
@@ -213,7 +264,7 @@ impl FightHub {
 
     fn schedule_text(schedule: &mut Schedule, now_ms: i64) -> Option<Utf8Bytes> {
         if let Some(cached) = &schedule.cached
-            && cached.is_fresh(schedule.version, 0, now_ms)
+            && cached.is_fresh(schedule.version, now_ms)
         {
             return Some(cached.text.clone());
         }
@@ -224,44 +275,49 @@ impl FightHub {
         })?;
         schedule.cached = Some(Cached {
             version: schedule.version,
-            released: 0,
             at_ms: now_ms,
             text: text.clone(),
         });
         Some(text)
     }
 
-    /// The `fight_sync` of a socket that subscribes, and its position. `None` if the fight is not
-    /// here.
+    /// The `fight_sync` of a socket that subscribes, and its position: at the start, so
+    /// [`FightHub::next_for`] gives it what was released, in pages. `None` if the fight is not here.
     pub fn subscribe_fight(&self, id: i32) -> Option<(Cursor, Option<Utf8Bytes>)> {
         let state = self.read();
         let entry = state.fights.get(&id)?;
         let cursor = Cursor {
             version: entry.version,
-            released: entry.released.len(),
+            released: 0,
         };
         Some((cursor, entry.sync_text(self.clock.now_ms())))
     }
 
-    /// What this position needs of a fight: the last batch if it is exactly behind it, and if not, a
-    /// shared `fight_sync`. That is how a slow client skips (RF43).
+    /// The next message this position needs of a fight, one at a time: a small `fight_sync` if its
+    /// state changed; the last batch if it is exactly behind it; and if not, the page with its next
+    /// event, which may repeat some it has. That is how a slow client skips (RF43, DP-B9).
     pub fn next_for(&self, id: i32, cursor: &mut Cursor) -> Option<Utf8Bytes> {
         let state = self.read();
         let entry = state.fights.get(&id)?;
-        if entry.version == cursor.version {
-            if entry.released.len() == cursor.released {
-                return None;
-            }
-            if let Some((from, text)) = &entry.last_batch
-                && *from == cursor.released
-            {
-                cursor.released = entry.released.len();
-                return Some(text.clone());
-            }
+        let now_ms = self.clock.now_ms();
+        if entry.version != cursor.version {
+            cursor.version = entry.version;
+            return entry.sync_text(now_ms);
         }
-        cursor.version = entry.version;
-        cursor.released = entry.released.len();
-        entry.sync_text(self.clock.now_ms())
+        let have = entry.released.len();
+        if cursor.released >= have {
+            cursor.released = have;
+            return None;
+        }
+        if let Some((from, text)) = &entry.last_batch
+            && *from == cursor.released
+        {
+            cursor.released = have;
+            return Some(text.clone());
+        }
+        let (next, text) = entry.page_with(cursor.released, now_ms)?;
+        cursor.released = next;
+        Some(text)
     }
 
     /// The entries still unsettled that are neither in `rows` nor `last`: settled by this runner, by
@@ -330,6 +386,7 @@ impl FightHub {
             released: Vec::new(),
             last_batch: None,
             sync: Mutex::new(None),
+            pages: Mutex::new(Pages::default()),
         });
         let mut changed = entry.version == 0 || entry.summary != summary;
         // Already public: a settled fight that this process did not see to the end.
@@ -338,6 +395,7 @@ impl FightHub {
         {
             entry.released = events.to_vec();
             entry.last_batch = None;
+            *entry.pages.lock().unwrap_or_else(PoisonError::into_inner) = Pages::default();
             changed = true;
         }
         if settled {
@@ -364,7 +422,16 @@ impl FightHub {
             .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
             .map_or(0, |cached| cached.text.len());
-        Some((entry.released.len(), batch.saturating_add(sync)))
+        let pages = entry.pages.lock().unwrap_or_else(PoisonError::into_inner);
+        let full: usize = pages.full.iter().map(|text| text.len()).sum();
+        let partial = pages.partial.as_ref().map_or(0, |(_, text)| text.len());
+        Some((
+            entry.released.len(),
+            batch
+                .saturating_add(sync)
+                .saturating_add(full)
+                .saturating_add(partial),
+        ))
     }
 }
 
@@ -388,19 +455,15 @@ impl EventSink for FightHub {
             let Some(new) = events.get(skip..).filter(|new| !new.is_empty()) else {
                 return;
             };
-            let Ok(first) = u32::try_from(have) else {
-                return;
-            };
-            let Some(text) = encode(&ServerMessage::FightEvents {
-                fight_id: entry.summary.id,
-                from_index: first,
-                events: new.to_vec(),
-                server_time: TimestampMs::from_ms(self.clock.now_ms()),
-            }) else {
-                return;
+            // A batch larger than a page goes in pages: no message passes 8 KiB.
+            entry.last_batch = if new.len() <= PAGE_EVENTS {
+                entry
+                    .encode_events(have, new, self.clock.now_ms())
+                    .map(|text| (have, text))
+            } else {
+                None
             };
             entry.released.extend_from_slice(new);
-            entry.last_batch = Some((have, text));
         }
         self.notify();
     }
@@ -447,6 +510,8 @@ mod tests {
         FightEvent::Intro { t }
     }
 
+    const MAX_MESSAGE: usize = 8 * 1024;
+
     fn message(text: &Utf8Bytes) -> ServerMessage {
         serde_json::from_str(text.as_str()).unwrap()
     }
@@ -472,15 +537,28 @@ mod tests {
         (hub, cursor)
     }
 
-    fn the_sync_events(text: &Utf8Bytes) -> Vec<FightEvent> {
-        match message(text) {
-            ServerMessage::FightSync { events, .. } => events,
-            other => panic!("{other:?}"),
+    /// Everything this position gets until it has nothing more to read, as a client would hold it:
+    /// the sync says the state, and the events are put in their place, discarding what repeats.
+    fn drain(hub: &FightHub, cursor: &mut Cursor, held: &mut Vec<FightEvent>) -> usize {
+        let mut messages = 0;
+        while let Some(text) = hub.next_for(1, cursor) {
+            messages += 1;
+            assert!(text.len() <= MAX_MESSAGE, "{}", text.len());
+            if let ServerMessage::FightEvents {
+                from_index, events, ..
+            } = message(&text)
+            {
+                let from = usize::try_from(from_index).unwrap();
+                assert!(from <= held.len(), "a gap");
+                let skip = held.len() - from;
+                held.extend(events.into_iter().skip(skip));
+            }
         }
+        messages
     }
 
     #[test]
-    fn a_socket_on_time_gets_the_batch_and_a_late_one_a_sync() {
+    fn a_socket_on_time_gets_the_batch_and_a_late_one_pages() {
         let clock = FightClock::manual(100);
         let (hub, mut on_time) = live_hub(&clock);
         let mut late = on_time;
@@ -504,10 +582,116 @@ mod tests {
             message(&second),
             ServerMessage::FightEvents { from_index: 2, .. }
         ));
-        // Behind by two batches: it skips, with everything released.
-        let sync = hub.next_for(1, &mut late).unwrap();
-        assert_eq!(the_sync_events(&sync), vec![event(0), event(0), event(5)]);
-        assert!(hub.next_for(1, &mut late).is_none());
+        // Behind by two batches: a page, with everything released so far.
+        let mut held = Vec::new();
+        assert_eq!(drain(&hub, &mut late, &mut held), 1);
+        assert_eq!(held, vec![event(0), event(0), event(5)]);
+    }
+
+    /// DP-B9: what comes late or falls behind rebuilds exactly the prefix, from any position, and no
+    /// message passes 8 KiB.
+    #[test]
+    fn whoever_is_behind_rebuilds_exactly_the_prefix_in_pages() {
+        let clock = FightClock::manual(100);
+        let (hub, start) = live_hub(&clock);
+        let all: Vec<FightEvent> = (0..418).map(event).collect();
+        hub.publish(1, 0, &all);
+
+        let mut cursor = start;
+        let mut held = Vec::new();
+        assert_eq!(
+            drain(&hub, &mut cursor, &mut held),
+            7,
+            "418 events, 64 a page"
+        );
+        assert_eq!(held, all);
+
+        // Behind from the middle of a page: the page repeats what it has, and it is discarded.
+        for have in [1_usize, 63, 64, 65, 70, 127, 128, 417] {
+            let mut cursor = Cursor {
+                version: start.version,
+                released: have,
+            };
+            let mut held = all[..have].to_vec();
+            assert!(drain(&hub, &mut cursor, &mut held) >= 1, "{have}");
+            assert_eq!(held, all, "{have}");
+        }
+
+        // More events after the pages: the last page, incomplete, is served again with them.
+        let mut held = all.clone();
+        hub.publish(1, 418, &[event(418), event(419)]);
+        let mut late = Cursor {
+            version: start.version,
+            released: 390,
+        };
+        let mut from_390 = all[..390].to_vec();
+        drain(&hub, &mut late, &mut from_390);
+        held.extend([event(418), event(419)]);
+        assert_eq!(from_390, held);
+    }
+
+    /// DP-B9: 64 events of 111 bytes, the longest of the golden logs, are under 8 KiB.
+    #[test]
+    fn a_page_of_the_longest_events_fits_in_8_kib() {
+        let mut longest = FightEvent::Hit {
+            t: 90_000,
+            attacker: protocol::Side::A,
+            ability: String::new(),
+            damage: 999,
+            crit: true,
+            weak: true,
+            hp: 860,
+        };
+        let size = serde_json::to_string(&longest).unwrap().len();
+        if let FightEvent::Hit { ability, .. } = &mut longest {
+            *ability = "x".repeat(111 - size);
+        }
+        assert_eq!(serde_json::to_string(&longest).unwrap().len(), 111);
+        let clock = FightClock::manual(1_800_000_000_000);
+        let (hub, start) = live_hub(&clock);
+        hub.publish(1, 0, &vec![longest; PAGE_EVENTS]);
+        let mut cursor = start;
+        let text = hub.next_for(1, &mut cursor).unwrap();
+        assert!(text.len() <= MAX_MESSAGE, "{}", text.len());
+        assert_eq!(cursor.released, PAGE_EVENTS);
+    }
+
+    /// A batch larger than a page is not kept: it would be the large message.
+    #[test]
+    fn a_batch_larger_than_a_page_goes_in_pages() {
+        let clock = FightClock::manual(100);
+        let (hub, start) = live_hub(&clock);
+        let at_the_limit: Vec<FightEvent> = (0..64).map(event).collect();
+        hub.publish(1, 0, &at_the_limit);
+        let mut cursor = start;
+        assert!(matches!(
+            message(&hub.next_for(1, &mut cursor).unwrap()),
+            ServerMessage::FightEvents { .. }
+        ));
+        assert_eq!(cursor.released, 64);
+
+        let over: Vec<FightEvent> = (64..129).map(event).collect();
+        hub.publish(1, 64, &over);
+        let mut held = at_the_limit;
+        assert_eq!(drain(&hub, &mut cursor, &mut held), 2);
+        assert_eq!(held.len(), 129);
+    }
+
+    /// DP-B9: a socket that is up to date gets the small sync at the final, and no events again.
+    #[test]
+    fn a_socket_up_to_date_gets_only_the_state_at_a_transition() {
+        let clock = FightClock::manual(100);
+        let (hub, mut cursor) = live_hub(&clock);
+        hub.publish(1, 0, &[event(0)]);
+        let _ = hub.next_for(1, &mut cursor).unwrap();
+        hub.update(HubUpdate {
+            last: Some(settled(summary(1, FightState::Settled))),
+            ..HubUpdate::default()
+        });
+        let text = hub.next_for(1, &mut cursor).unwrap();
+        assert!(!text.contains("\"events\""), "{text}");
+        assert!(matches!(message(&text), ServerMessage::FightSync { .. }));
+        assert!(hub.next_for(1, &mut cursor).is_none());
     }
 
     #[test]
@@ -578,7 +762,10 @@ mod tests {
         let hub = FightHub::new(clock);
         rows(&hub, vec![summary(1, FightState::BettingClosed)]);
         let (mut cursor, first) = hub.subscribe_fight(1).unwrap();
-        assert_eq!(the_sync_events(&first.unwrap()), vec![]);
+        assert!(matches!(
+            message(&first.unwrap()),
+            ServerMessage::FightSync { .. }
+        ));
 
         let mut changes = hub.watch();
         changes.mark_unchanged();
@@ -589,12 +776,10 @@ mod tests {
         rows(&hub, vec![summary(1, FightState::Live)]);
         assert!(changes.has_changed().unwrap());
         match message(&hub.next_for(1, &mut cursor).unwrap()) {
-            ServerMessage::FightSync { fight, events, .. } => {
-                assert_eq!(fight.state, FightState::Live);
-                assert!(events.is_empty());
-            }
+            ServerMessage::FightSync { fight, .. } => assert_eq!(fight.state, FightState::Live),
             other => panic!("{other:?}"),
         }
+        assert!(hub.next_for(1, &mut cursor).is_none());
     }
 
     /// DP-B4: a shared message keeps its bytes for a moment, and then takes the hour again.
@@ -625,21 +810,9 @@ mod tests {
     }
 
     #[test]
-    fn a_cached_sync_follows_its_version_and_what_was_released() {
+    fn a_cached_sync_follows_its_version() {
         let clock = FightClock::manual(1000);
         let (hub, _) = live_hub(&clock);
-        let (_, first) = hub.subscribe_fight(1).unwrap();
-        hub.publish(1, 0, &[event(0)]);
-        let (_, second) = hub.subscribe_fight(1).unwrap();
-        assert_eq!(the_sync_events(&first.unwrap()), vec![]);
-        assert_eq!(the_sync_events(&second.unwrap()), vec![event(0)]);
-        rows(
-            &hub,
-            vec![
-                summary(1, FightState::Live),
-                summary(2, FightState::Scheduled),
-            ],
-        );
         let mut changed = summary(1, FightState::Live);
         changed.live_started_at = Some(TimestampMs::from_ms(7));
         rows(&hub, vec![changed]);
@@ -649,6 +822,20 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    /// A full page is serialized once, and shared.
+    #[test]
+    fn a_full_page_is_the_same_bytes_for_everyone() {
+        let clock = FightClock::manual(1000);
+        let (hub, start) = live_hub(&clock);
+        let all: Vec<FightEvent> = (0..100).map(event).collect();
+        hub.publish(1, 0, &all);
+        let (mut a, mut b) = (start, start);
+        let first = hub.next_for(1, &mut a).unwrap();
+        clock.advance(10_000);
+        let second = hub.next_for(1, &mut b).unwrap();
+        assert_eq!(first.as_str().as_ptr(), second.as_str().as_ptr());
     }
 
     /// DP-B8: missing from the rows is not leaving. It waits for its final.

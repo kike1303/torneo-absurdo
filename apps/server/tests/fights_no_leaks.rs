@@ -276,19 +276,19 @@ struct Received {
 
 impl Received {
     fn apply(&mut self, what: &str, message: &ServerMessage) {
-        match message {
-            ServerMessage::FightSync { events, .. } => self.events.clone_from(events),
-            ServerMessage::FightEvents {
-                from_index, events, ..
-            } => {
-                assert_eq!(
-                    usize::try_from(*from_index).unwrap(),
-                    self.events.len(),
-                    "{what}: a batch out of its place"
-                );
-                self.events.extend_from_slice(events);
+        if let ServerMessage::FightEvents {
+            from_index, events, ..
+        } = message
+        {
+            // In its place, discarding what a page repeats, and what repeats has to be the same.
+            let from = usize::try_from(*from_index).unwrap();
+            assert!(from <= self.events.len(), "{what}: a gap");
+            for (i, event) in events.iter().enumerate() {
+                match self.events.get(from + i) {
+                    Some(held) => assert_eq!(held, event, "{what}: it changed"),
+                    None => self.events.push(event.clone()),
+                }
             }
-            _ => {}
         }
     }
 }

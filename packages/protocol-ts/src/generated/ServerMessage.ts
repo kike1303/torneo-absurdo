@@ -18,7 +18,7 @@ export type ServerMessage =
   | { type: 'error'; code: ErrorCode }
   | { type: 'self_event'; event: SelfEvent }
   | { type: 'schedule_update'; board: FightsCurrent }
-  | { type: 'fight_sync'; fight: FightSummary; server_time: TimestampMs; events: Array<FightEvent> }
+  | { type: 'fight_sync'; fight: FightSummary; server_time: TimestampMs }
   | {
       type: 'fight_events';
       fight_id: number;
