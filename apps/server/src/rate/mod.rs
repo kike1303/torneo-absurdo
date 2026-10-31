@@ -26,8 +26,8 @@ use tokio_util::sync::CancellationToken;
 
 pub use clock::ServerClock;
 pub use quotas::{
-    AUTH_IP, FULL_RETRY_AFTER_SECS, MAX_KEYS, MUTATION_IP, MUTATION_USER, WS_ANON_UPGRADE_IP,
-    WS_SESSION_UPGRADE_IP, WS_SESSION_UPGRADE_USER,
+    AUTH_IP, FIGHT_READ_IP, FULL_RETRY_AFTER_SECS, MAX_KEYS, MUTATION_IP, MUTATION_USER,
+    WS_ANON_UPGRADE_IP, WS_SESSION_UPGRADE_IP, WS_SESSION_UPGRADE_USER,
 };
 use store::CappedStore;
 
@@ -195,6 +195,8 @@ pub struct RateLimits {
     /// The upgrade of a `/ws` with a session (RF-B14): per user and per IP.
     pub ws_session_user: Arc<KeyedLimiter<Uuid>>,
     pub ws_session_ip: Arc<KeyedLimiter>,
+    /// `GET /api/fights/{id}` (010 RF34).
+    pub fight_read_ip: Arc<KeyedLimiter>,
 }
 
 impl RateLimits {
@@ -206,6 +208,7 @@ impl RateLimits {
             mutation_ip: Arc::new(KeyedLimiter::new(MUTATION_IP, settings)),
             ws_session_user: Arc::new(KeyedLimiter::new(WS_SESSION_UPGRADE_USER, settings)),
             ws_session_ip: Arc::new(KeyedLimiter::new(WS_SESSION_UPGRADE_IP, settings)),
+            fight_read_ip: Arc::new(KeyedLimiter::new(FIGHT_READ_IP, settings)),
         }
     }
 
@@ -216,6 +219,7 @@ impl RateLimits {
         self.mutation_ip.sweep();
         self.ws_session_user.sweep();
         self.ws_session_ip.sweep();
+        self.fight_read_ip.sweep();
     }
 }
 

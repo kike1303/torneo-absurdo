@@ -1,7 +1,7 @@
 //! The HTTP layers of a limiter (008 RF-A4).
 //!
 //! - [`layer`]: 429 `http.rate_limited` with `Retry-After`, for routes a page calls with
-//!   `fetch` or a form action. Mounted on none today.
+//!   `fetch` or a form action, and `GET /api/fights/{id}` (010 RF34).
 //! - [`redirect_layer`]: for the routes the browser navigates to (`start`, `link` and
 //!   `callback`, which share AUTH_IP): 303 to the login page with `auth.try_again`, without
 //!   `Retry-After` or a body (008 "Enmienda 2026-10-30" of RF-B5). It never touches the database

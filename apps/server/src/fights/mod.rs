@@ -6,6 +6,7 @@
 //! Once the commit is published the runner never ends a fight without a result: if it cannot go
 //! on, it stops until someone fixes it (RF16).
 
+pub mod api;
 pub mod bets_contract;
 pub mod board;
 pub mod clock;

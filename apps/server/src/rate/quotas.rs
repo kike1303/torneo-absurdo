@@ -26,6 +26,9 @@ pub const MUTATION_IP: Quota = Quota::per_minute(nonzero(240));
 pub const WS_SESSION_UPGRADE_USER: Quota = Quota::per_minute(nonzero(10));
 pub const WS_SESSION_UPGRADE_IP: Quota = Quota::per_minute(nonzero(120));
 
+/// `GET /api/fights/{id}` per `IpKey`: 120 per minute, burst 30 (010 RF34).
+pub const FIGHT_READ_IP: Quota = Quota::per_minute(nonzero(120)).allow_burst(nonzero(30));
+
 /// Keys per limiter. A constant, never an environment variable (RF-A4).
 pub const MAX_KEYS: usize = 100_000;
 

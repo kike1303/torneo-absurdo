@@ -12,7 +12,7 @@ pub mod http;
 pub mod logs;
 pub mod oauth;
 pub mod pg_proxy;
-
+pub mod public_verifier;
 pub mod ws;
 
 /// A port that was free a moment ago (the listener is dropped before returning).

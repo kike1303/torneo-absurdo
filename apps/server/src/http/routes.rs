@@ -8,7 +8,7 @@ use axum::{Router, middleware};
 
 use super::{errors, health};
 use crate::app::AppState;
-use crate::rate;
+use crate::{fights, rate};
 
 /// What a route does to the server state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +77,8 @@ pub enum Handler {
     Me,
     MeDisplayName,
     MePreferences,
+    FightsCurrent,
+    FightDetail,
     #[cfg(feature = "dev-auth")]
     DevAuthorize,
     #[cfg(feature = "dev-auth")]
@@ -179,6 +181,19 @@ pub const ROUTES: &[RouteSpec] = &[
         effect: Effect::Mutate,
         handler: Handler::MePreferences,
     },
+    // The static segment wins over the parameter (010 RF34, RF35).
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/fights/current",
+        effect: Effect::Read,
+        handler: Handler::FightsCurrent,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/fights/{id}",
+        effect: Effect::Read,
+        handler: Handler::FightDetail,
+    },
     #[cfg(feature = "dev-auth")]
     RouteSpec {
         method: RouteMethod::Get,
@@ -268,6 +283,10 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         Handler::Me => on(filter, crate::profile::me::handler),
         Handler::MeDisplayName => on(filter, crate::profile::update::display_name).layer(body),
         Handler::MePreferences => on(filter, crate::profile::update::preferences).layer(body),
+        Handler::FightsCurrent => on(filter, fights::api::current),
+        Handler::FightDetail => on(filter, fights::api::detail).layer(
+            middleware::from_fn_with_state(state.rate.fight_read_ip.clone(), rate::http::layer),
+        ),
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize => on(filter, auth::dev::authorize),
         #[cfg(feature = "dev-auth")]
