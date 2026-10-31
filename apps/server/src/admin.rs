@@ -632,13 +632,19 @@ mod source_rules {
         out
     }
 
+    /// The text of a migration as the rules read it: no comments, and no quotes of literals or of
+    /// `$$`, so `tokens` also sees what a `do` block runs through `execute '…'`.
+    fn migration_sql(text: &str) -> String {
+        without_sql_comments(text).replace(['\'', '$'], " ")
+    }
+
     /// Each `(form, target)` of the SQL of a migration that switches a guard off. By statement and
-    /// by substring, with the quotes of literals and of `$$` gone, so a schema, quotes, `if exists`
-    /// or a `do` block change nothing; a false positive only asks for a look.
+    /// by substring, so a schema, quotes, `if exists` or a `do` block change nothing; a false
+    /// positive only asks for a look.
     fn weakens_a_guard(sql: &str) -> Vec<(&'static str, &'static str)> {
         let mut found = Vec::new();
-        for statement in without_sql_comments(sql).split(';') {
-            let text = tokens(&statement.replace(['\'', '$'], " ")).join(" ") + " ";
+        for statement in migration_sql(sql).split(';') {
+            let text = tokens(statement).join(" ") + " ";
             for (guard, _) in GUARD_TRIGGERS {
                 if text.contains(guard) {
                     for form in WEAKENS_A_NAMED_GUARD {
@@ -914,7 +920,7 @@ mod source_rules {
         }
         for (_, name, text) in migrations() {
             assert!(
-                !writes_session_auth(&without_sql_comments(&text)),
+                !writes_session_auth(&migration_sql(&text)),
                 "{name} writes the authentication of a session"
             );
         }
@@ -951,6 +957,13 @@ mod source_rules {
             r#"sqlx::query("MERGE INTO ONLY sessions s USING x ON true WHEN NOT MATCHED THEN INSERT (auth_link_seq) VALUES (1)")"#,
         ] {
             assert!(writes_session_auth(sql), "{sql}");
+        }
+        for sql in [
+            "DO $$ BEGIN EXECUTE 'UPDATE sessions SET authenticated_at = now()'; END $$;",
+            "DO $do$ BEGIN EXECUTE 'INSERT INTO sessions (auth_link_seq) VALUES (1)'; END $do$;",
+            "/* '--' */ UPDATE sessions SET auth_account_id = NULL; -- it's over",
+        ] {
+            assert!(writes_session_auth(&migration_sql(sql)), "{sql}");
         }
         for sql in [
             r#"sqlx::query("SELECT authenticated_at, auth_account_id, auth_link_seq FROM sessions")"#,
