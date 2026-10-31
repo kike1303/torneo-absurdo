@@ -291,7 +291,7 @@ async fn logout_all_with_a_dead_session_does_not_look_like_success() {
         let other = TokenHash::of(&other);
         assert!(sessions::validate(&pool, &other).await.unwrap().is_some());
 
-        // The same dead cookie on `logout`: nothing else was asked for.
+        // The same cookie on `logout`, its row already gone: nothing else was asked for.
         let out = http::send(app.addr, "POST", "/api/auth/logout", &headers).await;
         assert_eq!(out.status, 303, "{sql}");
         assert_eq!(out.header("location"), Some("/"), "{sql}");
@@ -324,4 +324,43 @@ async fn logout_all_without_a_valid_cookie_goes_to_the_login_page() {
     assert_eq!(sessions_of(&pool, user).await, 1);
     let hash = TokenHash::of(&token);
     assert!(sessions::validate(&pool, &hash).await.unwrap().is_some());
+}
+
+/// TA-30 and 009 plan decision 6: only a valid session takes the lock of the user. A dead cookie
+/// answers while another transaction holds it, so it cannot make a user's writes wait.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn logout_all_with_a_dead_session_does_not_take_the_lock_of_the_user() {
+    let db = TestDb::create().await;
+    let (app, pool) = support::app::start_db(&db, &[], &Settings::default()).await;
+    let (user, token) = support::app::user_with_session(&pool).await;
+    let hash = TokenHash::of(&token);
+    let id = sessions::validate(&pool, &hash).await.unwrap().unwrap().id;
+    support::db::privileged(
+        &pool,
+        sqlx::query("UPDATE sessions SET last_seen_at = now() - interval '8 days' WHERE id = $1")
+            .bind(id.uuid()),
+    )
+    .await;
+    let name = support::config::config(&[]).cookies.session_name();
+    let cookie = format!("{name}={token}");
+    let mut hold = pool.begin().await.unwrap();
+    sqlx::query("SELECT 1 FROM users WHERE id = $1 FOR UPDATE")
+        .bind(user)
+        .execute(&mut *hold)
+        .await
+        .unwrap();
+    let out = tokio::time::timeout(
+        Duration::from_secs(10),
+        http::send(
+            app.addr,
+            "POST",
+            "/api/auth/logout-all",
+            &[("origin", ORIGIN), ("cookie", cookie.as_str())],
+        ),
+    )
+    .await
+    .expect("a dead cookie must not wait for the lock of the user");
+    hold.rollback().await.unwrap();
+    assert_eq!(out.header("location"), Some("/login"));
+    assert_eq!(sessions_of(&pool, user).await, 0);
 }

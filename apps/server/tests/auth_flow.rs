@@ -541,8 +541,10 @@ async fn logout_and_logout_all() {
     }
     // A logout without Origin is a cross-site mutation (D4).
     let cookie = format!("{SESSION}={c}");
-    let forged = http::send(app.addr, "POST", "/api/auth/logout", &[("cookie", &cookie)]).await;
-    assert_eq!(forged.status, 403);
+    for path in ["/api/auth/logout", "/api/auth/logout-all"] {
+        let forged = http::send(app.addr, "POST", path, &[("cookie", &cookie)]).await;
+        assert_eq!(forged.status, 403, "{path}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
