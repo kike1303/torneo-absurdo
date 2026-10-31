@@ -11,6 +11,9 @@ Desde la raíz del repo. `-s` evita que pnpm imprima la línea del comando, que 
 # Export → set (solo content/_local/sprites/<id> o content/sprites/<id>, con <id> igual al del export).
 pnpm -s --filter @torneo/sprite-importer run import -- --in <carpeta-del-export> --out content/_local/sprites/<id>
 
+# Frames crudos + receta → export (004). Opcional; escribe solo dentro de content/_local/.
+pnpm -s --filter @torneo/sprite-importer run normalize -- --in <frames-crudos> --recipe tools/sprite-importer/recipes/<id>.json --out content/_local/export/<id>
+
 # Chequeo de todos los sets de content/sprites/, su procedencia y los vínculos de los personajes (corre en just check).
 pnpm -s --filter @torneo/sprite-importer check
 

@@ -2,7 +2,13 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GUIDE_CODES } from '@torneo/renderer/guide';
-import { EXPORT_CODES, LINK_CODES, PROVENANCE_CODES, SET_CODES } from '../src/codes.ts';
+import {
+  EXPORT_CODES,
+  LINK_CODES,
+  NORMALIZE_CODES,
+  PROVENANCE_CODES,
+  SET_CODES,
+} from '../src/codes.ts';
 import { loadGolden } from '../src/golden.ts';
 import {
   GUIDE_END,
@@ -52,6 +58,7 @@ describe('docs/guides/sprites.md', () => {
       ...Object.values(SET_CODES),
       ...Object.values(PROVENANCE_CODES),
       ...Object.values(LINK_CODES),
+      ...Object.values(NORMALIZE_CODES),
       ...Object.values(GUIDE_CODES),
     ];
     const prose = outside(TEXT);

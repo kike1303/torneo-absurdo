@@ -7,6 +7,7 @@
   "scripts": {
     "import": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts import",
     "check": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts check",
+    "normalize": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/normalize-cli.ts",
     "gen:guide": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/gen-guide.ts",
     "gen:fixture": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/gen-fixture.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
