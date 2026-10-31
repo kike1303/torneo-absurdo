@@ -161,12 +161,13 @@ pub async fn unsettled(pool: &PgPool) -> Result<Vec<FightRow>, sqlx::Error> {
     rows.iter().map(decode).collect()
 }
 
-/// The last settled fight.
+/// The last fight settled, by the hour it settled (RF35): a fight halted for a while settles after a
+/// later one that was cancelled.
 pub async fn last_settled(pool: &PgPool) -> Result<Option<FightRow>, sqlx::Error> {
     let row = sqlx::query(concat!(
         "SELECT ",
         columns!(),
-        " FROM fights WHERE state = 'settled' ORDER BY opens_at DESC LIMIT 1"
+        " FROM fights WHERE state = 'settled' ORDER BY settled_at DESC, id DESC LIMIT 1"
     ))
     .fetch_optional(pool)
     .await?;
