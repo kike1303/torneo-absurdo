@@ -12,6 +12,7 @@ use support::db::TestDb;
 use uuid::Uuid;
 
 const LEVELS: [&str; 3] = ["info", "debug", "debug,sqlx=trace"];
+const PROVIDERS_LINE: &str = "providers within the admin cutoff: ";
 
 async fn run(args: &[&str], envs: &[(&str, &str)]) -> bin::Finished {
     bin::spawn(args, envs).finish(Duration::from_secs(20)).await
@@ -35,12 +36,29 @@ fn assert_clean(finished: &bin::Finished, user: Uuid, reason: &str, case: &str) 
     assert!(finished.stderr.is_empty(), "{case}: {:?}", finished.stderr);
 }
 
+/// The line of providers of a `grant` is not a log (009 RF17): every other line is JSON.
 fn events(finished: &bin::Finished) -> Vec<serde_json::Value> {
     finished
         .stdout
         .iter()
+        .filter(|line| !line.starts_with(PROVIDERS_LINE))
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
+}
+
+/// An event of the CLI (no `target`) has `event`, `level`, `ts` and at most an `error_kind`.
+fn assert_own_events_have_only_their_fields(lines: &[serde_json::Value], case: &str) {
+    for line in lines {
+        let own = line.get("target").is_none();
+        let mut keys: Vec<_> = line.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        if own {
+            assert!(
+                keys == ["event", "level", "ts"] || keys == ["error_kind", "event", "level", "ts"],
+                "{case}: {line}"
+            );
+        }
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -128,18 +146,57 @@ async fn the_cli_never_logs_the_user_nor_the_reason() {
                 lines.iter().any(|l| l["event"] == event),
                 "{case}: {lines:?}"
             );
-            for line in &lines {
-                let own = line.get("target").is_none();
-                let mut keys: Vec<_> = line.as_object().unwrap().keys().cloned().collect();
-                keys.sort();
-                if own {
-                    assert!(
-                        keys == ["event", "level", "ts"]
-                            || keys == ["error_kind", "event", "level", "ts"],
-                        "{case}: {line}"
-                    );
-                }
+            assert_own_events_have_only_their_fields(&lines, &case);
+        }
+    }
+}
+
+/// 009 RF17: the line of providers has only their names: no `user_id` and no `provider_user_id`
+/// in stdout or stderr, in any log level, and no event has more than its fields.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn grant_with_two_providers_prints_only_their_names() {
+    bin::warm_up().await;
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let url = db.url();
+    let (user, _) = support::app::user_with_session(&pool).await;
+    let subjects = [
+        ("google", format!("g-c4n4ry-{}", Uuid::new_v4().simple())),
+        ("discord", format!("d-c4n4ry-{}", Uuid::new_v4().simple())),
+    ];
+    for (provider, subject) in &subjects {
+        sqlx::query(
+            "INSERT INTO oauth_accounts (provider, provider_user_id, user_id) VALUES ($1, $2, $3)",
+        )
+        .bind(provider)
+        .bind(subject)
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let user_text = user.to_string();
+    for level in LEVELS {
+        let envs = [("DATABASE_URL", url.as_str()), ("RUST_LOG", level)];
+        let finished = run(&["admin", "grant", user_text.as_str()], &envs).await;
+        assert_eq!(finished.status.code(), Some(0), "{level}");
+        assert_clean(&finished, user, "no reason here", level);
+        let line = finished
+            .stdout
+            .iter()
+            .find_map(|l| l.strip_prefix(PROVIDERS_LINE))
+            .unwrap();
+        assert_eq!(line, "google, discord", "{level}");
+        for (_, subject) in &subjects {
+            for out in finished.stdout.iter().chain(&finished.stderr) {
+                assert!(!out.contains(subject.as_str()), "{level}: {out}");
             }
         }
+        let lines = events(&finished);
+        assert!(
+            lines.iter().any(|l| l["event"] == "admin.grant_applied"),
+            "{level}: {lines:?}"
+        );
+        assert_own_events_have_only_their_fields(&lines, level);
     }
 }

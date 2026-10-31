@@ -50,9 +50,9 @@ Con dos cuentas de Google o de Discord a mano:
 
 1. Login con Google; logout; login con Discord (es otro usuario).
 2. Desde la sesión de Google, vincular Discord: vuelves con una sesión nueva, y `/api/me` lista los dos proveedores.
-3. Desvincular uno: la sesión actual sigue, las demás se cierran.
-4. Vincular una cuenta que ya es de otro usuario: `/login?error=auth.already_linked`, sin fusión.
-5. Cancelar en la pantalla del proveedor: `/login?error=auth.provider_error`.
+3. Desvincular Discord: la web pide primero confirmar tu identidad, porque lo que vinculaste en el paso 2 es posterior a tu autenticación. Después de confirmar, la sesión actual sigue y las demás se cierran.
+4. Vincular una cuenta que ya es de otro usuario. El desvincular del paso 3 consumió la confirmación, así que `/account` muestra otra vez el panel en lugar de los botones de vincular: confirma tu identidad y vincula. Resultado: `/login?error=auth.already_linked`, sin fusión.
+5. Volver a `/account`, empezar a vincular y cancelar en la pantalla del proveedor: `/login?error=auth.provider_error`. El intento fallido del paso 4 no consume la confirmación: los botones siguen ahí mientras la confirmación tenga menos de 10 minutos. Si ya pasaron, la web vuelve a pedirla.
 
 ## Admin y ban por CLI
 
@@ -69,7 +69,25 @@ server admin unban  <user_id>
 - En la imagen: `docker exec <contenedor> /server admin ban <user_id> --reason <texto>`.
 - Para encontrar un `user_id`, por ejemplo por su nombre visible: `psql "$DATABASE_URL" -c "SELECT id FROM users WHERE display_name = '…'"`.
 - Sale con 0 si aplicó el cambio, con 1 y `admin.user_not_found` si el usuario no existe (sin cambios), y con 2 y `cli.invalid` si el comando no se entiende.
+- `server admin --help` y `server admin <acción> --help` imprimen la ayuda por stdout y salen con 0, sin leer `DATABASE_URL` ni conectar. Cualquier otra forma (`-h`, o `--help` después del `user_id`) es un comando que no se entiende.
 - Los logs de la CLI llevan solo el evento. Ni el `user_id` ni el motivo aparecen en ellos: el motivo queda en `admin_audit.payload`.
 - **El `--reason` queda en el historial de la shell y, con `docker exec`, en los eventos `exec_create` del daemon de Docker, junto con el `user_id`. Por eso nunca lleva datos personales:** basta con algo como `spam en el chat`.
-- Un `UPDATE users SET role …` o `banned_at …` a mano por `psql` falla con `TA004` (`users_privileged_guard`). El camino es la CLI, así el cambio queda en `admin_audit`.
-- Un admin tiene sesiones de 12 h, y las rutas de admin (TA-13) piden haberse autenticado hace menos de 60 min.
+- Un `UPDATE users SET role …`, `banned_at …` o `admin_account_cutoff …` a mano por `psql` falla con `TA004` (`users_privileged_guard`). El camino es la CLI, así el cambio queda en `admin_audit`.
+- Un admin tiene sesiones de 12 h. Las rutas de admin (TA-13) piden una autenticación vigente (la cuenta sigue vinculada y no se vinculó nada después), de hace menos de 60 min y con una cuenta dentro del corte de `grant` (`admin_account_cutoff`).
+
+### Cuándo volver a correr `grant`
+
+`grant` guarda como corte la cuenta vinculada más reciente del usuario, y `revoke` lo borra. Hay que volver a correr `grant`:
+
+- después de migrar a 009: ningún admin tiene corte todavía, así que ninguna sesión pasa como admin;
+- después de vincular un proveedor nuevo como admin: no da admin hasta otro `grant`.
+
+Antes de correrlo, revisa los proveedores vinculados en `/account`: todo lo vinculado hasta ese momento pasa a dar admin. Como cada comando cierra todas las sesiones del usuario, después hay que volver a entrar.
+
+Al terminar, `grant` imprime por stdout (no es un log) los proveedores dentro del corte, en orden de vínculo y sin ids:
+
+```
+providers within the admin cutoff: google, dev
+```
+
+Si el usuario no tiene cuentas, la línea dice `none`. Si muestra un proveedor que no reconoces, corre `revoke`, quítalo desde `/account` y vuelve a correr `grant`.

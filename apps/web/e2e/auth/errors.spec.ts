@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { waitForHydration } from '../support/hydration.js';
 import { EGRESS_LOG, addDynamicCanary, expectEgress, fileLines } from '../support/logs.js';
 import { PUBLIC_ORIGIN } from '../support/topology.js';
-import { expect, login, press, test, text } from './fixtures.js';
+import { expect, login, press, reflected, test, text } from './fixtures.js';
 
 // 008 RF-D6, the T4 case of the 2026-10-28 amendment, the 2026-10-30 amendment of RF-B5 and
 // open question 1 of plan-d (decision 11). `page.route` never sees the destination of a 303, so
@@ -28,17 +28,6 @@ async function callbackUrl(page: Page, identity: string): Promise<URL> {
   const authorize = await page.request.get(start.headers().location ?? '', { maxRedirects: 0 });
   expect(authorize.status()).toBe(303);
   return new URL(authorize.headers().location ?? '', PUBLIC_ORIGIN);
-}
-
-/** Everything a page could reflect: the HTML and every attribute of every element. */
-async function reflected(page: Page): Promise<string> {
-  const html = await page.content();
-  const attributes = await page.evaluate(() =>
-    [...document.querySelectorAll('*')]
-      .flatMap((el) => [...el.attributes].map((a) => `${a.name}=${a.value}`))
-      .join('\n'),
-  );
-  return `${html}\n${attributes}`;
 }
 
 test('1. an invalid state ends in /login with the translated text', async ({ page, identity }) => {

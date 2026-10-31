@@ -1,5 +1,6 @@
 //! Authentication (ADR-0008, 008 phase B): the OAuth flow (`start` and `callback`), the login
-//! transaction, logout and, with the `dev-auth` feature only, the dev provider.
+//! transaction, link, reauth (009), unlink, logout and, with the `dev-auth` feature only, the dev
+//! provider.
 
 pub mod callback;
 pub mod client;
@@ -10,6 +11,8 @@ pub mod login;
 pub mod logout;
 pub mod next;
 pub mod providers;
+pub mod reauth;
+pub mod reauth_status;
 pub mod start;
 pub mod unlink;
 
@@ -49,6 +52,8 @@ pub struct AuthState {
     pub http: client::HttpClient,
     /// The pause of the link race tests ([`link::NoLinkGate`] in production).
     pub link_gate: link::LinkGateConfig,
+    /// The pause of the unlink race tests ([`unlink::NoUnlinkGate`] in production, 009 RF15).
+    pub unlink_gate: unlink::UnlinkGateConfig,
     #[cfg(feature = "dev-auth")]
     pub dev: dev::DevProvider,
 }
@@ -77,6 +82,7 @@ impl AuthState {
             providers: enabled_providers(&config.oauth),
             http: client::HttpClient::new(tls),
             link_gate: settings.link_gate.clone(),
+            unlink_gate: settings.unlink_gate.clone(),
             #[cfg(feature = "dev-auth")]
             dev: dev::DevProvider::default(),
         })
@@ -319,7 +325,7 @@ mod source_rules {
     }
 
     /// B4.6: a redirect of ours never keeps the method and the body (307, 308). The redirect of
-    /// `start` and `link` to the provider is a 303; `tests/oauth_providers.rs` reads its status.
+    /// `start`, `link` and `reauth` to the provider is a 303; `tests/oauth_providers.rs` reads its status.
     #[test]
     fn no_redirect_of_the_server_is_307_or_308() {
         let needles = [

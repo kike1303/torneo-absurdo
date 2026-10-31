@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   a9Parameters,
+  ageSession,
   assertA9Apply,
   assertE2eTarget,
   maintenanceUrl,
@@ -82,6 +83,13 @@ describe('assertE2eTarget', () => {
     await expect(seedOauthAccount('x', 'google', url('10.0.0.5', 'torneo_e2e'))).rejects.toThrow(
       /must point at/,
     );
+    await expect(ageSession('x', 11, url('10.0.0.5', 'torneo_e2e'))).rejects.toThrow(
+      /must point at/,
+    );
+    await expect(ageSession('x', 11, url('127.0.0.1', 'torneo'))).rejects.toThrow(/torneo_e2e/);
+    await expect(
+      ageSession('x', 11, `${url('127.0.0.1', 'torneo_e2e')}?host=db.example.com`),
+    ).rejects.toThrow(/no query string or fragment/);
   });
 });
 

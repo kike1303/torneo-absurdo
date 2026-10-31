@@ -189,7 +189,8 @@ export async function userId(identity, url = process.env.E2E_DATABASE_URL) {
 
 /**
  * Links an account of `provider` to the user of a `dev` identity, without the provider (the e2e
- * has no network): for the unlink test of account.spec.ts.
+ * has no network): for the unlink tests of account.spec.ts. The `id` comes from the sequence, so
+ * the session in use stops being current until it reauthenticates (009 RF10).
  * @param {string} identity
  * @param {'google' | 'discord'} provider
  * @param {string | undefined} [url]
@@ -202,6 +203,27 @@ export async function seedOauthAccount(identity, provider, url = process.env.E2E
       INSERT INTO oauth_accounts (provider, provider_user_id, user_id)
       SELECT ${provider}, ${`e2e-seed-${identity}`}, user_id FROM oauth_accounts
       WHERE provider = 'dev' AND provider_user_id = ${identity}`;
+  } finally {
+    await sql.end({ timeout: 1 });
+  }
+}
+
+/**
+ * Moves the authentication of every session of a `dev` identity back in time (009): the e2e has
+ * no clock to wait for. Only `authenticated_at`, the column that the 10 minutes read.
+ * @param {string} identity
+ * @param {number} minutes
+ * @param {string | undefined} [url]
+ */
+export async function ageSession(identity, minutes, url = process.env.E2E_DATABASE_URL) {
+  const target = assertE2eTarget(url);
+  const sql = connect(target.toString());
+  try {
+    await sql`
+      UPDATE sessions SET authenticated_at = authenticated_at - make_interval(mins => ${minutes}::int)
+      WHERE user_id = (
+        SELECT user_id FROM oauth_accounts WHERE provider = 'dev' AND provider_user_id = ${identity}
+      )`;
   } finally {
     await sql.end({ timeout: 1 });
   }

@@ -150,13 +150,15 @@ pub async fn user_with_session(pool: &sqlx::PgPool) -> (uuid::Uuid, String) {
     (user, session_for(pool, user).await)
 }
 
-/// Another valid session of `user`.
+/// Another valid session of `user`, with no authentication that counts (009: never `step_up`
+/// nor `recent_admin`).
 pub async fn session_for(pool: &sqlx::PgPool, user: uuid::Uuid) -> String {
     let mut tx = pool.begin().await.unwrap();
     let issued = server::sessions::issue(
         &mut tx,
         user,
         protocol::Role::User,
+        server::sessions::Authentication::None,
         &[0; 32],
         server::sessions::UaFamily::Other,
     )
@@ -164,4 +166,40 @@ pub async fn session_for(pool: &sqlx::PgPool, user: uuid::Uuid) -> String {
     .unwrap();
     tx.commit().await.unwrap();
     issued.token.as_str().to_owned()
+}
+
+/// A user created by SQL with a single `dev` account (the `CHECK` accepts it in every build) and
+/// a session freshly authenticated with it (009 RF6): the shape of a login, without a provider.
+pub async fn user_with_dev_account(pool: &sqlx::PgPool) -> (uuid::Uuid, String) {
+    let user = uuid::Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, display_name, display_name_key) VALUES ($1, $2, $3)")
+        .bind(user)
+        .bind(format!("Test{}", user.simple()))
+        .bind(format!("test{}", user.simple()))
+        .execute(pool)
+        .await
+        .unwrap();
+    let account: i64 = sqlx::query(
+        "INSERT INTO oauth_accounts (provider, provider_user_id, user_id) \
+         VALUES ('dev', $1, $2) RETURNING id",
+    )
+    .bind(format!("dev-{}", user.simple()))
+    .bind(user)
+    .fetch_one(pool)
+    .await
+    .map(|row| sqlx::Row::get(&row, 0))
+    .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    let issued = server::sessions::issue(
+        &mut tx,
+        user,
+        protocol::Role::User,
+        server::sessions::Authentication::Fresh(server::sessions::OauthAccountId::new(account)),
+        &[0; 32],
+        server::sessions::UaFamily::Other,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    (user, issued.token.as_str().to_owned())
 }

@@ -1,12 +1,14 @@
 //! Linking a second provider (ADR-0008 D1, D3; 008 RF-C2, plan-c decision 7).
 //!
-//! `POST /api/auth/link/{provider}` needs a session and starts the same flow as `start`, with
-//! `purpose = 'link'` and the user of the session. The callback (see `callback.rs`) checks that
-//! the session is still that user's, talks to the provider and then runs [`link`]: one
-//! transaction that locks the user, rotates the session (and refuses if it was closed in the
-//! meantime), inserts the identity without ever raising a violation, writes `auth_events` and
-//! issues the new session. Nothing ever merges two users, and no error touches the session in
-//! use (the transaction did not commit).
+//! `POST /api/auth/link/{provider}` needs a session with a confirmation (009 RF8) and starts the
+//! same flow as `start`, with `purpose = 'link'` and the user of the session. The callback (see
+//! `callback.rs`) checks that the session is still that user's, talks to the provider and then
+//! runs [`link`]: one transaction that locks the user, reads the session with its row locked and
+//! needs a current authentication of the last 20 minutes (RF9), issues the new session as a copy
+//! of the old one (RF10: a link never counts as a reauthentication and never extends a session),
+//! rotates the old one (and refuses if it was closed in the meantime), inserts the identity
+//! without ever raising a violation and writes `auth_events`. Nothing ever merges two users, and
+//! no error touches the session in use (the transaction did not commit).
 
 use std::fmt;
 use std::future::Future;
@@ -21,16 +23,17 @@ use protocol::{ApiErrorCode, CallbackErrorCode};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::callback::{login_location, try_again_redirect};
+use super::callback::{code_redirect, login_location, try_again_redirect};
 use super::login::Identity;
 use super::start::{Purpose, StartForm, begin_flow, flow_error};
 use crate::app::AppState;
 use crate::http::errors::error_response;
 use crate::http::session::{self, PRIVATE_NO_STORE};
-use crate::sessions::{self, Issued, RevokeFilter, SessionId, UaFamily};
+use crate::sessions::{self, Authentication, Issued, RevokeFilter, SessionId, UaFamily};
 
-/// A pause between the session check of a link callback and its transaction. Production uses
-/// [`NoLinkGate`]; the race tests close the session there (plan-c decision 7).
+/// A pause between the session check of a link or reauth callback and its transaction.
+/// Production uses [`NoLinkGate`]; the race tests close the session there (plan-c decision 7,
+/// 009 plan decision 5).
 pub trait LinkGate: Send + Sync {
     fn before_link(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 }
@@ -61,7 +64,9 @@ impl fmt::Debug for LinkGateConfig {
 
 /// `POST /api/auth/link/{provider}`: an unknown or disabled provider is 404 (JSON); no session
 /// is a 303 to the login page and a database error a 303 to `auth.try_again` (008 "Enmienda
-/// 2026-10-30" of RF-C2); with a session, the flow (a rejected form is `auth.invalid_state`).
+/// 2026-10-30" of RF-C2); a session without a confirmation is a 303 to `auth.reauth_required`
+/// with no flow and no cookie change (009 RF8); with one, the flow (a rejected form is
+/// `auth.invalid_state`).
 pub async fn handler(
     State(state): State<AppState>,
     Path(segment): Path<String>,
@@ -77,6 +82,9 @@ pub async fn handler(
         Ok(None) => return to_login(&state),
         Err(_) => return try_again_redirect(PRIVATE_NO_STORE),
     };
+    if !info.step_up {
+        return code_redirect(CallbackErrorCode::ReauthRequired, PRIVATE_NO_STORE);
+    }
     match begin_flow(&state, provider, form, Purpose::Link(info.user_id)).await {
         Ok(response) => response,
         Err(code) => flow_error(&state.auth.cookies, code),
@@ -85,8 +93,9 @@ pub async fn handler(
 
 /// No session (absent, expired or revoked): 303 to the login page with no `error` (its form is
 /// the answer; `auth.invalid_state` would mislead), and the session cookie expired (008
-/// "Enmienda 2026-10-30" of RF-C2). `private, no-store`: it read the session.
-fn to_login(state: &AppState) -> Response {
+/// "Enmienda 2026-10-30" of RF-C2). `private, no-store`: it read the session. Also the answer of
+/// a reauth without a session (009 RF11).
+pub(super) fn to_login(state: &AppState) -> Response {
     (
         StatusCode::SEE_OTHER,
         [
@@ -145,8 +154,9 @@ async fn attempt(
     tx: &mut sqlx::PgConnection,
     request: &LinkRequest<'_>,
 ) -> Result<Issued, Refused> {
-    use CallbackErrorCode::{AlreadyLinked, InvalidState, ProviderAlreadyLinked};
-    // In series with an unlink and another link of the same user; a banned user has no row.
+    use CallbackErrorCode::{AlreadyLinked, InvalidState, ProviderAlreadyLinked, ReauthRequired};
+    // In series with every link, reauth, unlink and logout-all of the same user; a banned user
+    // has no row.
     let user = sqlx::query("SELECT role FROM users WHERE id = $1 AND banned_at IS NULL FOR UPDATE")
         .bind(request.user)
         .fetch_optional(&mut *tx)
@@ -157,9 +167,31 @@ async fn attempt(
     } else {
         protocol::Role::User
     };
-    // The rotation first (D3): the session has to be exactly the one checked before the
-    // exchange. If a logout-all, a ban or a sibling link closed it in the meantime, linking now
-    // would revive it.
+    // RF9, with the row of the session locked. Closed in the meantime (a logout-all, a ban, a
+    // sibling link) is `auth.invalid_state`, as in 008; alive without an authentication that
+    // counts (too old, or something linked or unlinked since) is `auth.reauth_required`.
+    let Some(auth) = sessions::lock_auth(tx, request.session).await? else {
+        return Err(Refused::Code(InvalidState));
+    };
+    if auth.user_id != request.user {
+        return Err(Refused::Code(InvalidState));
+    }
+    if !auth.link_window {
+        return Err(Refused::Code(ReauthRequired));
+    }
+    // RF10: the new session copies the authentication and the expiry of the one locked above,
+    // so it is issued before the rotation deletes it.
+    let issued = sessions::issue(
+        tx,
+        request.user,
+        role,
+        Authentication::KeptFrom(request.session),
+        &request.ip_hash,
+        request.ua,
+    )
+    .await?;
+    // The rotation (D3): exactly the session checked before the exchange. With the lock above it
+    // cannot fail; the comparison stays as a defense.
     let revoked = sessions::revoke(tx, RevokeFilter::One(request.session)).await?;
     if revoked != [request.session] {
         return Err(Refused::Code(InvalidState));
@@ -200,7 +232,7 @@ async fn attempt(
     .bind(request.ip_hash.as_slice())
     .execute(&mut *tx)
     .await?;
-    Ok(sessions::issue(tx, request.user, role, &request.ip_hash, request.ua).await?)
+    Ok(issued)
 }
 
 #[cfg(test)]
@@ -215,6 +247,8 @@ mod tests {
             assert!(
                 ![
                     "link",
+                    "reauth",
+                    "reauth-status",
                     "unlink",
                     "start",
                     "callback",

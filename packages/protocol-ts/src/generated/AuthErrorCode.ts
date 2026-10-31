@@ -14,4 +14,5 @@ export type AuthErrorCode =
   | 'auth.already_linked'
   | 'auth.provider_already_linked'
   | 'auth.last_provider'
-  | 'auth.reauth_required';
+  | 'auth.reauth_required'
+  | 'auth.reauth_mismatch';

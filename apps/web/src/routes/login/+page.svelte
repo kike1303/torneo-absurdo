@@ -31,8 +31,14 @@
       {#if !data.errorKey}
         <p data-testid="login-signed-in">{m.login_already_signed_in()}</p>
       {/if}
-      <Button href={`/${locale}/account`} variant="outline" data-testid="login-account-link">
-        {m.account_link()}
+      <!-- After an error, going back is the main action (009 RF24). -->
+      <Button
+        href={`/${locale}/account`}
+        variant={data.errorKey ? 'default' : 'outline'}
+        class="w-full"
+        data-testid="login-account-link"
+      >
+        {data.errorKey ? m.login_back_to_account() : m.account_link()}
       </Button>
     </div>
   {:else if data.providers === null}

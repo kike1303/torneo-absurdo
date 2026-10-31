@@ -1,9 +1,11 @@
 //! Subcommands (plan-b decision 2, plan-c decision 10): `server` / `server serve`,
-//! `server healthcheck` and `server admin grant|revoke|ban|unban <user_id>`.
+//! `server healthcheck`, `server admin grant|revoke|ban|unban <user_id>` and `server admin
+//! [<action>] --help` (009 RF17, the only text that is not a log or a code).
 //! No error is ever formatted to stdout or stderr: failures become exit codes and, for `serve`
 //! and `admin`, a log line with a code (never an argument).
 
 use std::ffi::OsString;
+use std::io::Write as _;
 use std::process::ExitCode;
 
 use crate::admin::{self, AdminCommand, AdminConfig};
@@ -17,6 +19,8 @@ pub enum Command {
     Serve,
     Healthcheck,
     Admin(AdminCommand),
+    /// `admin --help` and `admin <action> --help`: no config and no connection.
+    AdminHelp,
     Invalid,
 }
 
@@ -27,6 +31,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Command {
         [] => Command::Serve,
         [one] if one == "serve" => Command::Serve,
         [one] if one == "healthcheck" => Command::Healthcheck,
+        [first, rest @ ..] if first == "admin" && admin::is_help(rest) => Command::AdminHelp,
         [first, rest @ ..] if first == "admin" => {
             AdminCommand::parse(rest).map_or(Command::Invalid, Command::Admin)
         }
@@ -68,6 +73,11 @@ pub fn run_cli(command: Command) -> Result<(), CliError> {
             crate::healthcheck::run_from_env().map_err(|_| CliError::Healthcheck)
         }
         Command::Admin(command) => run_admin(&command),
+        Command::AdminHelp => {
+            // A closed stdout changes nothing: the help has no effect to report.
+            let _ = std::io::stdout().lock().write_all(admin::HELP.as_bytes());
+            Ok(())
+        }
         Command::Invalid => {
             // Logging may not start; the exit code still says what happened.
             if telemetry::init("info").is_ok() {
@@ -195,6 +205,31 @@ mod tests {
             vec!["admin", "promote", USER],
             vec!["admin", "GRANT", USER],
             vec!["serve", "admin"],
+        ] {
+            assert_eq!(parse(args(&list)), Command::Invalid, "{list:?}");
+        }
+    }
+
+    /// 009 RF17: the help of the CLI, as `admin --help` and `admin <action> --help`.
+    #[test]
+    fn the_help_forms() {
+        for list in [
+            vec!["admin", "--help"],
+            vec!["admin", "grant", "--help"],
+            vec!["admin", "revoke", "--help"],
+            vec!["admin", "ban", "--help"],
+            vec!["admin", "unban", "--help"],
+        ] {
+            assert_eq!(parse(args(&list)), Command::AdminHelp, "{list:?}");
+        }
+        for list in [
+            vec!["--help"],
+            vec!["serve", "--help"],
+            vec!["admin", "--help", "extra"],
+            vec!["admin", "grant", "--help", "extra"],
+            vec!["admin", "promote", "--help"],
+            vec!["admin", "grant", USER, "--help"],
+            vec!["admin", "-h"],
         ] {
             assert_eq!(parse(args(&list)), Command::Invalid, "{list:?}");
         }

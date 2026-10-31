@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
-import { login as authLogin, test as authTest } from './auth/fixtures.js';
+import { login as authLogin, press, test as authTest } from './auth/fixtures.js';
+import { seedOauthAccount } from './support/db.mjs';
 import { waitForHydration } from './support/hydration.js';
 
 const ORIGIN = 'http://localhost:4173';
@@ -124,6 +125,17 @@ for (const theme of ['light', 'dark'] as const) {
     expect(await seriousViolations(page), 'onboarding').toEqual([]);
     await page.goto('/es/account');
     expect(await seriousViolations(page), 'account').toEqual([]);
+    // 009 step 13: the confirmation panel, in both places, and the way back from /login.
+    await seedOauthAccount(identity, 'google');
+    await page.goto('/es/account');
+    await waitForHydration(page);
+    await expect(page.getByTestId('reauth-panel-link')).toBeVisible();
+    expect(await seriousViolations(page), 'account with the link panel').toEqual([]);
+    await press(page.getByTestId('unlink-google'));
+    await expect(page.getByTestId('reauth-panel-google')).toBeVisible();
+    expect(await seriousViolations(page), 'account with the panel of a row').toEqual([]);
+    await page.goto('/es/login?error=auth.reauth_mismatch');
+    expect(await seriousViolations(page), 'login with the way back').toEqual([]);
     await page.goto('/es/dev/components?theme=' + theme);
     expect(await seriousViolations(page), 'catalog with the auth section').toEqual([]);
   });

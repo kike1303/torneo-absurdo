@@ -7,7 +7,8 @@ import {
   resolveCallbackError,
 } from './error-text.js';
 
-// 008 RF-D6, plan-d decision 6 and the condition of architect in plan-a (answer 5).
+// 008 RF-D6, plan-d decision 6 and the condition of architect in plan-a (answer 5). 009 RF24:
+// the closed list grows from six to eight.
 const CALLBACK = [
   'auth.invalid_state',
   'auth.banned',
@@ -15,6 +16,8 @@ const CALLBACK = [
   'auth.try_again',
   'auth.already_linked',
   'auth.provider_already_linked',
+  'auth.reauth_required',
+  'auth.reauth_mismatch',
 ] as const;
 
 describe('resolveCallbackError', () => {
@@ -49,6 +52,8 @@ describe('resolveApiError', () => {
   it('a known code gets its key', () => {
     expect(resolveApiError('auth.last_provider')).toBe(ERROR_TEXT['auth.last_provider']);
     expect(resolveApiError('profile.display_name_taken')).toBe('error_profile_display_name_taken');
+    expect(resolveApiError('auth.reauth_mismatch')).toBe('error_auth_reauth_mismatch');
+    expect(resolveApiError('auth.reauth_required')).toBe('error_auth_reauth_required');
   });
   it.each([undefined, null, '', '__proto__', 'toString', 'canary', 42])('%j → error_generic', (v) =>
     expect(resolveApiError(v)).toBe('error_generic'),
@@ -77,8 +82,8 @@ describe('every code has a text in en and es (condition of plan-a, answer 5)', (
   });
 
   it('every code of the protocol is in the table', () => {
-    // 4 + 11 + 10 + 3 (ApiErrorCode, WsErrorCode, AuthErrorCode, ProfileErrorCode).
-    expect(Object.keys(ERROR_TEXT)).toHaveLength(28);
+    // 4 + 11 + 11 + 3 (ApiErrorCode, WsErrorCode, AuthErrorCode, ProfileErrorCode).
+    expect(Object.keys(ERROR_TEXT)).toHaveLength(29);
     expect(Object.keys(CALLBACK_ERROR_TEXT)).toEqual([...CALLBACK]);
   });
 

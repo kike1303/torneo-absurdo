@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
-import { login as authLogin, test as authTest } from './auth/fixtures.js';
+import { login as authLogin, press, test as authTest } from './auth/fixtures.js';
+import { seedOauthAccount } from './support/db.mjs';
+import { waitForHydration } from './support/hydration.js';
 import { PUBLIC_ORIGIN } from './support/topology.js';
 
 // Test 8 and the 375 px RNF: artifacts for review (no pixel comparison), plus no horizontal scroll.
@@ -157,8 +159,34 @@ for (const lang of ['es', 'en'] as const) {
       await shoot('onboarding');
       await page.goto(`/${lang}/account`);
       await shoot('account');
+      // 009 step 13: the way back after a wrong identity, and both places of the panel.
+      await page.goto(`/${lang}/login?error=auth.reauth_mismatch`);
+      await shoot('login-reauth-mismatch');
+      await seedOauthAccount(identity, 'google');
+      await page.goto(`/${lang}/account`);
+      await waitForHydration(page);
+      await expectPanelButtons(page, 'reauth-panel-link');
+      await shoot('account-reauth-link');
+      await press(page.getByTestId('unlink-google'));
+      await expectPanelButtons(page, 'reauth-panel-google');
+      await shoot('account-reauth-row');
     });
   }
+}
+
+/** 009 RF22: full width and 44 px at 375 px, `sm:w-auto` on desktop, inside the provider card. */
+async function expectPanelButtons(page: Page, testid: string): Promise<void> {
+  const panel = page.getByTestId(testid);
+  const original = page.viewportSize();
+  for (const size of SIZES) {
+    await page.setViewportSize(size);
+    const area = await panel.boundingBox();
+    const button = await panel.getByTestId('reauth-provider-dev').boundingBox();
+    expect(button?.height ?? 0, `height at ${size.width}`).toBeGreaterThanOrEqual(44);
+    if (size.width === 375) expect(button?.width, 'full width at 375').toBe(area?.width);
+    else expect(button?.width ?? 0, 'auto width at 1280').toBeLessThan(area?.width ?? 0);
+  }
+  if (original) await page.setViewportSize(original);
 }
 
 /** No horizontal scroll, the content column within 28 rem and 44 px targets in <main>. */

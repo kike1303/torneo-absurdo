@@ -86,6 +86,34 @@ export async function login(
   await declareSessionToken(page.context());
 }
 
+/**
+ * Confirms the identity with `dev` from a panel of the account (009 RF22) and waits for the way
+ * back. It searches inside that panel only: the page may have another form with the same label.
+ * The rotated cookie is a new canary.
+ */
+export async function reauth(page: Page, identity: string, panel: string): Promise<void> {
+  const locale = new URL(page.url()).pathname.split('/')[1] as Locale;
+  const scope = page.getByTestId(panel);
+  await scope.getByLabel(text(locale, 'login_dev_identity_label')).fill(identity);
+  await press(scope.getByTestId('reauth-provider-dev'));
+  await page.waitForURL(
+    (url) => url.pathname === `/${locale}/account` && url.search === '?reauth=1',
+  );
+  await waitForHydration(page);
+  await declareSessionToken(page.context());
+}
+
+/** Everything a page could reflect: the HTML and every attribute of every element. */
+export async function reflected(page: Page): Promise<string> {
+  const html = await page.content();
+  const attributes = await page.evaluate(() =>
+    [...document.querySelectorAll('*')]
+      .flatMap((el) => [...el.attributes].map((a) => `${a.name}=${a.value}`))
+      .join('\n'),
+  );
+  return `${html}\n${attributes}`;
+}
+
 /** The value of the session cookie, so the teardown looks for it in every log. */
 export async function declareSessionToken(context: BrowserContext): Promise<string | undefined> {
   const cookie = (await context.cookies(PUBLIC_ORIGIN)).find((c) => c.name === 'ta_dev_session');

@@ -5,7 +5,9 @@
 //! ledger account, the `grant` of `DAILY_GRANT`, the `auth_events` and the session. If a
 //! concurrent first login of the same identity wins the OAuth account, this one rolls back and
 //! retries once as an existing login. A session the request brought is revoked in the same
-//! transaction (rotation, D3).
+//! transaction (rotation, D3). The new session knows the account it logged in with and the
+//! `max(id)` of the user's accounts, read in its `INSERT` without locking the user (009 RF6): a
+//! link that commits after that read leaves it without a current authentication, the safe side.
 
 use protocol::{Provider, Role};
 use sqlx::{PgConnection, PgPool, Row};
@@ -14,7 +16,9 @@ use uuid::Uuid;
 use super::AuthState;
 use crate::ledger;
 use crate::profile::name;
-use crate::sessions::{self, Issued, RevokeFilter, TokenHash, UaFamily};
+use crate::sessions::{
+    self, Authentication, Issued, OauthAccountId, RevokeFilter, TokenHash, UaFamily,
+};
 
 /// Tries of the generated alias before `auth.try_again` (ADR-0008 D1).
 pub const ALIAS_TRIES: usize = 10;
@@ -103,7 +107,7 @@ async fn attempt(
     previous: Option<TokenHash>,
 ) -> Result<Attempt, LoginError> {
     let existing = sqlx::query(
-        "SELECT u.id, u.role, u.banned_at IS NOT NULL FROM oauth_accounts o \
+        "SELECT u.id, u.role, u.banned_at IS NOT NULL, o.id FROM oauth_accounts o \
          JOIN users u ON u.id = o.user_id WHERE o.provider = $1 AND o.provider_user_id = $2",
     )
     .bind(identity.provider.as_str())
@@ -111,12 +115,16 @@ async fn attempt(
     .fetch_optional(&mut *tx)
     .await?;
 
-    let (user_id, user_role) = match existing {
+    let (user_id, user_role, account) = match existing {
         Some(row) => {
             if row.try_get::<bool, _>(2)? {
                 return Err(LoginError::Banned);
             }
-            (row.try_get::<Uuid, _>(0)?, role(row.try_get(1)?))
+            (
+                row.try_get::<Uuid, _>(0)?,
+                role(row.try_get(1)?),
+                OauthAccountId::new(row.try_get(3)?),
+            )
         }
         None => {
             let Some(user_id) = create_user(auth, tx).await? else {
@@ -125,29 +133,37 @@ async fn attempt(
             let linked = sqlx::query(
                 "INSERT INTO oauth_accounts (provider, provider_user_id, user_id) \
                  VALUES ($1, $2, $3) ON CONFLICT (provider, provider_user_id) DO NOTHING \
-                 RETURNING user_id",
+                 RETURNING id",
             )
             .bind(identity.provider.as_str())
             .bind(&identity.subject)
             .bind(user_id)
             .fetch_optional(&mut *tx)
             .await?;
-            if linked.is_none() {
+            let Some(linked) = linked else {
                 return Ok(Attempt::Lost);
-            }
+            };
             ledger::create_user_account(tx, user_id).await?;
             let entry = ledger::grant(tx, user_id, auth.daily_grant).await?;
             if let Some(entry) = entry {
                 event(tx, user_id, "grant", None, Some(entry), ip_hash).await?;
             }
-            (user_id, Role::User)
+            (user_id, Role::User, OauthAccountId::new(linked.try_get(0)?))
         }
     };
     event(tx, user_id, "login", Some(identity.provider), None, ip_hash).await?;
     if let Some(previous) = previous {
         sessions::revoke(tx, RevokeFilter::Token(previous)).await?;
     }
-    let issued = sessions::issue(tx, user_id, user_role, ip_hash, ua).await?;
+    let issued = sessions::issue(
+        tx,
+        user_id,
+        user_role,
+        Authentication::Fresh(account),
+        ip_hash,
+        ua,
+    )
+    .await?;
     Ok(Attempt::Done(issued))
 }
 

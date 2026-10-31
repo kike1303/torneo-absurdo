@@ -67,9 +67,11 @@ pub enum Handler {
     Ws,
     AuthStart,
     AuthLink,
+    AuthReauth,
     AuthUnlink,
     AuthCallback,
     AuthProviders,
+    AuthReauthStatus,
     Logout,
     LogoutAll,
     Me,
@@ -119,6 +121,12 @@ pub const ROUTES: &[RouteSpec] = &[
     },
     RouteSpec {
         method: RouteMethod::Post,
+        path: "/api/auth/reauth/{provider}",
+        effect: Effect::Mutate,
+        handler: Handler::AuthReauth,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
         path: "/api/auth/unlink/{provider}",
         effect: Effect::Mutate,
         handler: Handler::AuthUnlink,
@@ -134,6 +142,12 @@ pub const ROUTES: &[RouteSpec] = &[
         path: "/api/auth/providers",
         effect: Effect::Read,
         handler: Handler::AuthProviders,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/auth/reauth-status",
+        effect: Effect::Read,
+        handler: Handler::AuthReauthStatus,
     },
     RouteSpec {
         method: RouteMethod::Post,
@@ -220,9 +234,9 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
     use crate::auth;
     let filter = spec.method.filter();
     let body = DefaultBodyLimit::max(MAX_FORM_BYTES);
-    // `start`, `link` (phase C) and `callback` share the AUTH_IP bucket (D7). They are browser
-    // navigations, so over the quota they redirect instead of answering JSON (008 "Enmienda
-    // 2026-10-30" of RF-B5).
+    // `start`, `link` (phase C), `reauth` (009) and `callback` share the AUTH_IP bucket (D7).
+    // They are browser navigations, so over the quota they redirect instead of answering JSON
+    // (008 "Enmienda 2026-10-30" of RF-B5).
     let auth_ip = |on_limit| {
         let navigation = rate::http::Navigation {
             limiter: state.rate.auth_ip.clone(),
@@ -240,11 +254,15 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         Handler::AuthLink => on(filter, auth::link::handler)
             .layer(body)
             .layer(auth_ip(keep)),
+        Handler::AuthReauth => on(filter, auth::reauth::handler)
+            .layer(body)
+            .layer(auth_ip(keep)),
         // No body extractor (like logout): nothing for the limit to reject (RF-C3).
         Handler::AuthUnlink => on(filter, auth::unlink::handler),
         Handler::AuthCallback => on(filter, auth::callback::handler)
             .layer(auth_ip(rate::http::OnLimit::ExpireFlow(state.auth.cookies))),
         Handler::AuthProviders => on(filter, auth::providers),
+        Handler::AuthReauthStatus => on(filter, auth::reauth_status::handler),
         Handler::Logout => on(filter, auth::logout::logout).layer(body),
         Handler::LogoutAll => on(filter, auth::logout::logout_all).layer(body),
         Handler::Me => on(filter, crate::profile::me::handler),

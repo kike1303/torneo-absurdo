@@ -4,21 +4,24 @@
 //! It reads only `DATABASE_URL` and `RUST_LOG` (an error in the config of `serve` never stops a
 //! ban), opens one connection (no pool, no retries, 10 s to connect) and runs **one**
 //! transaction: `SET LOCAL torneo.actor = 'cli'` (the actor `users_privileged_guard` accepts),
-//! lock the user, change `role` or `banned_at`, revoke every session (its `NOTIFY` closes the
-//! sockets of the serving process) and insert one row of `admin_audit`. It never runs the
-//! migrations.
+//! lock the user, change `role` (with `admin_account_cutoff`, 009 RF17) or `banned_at`, revoke
+//! every session (its `NOTIFY` closes the sockets of the serving process) and insert one row of
+//! `admin_audit`. It never runs the migrations.
 //!
 //! A new source of logs (ADR-0012 A8): its events carry only `event` and, on a failure,
 //! `error_kind`. Neither the `user_id` nor the reason ever reach `tracing`, and their `Debug` is
-//! redacted. **The only SQL of the server that writes `role` or `banned_at` is in this file**,
-//! checked by the source test at the end.
+//! redacted. **The only SQL of the server that writes `role`, `banned_at` or
+//! `admin_account_cutoff` is in this file**, checked by the source test at the end. After a
+//! `grant`, one line of fixed text on stdout names the providers within the cutoff (RF17): not a
+//! log, and never an id.
 
 use std::ffi::OsString;
 use std::fmt;
+use std::io::Write as _;
 use std::time::Duration;
 
 use sqlx::postgres::PgConnectOptions;
-use sqlx::{Connection, PgConnection};
+use sqlx::{Connection, PgConnection, Row};
 use uuid::Uuid;
 
 use crate::config::{self, ConfigError};
@@ -28,6 +31,49 @@ use crate::sessions::{self, RevokeFilter};
 pub const MAX_REASON_CHARS: usize = 500;
 /// Bound of the connection to the database.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// `server admin --help` and `server admin <action> --help` (009 RF17, plan decision 7). Text of
+/// an operator tool, not of the UI: in English like the code, and `docs/architecture.md` says the
+/// same in Spanish.
+pub const HELP: &str = "\
+server admin: the admin CLI. It reads only DATABASE_URL and RUST_LOG.
+
+  server admin grant <user_id>                make the user an admin
+  server admin revoke <user_id>               take admin away from the user
+  server admin ban <user_id> --reason <text>  ban the user
+  server admin unban <user_id>                lift the ban
+
+Every command revokes all the sessions of the user.
+
+When to run `grant` again:
+  - after migrating to 009: no admin has a cutoff yet, so no session passes as admin;
+  - after linking a new provider as an admin: it gives no admin until another `grant`.
+
+Before running `grant`, review the linked providers in /account: everything linked until that
+moment starts giving admin. `grant` prints the providers within the cutoff. If it shows one you
+do not recognize, run `revoke`, remove it from /account and run `grant` again.
+";
+
+/// Whether the arguments after `admin` ask for [`HELP`]: `--help` or `<action> --help`.
+pub fn is_help(args: &[OsString]) -> bool {
+    match args {
+        [flag] => flag == "--help",
+        [action, flag] => {
+            flag == "--help" && action.to_str().and_then(AdminAction::parse).is_some()
+        }
+        _ => false,
+    }
+}
+
+/// The line of a `grant`, with the providers in link order.
+fn providers_line(providers: &[String]) -> String {
+    let names = if providers.is_empty() {
+        "none".to_owned()
+    } else {
+        providers.join(", ")
+    };
+    format!("providers within the admin cutoff: {names}")
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdminAction {
@@ -209,8 +255,14 @@ async fn execute(options: &PgConnectOptions, command: &AdminCommand) -> Result<(
         return Err(AdminError::UserNotFound);
     }
     let change = match command.action {
-        AdminAction::Grant => "UPDATE users SET role = 'admin' WHERE id = $1",
-        AdminAction::Revoke => "UPDATE users SET role = 'user' WHERE id = $1",
+        // 009 RF17: every account linked until now gives admin, and none linked later.
+        AdminAction::Grant => {
+            "UPDATE users SET role = 'admin', admin_account_cutoff = \
+             (SELECT max(id) FROM oauth_accounts WHERE user_id = $1) WHERE id = $1"
+        }
+        AdminAction::Revoke => {
+            "UPDATE users SET role = 'user', admin_account_cutoff = NULL WHERE id = $1"
+        }
         // A second ban keeps the date of the first.
         AdminAction::Ban => "UPDATE users SET banned_at = COALESCE(banned_at, now()) WHERE id = $1",
         AdminAction::Unban => "UPDATE users SET banned_at = NULL WHERE id = $1",
@@ -219,6 +271,22 @@ async fn execute(options: &PgConnectOptions, command: &AdminCommand) -> Result<(
         .bind(command.user)
         .execute(&mut *tx)
         .await?;
+    let within = if command.action == AdminAction::Grant {
+        let rows = sqlx::query(
+            "SELECT provider FROM oauth_accounts WHERE user_id = $1 \
+             AND id <= (SELECT admin_account_cutoff FROM users WHERE id = $1) ORDER BY id",
+        )
+        .bind(command.user)
+        .fetch_all(&mut *tx)
+        .await?;
+        let providers: Vec<String> = rows
+            .iter()
+            .map(|row| row.try_get(0))
+            .collect::<Result<_, _>>()?;
+        Some(providers)
+    } else {
+        None
+    };
     sessions::revoke(&mut tx, RevokeFilter::AllOfUser(command.user)).await?;
     let payload = match &command.reason {
         Some(reason) => serde_json::json!({ "reason": reason.as_str() }),
@@ -235,11 +303,34 @@ async fn execute(options: &PgConnectOptions, command: &AdminCommand) -> Result<(
     .await?;
     tx.commit().await?;
     let _ = connection.close().await;
+    // Not `tracing`: RF17 says stdout, never a log. Before the event of `run`. The commit is done,
+    // so a failed write changes nothing.
+    if let Some(providers) = within {
+        let _ = writeln!(std::io::stdout().lock(), "{}", providers_line(&providers));
+    }
     Ok(())
 }
 
-/// RF-C6 (T9): the only SQL that writes `role` or `banned_at` lives in this file (plan-c
-/// decision 10). The second barrier is `users_privileged_guard` in the database.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_line_of_providers_has_only_their_names() {
+        assert_eq!(
+            providers_line(&["google".to_owned(), "dev".to_owned()]),
+            "providers within the admin cutoff: google, dev"
+        );
+        assert_eq!(
+            providers_line(&[]),
+            "providers within the admin cutoff: none"
+        );
+    }
+}
+
+/// RF-C6 (T9): the only SQL that writes `role`, `banned_at` or `admin_account_cutoff` lives in
+/// this file (plan-c decision 10, 009 RF3). The second barrier is `users_privileged_guard` in the
+/// database. 009 RF1: nothing rewrites the link order of `oauth_accounts`.
 #[cfg(test)]
 mod source_rules {
     use std::path::{Path, PathBuf};
@@ -291,20 +382,25 @@ mod source_rules {
         out
     }
 
-    /// `[<schema>.]users`.
-    fn is_users(token: &str) -> bool {
-        token == "users"
-            || token.rsplit_once('.').is_some_and(|(schema, table)| {
-                table == "users"
+    /// `[<schema>.]<table>`.
+    fn is_table(token: &str, table: &str) -> bool {
+        token == table
+            || token.rsplit_once('.').is_some_and(|(schema, name)| {
+                name == table
                     && !schema.is_empty()
                     && schema.chars().all(|c| c.is_alphanumeric() || c == '_')
             })
     }
 
-    fn is_privileged(token: &str) -> bool {
-        ["role", "banned_at"]
+    /// `[<alias>.]<column>`, for one of `columns`.
+    fn is_column(token: &str, columns: &[&str]) -> bool {
+        columns
             .iter()
             .any(|column| token == *column || token.ends_with(&format!(".{column}")))
+    }
+
+    fn is_privileged(token: &str) -> bool {
+        is_column(token, &["role", "banned_at", "admin_account_cutoff"])
     }
 
     fn get(tokens: &[String], i: usize) -> &str {
@@ -350,10 +446,10 @@ mod source_rules {
         out
     }
 
-    /// The tokens each statement that writes `users` can write: the `set` of an `update`, the
-    /// column list of an `insert` (all of it without a list), the rest of a `merge`, and the
-    /// `set` of every `on conflict … do update`.
-    pub(super) fn writes(tokens: &[String]) -> Vec<Vec<String>> {
+    /// The tokens each statement that writes `table` can write: the `set` of an `update`, the
+    /// column list of an `insert` (all of it without a list, and only with `inserts`), the rest
+    /// of a `merge`, and the `set` of every `on conflict … do update`.
+    pub(super) fn writes(tokens: &[String], table: &str, inserts: bool) -> Vec<Vec<String>> {
         let mut found = Vec::new();
         for i in 0..tokens.len() {
             match get(tokens, i) {
@@ -362,7 +458,7 @@ mod source_rules {
                     if get(tokens, j) == "only" {
                         j += 1;
                     }
-                    if !is_users(get(tokens, j)) {
+                    if !is_table(get(tokens, j), table) {
                         continue;
                     }
                     j += 1;
@@ -375,7 +471,11 @@ mod source_rules {
                         found.push(span(tokens, j + 1, &["where", "from", "returning"]));
                     }
                 }
-                "insert" if get(tokens, i + 1) == "into" && is_users(get(tokens, i + 2)) => {
+                "insert"
+                    if inserts
+                        && get(tokens, i + 1) == "into"
+                        && is_table(get(tokens, i + 2), table) =>
+                {
                     let mut j = i + 3;
                     if get(tokens, j) == "as" {
                         j += 2;
@@ -391,7 +491,7 @@ mod source_rules {
                         found.push(vec!["role".to_owned()]);
                     }
                 }
-                "merge" if get(tokens, i + 1) == "into" && is_users(get(tokens, i + 2)) => {
+                "merge" if get(tokens, i + 1) == "into" && is_table(get(tokens, i + 2), table) => {
                     found.push(span(tokens, i + 3, &[]));
                 }
                 "do" if get(tokens, i + 1) == "update" && get(tokens, i + 2) == "set" => {
@@ -404,9 +504,51 @@ mod source_rules {
     }
 
     pub(super) fn writes_privileged(source: &str) -> bool {
-        writes(&tokens(source))
+        writes(&tokens(source), "users", true)
             .iter()
             .any(|span| span.iter().any(|t| is_privileged(t)))
+    }
+
+    /// What 009 RF1 forbids over the link order of `oauth_accounts`, if `source` has any of it:
+    /// writing `id` or `user_id` (an `insert` may name `user_id`: a new account is no rewrite),
+    /// `overriding system value`, `setval`, `alter sequence`, or altering the column `id`.
+    pub(super) fn rewrites_the_link_order(source: &str) -> Option<&'static str> {
+        let tokens = tokens(source);
+        let identity = ["id", "user_id"];
+        if writes(&tokens, "oauth_accounts", false)
+            .iter()
+            .any(|span| span.iter().any(|t| is_column(t, &identity)))
+        {
+            return Some("a write of id or user_id");
+        }
+        for i in 0..tokens.len() {
+            let token = get(&tokens, i);
+            if token == "overriding" && get(&tokens, i + 1) == "system" {
+                return Some("overriding system");
+            }
+            if is_column(token, &["setval"]) {
+                return Some("setval");
+            }
+            if token == "alter" && get(&tokens, i + 1) == "sequence" {
+                return Some("alter sequence");
+            }
+            if token == "alter" && get(&tokens, i + 1) == "table" {
+                let mut j = i + 2;
+                if get(&tokens, j) == "only" {
+                    j += 1;
+                }
+                if is_table(get(&tokens, j), "oauth_accounts") && get(&tokens, j + 1) == "alter" {
+                    let mut k = j + 2;
+                    if get(&tokens, k) == "column" {
+                        k += 1;
+                    }
+                    if get(&tokens, k) == "id" {
+                        return Some("alter column id");
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn sources() -> Vec<(PathBuf, String)> {
@@ -451,14 +593,119 @@ mod source_rules {
         // Never vacuous: this file (its code, not these tests) still has both writes.
         let text = std::fs::read_to_string(&here).unwrap();
         let code = text.split("#[cfg(test)]").next().unwrap();
-        let spans = writes(&tokens(code));
-        for column in ["role", "banned_at"] {
+        let spans = writes(&tokens(code), "users", true);
+        for column in ["role", "banned_at", "admin_account_cutoff"] {
             assert!(
                 spans.iter().any(|s| s.iter().any(|t| t == column)),
                 "admin.rs no longer writes {column}"
             );
         }
         assert!(code.to_lowercase().contains(&actor));
+    }
+
+    /// The migration of 009 is the only one allowed to number `oauth_accounts` (RF1).
+    const LAST_ALLOWED_MIGRATION: i64 = 20261030000000;
+
+    /// 009 RF1, with `oauth_accounts_identity_guard` as the second barrier: outside the migration
+    /// of 009, nothing in `src/` or a later migration rewrites the link order.
+    #[test]
+    fn only_migrations_up_to_009_renumber_oauth_accounts() {
+        let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/admin.rs");
+        for (path, text) in sources() {
+            // This file: its code, not the examples of these tests.
+            let text = if path == here {
+                text.split("#[cfg(test)]")
+                    .next()
+                    .unwrap_or_default()
+                    .to_owned()
+            } else {
+                text
+            };
+            assert_eq!(rewrites_the_link_order(&text), None, "{}", path.display());
+        }
+        let migrations = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        let mut own = None;
+        for entry in std::fs::read_dir(migrations).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_str().unwrap().to_owned();
+            let version: i64 = name.split('_').next().unwrap().parse().unwrap();
+            let text = std::fs::read_to_string(&path).unwrap();
+            if version == LAST_ALLOWED_MIGRATION {
+                own = Some(text);
+            } else if version > LAST_ALLOWED_MIGRATION {
+                assert_eq!(rewrites_the_link_order(&text), None, "{name}");
+            }
+        }
+        // Never vacuous: the migration of 009 exists, still has its `setval`, and this rule sees it.
+        let own = own.expect("the migration of 009 is gone");
+        assert!(tokens(&own).iter().any(|t| t == "setval"));
+        assert!(rewrites_the_link_order(&own).is_some());
+    }
+
+    #[test]
+    fn the_rule_of_the_link_order_sees_every_form() {
+        for (sql, what) in [
+            (
+                r#"sqlx::query("UPDATE oauth_accounts SET user_id = $1")"#,
+                "a write of id or user_id",
+            ),
+            (
+                r#"sqlx::query("update public.oauth_accounts a set a.id = default")"#,
+                "a write of id or user_id",
+            ),
+            (
+                r#"sqlx::query("UPDATE \"oauth_accounts\" SET \"user_id\" = $1")"#,
+                "a write of id or user_id",
+            ),
+            (
+                r#"sqlx::query("UPDATE ONLY oauth_accounts SET id = DEFAULT")"#,
+                "a write of id or user_id",
+            ),
+            (
+                r#"sqlx::query("INSERT INTO oauth_accounts (provider) VALUES ($1) ON CONFLICT (provider) DO UPDATE SET user_id = $2")"#,
+                "a write of id or user_id",
+            ),
+            (
+                r#"sqlx::query("INSERT INTO oauth_accounts (id, provider) OVERRIDING SYSTEM VALUE VALUES ($1, $2)")"#,
+                "overriding system",
+            ),
+            (r#"sqlx::query("SELECT setval('x', 1)")"#, "setval"),
+            (
+                r#"sqlx::query("SELECT pg_catalog.setval($1, 1)")"#,
+                "setval",
+            ),
+            (
+                "ALTER SEQUENCE oauth_accounts_id_seq RESTART WITH 1",
+                "alter sequence",
+            ),
+            (
+                "ALTER TABLE oauth_accounts ALTER COLUMN id RESTART WITH 1",
+                "alter column id",
+            ),
+            (
+                "alter table only public.oauth_accounts alter id drop identity",
+                "alter column id",
+            ),
+            (
+                "ALTER TABLE oauth_accounts ALTER id SET GENERATED BY DEFAULT",
+                "alter column id",
+            ),
+        ] {
+            assert_eq!(rewrites_the_link_order(sql), Some(what), "{sql}");
+        }
+        for sql in [
+            r#"sqlx::query("INSERT INTO oauth_accounts (provider, provider_user_id, user_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING RETURNING id")"#,
+            r#"sqlx::query("UPDATE oauth_accounts SET created_at = now() WHERE user_id = $1")"#,
+            r#"sqlx::query("SELECT id, user_id FROM oauth_accounts WHERE provider = $1")"#,
+            r#"sqlx::query("DELETE FROM oauth_accounts WHERE id = $1 RETURNING id")"#,
+            r#"sqlx::query("UPDATE sessions SET auth_account_id = NULL WHERE id = $1")"#,
+            r#"sqlx::query("UPDATE users SET locale = $1 WHERE id = $2")"#,
+            "ALTER TABLE sessions ALTER COLUMN id SET NOT NULL",
+            "ALTER TABLE oauth_accounts ADD COLUMN x bigint",
+            ".layer(SetResponseHeaderLayer::overriding(",
+        ] {
+            assert_eq!(rewrites_the_link_order(sql), None, "{sql}");
+        }
     }
 
     /// Files of `src/` allowed to build SQL from text. None: every value goes by `bind`.
@@ -549,6 +796,9 @@ mod source_rules {
             r#"sqlx::query("UPDATE users SET role = 'admin' WHERE id = $1")"#,
             r#"sqlx::query("update users u set u.role = 'admin'")"#,
             r#"sqlx::query("UPDATE users AS u SET u.banned_at = now()")"#,
+            r#"sqlx::query("UPDATE users SET admin_account_cutoff = $1 WHERE id = $2")"#,
+            r#"sqlx::query("update users u set u.admin_account_cutoff = null")"#,
+            r#"sqlx::query("INSERT INTO users (display_name, admin_account_cutoff) VALUES ($1, 1)")"#,
             r#"sqlx::query("UPDATE public.users SET role = $1")"#,
             r#"sqlx::query("update public.users u set u.role = $1 where u.id = $2")"#,
             r#"sqlx::query("UPDATE \"users\" SET \"role\" = $1")"#,

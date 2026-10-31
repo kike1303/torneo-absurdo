@@ -2,7 +2,9 @@
 //! Google, a failed one, linking the fake Discord, a rename that collides and one that wins, the
 //! preferences, a broken JSON body, an unlink and a logout, in the three log levels of phase A.
 //! No credential, token, identity, profile field or identifier of the run reaches the log, and
-//! every own line has only allowed fields.
+//! every own line has only allowed fields. 009 (plan decision 11): also a link refused without a
+//! confirmation, `reauth-status`, a refused unlink, and a reauth that succeeds, one that comes
+//! back with another user's identity and one whose transaction fails (`auth.reauth_failed`).
 //!
 //! The fakes are only injectable by `Settings`, so this runs in process with the server's real
 //! log layer (`support::logs`), in its own binary with a single test (plan-c deviation 7).
@@ -80,6 +82,10 @@ async fn flow(canaries: Canaries) {
     let linked = oauth::link(&app, Kind::Discord, &discord, &token).await;
     let token = oauth::session_of(&linked);
     add(token.clone());
+    // The rotated session has no confirmation (009 RF10): a reauthentication with Google before
+    // the unlink at the end.
+    let token = oauth::session_of(&oauth::reauth(&app, Kind::Google, &sub, &token).await);
+    add(token.clone());
 
     // Another user holds a name; the rename to it collides, then one wins.
     let taken = server::profile::name::validate("Canario Ocupado").unwrap();
@@ -136,6 +142,82 @@ async fn flow(canaries: Canaries) {
     )
     .await;
     assert_eq!(refused.status, 422);
+
+    // 009: the session 11 minutes old. A link is refused before any flow, and so is an unlink.
+    oauth::age(&pool, &token, 11).await;
+    let refused = oauth::start_link(&app, Kind::Discord, &token).await;
+    assert_eq!(
+        refused.header("location"),
+        Some("/login?error=auth.reauth_required")
+    );
+    let status = oauth::reauth_status(&app, &token).await;
+    assert_eq!(status.status, 200);
+    let refused = oauth::send(&app, "POST", "/api/auth/unlink/discord", &token, "").await;
+    assert_eq!(refused.status, 403);
+
+    // A reauth that comes back with another user's identity: nothing changes.
+    let other_sub = format!("g-other-c4n4ry-{}", uuid::Uuid::new_v4().simple());
+    add(other_sub.clone());
+    let other = oauth::session_of(&oauth::login(&app, Kind::Google, &other_sub).await);
+    add(other.clone());
+    let row = sqlx::query("SELECT user_id, id FROM sessions WHERE token_hash = $1")
+        .bind(TokenHash::of(&other).0.as_slice())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let other_user: uuid::Uuid = row.get(0);
+    let other_session: uuid::Uuid = row.get(1);
+    add(other_user.to_string());
+    add(other_user.simple().to_string());
+    add(other_session.to_string());
+    let mismatch = oauth::reauth(&app, Kind::Google, &other_sub, &token).await;
+    assert_eq!(oauth::error_of(&mismatch), "auth.reauth_mismatch");
+
+    // A reauth whose transaction fails: `auth.reauth_failed`, and the session stays.
+    sqlx::query(
+        "CREATE FUNCTION test_reauth_fails() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN \
+         IF NEW.kind = 'reauth' THEN \
+         RAISE EXCEPTION USING ERRCODE = 'XX000', MESSAGE = 'test failure'; \
+         END IF; RETURN NEW; END; $$",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "CREATE TRIGGER test_reauth_fails BEFORE INSERT ON auth_events \
+         FOR EACH ROW EXECUTE FUNCTION test_reauth_fails()",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let failed = oauth::reauth(&app, Kind::Google, &sub, &token).await;
+    assert_eq!(oauth::error_of(&failed), "auth.try_again");
+    sqlx::query("DROP TRIGGER test_reauth_fails ON auth_events")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // The reauth that succeeds, with its flow cookie, `state`, `code` and `code_verifier`.
+    let started = oauth::start_reauth(&app, Kind::Google, &token).await;
+    add(started.cookie(oauth::flow_name()).unwrap().to_owned());
+    let query = oauth::query_of(started.header("location").unwrap());
+    add(query["state"].clone());
+    let code = app.google.code_for(&query["code_challenge"], &sub);
+    add(code.clone());
+    let flow_cookie = started.cookie(oauth::flow_name()).unwrap().to_owned();
+    let done = oauth::callback(
+        &app,
+        &format!(
+            "/api/auth/google/callback?code={code}&state={}",
+            query["state"]
+        ),
+        &flow_cookie,
+        Some(&token),
+    )
+    .await;
+    let token = oauth::session_of(&done);
+    add(app.google.last_token_request().unwrap().0);
+    add(token.clone());
 
     // The identifiers of the run, read before the logout deletes the session.
     let row =
@@ -202,7 +284,7 @@ fn no_secret_identity_or_profile_field_reaches_the_log() {
         assert!(!text.contains("c4n4ry"), "{level}");
         let lines = logs.lines();
         // Positive controls: the run was logged, its events among them.
-        for event in ["http.request", "auth.provider_failed"] {
+        for event in ["http.request", "auth.provider_failed", "auth.reauth_failed"] {
             assert!(
                 lines.iter().any(|l| l["event"] == event),
                 "{level}: no {event}"

@@ -1,7 +1,9 @@
 //! 008 RF-C2 (T4, T6, T10): linking a second provider. One transaction locks the user, rotates
 //! the session (and refuses if it was closed meanwhile), inserts the identity without a
 //! violation, writes `auth_events` and issues the new session. No error touches the session in
-//! use, and nothing ever merges two users.
+//! use, and nothing ever merges two users. 009 RF8 to RF10: a link needs a confirmation to start
+//! and a current authentication of the last 20 minutes in its transaction, and the rotated
+//! session keeps the authentication and the expiry of the old one.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod support;
@@ -152,8 +154,11 @@ async fn an_identity_of_another_user_is_already_linked() {
 async fn a_second_account_of_the_same_provider_is_provider_already_linked() {
     let db = TestDb::create().await;
     let (app, pool) = oauth::start_app(&db).await;
-    let first = oauth::session_of(&oauth::login(&app, Kind::Google, &sub()).await);
-    let token = oauth::session_of(&oauth::link(&app, Kind::Discord, &snowflake(), &first).await);
+    let google_sub = sub();
+    let first = oauth::session_of(&oauth::login(&app, Kind::Google, &google_sub).await);
+    oauth::session_of(&oauth::link(&app, Kind::Discord, &snowflake(), &first).await);
+    // The rotated session has no confirmation (009 RF10): a new login gives one.
+    let token = oauth::session_of(&oauth::login(&app, Kind::Google, &google_sub).await);
     let user = user_of(&pool, &token).await;
     let done = oauth::link(&app, Kind::Discord, &snowflake(), &token).await;
     assert_eq!(oauth::error_of(&done), "auth.provider_already_linked");
@@ -442,8 +447,9 @@ async fn two_link_callbacks_of_one_session_link_once() {
     let db = TestDb::create().await;
     let gate = Gate::new();
     let (app, pool) = gated_app(&db, &gate).await;
-    // A user without providers, so neither link can collide with an existing account.
-    let (user, token) = support::app::user_with_session(&pool).await;
+    // A user with only a `dev` account and a fresh session with it (009 RF8 needs a
+    // confirmation), so neither link can collide with an existing account.
+    let (user, token) = support::app::user_with_dev_account(&pool).await;
     let google = oauth::start_link(&app, Kind::Google, &token).await;
     let discord = oauth::start_link(&app, Kind::Discord, &token).await;
     let (google_path, google_flow) = callback_of(&app, Kind::Google, &google, &sub());
@@ -469,7 +475,7 @@ async fn two_link_callbacks_of_one_session_link_once() {
         .map(|r| r.get(0))
         .collect();
     assert_eq!(sessions, [TokenHash::of(&new).0.to_vec()]);
-    assert_eq!(providers_of(&pool, user).await.len(), 1);
+    assert_eq!(providers_of(&pool, user).await.len(), 2);
     assert_eq!(
         count(
             &pool,
@@ -478,4 +484,185 @@ async fn two_link_callbacks_of_one_session_link_once() {
         .await,
         1
     );
+}
+
+// --- 009 RF8 to RF10 ---------------------------------------------------------------------
+
+/// The `Max-Age` of the session cookie a response set.
+fn max_age_of(response: &http::Response) -> u64 {
+    let prefix = format!("{}=", oauth::session_name());
+    let line = response
+        .set_cookies()
+        .into_iter()
+        .find(|l| l.starts_with(&prefix) && !l.starts_with(&format!("{prefix};")))
+        .unwrap_or_else(|| panic!("no session cookie: {:?}", response.set_cookies()));
+    line.split(';')
+        .find_map(|part| part.trim().strip_prefix("Max-Age="))
+        .unwrap()
+        .parse()
+        .unwrap()
+}
+
+/// `(authenticated_at, expires_at, auth_account_id, auth_link_seq)` of a session, as text.
+async fn authentication_of(pool: &PgPool, token: &str) -> (String, String, String, String) {
+    let row = sqlx::query(
+        "SELECT authenticated_at::text, expires_at::text, auth_account_id::text, \
+         auth_link_seq::text FROM sessions WHERE token_hash = $1",
+    )
+    .bind(TokenHash::of(token).0.as_slice())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    (row.get(0), row.get(1), row.get(2), row.get(3))
+}
+
+fn assert_reauth_required_without_cookies(response: &http::Response) {
+    assert_eq!(response.status, 303, "{}", response.text());
+    assert_eq!(
+        response.header("location"),
+        Some("/login?error=auth.reauth_required")
+    );
+    assert_eq!(response.header("cache-control"), Some("private, no-store"));
+    assert!(
+        response.set_cookies().is_empty(),
+        "{:?}",
+        response.set_cookies()
+    );
+    assert!(response.body.is_empty());
+}
+
+/// RF8: without a confirmation, `link` never starts a flow and touches no cookie.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn link_needs_a_confirmation_to_start() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let token = oauth::session_of(&oauth::login(&app, Kind::Google, &sub()).await);
+    oauth::age(&pool, &token, 11).await;
+    let refused = oauth::start_link(&app, Kind::Discord, &token).await;
+    assert_reauth_required_without_cookies(&refused);
+    assert!(alive(&app, &token).await);
+    // A session without any authentication (a test helper's, or one of before 009).
+    let user = user_of(&pool, &token).await;
+    let none = support::app::session_for(&pool, user).await;
+    let refused = oauth::start_link(&app, Kind::Discord, &none).await;
+    assert_reauth_required_without_cookies(&refused);
+    assert_eq!(count(&pool, "SELECT count(*) FROM oauth_flows").await, 0);
+    // Within the 10 minutes, it starts.
+    let token = oauth::session_of(&oauth::login(&app, Kind::Google, &sub()).await);
+    oauth::age(&pool, &token, 9).await;
+    let started = oauth::start_link(&app, Kind::Discord, &token).await;
+    assert_eq!(started.status, 303, "{}", started.text());
+    assert!(
+        started
+            .cookie(oauth::flow_name())
+            .is_some_and(|v| !v.is_empty())
+    );
+}
+
+/// RF9: the transaction of the callback needs a current authentication of the last 20 minutes;
+/// without it nothing is linked and the session in use stays.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_callback_needs_a_current_authentication_of_the_last_twenty_minutes() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let links = "SELECT count(*) FROM auth_events WHERE kind = 'link'";
+
+    // Started with a confirmation, back after 21 minutes.
+    let token = oauth::session_of(&oauth::login(&app, Kind::Google, &sub()).await);
+    let user = user_of(&pool, &token).await;
+    let started = oauth::start_link(&app, Kind::Discord, &token).await;
+    oauth::age(&pool, &token, 21).await;
+    let done = oauth::finish(&app, Kind::Discord, &started, &snowflake(), Some(&token)).await;
+    assert_eq!(oauth::error_of(&done), "auth.reauth_required");
+    assert_eq!(done.cookie(oauth::flow_name()), Some(""));
+    assert_eq!(providers_of(&pool, user).await, ["google"]);
+    assert_eq!(count(&pool, links).await, 0);
+    assert!(alive(&app, &token).await);
+
+    // An account linked between the start and the callback: no longer current.
+    let token = oauth::session_of(&oauth::login(&app, Kind::Google, &sub()).await);
+    let user = user_of(&pool, &token).await;
+    let started = oauth::start_link(&app, Kind::Discord, &token).await;
+    sqlx::query(
+        "INSERT INTO oauth_accounts (provider, provider_user_id, user_id) VALUES ('dev', $1, $2)",
+    )
+    .bind(format!("dev-{}", Uuid::new_v4().simple()))
+    .bind(user)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let done = oauth::finish(&app, Kind::Discord, &started, &snowflake(), Some(&token)).await;
+    assert_eq!(oauth::error_of(&done), "auth.reauth_required");
+    assert_eq!(providers_of(&pool, user).await, ["dev", "google"]);
+    assert_eq!(count(&pool, links).await, 0);
+    assert!(alive(&app, &token).await);
+
+    // Back after 19 minutes: it links.
+    let token = oauth::session_of(&oauth::login(&app, Kind::Google, &sub()).await);
+    let user = user_of(&pool, &token).await;
+    let started = oauth::start_link(&app, Kind::Discord, &token).await;
+    oauth::age(&pool, &token, 19).await;
+    let done = oauth::finish(&app, Kind::Discord, &started, &snowflake(), Some(&token)).await;
+    oauth::session_of(&done);
+    assert_eq!(providers_of(&pool, user).await, ["discord", "google"]);
+    assert_eq!(count(&pool, links).await, 1);
+}
+
+/// RF10: the rotated session keeps the authentication and the expiry of the old one, its cookie
+/// lasts what is left, and it has no confirmation (the new account is above its sequence).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_rotated_session_keeps_the_authentication_and_the_expiry() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let old = oauth::session_of(&oauth::login(&app, Kind::Google, &sub()).await);
+    sqlx::query(
+        "UPDATE sessions SET expires_at = now() + interval '1 hour', \
+         authenticated_at = now() - interval '3 minutes' WHERE token_hash = $1",
+    )
+    .bind(TokenHash::of(&old).0.as_slice())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let before = authentication_of(&pool, &old).await;
+    let done = oauth::link(&app, Kind::Discord, &snowflake(), &old).await;
+    let new = oauth::session_of(&done);
+    assert_eq!(authentication_of(&pool, &new).await, before);
+    let max_age = max_age_of(&done);
+    assert!((3590..=3600).contains(&max_age), "{max_age}");
+    // At once without a confirmation: a second link is refused before any flow.
+    let again = oauth::start_link(&app, Kind::Google, &new).await;
+    assert_reauth_required_without_cookies(&again);
+    assert!(alive(&app, &new).await);
+}
+
+/// RF10: an admin's rotated session never outlives the 12 hours of its login.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_admin_link_never_extends_the_twelve_hours() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let identity = sub();
+    let first = oauth::session_of(&oauth::login(&app, Kind::Google, &identity).await);
+    let user = user_of(&pool, &first).await;
+    let command = server::admin::AdminCommand {
+        action: server::admin::AdminAction::Grant,
+        user,
+        reason: None,
+    };
+    server::admin::run(&db.options(), &command).await.unwrap();
+    let admin = oauth::session_of(&oauth::login(&app, Kind::Google, &identity).await);
+    // Three hours into the 12 of the login.
+    sqlx::query(
+        "UPDATE sessions SET expires_at = expires_at - interval '3 hours' WHERE token_hash = $1",
+    )
+    .bind(TokenHash::of(&admin).0.as_slice())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let before = authentication_of(&pool, &admin).await;
+    let done = oauth::link(&app, Kind::Discord, &snowflake(), &admin).await;
+    let new = oauth::session_of(&done);
+    assert_eq!(authentication_of(&pool, &new).await, before);
+    let max_age = max_age_of(&done);
+    assert!(max_age <= 9 * 3600, "{max_age}");
+    assert!(max_age >= 9 * 3600 - 10, "{max_age}");
 }

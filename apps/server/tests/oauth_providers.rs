@@ -50,7 +50,8 @@ async fn the_redirect_to_a_real_provider_is_a_303_to_its_authorize_constant() {
         &server::app::Settings::default(),
     )
     .await;
-    let (_, token) = support::app::user_with_session(&pool).await;
+    // A fresh session: `link` needs a confirmation (009 RF8).
+    let (_, token) = support::app::user_with_dev_account(&pool).await;
     let session = oauth::session_cookie(&token);
     for (path, cookie, authorize) in [
         ("/api/auth/google/start", None, GOOGLE_AUTHORIZE),
@@ -72,6 +73,47 @@ async fn the_redirect_to_a_real_provider_is_a_303_to_its_authorize_constant() {
         ];
         headers.extend(cookie.map(|c| ("cookie", c)));
         let response = support::http::send_body(app.addr, "POST", path, &headers, "next=%2F").await;
+        assert_eq!(response.status, 303, "{path}: {}", response.text());
+        let location = response.header("location").unwrap();
+        assert!(
+            location.starts_with(&format!("{authorize}?")),
+            "{path}: {location}"
+        );
+    }
+}
+
+/// 009 RF11: the same for `reauth`, which needs an account of the provider. Its own server,
+/// because the test above already spends most of the AUTH_IP burst (5) of 127.0.0.1.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_reauth_redirect_to_a_real_provider_is_a_303_to_its_authorize_constant() {
+    use server::auth::providers::{DISCORD_AUTHORIZE, GOOGLE_AUTHORIZE};
+    let db = TestDb::create().await;
+    let (app, pool) = support::app::start_db(
+        &db,
+        &support::config::PROVIDER_VARS,
+        &server::app::Settings::default(),
+    )
+    .await;
+    let (user, token) = support::app::user_with_session(&pool).await;
+    let session = oauth::session_cookie(&token);
+    for (provider, authorize) in [("google", GOOGLE_AUTHORIZE), ("discord", DISCORD_AUTHORIZE)] {
+        sqlx::query(
+            "INSERT INTO oauth_accounts (provider, provider_user_id, user_id) VALUES ($1, $2, $3)",
+        )
+        .bind(provider)
+        .bind(format!("{provider}-{}", user.simple()))
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let path = format!("/api/auth/reauth/{provider}");
+        let headers = [
+            ("origin", ORIGIN),
+            ("content-type", "application/x-www-form-urlencoded"),
+            ("cookie", session.as_str()),
+        ];
+        let response =
+            support::http::send_body(app.addr, "POST", &path, &headers, "next=%2F").await;
         assert_eq!(response.status, 303, "{path}: {}", response.text());
         let location = response.header("location").unwrap();
         assert!(

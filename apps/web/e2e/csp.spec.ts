@@ -43,26 +43,35 @@ test('RF-A10: no CSP violations in the catalog with a menu and a dialog open', a
 // 002 RF-A18 and ADR-0012 B6.1: Pixi runs under the CSP as it is, in Chromium and WebKit. If the
 // engine has no WebGL (WebKit on Linux), the route must still load the deferred chunks and run
 // `pixi.js/unsafe-eval` (data-renderer-loaded) before it reports webgl_unavailable.
-test('RF-A18: no CSP violations on /es/dev/arena while loading and 5 s of playback', async ({
-  page,
-}) => {
-  await collectViolations(page);
-  await page.goto('/es/dev/arena');
-  const stage = page.getByTestId('fight-stage');
-  await expect(stage).toHaveAttribute('data-renderer-loaded', '', { timeout: 15_000 });
-  await expect(stage).toHaveAttribute('data-state', /^(ready|error)$/, { timeout: 15_000 });
-  if ((await stage.getAttribute('data-state')) === 'error') {
-    await expect(stage).toHaveAttribute('data-error', 'webgl_unavailable');
-    test.info().annotations.push({ type: 'limited', description: 'no WebGL in this engine' });
-  } else {
-    // TA-20: the arena loads paused; playback starts with Play.
-    await waitForHydration(page);
-    await page.getByTestId('arena-toggle').click();
-    await expect(stage).toHaveAttribute('data-state', 'playing');
-    await page.waitForTimeout(5000);
-    await expect(stage).toHaveAttribute('data-state', 'playing');
-  }
-  expect(await violations(page)).toEqual([]);
+// TA-34: on CI, `browser.newContext` sometimes never answers here, always right after the catalog
+// test above, so this test dies before its first line. The cause is unproven. One retry runs in a
+// new worker with a new browser, so it only protects the test that follows the catalog test: move
+// it if the order changes. A violation on every attempt still fails; an intermittent one would
+// only show as flaky.
+test.describe(() => {
+  test.describe.configure({ retries: 1 });
+
+  test('RF-A18: no CSP violations on /es/dev/arena while loading and 5 s of playback', async ({
+    page,
+  }) => {
+    await collectViolations(page);
+    await page.goto('/es/dev/arena');
+    const stage = page.getByTestId('fight-stage');
+    await expect(stage).toHaveAttribute('data-renderer-loaded', '', { timeout: 15_000 });
+    await expect(stage).toHaveAttribute('data-state', /^(ready|error)$/, { timeout: 15_000 });
+    if ((await stage.getAttribute('data-state')) === 'error') {
+      await expect(stage).toHaveAttribute('data-error', 'webgl_unavailable');
+      test.info().annotations.push({ type: 'limited', description: 'no WebGL in this engine' });
+    } else {
+      // TA-20: the arena loads paused; playback starts with Play.
+      await waitForHydration(page);
+      await page.getByTestId('arena-toggle').click();
+      await expect(stage).toHaveAttribute('data-state', 'playing');
+      await page.waitForTimeout(5000);
+      await expect(stage).toHaveAttribute('data-state', 'playing');
+    }
+    expect(await violations(page)).toEqual([]);
+  });
 });
 
 // ADR-0012 B4.6 (step 14 of 008 plan-d): the login and the account load under the amended CSP

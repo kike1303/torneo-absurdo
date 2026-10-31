@@ -1,5 +1,5 @@
 //! The OAuth flow against the fake Google and Discord (008 phase C), step by step: `start` (or
-//! `link`), the code of the fake for the challenge of the `Location`, and the callback. Each
+//! `link`, or `reauth` of 009), the code of the fake for the challenge of the `Location`, and the callback. Each
 //! step returns the raw response so a test can check it or tamper with what follows.
 
 use std::collections::HashMap;
@@ -181,6 +181,23 @@ pub async fn link(app: &App, kind: Kind, identity: &str, token: &str) -> Respons
     finish(app, kind, &started, identity, Some(token)).await
 }
 
+/// `POST /api/auth/reauth/{provider}` from the session `token`, with `next` (009 RF11).
+pub async fn start_reauth(app: &App, kind: Kind, token: &str) -> Response {
+    begin(
+        app,
+        &format!("/api/auth/reauth/{}", kind.name()),
+        "next=%2Fes%2Faccount%3Freauth%3D1",
+        Some(token),
+    )
+    .await
+}
+
+/// The whole reauthentication of `identity` from the session `token`.
+pub async fn reauth(app: &App, kind: Kind, identity: &str, token: &str) -> Response {
+    let started = start_reauth(app, kind, token).await;
+    finish(app, kind, &started, identity, Some(token)).await
+}
+
 /// The session token a successful callback set.
 pub fn session_of(response: &Response) -> String {
     assert_eq!(response.status, 303, "{:?}", response.headers);
@@ -226,4 +243,29 @@ pub async fn send(app: &App, method: &str, path: &str, token: &str, body: &str) 
 pub async fn me(app: &App, token: &str) -> Response {
     let cookie = session_cookie(token);
     http::send(app.addr, "GET", "/api/me", &[("cookie", cookie.as_str())]).await
+}
+
+/// `GET /api/auth/reauth-status` with the session `token` (009 RF18).
+pub async fn reauth_status(app: &App, token: &str) -> Response {
+    let cookie = session_cookie(token);
+    http::send(
+        app.addr,
+        "GET",
+        "/api/auth/reauth-status",
+        &[("cookie", cookie.as_str())],
+    )
+    .await
+}
+
+/// Moves the authentication of the session `token` `minutes` into the past (Postgres' clock).
+pub async fn age(pool: &sqlx::PgPool, token: &str, minutes: i32) {
+    sqlx::query(
+        "UPDATE sessions SET authenticated_at = authenticated_at - make_interval(mins => $2) \
+         WHERE token_hash = $1",
+    )
+    .bind(server::sessions::TokenHash::of(token).0.as_slice())
+    .bind(minutes)
+    .execute(pool)
+    .await
+    .unwrap();
 }

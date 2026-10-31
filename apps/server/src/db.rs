@@ -49,6 +49,11 @@ pub fn error_kind(error: &sqlx::Error) -> &'static str {
             "TA003" => return "ledger_closed",
             // `users_privileged_guard` (008 plan-c decision 10).
             "TA004" => return "privileged_write",
+            // `oauth_accounts_identity_guard` (009 plan decision 1).
+            "TA005" => return "oauth_identity_immutable",
+            // A row that a foreign key needs was deleted meanwhile: a login whose identity an
+            // unlink removed (009 plan decision 6).
+            "23503" => return "foreign_key",
             _ => {}
         }
     }

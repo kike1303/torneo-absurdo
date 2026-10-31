@@ -1,17 +1,33 @@
 <script lang="ts">
+  import type { ReauthStatus } from '@torneo/protocol';
   import DisplayNameForm from '#lib/components/account/DisplayNameForm.svelte';
   import ProviderList from '#lib/components/account/ProviderList.svelte';
+  import ReauthPanel from '#lib/components/account/ReauthPanel.svelte';
   import UserBadge from '#lib/components/account/UserBadge.svelte';
   import AuthErrorNotice from '#lib/components/auth/AuthErrorNotice.svelte';
   import DevIdentityField from '#lib/components/auth/DevIdentityField.svelte';
   import ProviderButton from '#lib/components/auth/ProviderButton.svelte';
   import * as Alert from '#lib/components/ui/alert/index.js';
-  import { providerRows } from '#lib/features/account/providers.js';
+  import { linkPanel, providerRows } from '#lib/features/account/providers.js';
   import Section from './Section.svelte';
 
   // 008 plan-d decision 9: every new component and its states (demo texts exempt from i18n).
   // The forms never submit here: `/dev/components` has no actions.
   const noSubmit = (event: SubmitEvent) => event.preventDefault();
+
+  // 009 RF21: Google switched off and older than the rest, so nothing can confirm its removal.
+  const blocked: ReauthStatus = {
+    link_ready: true,
+    unlink: [
+      { provider: 'google', ready: false, reauth_with: [] },
+      { provider: 'dev', ready: true, reauth_with: ['dev'] },
+    ],
+  };
+  // 009 RF20: without a confirmation, the panel replaces the link buttons.
+  const notReady: ReauthStatus = {
+    link_ready: false,
+    unlink: [{ provider: 'dev', ready: false, reauth_with: ['dev'] }],
+  };
 </script>
 
 <Section title="Alert" id="alert">
@@ -53,11 +69,39 @@
       value="Taken name"
       errorKey="error_profile_display_name_taken"
     />
-    <ProviderList rows={providerRows(['dev'], ['google', 'discord', 'dev'])} locale="en" />
+    <ProviderList
+      rows={providerRows(['dev'], ['google', 'discord', 'dev'])}
+      locale="en"
+      idPrefix="catalog-one-"
+    />
     <ProviderList
       rows={providerRows(['google', 'dev'], ['google', 'discord', 'dev'])}
       locale="en"
       error={{ provider: 'google', key: 'error_auth_try_again' }}
+      idPrefix="catalog-two-"
+    />
+    <ProviderList
+      rows={providerRows(['google', 'dev'], ['discord', 'dev'], blocked)}
+      locale="en"
+      idPrefix="catalog-blocked-"
+    />
+    <ProviderList
+      rows={providerRows(['dev'], ['google', 'dev'], notReady)}
+      linkPanel={linkPanel(notReady, ['dev'], ['google', 'dev'])}
+      locale="en"
+      idPrefix="catalog-link-panel-"
+    />
+    <ReauthPanel
+      providers={['google', 'discord']}
+      locale="en"
+      idPrefix="catalog-panel-"
+      testid="catalog-reauth-panel"
+    />
+    <ReauthPanel
+      providers={['google', 'dev']}
+      locale="es"
+      idPrefix="catalog-panel-dev-"
+      testid="catalog-reauth-panel-dev"
     />
   </div>
 </Section>

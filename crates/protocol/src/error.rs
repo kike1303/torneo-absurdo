@@ -128,9 +128,14 @@ pub enum AuthErrorCode {
     /// Unlinking would leave no enabled provider to log in with (008 RF-C3).
     #[serde(rename = "auth.last_provider")]
     LastProvider,
-    /// An admin route needs an admin who authenticated in the last 60 minutes (008 RF-C7).
+    /// The action needs a recent authentication that counts (ADR-0008 D9, amendment
+    /// 2026-10-30; 009 RF8, RF9, RF13, RF16).
     #[serde(rename = "auth.reauth_required")]
     ReauthRequired,
+    /// A reauthentication came back with an identity that is not one of the user's: absent or
+    /// another user's, the same code (009 RF11, RF12).
+    #[serde(rename = "auth.reauth_mismatch")]
+    ReauthMismatch,
 }
 
 impl AuthErrorCode {
@@ -146,6 +151,7 @@ impl AuthErrorCode {
         Self::ProviderAlreadyLinked,
         Self::LastProvider,
         Self::ReauthRequired,
+        Self::ReauthMismatch,
     ];
     /// The only domain prefix this enum may use.
     pub const PREFIX: &'static str = "auth.";
@@ -163,6 +169,7 @@ impl AuthErrorCode {
             Self::ProviderAlreadyLinked => "auth.provider_already_linked",
             Self::LastProvider => "auth.last_provider",
             Self::ReauthRequired => "auth.reauth_required",
+            Self::ReauthMismatch => "auth.reauth_mismatch",
         }
     }
 }
@@ -187,6 +194,12 @@ pub enum CallbackErrorCode {
     AlreadyLinked,
     #[serde(rename = "auth.provider_already_linked")]
     ProviderAlreadyLinked,
+    /// 009 RF8, RF9: a link without a recent authentication that counts.
+    #[serde(rename = "auth.reauth_required")]
+    ReauthRequired,
+    /// 009 RF11, RF12.
+    #[serde(rename = "auth.reauth_mismatch")]
+    ReauthMismatch,
 }
 
 impl CallbackErrorCode {
@@ -198,6 +211,8 @@ impl CallbackErrorCode {
         Self::TryAgain,
         Self::AlreadyLinked,
         Self::ProviderAlreadyLinked,
+        Self::ReauthRequired,
+        Self::ReauthMismatch,
     ];
 
     /// The serialized code, equal to the [`AuthErrorCode`] it maps to.
@@ -215,6 +230,8 @@ impl AuthErrorCode {
             CallbackErrorCode::TryAgain => Self::TryAgain,
             CallbackErrorCode::AlreadyLinked => Self::AlreadyLinked,
             CallbackErrorCode::ProviderAlreadyLinked => Self::ProviderAlreadyLinked,
+            CallbackErrorCode::ReauthRequired => Self::ReauthRequired,
+            CallbackErrorCode::ReauthMismatch => Self::ReauthMismatch,
         }
     }
 }
@@ -364,6 +381,7 @@ mod tests {
             AuthErrorCode::ProviderAlreadyLinked => 7,
             AuthErrorCode::LastProvider => 8,
             AuthErrorCode::ReauthRequired => 9,
+            AuthErrorCode::ReauthMismatch => 10,
         }
     }
 
@@ -375,6 +393,8 @@ mod tests {
             CallbackErrorCode::TryAgain => 3,
             CallbackErrorCode::AlreadyLinked => 4,
             CallbackErrorCode::ProviderAlreadyLinked => 5,
+            CallbackErrorCode::ReauthRequired => 6,
+            CallbackErrorCode::ReauthMismatch => 7,
         }
     }
 
@@ -388,8 +408,8 @@ mod tests {
 
     const API_COUNT: usize = 4;
     const WS_COUNT: usize = 11;
-    const AUTH_COUNT: usize = 10;
-    const CALLBACK_COUNT: usize = 6;
+    const AUTH_COUNT: usize = 11;
+    const CALLBACK_COUNT: usize = 8;
     const PROFILE_COUNT: usize = 3;
 
     #[test]
@@ -429,6 +449,9 @@ mod tests {
                 CallbackErrorCode::ProviderAlreadyLinked,
                 "auth.provider_already_linked",
             ),
+            // 009 RF19: the closed list grows from six to eight.
+            (CallbackErrorCode::ReauthRequired, "auth.reauth_required"),
+            (CallbackErrorCode::ReauthMismatch, "auth.reauth_mismatch"),
         ];
         assert_eq!(expected.len(), CALLBACK_COUNT);
         for (code, text) in expected {
@@ -445,7 +468,6 @@ mod tests {
             "auth.csrf_origin",
             "auth.unauthenticated",
             "auth.last_provider",
-            "auth.reauth_required",
             "http.not_found",
             "profile.display_name_taken",
         ] {
@@ -515,6 +537,7 @@ mod tests {
             ),
             (AuthErrorCode::LastProvider, "auth.last_provider"),
             (AuthErrorCode::ReauthRequired, "auth.reauth_required"),
+            (AuthErrorCode::ReauthMismatch, "auth.reauth_mismatch"),
         ];
         assert_eq!(expected.len(), AUTH_COUNT);
         for (code, text) in expected {

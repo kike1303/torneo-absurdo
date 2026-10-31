@@ -29,6 +29,7 @@ pub use error::{
 pub use fight::{AbilityKind, EndReason, FightEvent, FightLog, FighterInfo, MomentKind, Side};
 pub use health::HealthResponse;
 pub use me::{
-    DisplayNameRequest, Locale, MAX_SAFE_INTEGER, Me, PreferencesRequest, Provider, Role, Theme,
+    DisplayNameRequest, Locale, MAX_SAFE_INTEGER, Me, PreferencesRequest, Provider, ReauthStatus,
+    Role, Theme, UnlinkStatus,
 };
 pub use ws::{Channel, ClientMessage, SelfEvent, ServerMessage};

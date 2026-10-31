@@ -1,7 +1,8 @@
 //! `POST /api/auth/{provider}/start` (ADR-0008 D2, 008 RF-B5): a form from the login page. It
 //! creates the flow (128-bit id and `state`, PKCE `code_verifier`, all from `OsRng`), sets the
 //! flow cookie and answers 303 to the provider's authorization URL. [`begin_flow`] is shared
-//! with `POST /api/auth/link/{provider}` (RF-C2), which only changes the purpose.
+//! with `POST /api/auth/link/{provider}` (RF-C2) and `POST /api/auth/reauth/{provider}` (009
+//! RF11), which only change the purpose.
 
 use axum::extract::rejection::FormRejection;
 use axum::extract::{Form, Path, State};
@@ -51,12 +52,13 @@ pub fn flow_error(cookies: &CookiePolicy, code: CallbackErrorCode) -> Response {
     }
 }
 
-/// What a flow is for: logging in, or linking a provider to the user of the session that
-/// started it (`oauth_flows.link_user_id`).
+/// What a flow is for: logging in, linking a provider to the user of the session that started
+/// it, or reauthenticating that user (009 RF4); both keep the user in `oauth_flows.link_user_id`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Purpose {
     Login,
     Link(Uuid),
+    Reauth(Uuid),
 }
 
 impl Purpose {
@@ -64,13 +66,14 @@ impl Purpose {
         match self {
             Self::Login => "login",
             Self::Link(_) => "link",
+            Self::Reauth(_) => "reauth",
         }
     }
 
     fn link_user_id(self) -> Option<Uuid> {
         match self {
             Self::Login => None,
-            Self::Link(user) => Some(user),
+            Self::Link(user) | Self::Reauth(user) => Some(user),
         }
     }
 }
