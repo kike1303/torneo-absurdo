@@ -4,7 +4,7 @@ type: architecture
 status: draft
 author: architect
 created: 2026-10-20
-updated: 2026-10-30
+updated: 2026-10-31
 ---
 
 # Arquitectura general
@@ -61,7 +61,7 @@ Scheduled ─▶ BettingOpen ─▶ BettingClosed ─▶ Live ─▶ Settled
 ## Datos (borrador)
 - `users`, `sessions`, `oauth_accounts`, `oauth_flows`, `auth_events`, `admin_audit` (feature 008, ver "Autenticación y monedas")
 - `ledger_accounts`, `ledger_entries`, `ledger_postings` (feature 008, ver "Autenticación y monedas")
-- `fights` (personajes, ruleset_version, seed_commit, seed —oculta hasta Settled—, resultado, log)
+- `fights` (snapshot de personajes y `ruleset_version`, horarios, `seed_commit`, estado y final; `revealed_seed` y `log` solo en `settled`) y `fight_secrets` (la semilla, que no se revela hasta `Settled`). Ver la [spec de 010](features/010-scheduler-de-peleas/spec.md)
 - `bets`, `pools`
 - `tournaments`, `tournament_rounds`
 - `character_ratings`, `seasons`, `season_stats`
@@ -130,7 +130,7 @@ Antes de correr `grant`, revisa los proveedores vinculados en `/account`: todo l
 > Detalle: [spec de 003](features/003-motor-de-pelea/spec.md), [plan-a](features/003-motor-de-pelea/plan-a.md) y [plan-b](features/003-motor-de-pelea/plan-b.md). Si algo no coincide, manda la spec.
 
 - **Crates.** `crates/engine` (librería pura: `simulate`, `Seed`, `Ruleset`, `CharacterSpec`, `SpecError` y la serialización canónica) y `crates/engine-wasm` (un `cdylib` con `wasm-bindgen` que exporta solo `simulate` y devuelve códigos de error `dominio.motivo`). `crates/content` lee `content/characters/` con `load_roster(root, &Ruleset) -> Result<Vec<Character>, ContentError>` (solo I/O y conversión: la validación es `CharacterSpec::validate` e `is_valid_slug` del motor, así que el navegador valida igual) y `crates/sim` juega peleas masivas con el motor real y emite el informe de balance (`just sim [--fights N] [--seed HEX] [--content DIR] [--json] [--check]`, en release). Sus umbrales viven en `sim::Criteria::RF17` y el test `crates/sim/tests/balance.rs` los aplica al contenido real dentro de `just check`. `sim` usa su propia semilla raíz y nunca recibe la de una pelea real (ADR-0002).
-- **Dirección de dependencias:** `protocol ← engine ← {content, engine-wasm, sim}` y `content ← sim` (más adelante, el server dependerá de `engine` y `content`). Nunca al revés: el motor no conoce a sus consumidores. El motor depende de `protocol` sin la feature `ts`: los tipos del log viven en `protocol` y el motor no compila `ts-rs` (lo comprueba `_check-ts-rs-graph`).
+- **Dirección de dependencias:** `protocol ← engine ← {content, engine-wasm, sim}`, `content ← sim` y, desde 010, `{engine, content} ← server` (`engine-wasm` solo como dependencia de desarrollo del server, y nunca `sim`). Nunca al revés: el motor no conoce a sus consumidores. El motor depende de `protocol` sin la feature `ts`: los tipos del log viven en `protocol` y el motor no compila `ts-rs` (lo comprueba `_check-ts-rs-graph`).
 - **Pureza:** lints `deny` en `lib.rs`, `crates/engine/clippy.toml` (sin `HashMap`/`HashSet`, reloj, semillas del sistema ni I/O de archivos, red, procesos, hilos o entorno) y `scripts/check-engine.mjs` (grafo y features de `engine`, y también del grafo conjunto de sus consumidores, que salen de `cargo metadata` (todo miembro del workspace que dependa de `engine`, salvo el server), para que un consumidor no active en un build conjunto features que el motor hereda; que el server no dependa de `sim`, cuyas semillas son públicas (ADR-0002); en `engine-wasm`, ni el token `unsafe` ni atributos que relajen `unsafe_code`, ni `include!` ni `#[path]`), todo dentro de `just check`. `engine` y `engine-wasm` heredan `unsafe_code = "forbid"` del workspace, sin excepciones.
 - **Serialización canónica:** `canonical_json(&FightLog)` y `canonical_spec_json(&CharacterSpec)` son `serde_json::to_vec` compacto, con los campos en orden de declaración y sin mapas ni floats. "Idéntico byte a byte" significa que devuelven los mismos bytes. Los dorados de `crates/engine/tests/golden/` lo comprueban en nativo y en `wasm32-wasip1` (`just _check-wasm`), y los `log-*.json` son también los fixtures del adaptador de 002, que los lee en su lugar (`apps/web/tests/support/golden-logs.ts`). Las únicas copias son los 7 `log-*.json` de `apps/web/src/lib/features/fight/fixtures/`, que el arena empaqueta porque el contexto de Docker de la web no incluye `crates/`. Un test las compara byte a byte con su dorado y otro exige que el conjunto de `log-*.json` sea exactamente el de `ENGINE_LOGS` (enmienda (006, TA-21), ver la [spec de 006](features/006-ritmo-rapido/spec.md)).
 - **Respiro (006):** tras una racha de resoluciones sin KO ni knockdown, un sorteo del PRNG (pasos 6 y 7 de RF7 de 003) desplaza por igual los dos relojes entre 1,8 y 2,6 s, y deja un hueco de ≥ 2,5 s sin impactos. No es un evento ni cambia quién actúa: solo ausencia de impactos. Sus entradas son los campos `breather_*` de `Ruleset`, y `sim` exige el ritmo resultante (media de 1100–1300 ms, ráfagas y pausas) en `Criteria::RF17`. Enmienda (006, TA-21): ver la [spec de 006](features/006-ritmo-rapido/spec.md).
@@ -274,7 +274,7 @@ Son los cambios en el proxy compartido que el owner aprobó el 2026-10-21. Se ha
 > - **"Reset configuration to default" del proxy en Coolify quita `torneo-edge` y la IP `10.250.0.2`.** Después de un reset, de reiniciar el proxy o de actualizar Coolify, se repite el paso 2 y la verificación 15 de ADR-0006.
 
 ### Prerrequisitos del primer despliegue a producción (bloquean; RF-C18)
-Ninguno se cumple en la feature 001. Los puntos 1 a 4 se siguen en Linear (TA-8, bloqueado por la feature de auth y por TA-6), el 5 en TA-13 y el 6 en la feature 002.
+Ninguno se cumple en la feature 001. Los puntos 1 a 4 se siguen en Linear (TA-8, bloqueado por la feature de auth y por TA-6), el 5 en TA-13, el 6 en la feature 002 y el 7 y el 8 en TA-8.
 
 1. **Límites anónimos de ADR-0008 D6 y D7 en `/ws`, implementados y probados:** como máximo 50 sockets simultáneos por `ip_key`, y upgrade a 30/min con ráfaga de 10 por IP, con `TRUSTED_PROXIES=10.250.0.2/32` (ADR-0006 D2).
 2. **Las verificaciones de ADR-0006 que no se hicieron en el cierre de 001** (RF-C19), más dos comprobaciones con el stack desplegado:
@@ -294,3 +294,5 @@ Ninguno se cumple en la feature 001. Los puntos 1 a 4 se siguen en Linear (TA-8,
 4. **Preparación del VPS** (sección anterior), con la verificación 15 de ADR-0006 en verde, y la **prueba de restauración** de backups de ADR-0006 D9.
 5. **Peleas re-simulables antes de abrir apuestas (RF22 de 003, TA-13).** Ninguna pelea de producción abre apuestas si no se cumple una de estas dos condiciones: (a) se publican como snapshot inmutable, junto con el commit, los `canonical_spec_json` de los dos personajes y la `ruleset_version`; o (b) el commit se extiende a `SHA-256(seed ‖ canonical_spec_json(a) ‖ canonical_spec_json(b) ‖ ruleset_version)`, lo que enmienda ADR-0002 con el OK del owner. TA-13 también cubre que el `FightLog` completo no salga del server antes de `Settled`, igual que la semilla.
 6. **`timeline_version` 2 del renderer (preocupación 7 de la spec de 003). Resuelto por TA-19 (feature 005):** la v2 suma `time_up` y `draw`, y el adaptador reproduce los tres finales. Texto original: ninguna feature publica peleas reales sin una `Timeline` que exprese el fin por tiempo: un cue `time_up`, una victoria por decisión sin `ko` y un cierre sin ganador (empate). Mientras no exista, el adaptador de 002 rechaza esos logs con `adapter.unsupported_ending`. Issue: TA-19 ("Timeline v2: fines sin KO"), con `log-decision-a`, `log-decision-b` y `log-draw` como casos de aceptación.
+7. **Primera entrada de la tabla de RF6 (spec de 010).** `apps/server/tests/ruleset_freeze.rs` lleva al menos la entrada de la versión de reglas con la que corre la primera pelea de producción. Desde 010 la imagen corre peleas sola, y con la tabla vacía nada ata esa versión a un comportamiento.
+8. **Medición en Android (spec de 002 y "Decisiones de 2026-10-31" de la de 010).** La RNF "Rendimiento" de 002 se mide en su dispositivo de referencia, un Android de gama media, antes del primer despliegue público. Hasta ahora solo se midió en un iPhone de gama alta.
