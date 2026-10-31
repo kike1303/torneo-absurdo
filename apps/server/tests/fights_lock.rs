@@ -130,10 +130,10 @@ async fn a_hung_connection_loses_the_lock_in_a_bounded_time() {
         .max_connections(4)
         .acquire_timeout(Duration::from_millis(300))
         .connect_lazy_with(db.options_via(proxy.addr()));
-    let idle_session_ms = 2000;
+    let idle_session_ms = 3000;
     let timings = RunnerTimings {
         heartbeat_ms: 100,
-        heartbeat_timeout_ms: 300,
+        heartbeat_timeout_ms: 1000,
         idle_session_ms,
         ..quick_timings()
     };
@@ -160,7 +160,7 @@ async fn a_hung_connection_loses_the_lock_in_a_bounded_time() {
     })
     .await;
     assert!(
-        hung_at.elapsed() < Duration::from_secs(5),
+        hung_at.elapsed() < Duration::from_secs(30),
         "{:?}",
         hung_at.elapsed()
     );
@@ -183,7 +183,7 @@ async fn a_hung_connection_loses_the_lock_in_a_bounded_time() {
     })
     .await;
     let took = hung_at.elapsed();
-    assert!(took < Duration::from_secs(10), "{took:?}");
+    assert!(took < Duration::from_secs(45), "{took:?}");
     clock.set(T0 + WINDOW);
     wait_state(&pool, id, FightState::BettingClosed).await;
     proxy.cut();

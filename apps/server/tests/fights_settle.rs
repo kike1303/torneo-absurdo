@@ -12,7 +12,7 @@ use protocol::{CancelReason, FightFinal, FightState};
 use server::fights::hook::{SettleFuture, SettlementError, SettlementHook, SettlingFight};
 use server::fights::sealed::{self, SealedLog, SealedSeed};
 use server::fights::snapshot::FightSnapshot;
-use server::fights::{FightSettings, FightsShared, store};
+use server::fights::{FightSettings, FightsShared, PassProbe, store};
 use sqlx::{PgConnection, PgPool};
 use support::db::TestDb;
 use support::fights::{
@@ -27,11 +27,24 @@ enum Mode {
     Hang,
 }
 
+/// Counts the passes of the runner. The result of a task is taken before the next pass, so a pass
+/// after a call to the hook means the runner saw how the call ended.
+#[derive(Default)]
+struct Passes(AtomicU32);
+
+impl PassProbe for Passes {
+    fn before_pass(&self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 /// Writes a row in the settling transaction, and then does what it was told.
 struct TestHook {
     mode: std::sync::Mutex<Mode>,
     calls: AtomicU32,
     entered: AtomicBool,
+    passes: Arc<Passes>,
+    passes_at_call: AtomicU32,
 }
 
 impl TestHook {
@@ -40,6 +53,8 @@ impl TestHook {
             mode: std::sync::Mutex::new(mode),
             calls: AtomicU32::new(0),
             entered: AtomicBool::new(false),
+            passes: Arc::new(Passes::default()),
+            passes_at_call: AtomicU32::new(0),
         })
     }
 
@@ -55,6 +70,8 @@ impl SettlementHook for TestHook {
         fight: &'a SettlingFight,
     ) -> SettleFuture<'a> {
         Box::pin(async move {
+            self.passes_at_call
+                .store(self.passes.0.load(Ordering::SeqCst), Ordering::SeqCst);
             self.calls.fetch_add(1, Ordering::SeqCst);
             sqlx::query("INSERT INTO hook_log (fight_id, final) VALUES ($1, $2)")
                 .bind(fight.id)
@@ -106,18 +123,19 @@ async fn live_fight(pool: &PgPool, vector: &Vector) -> (i32, i64) {
 fn with_hook(settings: FightSettings, hook: &Arc<TestHook>) -> FightSettings {
     FightSettings {
         hook: hook.clone(),
+        probe: hook.passes.clone(),
         ..settings
     }
 }
 
-/// Until the hook ran `at_least` times, and the runner had time to take its result: the hour of a
-/// failure is the clock when the runner sees it, so a test must not move it before that.
+/// Until the hook ran `at_least` times, and the runner saw how it ended: the hour of a failure is
+/// the clock when the runner sees it, so a test must not move it before that.
 async fn wait_calls(hook: &TestHook, at_least: u32) {
     wait_for("the hook", || async {
         hook.calls.load(Ordering::SeqCst) >= at_least
+            && hook.passes.0.load(Ordering::SeqCst) > hook.passes_at_call.load(Ordering::SeqCst)
     })
     .await;
-    tokio::time::sleep(Duration::from_millis(100)).await;
 }
 
 fn assert_still_live(fight: &server::fights::state::FightRow) {
@@ -465,12 +483,14 @@ async fn a_long_failure_opens_no_windows_and_leaves_one_final_per_fight() {
         shared.current().halted == Some(false)
     })
     .await;
-    // One announcement ahead, not one per slot that went by.
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    let live_or_open: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM fights WHERE state <> 'settled'")
+    // One announcement ahead, not one per slot that went by. A missed fight whose cancellation is
+    // on its way may still count for a moment.
+    wait_for("one fight ahead", || async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM fights WHERE state <> 'settled'")
             .fetch_one(&pool)
             .await
-            .unwrap();
-    assert!(live_or_open <= 1, "{live_or_open}");
+            .unwrap()
+            <= 1
+    })
+    .await;
 }

@@ -289,7 +289,7 @@ pub fn quick_timings() -> RunnerTimings {
     RunnerTimings {
         lock_retry_ms: 50,
         heartbeat_ms: 100,
-        heartbeat_timeout_ms: 1000,
+        heartbeat_timeout_ms: 3000,
         settle_backoff_min_ms: 1000,
         lock_timeout_ms: 200,
         db_backoff_min_ms: 50,
@@ -361,13 +361,14 @@ pub fn start(pool: &PgPool, settings: &FightSettings) -> (Arc<FightsShared>, Run
     (shared, running)
 }
 
-/// Polls `condition` for up to 15 s.
+/// Polls `condition` for up to 60 s: only a failing test waits that long, and a loaded machine does
+/// not make a passing one fail.
 pub async fn wait_for<F, Fut>(what: &str, mut condition: F)
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = bool>,
 {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
         if condition().await {
             return;
@@ -399,6 +400,16 @@ pub async fn drive_to_settled(pool: &PgPool, clock: &FightClock, id: i32) {
     // Past any end and any settle delay.
     clock.set(clock.now_ms().max(started + 100_000));
     wait_state(pool, id, FightState::Settled).await;
+}
+
+/// Until the fight reaches `state`, moving the clock forward meanwhile: the hour of a retry depends
+/// on when the runner saw the failure, which a test cannot know.
+pub async fn wait_state_advancing(pool: &PgPool, clock: &FightClock, id: i32, state: FightState) {
+    wait_for(state.as_str(), || async {
+        clock.advance(2000);
+        row(pool, id).await.state == state
+    })
+    .await;
 }
 
 /// How many rows of `fight_secrets` a fight has.

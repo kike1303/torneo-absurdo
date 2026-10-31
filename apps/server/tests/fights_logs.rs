@@ -73,15 +73,14 @@ fn a_whole_run_logs_no_seed_and_no_fragment_of_the_log() {
         // A settlement that fails, so its error path logs too.
         wait_for("the hook", || async { hook.called.load(Ordering::SeqCst) }).await;
         hook.fixed.store(true, Ordering::SeqCst);
-        clock.advance(10_000);
-        wait_state(&pool, id, FightState::Settled).await;
+        f::wait_state_advancing(&pool, &clock, id, FightState::Settled).await;
         assert_eq!(row(&pool, id).await.log, Some(vector.canonical()));
 
         // A safe stop, with the secret lost, so its path logs too.
         let lost = f::open_vector(&pool, T0 + 2 * CADENCE, &secret_lost).await;
         f::close_by_sql(&pool, lost, T0 + 2 * CADENCE + WINDOW).await;
         f::lose_secret(&pool, lost).await;
-        clock.set(T0 + 2 * CADENCE + WINDOW + 1);
+        clock.set(clock.now_ms().max(T0 + 2 * CADENCE + WINDOW + 1) + 60_000);
         wait_for("the halt", || async {
             shared.current().halted == Some(true)
         })

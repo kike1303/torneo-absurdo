@@ -32,7 +32,7 @@ async fn a_kill_with_a_fight_on_air_changes_nothing() {
     // A fight on air whose `end` already passed, with its `settle_at` a few seconds ahead: the
     // whole cycle does not have to be waited, and `live_started_at` is a real hour in the past.
     let now = now_ms();
-    let started = now - vector.end_t() - 5000 + 6000;
+    let started = now - vector.end_t() - 5000 + 15_000;
     let opens_at = started - f::WINDOW - f::PRE_LIVE;
     let id = f::open_vector(&pool, opens_at, &vector).await;
     let (closes_at, _) = f::hours(opens_at);
