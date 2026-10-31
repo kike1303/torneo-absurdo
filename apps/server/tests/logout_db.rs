@@ -258,3 +258,70 @@ async fn logout_all_still_closes_everything_if_a_ban_commits_while_it_waits() {
     assert_eq!(done.header("location"), Some("/"));
     assert_eq!(sessions_of(&pool, user).await, 0);
 }
+
+/// TA-30: a dead cookie proves nothing, so `logout-all` closes only its own row. The other
+/// sessions stay alive, and the answer must not look like the closing it did not do: the login
+/// page, never `/`. `logout` closes all it was asked to, so it stays idempotent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn logout_all_with_a_dead_session_does_not_look_like_success() {
+    let db = TestDb::create().await;
+    let (app, pool) = support::app::start_db(&db, &[], &Settings::default()).await;
+    let name = support::config::config(&[]).cookies.session_name();
+    for sql in [
+        "UPDATE sessions SET last_seen_at = now() - interval '8 days' WHERE id = $1",
+        "UPDATE sessions SET expires_at = now() - interval '1 second' WHERE id = $1",
+    ] {
+        let (user, token) = support::app::user_with_session(&pool).await;
+        let other = support::app::session_for(&pool, user).await;
+        let hash = TokenHash::of(&token);
+        let id = sessions::validate(&pool, &hash).await.unwrap().unwrap().id;
+        support::db::privileged(&pool, sqlx::query(sql).bind(id.uuid())).await;
+        let cookie = format!("{name}={token}");
+        let headers = [("origin", ORIGIN), ("cookie", cookie.as_str())];
+
+        let out = http::send(app.addr, "POST", "/api/auth/logout-all", &headers).await;
+
+        assert_eq!(out.status, 303, "{sql}: {}", out.text());
+        assert_eq!(out.header("location"), Some("/login"), "{sql}");
+        assert_eq!(out.cookie(name), Some(""), "{sql}");
+        assert_eq!(out.header("cache-control"), Some("private, no-store"));
+        assert!(out.body.is_empty(), "{sql}");
+        // Only its own row: the other session is alive and answers.
+        assert_eq!(sessions_of(&pool, user).await, 1, "{sql}");
+        let other = TokenHash::of(&other);
+        assert!(sessions::validate(&pool, &other).await.unwrap().is_some());
+
+        // The same dead cookie on `logout`: nothing else was asked for.
+        let out = http::send(app.addr, "POST", "/api/auth/logout", &headers).await;
+        assert_eq!(out.status, 303, "{sql}");
+        assert_eq!(out.header("location"), Some("/"), "{sql}");
+    }
+}
+
+/// TA-30: the cookie carries `Max-Age` up to the absolute expiry, so a browser usually arrives at
+/// that death with no cookie at all. No cookie and an unknown token prove as little as a dead
+/// one, and get its very answer; `logout` with either stays idempotent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn logout_all_without_a_valid_cookie_goes_to_the_login_page() {
+    let db = TestDb::create().await;
+    let (app, pool) = support::app::start_db(&db, &[], &Settings::default()).await;
+    let name = support::config::config(&[]).cookies.session_name();
+    let (user, token) = support::app::user_with_session(&pool).await;
+    let unknown = format!("{name}=not-a-session");
+    let without = [("origin", ORIGIN)];
+    let forged = [("origin", ORIGIN), ("cookie", unknown.as_str())];
+
+    for headers in [&without[..], &forged[..]] {
+        let all = http::send(app.addr, "POST", "/api/auth/logout-all", headers).await;
+        assert_eq!(all.status, 303, "{}", all.text());
+        assert_eq!(all.header("location"), Some("/login"));
+        assert_eq!(all.cookie(name), Some(""));
+        assert_eq!(all.header("cache-control"), Some("private, no-store"));
+        let one = http::send(app.addr, "POST", "/api/auth/logout", headers).await;
+        assert_eq!(one.status, 303, "{}", one.text());
+        assert_eq!(one.header("location"), Some("/"));
+    }
+    assert_eq!(sessions_of(&pool, user).await, 1);
+    let hash = TokenHash::of(&token);
+    assert!(sessions::validate(&pool, &hash).await.unwrap().is_some());
+}

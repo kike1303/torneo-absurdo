@@ -90,7 +90,7 @@ Revocar una sesión (logout, logout-all, `unlink`, el ban de la CLI) hace `pg_no
 
 `link`, `reauth`, `unlink`, la CLI y `logout-all` bloquean la fila del usuario (`SELECT … FROM users … FOR UPDATE`) antes de tocar sus sesiones, así que quedan en serie, y un `unlink` que tiene su sesión y revoca las demás no forma un ciclo con un `logout-all` desde otra sesión (feature 009).
 - `logout-all` no filtra por `banned_at`, a diferencia de los otros tres del server: un ban que se confirma mientras espera el bloqueo no le impide revocar todo.
-- `logout-all` solo toma el bloqueo si la cookie es de una sesión válida. Sin ella, también la de un usuario que ya estaba baneado, revoca por token solo la fila de esa cookie, igual que `logout`.
+- `logout-all` solo toma el bloqueo si la cookie es de una sesión válida. Sin ella, también la de un usuario que ya estaba baneado, revoca por token solo la fila de esa cookie, igual que `logout`, y responde 303 a `/login`, no a `/`, porque las otras sesiones siguen vivas (TA-30).
 - `logout` no toma el bloqueo (una fila no forma un ciclo), ni el login, ni la limpieza de sesiones vencidas.
 
 ### `web` y el API interno (ADR-0008 D5)

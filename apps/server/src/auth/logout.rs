@@ -1,8 +1,11 @@
 //! `POST /api/auth/logout` and `POST /api/auth/logout-all` (ADR-0008 D10, 008 RF-B11). Both
 //! revoke (one session, or every session of the user), expire the cookie and answer 303 to
-//! `/`, with or without a session: logging out is idempotent. If the revoke fails, a 303 to the
-//! login page with `auth.try_again` and the cookie kept; over the "other mutations" quota of D7,
-//! the same 303 (008 "Enmienda 2026-10-30" of RF-B5).
+//! `/`. `logout` does so with or without a session: logging out is idempotent. `logout-all`
+//! without a valid session closes at most the row of its own cookie, so it answers 303 to the
+//! login page instead, and never looks like the closing it did not do (008 "Enmienda 2026-10-30
+//! (TA-30)" of RF-B5). If the revoke fails, a 303 to the login page with `auth.try_again` and the
+//! cookie kept; over the "other mutations" quota of D7, the same 303 (008 "Enmienda 2026-10-30"
+//! of RF-B5).
 
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -11,7 +14,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
-use super::callback::try_again_redirect;
+use super::callback::{login_location, try_again_redirect};
 
 use crate::app::AppState;
 use crate::http::session::{self, PRIVATE_NO_STORE};
@@ -70,10 +73,10 @@ async fn run(
     {
         return cannot_revoke();
     }
-    match decide(scope, lookup, hash) {
+    let landing = match decide(scope, lookup, hash) {
         Plan::CannotRevoke => return cannot_revoke(),
-        Plan::Nothing => {}
-        Plan::Revoke(filter) => {
+        Plan::Nothing(landing) => landing,
+        Plan::Revoke(filter, landing) => {
             let revoked = async {
                 let mut tx = state.db.begin().await?;
                 // logout-all first takes the lock of the user, as link, reauth, unlink and the
@@ -95,12 +98,17 @@ async fn run(
             if revoked.await.is_err() {
                 return cannot_revoke();
             }
+            landing
         }
-    }
+    };
+    let location = match landing {
+        Landing::Home => HeaderValue::from_static("/"),
+        Landing::Login => login_location(),
+    };
     (
         StatusCode::SEE_OTHER,
         [
-            (header::LOCATION, HeaderValue::from_static("/")),
+            (header::LOCATION, location),
             (header::SET_COOKIE, state.auth.cookies.expire_session()),
             (header::CACHE_CONTROL, PRIVATE_NO_STORE),
         ],
@@ -108,27 +116,46 @@ async fn run(
         .into_response()
 }
 
+/// Where a logout that ran ends up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Landing {
+    /// All that was asked for is closed.
+    Home,
+    /// A `logout-all` that proved no session: the others, if any, are still alive.
+    Login,
+}
+
 enum Plan {
-    Revoke(RevokeFilter),
-    /// No cookie: nothing to revoke, and the logout is still a success (idempotent).
-    Nothing,
+    Revoke(RevokeFilter, Landing),
+    /// No cookie: nothing to revoke.
+    Nothing(Landing),
     /// The session lookup failed: no revoke is safe to report.
     CannotRevoke,
 }
 
 /// What a logout does with the session lookup. A lookup that failed is never read as "no
 /// session": logout-all would fall back to revoking only this cookie and answer success while
-/// the other sessions stay alive (review of #54).
+/// the other sessions stay alive (review of #54). A cookie that is dead, unknown or missing proves
+/// nothing, so it never closes the other sessions, and `logout-all` then never answers as if it
+/// had (TA-30). No cookie counts too: the cookie has `Max-Age` up to the absolute expiry, so the
+/// browser usually arrives at that death without it.
 fn decide(
     scope: Scope,
     lookup: Result<Option<crate::sessions::SessionInfo>, ()>,
     hash: Option<crate::sessions::TokenHash>,
 ) -> Plan {
+    // With `All`, this is only for the arms below, where no session was proved.
+    let landing = match scope {
+        Scope::This => Landing::Home,
+        Scope::All => Landing::Login,
+    };
     match (scope, lookup, hash) {
         (_, Err(()), _) => Plan::CannotRevoke,
-        (Scope::All, Ok(Some(info)), _) => Plan::Revoke(RevokeFilter::AllOfUser(info.user_id)),
-        (_, Ok(_), Some(hash)) => Plan::Revoke(RevokeFilter::Token(hash)),
-        (_, Ok(_), None) => Plan::Nothing,
+        (Scope::All, Ok(Some(info)), _) => {
+            Plan::Revoke(RevokeFilter::AllOfUser(info.user_id), Landing::Home)
+        }
+        (_, Ok(_), Some(hash)) => Plan::Revoke(RevokeFilter::Token(hash), landing),
+        (_, Ok(_), None) => Plan::Nothing(landing),
     }
 }
 
@@ -172,19 +199,28 @@ mod tests {
         let hash = Some(TokenHash::of("t"));
         assert!(matches!(
             decide(Scope::All, Ok(Some(info())), hash),
-            Plan::Revoke(RevokeFilter::AllOfUser(_))
+            Plan::Revoke(RevokeFilter::AllOfUser(_), Landing::Home)
         ));
         assert!(matches!(
             decide(Scope::This, Ok(Some(info())), hash),
-            Plan::Revoke(RevokeFilter::Token(_))
+            Plan::Revoke(RevokeFilter::Token(_), Landing::Home)
         ));
-        // A dead session still has its cookie row revoked by token, idempotently.
-        for scope in [Scope::This, Scope::All] {
+    }
+
+    /// A dead session still has its cookie row revoked by token, and never the other sessions.
+    /// `logout` is idempotent; `logout-all` does not answer as if it had closed them (TA-30).
+    #[test]
+    fn without_a_valid_session_only_logout_all_goes_to_the_login_page() {
+        let hash = Some(TokenHash::of("t"));
+        for (scope, expected) in [(Scope::This, Landing::Home), (Scope::All, Landing::Login)] {
             assert!(matches!(
                 decide(scope, Ok(None), hash),
-                Plan::Revoke(RevokeFilter::Token(_))
+                Plan::Revoke(RevokeFilter::Token(_), landing) if landing == expected
             ));
-            assert!(matches!(decide(scope, Ok(None), None), Plan::Nothing));
+            assert!(matches!(
+                decide(scope, Ok(None), None),
+                Plan::Nothing(landing) if landing == expected
+            ));
         }
     }
 }
