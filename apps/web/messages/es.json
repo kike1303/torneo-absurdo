@@ -118,6 +118,8 @@
   "error_profile_display_name_invalid": "Usa de 3 a 24 caracteres, sin caracteres invisibles ni de control.",
   "error_profile_display_name_reserved": "Ese nombre está reservado. Elige otro.",
   "error_profile_display_name_taken": "Ese nombre ya está en uso. Elige otro.",
+  "error_fight_not_found": "No encontramos esa pelea.",
+  "error_fight_unavailable": "No pudimos cargar esa pelea. Inténtalo de nuevo.",
   "header_sign_in": "Entrar",
   "header_account_label": "Tu cuenta: {name}, {balance}",
   "header_session_unavailable": "Sesión no disponible",

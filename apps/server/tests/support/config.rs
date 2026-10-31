@@ -59,5 +59,6 @@ pub fn config(extra: &[(&str, &str)]) -> Config {
 pub fn lazy_pool(config: &Config) -> PgPool {
     PgPoolOptions::new()
         .max_connections(2)
+        .acquire_timeout(server::db::ACQUIRE_TIMEOUT)
         .connect_lazy_with(config.database.clone())
 }

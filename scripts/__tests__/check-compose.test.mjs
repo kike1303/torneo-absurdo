@@ -713,6 +713,37 @@ const CASES = [
     { [SD]: [['static-debian13:nonroot@', 'static-debian13:latest@']] },
     /nonroot: the final base must be a :nonroot tag/,
   ],
+  // 010 RNF "Imagen": the final stage carries the characters, and has no RUN.
+  [
+    'server Dockerfile: without the characters',
+    { [SD]: [['COPY content/characters /content/characters\n', '']] },
+    /final-stage: COPY content\/characters \/content\/characters is required/,
+  ],
+  [
+    'server Dockerfile: the characters only in a build stage',
+    {
+      [SD]: [
+        ['COPY content/characters /content/characters\n', ''],
+        ['COPY content/names content/names\n', 'COPY content/characters /content/characters\n'],
+      ],
+    },
+    /final-stage: COPY content\/characters \/content\/characters is required/,
+  ],
+  [
+    'server Dockerfile: without CONTENT_DIR',
+    { [SD]: [['ENV CONTENT_DIR=/content/characters\n', '']] },
+    /final-stage: ENV CONTENT_DIR=\/content\/characters is required/,
+  ],
+  [
+    'server Dockerfile: CONTENT_DIR somewhere else',
+    { [SD]: [['ENV CONTENT_DIR=/content/characters', 'ENV CONTENT_DIR=/tmp']] },
+    /final-stage: ENV CONTENT_DIR=\/content\/characters is required/,
+  ],
+  [
+    'server Dockerfile: a RUN in the final stage',
+    { [SD]: [['EXPOSE 8080\n', 'RUN true\nEXPOSE 8080\n']] },
+    /final-stage: RUN is not allowed/,
+  ],
   // 008 RF-D9, plan-d decision 12: no feature flag and no dev-auth in any instruction of the
   // server Dockerfile, with the `\` continuations joined and the comments dropped.
   ...[

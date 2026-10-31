@@ -274,6 +274,33 @@ impl ProfileErrorCode {
     }
 }
 
+/// Fight codes (`fight.*`, 010 RF36): the answers of the read API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum FightErrorCode {
+    /// An id that is not a canonical decimal from 1 to `i32::MAX`, or a fight that does not exist.
+    #[serde(rename = "fight.not_found")]
+    NotFound,
+    /// The database failed (RF34).
+    #[serde(rename = "fight.unavailable")]
+    Unavailable,
+}
+
+impl FightErrorCode {
+    /// Every variant. A test with an exhaustive `match` keeps this list complete.
+    pub const ALL: &'static [Self] = &[Self::NotFound, Self::Unavailable];
+    /// The only domain prefix this enum may use.
+    pub const PREFIX: &'static str = "fight.";
+
+    /// The serialized code (the same string serde writes).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotFound => "fight.not_found",
+            Self::Unavailable => "fight.unavailable",
+        }
+    }
+}
+
 /// Any error code the server can put in an HTTP body or a WebSocket message. Untagged, so in
 /// TypeScript it is the union of the domain enums. Each enum owns one prefix and their string
 /// sets never overlap, which keeps deserialization unambiguous. A new domain gets a new enum
@@ -286,6 +313,7 @@ pub enum ErrorCode {
     Ws(WsErrorCode),
     Auth(AuthErrorCode),
     Profile(ProfileErrorCode),
+    Fight(FightErrorCode),
 }
 
 impl ErrorCode {
@@ -296,6 +324,7 @@ impl ErrorCode {
             Self::Ws(code) => code.as_str(),
             Self::Auth(code) => code.as_str(),
             Self::Profile(code) => code.as_str(),
+            Self::Fight(code) => code.as_str(),
         }
     }
 }
@@ -321,6 +350,12 @@ impl From<AuthErrorCode> for ErrorCode {
 impl From<ProfileErrorCode> for ErrorCode {
     fn from(code: ProfileErrorCode) -> Self {
         Self::Profile(code)
+    }
+}
+
+impl From<FightErrorCode> for ErrorCode {
+    fn from(code: FightErrorCode) -> Self {
+        Self::Fight(code)
     }
 }
 
@@ -406,11 +441,19 @@ mod tests {
         }
     }
 
+    fn fight_index(code: FightErrorCode) -> usize {
+        match code {
+            FightErrorCode::NotFound => 0,
+            FightErrorCode::Unavailable => 1,
+        }
+    }
+
     const API_COUNT: usize = 4;
     const WS_COUNT: usize = 11;
     const AUTH_COUNT: usize = 11;
     const CALLBACK_COUNT: usize = 8;
     const PROFILE_COUNT: usize = 3;
+    const FIGHT_COUNT: usize = 2;
 
     #[test]
     fn all_lists_every_variant_once() {
@@ -435,6 +478,12 @@ mod tests {
             .collect();
         assert_eq!(profile.len(), PROFILE_COUNT);
         assert_eq!(ProfileErrorCode::ALL.len(), PROFILE_COUNT);
+        let fight: HashSet<usize> = FightErrorCode::ALL
+            .iter()
+            .map(|c| fight_index(*c))
+            .collect();
+        assert_eq!(fight.len(), FIGHT_COUNT);
+        assert_eq!(FightErrorCode::ALL.len(), FIGHT_COUNT);
     }
 
     #[test]
@@ -606,6 +655,13 @@ mod tests {
             );
             assert_eq!(ErrorCode::from(*code).as_str(), code.as_str());
         }
+        for code in FightErrorCode::ALL {
+            assert_eq!(
+                serde_json::to_value(code).unwrap(),
+                serde_json::Value::from(code.as_str())
+            );
+            assert_eq!(ErrorCode::from(*code).as_str(), code.as_str());
+        }
     }
 
     #[test]
@@ -630,9 +686,16 @@ mod tests {
             );
             assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
         }
+        for code in FightErrorCode::ALL {
+            assert!(
+                code.as_str().starts_with(FightErrorCode::PREFIX),
+                "{code:?}"
+            );
+            assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
+        }
         assert_eq!(
             seen.len(),
-            API_COUNT + WS_COUNT + AUTH_COUNT + PROFILE_COUNT
+            API_COUNT + WS_COUNT + AUTH_COUNT + PROFILE_COUNT + FIGHT_COUNT
         );
     }
 
@@ -664,6 +727,13 @@ mod tests {
             assert_eq!(
                 serde_json::from_str::<ErrorCode>(&json).unwrap(),
                 ErrorCode::Profile(*code)
+            );
+        }
+        for code in FightErrorCode::ALL {
+            let json = format!("\"{}\"", code.as_str());
+            assert_eq!(
+                serde_json::from_str::<ErrorCode>(&json).unwrap(),
+                ErrorCode::Fight(*code)
             );
         }
         assert_eq!(

@@ -1,0 +1,6 @@
+{
+  "ruleset_version": 1,
+  "spec_a": "{\"slug\":\"striker\",\"stats\":{\"hp\":50,\"attack\":80,\"defense\":40,\"speed\":70,\"special\":60},\"personality\":{\"aggression\":80,\"caution\":20,\"showmanship\":50},\"abilities\":[{\"id\":\"power_punch\",\"kind\":\"heavy\",\"power\":50,\"cooldown\":2,\"element\":null},{\"id\":\"flame_burst\",\"kind\":\"special\",\"power\":80,\"cooldown\":4,\"element\":\"fire\"}],\"weaknesses\":[\"water\"]}",
+  "spec_b": "{\"slug\":\"tank\",\"stats\":{\"hp\":90,\"attack\":60,\"defense\":80,\"speed\":30,\"special\":40},\"personality\":{\"aggression\":50,\"caution\":70,\"showmanship\":20},\"abilities\":[{\"id\":\"ground_slam\",\"kind\":\"heavy\",\"power\":60,\"cooldown\":3,\"element\":\"ground\"},{\"id\":\"boulder_toss\",\"kind\":\"special\",\"power\":50,\"cooldown\":6,\"element\":\"ground\"}],\"weaknesses\":[\"water\"]}",
+  "snapshot_sha256": "d34614447e89e5e959f1afecb4d71436e9cbc90903fd4666af4c61aa70fbe439"
+}

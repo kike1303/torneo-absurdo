@@ -17,6 +17,8 @@ path = "src/main.rs"
 
 [dependencies]
 protocol.workspace = true
+engine.workspace = true
+content.workspace = true
 axum.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
@@ -56,6 +58,8 @@ webpki-roots.workspace = true
 dev-auth = []
 
 [dev-dependencies]
+# RF7: a public verification also runs the bindings a browser would run.
+engine-wasm.workspace = true
 tokio = { workspace = true, features = ["process", "test-util"] }
 tokio-tungstenite.workspace = true
 futures-util.workspace = true

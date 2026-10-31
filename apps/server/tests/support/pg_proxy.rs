@@ -12,6 +12,7 @@ use tokio::task::JoinHandle;
 pub struct PgProxy {
     addr: SocketAddr,
     cut: watch::Sender<bool>,
+    hung: watch::Sender<bool>,
     accepted: Arc<AtomicUsize>,
     task: JoinHandle<()>,
 }
@@ -30,6 +31,7 @@ impl PgProxy {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let (tx, rx) = watch::channel(cut);
+        let (hung_tx, hung_rx) = watch::channel(false);
         let accepted = Arc::new(AtomicUsize::new(0));
         let counter = accepted.clone();
         let task = tokio::spawn(async move {
@@ -43,20 +45,30 @@ impl PgProxy {
                 }
                 counter.fetch_add(1, Ordering::SeqCst);
                 let mut rx = rx.clone();
+                let mut hung = hung_rx.clone();
                 tokio::spawn(async move {
                     let Ok(mut upstream) = TcpStream::connect(target).await else {
                         return;
                     };
-                    tokio::select! {
-                        _ = tokio::io::copy_bidirectional(&mut client, &mut upstream) => {}
-                        _ = rx.wait_for(|cut| *cut) => {}
+                    let hang = tokio::select! {
+                        _ = tokio::io::copy_bidirectional(&mut client, &mut upstream) => false,
+                        _ = rx.wait_for(|cut| *cut) => false,
+                        _ = hung.wait_for(|hung| *hung) => true,
+                    };
+                    // Both sockets stay open and no byte moves: the backend stays alive, and the
+                    // client hears nothing, not even a close.
+                    if hang {
+                        let _ = rx.wait_for(|cut| *cut).await;
                     }
+                    drop(upstream);
+                    drop(client);
                 });
             }
         });
         Self {
             addr,
             cut: tx,
+            hung: hung_tx,
             accepted,
             task,
         }
@@ -69,6 +81,12 @@ impl PgProxy {
     /// Closes every live connection and refuses new ones.
     pub fn cut(&self) {
         self.cut.send_replace(true);
+    }
+
+    /// Stops moving bytes on every connection, without closing any: a hung network (010 RF10).
+    /// New connections hang too.
+    pub fn hang(&self) {
+        self.hung.send_replace(true);
     }
 
     pub fn restore(&self) {

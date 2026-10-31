@@ -70,6 +70,11 @@ pub async fn warm_up() {
 /// them, so a test can override or check any of them. With `dev-auth`, the gate needs a
 /// loopback `BIND_ADDR`.
 pub const DEFAULT_ENV: &[(&str, &str)] = &[
+    // `cargo test` runs in apps/server, and the default is relative to the root (010 RF22).
+    (
+        "CONTENT_DIR",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/characters"),
+    ),
     ("INTERNAL_API_SECRET", super::app::SECRET),
     ("IP_HASH_KEY", super::app::IP_HASH_KEY),
     ("DAILY_GRANT", "100"),
