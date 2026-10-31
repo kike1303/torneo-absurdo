@@ -46,6 +46,21 @@ fn events(finished: &bin::Finished) -> Vec<serde_json::Value> {
         .collect()
 }
 
+/// An event of the CLI (no `target`) has `event`, `level`, `ts` and at most an `error_kind`.
+fn assert_own_events_have_only_their_fields(lines: &[serde_json::Value], case: &str) {
+    for line in lines {
+        let own = line.get("target").is_none();
+        let mut keys: Vec<_> = line.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        if own {
+            assert!(
+                keys == ["event", "level", "ts"] || keys == ["error_kind", "event", "level", "ts"],
+                "{case}: {line}"
+            );
+        }
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_cli_never_logs_the_user_nor_the_reason() {
     bin::warm_up().await;
@@ -131,18 +146,7 @@ async fn the_cli_never_logs_the_user_nor_the_reason() {
                 lines.iter().any(|l| l["event"] == event),
                 "{case}: {lines:?}"
             );
-            for line in &lines {
-                let own = line.get("target").is_none();
-                let mut keys: Vec<_> = line.as_object().unwrap().keys().cloned().collect();
-                keys.sort();
-                if own {
-                    assert!(
-                        keys == ["event", "level", "ts"]
-                            || keys == ["error_kind", "event", "level", "ts"],
-                        "{case}: {line}"
-                    );
-                }
-            }
+            assert_own_events_have_only_their_fields(&lines, &case);
         }
     }
 }
@@ -193,5 +197,6 @@ async fn grant_with_two_providers_prints_only_their_names() {
             lines.iter().any(|l| l["event"] == "admin.grant_applied"),
             "{level}: {lines:?}"
         );
+        assert_own_events_have_only_their_fields(&lines, level);
     }
 }

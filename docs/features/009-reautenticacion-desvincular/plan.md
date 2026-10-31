@@ -691,6 +691,7 @@ Sin cambios en los workflows.
     - La fila "Historial de eventos de seguridad" del aviso declara el proveedor, con el texto de security-reviewer. La sección 8 no cambia.
     - El comentario de `auth_state!` nombra los dos casos reales de la desviación 5, y dice por qué una sesión anterior a 009 no es uno de ellos.
     - La prueba manual del README dice que el paso 4 pide confirmar otra vez, porque el `unlink` del paso 3 consumió la confirmación. El paso 5 dice que el intento fallido del paso 4 no la consume (la transacción de `link` hace rollback), con el límite de 10 minutos.
+26. **Revisión del PR: los campos de los eventos de `grant`.** `tests/admin_cli_logs.rs` ya prometía "no event has more than its fields" en el caso de dos proveedores. Lo compruebo en lugar de quitar la frase, con la misma comprobación del otro test, ahora en un helper. La lista de `telemetry.rs` no lo hace redundante, porque deja pasar cualquier campo permitido. Mutante "`admin.grant_applied` con `status`, que está en la lista": **muere**.
 
 ## Revisión
 
