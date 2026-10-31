@@ -37,4 +37,4 @@ pub use me::{
     DisplayNameRequest, Locale, MAX_SAFE_INTEGER, Me, PreferencesRequest, Provider, ReauthStatus,
     Role, Theme, UnlinkStatus,
 };
-pub use ws::{Channel, ClientMessage, SelfEvent, ServerMessage};
+pub use ws::{Channel, ClientMessage, FightId, SelfEvent, ServerMessage};

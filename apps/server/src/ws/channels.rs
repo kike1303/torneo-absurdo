@@ -32,7 +32,8 @@ impl Subscriptions {
     /// so is `self` without a session. Past the limit: `ws.too_many_subscriptions`.
     pub fn subscribe(&mut self, name: &str, has_session: bool) -> Result<Channel, WsErrorCode> {
         let channel = Channel::parse(name).ok_or(WsErrorCode::ForbiddenChannel)?;
-        if channel == Channel::SelfChannel && !has_session {
+        // Until the hub exists, the only channel that can be opened.
+        if channel != Channel::SelfChannel || !has_session {
             return Err(WsErrorCode::ForbiddenChannel);
         }
         if !self.open.contains(&channel) && self.open.len() >= self.limit {
