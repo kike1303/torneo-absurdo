@@ -139,7 +139,11 @@ struct Runner {
     emissions: BTreeMap<i32, tokio::task::AbortHandle>,
     finals: BTreeMap<i32, Settling>,
     safe_stops: BTreeMap<i32, SafeStop>,
-    /// The result of `FightSnapshot::from_row` of each row: its bytes do not change.
+    /// The rows whose last step failed with an error of the database, and since when. They do not
+    /// stop the other rows, and they are tried again at the backoff of the database.
+    row_failures: BTreeMap<i32, i64>,
+    /// The result of `FightSnapshot::from_row` of each row, until the next reread: a row repaired
+    /// by hand has to be seen (only with its guard off, but that is the way out of a corrupt one).
     snapshot_errors: BTreeMap<i32, Option<&'static str>>,
     /// Rows whose snapshot failed in a state with a commit, and when they were last logged.
     snapshot_logged: BTreeMap<i32, i64>,
@@ -169,6 +173,7 @@ impl Runner {
             emissions: BTreeMap::new(),
             finals: BTreeMap::new(),
             safe_stops: BTreeMap::new(),
+            row_failures: BTreeMap::new(),
             snapshot_errors: BTreeMap::new(),
             snapshot_logged: BTreeMap::new(),
             tasks: JoinSet::new(),
@@ -240,9 +245,19 @@ impl Runner {
             };
             let (wake, retry) = match passed {
                 Ok(wake) => {
-                    self.shared.initial_evaluation_done();
-                    db_backoff = timings.db_backoff_min_ms;
-                    (wake, None)
+                    // The first evaluation is not over while a row with a commit is unevaluated,
+                    // unless it already halted the fights, which is what it would say.
+                    if !self.commit_row_failing() || self.halted() {
+                        self.shared.initial_evaluation_done();
+                    }
+                    if self.row_failures.is_empty() {
+                        db_backoff = timings.db_backoff_min_ms;
+                        (wake, None)
+                    } else {
+                        let retry = Duration::from_millis(db_backoff);
+                        db_backoff = db_backoff.saturating_mul(2).min(timings.db_backoff_max_ms);
+                        (wake, Some(retry))
+                    }
                 }
                 Err(error) => {
                     let kind = error_kind(&error);
@@ -291,11 +306,28 @@ impl Runner {
         }
         let now = self.now();
         let halt_after = self.settings.timings.settle_halt_ms;
-        self.finals.values().any(|settling| {
+        let settlement = self.finals.values().any(|settling| {
             settling
                 .first_failed_at
                 .is_some_and(|first| now.saturating_sub(first) >= halt_after)
+        });
+        settlement
+            || self
+                .commit_row_failures()
+                .any(|first| now.saturating_sub(first) >= halt_after)
+    }
+
+    /// Since when each failing row with a commit has been failing. One without a commit never halts
+    /// anything: it has no seed nor bets, and it ends cancelled when it loses its window.
+    fn commit_row_failures(&self) -> impl Iterator<Item = i64> + '_ {
+        self.row_failures.iter().filter_map(|(id, first)| {
+            let row = self.rows.get(id)?;
+            (row.state != FightState::Scheduled).then_some(*first)
         })
+    }
+
+    fn commit_row_failing(&self) -> bool {
+        self.commit_row_failures().next().is_some()
     }
 
     /// One evaluation of every unsettled fight, the oldest first. Returns the next hour to look.
@@ -311,8 +343,18 @@ impl Runner {
         order.sort_unstable();
         let mut wake = self.next_reread;
         for (_, id) in order {
-            if let Some(deadline) = self.step(id, now).await? {
-                wake = wake.min(deadline);
+            match self.step(id, now).await {
+                Ok(deadline) => {
+                    self.row_failures.remove(&id);
+                    if let Some(deadline) = deadline {
+                        wake = wake.min(deadline);
+                    }
+                }
+                // Something this row does, not the connection: the rest of the rows go on.
+                Err(error) if error.as_database_error().is_some() => {
+                    self.row_failed(id, &error, now);
+                }
+                Err(error) => return Err(error),
             }
         }
         self.spawn_attempts(now, &mut wake);
@@ -345,9 +387,21 @@ impl Runner {
         self.finals
             .values()
             .filter_map(|s| s.first_failed_at)
+            .chain(self.commit_row_failures())
             .map(|first| first.saturating_add(halt_after))
             .filter(|hour| *hour > now)
             .min()
+    }
+
+    fn row_failed(&mut self, id: i32, error: &sqlx::Error, now: i64) {
+        let kind = error_kind(error);
+        if kind == "lock_timeout" {
+            tracing::warn!(event = "fights.lock_timeout", error_kind = kind);
+        } else {
+            tracing::warn!(event = "fights.row_failed", error_kind = kind);
+        }
+        self.row_failures.entry(id).or_insert(now);
+        self.dirty = true;
     }
 
     async fn reload(&mut self, now: i64) -> Result<(), sqlx::Error> {
@@ -370,6 +424,7 @@ impl Runner {
         for id in gone {
             self.forget(id);
         }
+        self.snapshot_errors.clear();
         Ok(())
     }
 
@@ -380,6 +435,7 @@ impl Runner {
         self.sealed.remove(&id);
         self.finals.remove(&id);
         self.safe_stops.remove(&id);
+        self.row_failures.remove(&id);
         self.snapshot_errors.remove(&id);
         self.snapshot_logged.remove(&id);
     }
@@ -552,7 +608,12 @@ impl Runner {
         };
         let snapshot = match FightSnapshot::from_row(row) {
             Ok(snapshot) => snapshot,
-            Err(error) => return Ok(Some(self.safe_stop(id, error.code(), now))),
+            // `check_snapshots` logs this one, on its own timer.
+            Err(_) => {
+                let next_retry = now.saturating_add(self.settings.timings.reread_ms);
+                self.safe_stops.insert(id, SafeStop { next_retry });
+                return Ok(Some(next_retry));
+            }
         };
         let Some(commit) = row.seed_commit.clone() else {
             return Ok(Some(self.safe_stop(id, "commit_missing", now)));
@@ -658,8 +719,10 @@ impl Runner {
             Ok((task, TaskOutput::Attempt { id, result })) => {
                 self.task_kinds.remove(&task);
                 match result {
-                    Ok(Attempted::Confirmed | Attempted::AlreadySettled) => {
-                        tracing::debug!(event = "fights.settled");
+                    Ok(attempted) => {
+                        if attempted == Attempted::Confirmed {
+                            tracing::debug!(event = "fights.settled");
+                        }
                         self.rows.remove(&id);
                         self.forget(id);
                         self.dirty = true;
