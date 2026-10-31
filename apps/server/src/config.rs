@@ -16,6 +16,7 @@ use sqlx::postgres::PgConnectOptions;
 use tracing_subscriber::EnvFilter;
 use url::{Host, Url};
 
+use crate::fights::{self, FightsConfig};
 use crate::http::cookies::CookiePolicy;
 use crate::ledger::Coins;
 use crate::net::{InternalSecret, IpHashKey, TrustedProxies};
@@ -269,6 +270,8 @@ pub struct Config {
     pub cookies: CookiePolicy,
     /// Google and Discord (RF-C1): both always outside loopback.
     pub oauth: OAuthCredentials,
+    /// The schedule of the fights and where the roster is (010 RF11, RF22).
+    pub fights: FightsConfig,
 }
 
 // Hand-written so the connection options (with the password), the internal secret and the
@@ -289,8 +292,59 @@ impl fmt::Debug for Config {
             .field("daily_grant", &self.daily_grant.0)
             .field("cookies", &self.cookies)
             .field("oauth", &self.oauth.configured())
+            .field("fights", &self.fights)
             .finish()
     }
+}
+
+/// The longest period of the schedule, in seconds: a day.
+const MAX_FIGHT_SECS: u32 = 86_400;
+
+/// The variables of the fights, with RF11: a window that exists and that a fight fits in its cadence:
+/// `window + pre_live + reserve + 10 s <= cadence`, with `reserve = max_duration + settle_delay`.
+fn fights_from(
+    text: &impl Fn(&'static str) -> Result<Option<String>, ConfigError>,
+) -> Result<FightsConfig, ConfigError> {
+    const CADENCE: &str = "FIGHT_CADENCE_SECS";
+    const WINDOW: &str = "FIGHT_BETTING_WINDOW_SECS";
+    const PRE_LIVE: &str = "FIGHT_PRE_LIVE_SECS";
+    const CONTENT_DIR: &str = "CONTENT_DIR";
+    let secs = |var: &'static str, default: u32, min: u32| -> Result<i64, ConfigError> {
+        let value = match text(var)? {
+            None => default,
+            Some(value) => value
+                .parse::<u32>()
+                .ok()
+                .filter(|n| (min..=MAX_FIGHT_SECS).contains(n))
+                .ok_or(ConfigError::Invalid { var })?,
+        };
+        Ok(i64::from(value) * 1000)
+    };
+    let (cadence, window, pre_live) = FightsConfig::DEFAULT_SECS;
+    let cadence_ms = secs(CADENCE, cadence, 1)?;
+    let window_ms = secs(WINDOW, window, 1)?;
+    let pre_live_ms = secs(PRE_LIVE, pre_live, 0)?;
+    let ruleset = engine::Ruleset::for_version(fights::RULESET_VERSION)
+        .ok_or(ConfigError::Invalid { var: CADENCE })?;
+    let reserve = fights::snapshot::max_duration_ms(&ruleset)
+        .map(|ms| i64::from(ms) + i64::from(fights::SETTLE_DELAY_MS))
+        .ok_or(ConfigError::Invalid { var: CADENCE })?;
+    if window_ms + pre_live_ms + reserve + 10_000 > cadence_ms {
+        return Err(ConfigError::Invalid { var: CADENCE });
+    }
+    let content_dir = match text(CONTENT_DIR)? {
+        None => FightsConfig::DEFAULT_CONTENT_DIR.to_owned(),
+        Some(value) if value.is_empty() => {
+            return Err(ConfigError::Invalid { var: CONTENT_DIR });
+        }
+        Some(value) => value,
+    };
+    Ok(FightsConfig {
+        cadence_ms,
+        window_ms,
+        pre_live_ms,
+        content_dir: content_dir.into(),
+    })
 }
 
 impl Config {
@@ -434,6 +488,7 @@ impl Config {
             }
         }
         let cookies = cookie_policy(loopback);
+        let fights = fights_from(&text)?;
 
         Ok(Self {
             database,
@@ -449,6 +504,7 @@ impl Config {
             daily_grant,
             cookies,
             oauth,
+            fights,
         })
     }
 }
@@ -1012,6 +1068,76 @@ mod tests {
         for value in ["65536", "-1", "abc", ""] {
             assert_eq!(with(&[("PORT", value)]).unwrap_err().var(), "PORT");
         }
+    }
+
+    /// 010 RF11: the defaults, every variable, and a fight that does not fit in its cadence.
+    #[test]
+    fn the_schedule_of_the_fights() {
+        let config = with(&[]).unwrap();
+        assert_eq!(config.fights.cadence_ms, 600_000);
+        assert_eq!(config.fights.window_ms, 450_000);
+        assert_eq!(config.fights.pre_live_ms, 30_000);
+        assert_eq!(
+            config.fights.content_dir,
+            std::path::PathBuf::from("content/characters")
+        );
+
+        // The smallest grid: 5 + 3 + 95 + 10 = 113 s (worry 9).
+        let tight = with(&[
+            ("FIGHT_CADENCE_SECS", "113"),
+            ("FIGHT_BETTING_WINDOW_SECS", "5"),
+            ("FIGHT_PRE_LIVE_SECS", "3"),
+            ("CONTENT_DIR", "/content/characters"),
+        ])
+        .unwrap();
+        assert_eq!(tight.fights.cadence_ms, 113_000);
+        assert_eq!(tight.fights.window_ms, 5000);
+        assert_eq!(tight.fights.pre_live_ms, 3000);
+        assert_eq!(
+            tight.fights.content_dir,
+            std::path::PathBuf::from("/content/characters")
+        );
+        // A pre-live of zero is a valid one, a window of zero is not (amendment DP-1).
+        assert!(with(&[("FIGHT_PRE_LIVE_SECS", "0")]).is_ok());
+        assert_eq!(
+            with(&[("FIGHT_BETTING_WINDOW_SECS", "0")])
+                .unwrap_err()
+                .var(),
+            "FIGHT_BETTING_WINDOW_SECS"
+        );
+        // One second less than the smallest grid.
+        assert_eq!(
+            with(&[
+                ("FIGHT_CADENCE_SECS", "112"),
+                ("FIGHT_BETTING_WINDOW_SECS", "5"),
+                ("FIGHT_PRE_LIVE_SECS", "3"),
+            ])
+            .unwrap_err()
+            .var(),
+            "FIGHT_CADENCE_SECS"
+        );
+        // The defaults do not fit in a cadence of 9 minutes.
+        assert_eq!(
+            with(&[("FIGHT_CADENCE_SECS", "540")]).unwrap_err().var(),
+            "FIGHT_CADENCE_SECS"
+        );
+        for var in [
+            "FIGHT_CADENCE_SECS",
+            "FIGHT_BETTING_WINDOW_SECS",
+            "FIGHT_PRE_LIVE_SECS",
+        ] {
+            for value in ["", "x", "-1", "1.5", "86401", "99999999999"] {
+                assert_eq!(
+                    with(&[(var, value)]).unwrap_err().var(),
+                    var,
+                    "{var} {value:?}"
+                );
+            }
+        }
+        assert_eq!(
+            with(&[("CONTENT_DIR", "")]).unwrap_err().var(),
+            "CONTENT_DIR"
+        );
     }
 
     #[test]

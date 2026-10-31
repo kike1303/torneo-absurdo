@@ -18,6 +18,7 @@ use tokio_util::task::TaskTracker;
 use crate::auth::AuthState;
 use crate::config::Config;
 use crate::db::{self, DbProbe, PgProbe, RetryConfig};
+use crate::fights::{self, FightSettings, FightsShared};
 use crate::http::origin::OriginPolicy;
 use crate::http::{self, health::HealthConfig, health::HealthState};
 use crate::net::{LocalAddr, NetState};
@@ -72,6 +73,8 @@ pub struct Settings {
     pub link_gate: crate::auth::link::LinkGateConfig,
     /// The pause of an unlink before its transaction (the race tests of 009 RF15).
     pub unlink_gate: crate::auth::unlink::UnlinkGateConfig,
+    /// The clock, the hook and the times of the fights (010): never an environment variable.
+    pub fights: FightSettings,
 }
 
 #[derive(Clone)]
@@ -83,6 +86,7 @@ pub struct AppState {
     pub origin: Arc<OriginPolicy>,
     pub rate: Arc<RateLimits>,
     pub auth: Arc<AuthState>,
+    pub fights: Arc<FightsShared>,
 }
 
 impl AppState {
@@ -104,6 +108,7 @@ impl AppState {
             net: Arc::new(Self::net_from_config(config)),
             rate: Arc::new(RateLimits::new(&settings.rate)),
             auth: Arc::new(AuthState::from_config(config, settings)?),
+            fights: Arc::new(FightsShared::new(settings.fights.clock.clone())),
         })
     }
 
@@ -185,6 +190,19 @@ pub async fn serve(
         .map_err(|_| StartupError::Bind)?
         .port();
     tracing::info!(event = "server.listening", port);
+    // Only here: the tests in process do not program fights unless they ask (010 RF14).
+    let stop_fights = CancellationToken::new();
+    tokio::spawn(fights::runner::run(
+        state.db.clone(),
+        state.fights.clone(),
+        config.fights.clone(),
+        settings.fights.clone(),
+        stop_fights.clone(),
+    ));
+    let shutdown = async move {
+        shutdown.await;
+        stop_fights.cancel();
+    };
     run_until_shutdown(listener, state, settings.http, shutdown).await
 }
 

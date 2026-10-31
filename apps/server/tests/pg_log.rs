@@ -27,6 +27,25 @@ async fn failing_statements_never_log_their_values() {
         .await
         .unwrap();
 
+    // 010: a fight that breaks a CHECK of its table, with the canary in a column of the row
+    // (`Failing row contains (…)` without A9), and the same canary on the guard of the state.
+    for (state, max_hp) in [("scheduled", 0), ("settled", 1)] {
+        let refused = sqlx::query(
+            "INSERT INTO fights (state, opens_at, closes_at, live_at, ruleset_version, spec_a, \
+             spec_b, snapshot_sha256, slug_a, slug_b, max_hp_a, max_hp_b, time_limit_ms, \
+             max_duration_ms, matchup_round, roster_sha256) \
+             VALUES ($1, now(), now() + interval '1 hour', now() + interval '2 hours', 1, \
+             '\\x7b7d', '\\x7b7d', $2, $3, $3, $4, 1, 1, 1, 1, $2)",
+        )
+        .bind(state)
+        .bind(vec![1_u8; 32])
+        .bind(&canary)
+        .bind(max_hp)
+        .execute(&pool)
+        .await;
+        assert!(refused.is_err(), "{state}");
+    }
+
     // A unique violation with the canary in the key (`Key (…)=(…)` without A9).
     let insert = "INSERT INTO users (display_name, display_name_key) VALUES ($1, $1)";
     sqlx::query(insert)

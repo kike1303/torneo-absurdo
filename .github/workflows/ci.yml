@@ -105,13 +105,14 @@ jobs:
               - rust-toolchain.toml
               - .github/dependabot.yml
             # 008 RF-D9, plan-d decision 12: what the e2e runs (the web and the server with
-            # dev-auth). Among the crates the server depends only on protocol; engine and
-            # engine-wasm already come with web, and a balance PR (crates/sim, crates/content)
-            # does not run it.
+            # dev-auth). Since 010 the server depends on protocol, engine and content, and it
+            # reads content/characters; engine, engine-wasm and those characters already come
+            # with web. A balance PR that only touches crates/sim does not run it.
             e2e:
               - *web
               - apps/server/**
               - crates/protocol/**
+              - crates/content/**
               - content/names/**
               - Cargo.toml
               - Cargo.lock
@@ -123,6 +124,8 @@ jobs:
               - infra/**
               - '**/Dockerfile'
               - .dockerignore
+              # The final stage of the server copies it (010 RNF "Imagen").
+              - content/characters/**
               - scripts/check-compose.mjs
               - scripts/check-dockerignore.sh
               - scripts/check-release-binary.mjs

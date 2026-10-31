@@ -15,7 +15,7 @@ async fn every_manifest_entry_is_routed_and_only_by_its_method() {
     let app = support::app::start(support::app::state(&[], &Settings::default())).await;
     for route in ROUTES {
         // A sample value for the path parameters.
-        let path = route.path.replace("{provider}", "dev");
+        let path = route.path.replace("{provider}", "dev").replace("{id}", "1");
         assert!(!path.contains('{'), "add a sample value for {route:?}");
         let method = route.method.http();
         let response = http::send(app.addr, method.as_str(), &path, &[("origin", ORIGIN)]).await;

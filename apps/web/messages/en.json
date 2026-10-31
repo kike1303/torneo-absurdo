@@ -118,6 +118,8 @@
   "error_profile_display_name_invalid": "Use 3 to 24 characters, without invisible or control characters.",
   "error_profile_display_name_reserved": "That name is reserved. Choose another one.",
   "error_profile_display_name_taken": "That name is taken. Choose another one.",
+  "error_fight_not_found": "We could not find that fight.",
+  "error_fight_unavailable": "We could not load that fight. Try again.",
   "header_sign_in": "Sign in",
   "header_account_label": "Your account: {name}, {balance}",
   "header_session_unavailable": "Session unavailable",
