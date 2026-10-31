@@ -82,8 +82,8 @@ describe('every code has a text in en and es (condition of plan-a, answer 5)', (
   });
 
   it('every code of the protocol is in the table', () => {
-    // 4 + 11 + 11 + 3 (ApiErrorCode, WsErrorCode, AuthErrorCode, ProfileErrorCode).
-    expect(Object.keys(ERROR_TEXT)).toHaveLength(29);
+    // 4 + 11 + 11 + 3 + 2 (ApiErrorCode, WsErrorCode, AuthErrorCode, ProfileErrorCode, FightErrorCode).
+    expect(Object.keys(ERROR_TEXT)).toHaveLength(31);
     expect(Object.keys(CALLBACK_ERROR_TEXT)).toEqual([...CALLBACK]);
   });
 
