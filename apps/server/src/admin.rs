@@ -418,7 +418,12 @@ mod source_rules {
                 "(" => depth += 1,
                 ")" => depth -= 1,
                 t if depth == 0 && stops.contains(&t) => break,
-                t if t.starts_with('.') || t.contains('{') || t.contains('}') => break,
+                // A brace ends the Rust around the literal; `'{}'` is a value of the SQL.
+                t if t.starts_with('.')
+                    || (!t.contains('\'') && (t.contains('{') || t.contains('}'))) =>
+                {
+                    break;
+                }
                 _ => {}
             }
             if depth < 0 {
@@ -489,7 +494,10 @@ mod source_rules {
                     {
                         j += 1;
                     }
-                    if get(tokens, j) == "(" {
+                    // `insert into t (select …)` has no column list either.
+                    if get(tokens, j) == "("
+                        && !["select", "values", "with"].contains(&get(tokens, j + 1))
+                    {
                         found.push(list(tokens, j));
                     } else {
                         // Without a column list an insert writes every column.
@@ -570,48 +578,67 @@ mod source_rules {
     ];
 
     /// What takes a guard away when its statement names it.
-    const WEAKENS_A_NAMED_GUARD: [&str; 7] = [
+    const WEAKENS_A_NAMED_GUARD: [&str; 8] = [
         "drop trigger",
         "disable trigger",
         "replica trigger",
         "alter trigger",
         "or replace trigger",
+        // A body of `RETURN NEW` is a guard switched off: each new body is declared below.
+        "or replace function",
         "drop function",
         "drop routine",
     ];
 
     /// What takes every guard away without naming one. On any table: it would also switch off
     /// the triggers of the ledger. The space ends the word: `user` is not `users_privileged_guard`.
-    const WEAKENS_EVERY_GUARD: [&str; 3] = [
+    /// `torneo.actor` is what lets a write past `users_privileged_guard`: only the CLI sets it, and
+    /// the bodies of the guard may read it. `alter role … set` falls under `set torneo.actor`.
+    const WEAKENS_EVERY_GUARD: [&str; 10] = [
         "disable trigger all ",
         "disable trigger user ",
         "session_replication_role",
+        "pg_trigger",
+        "drop schema",
+        "drop owned",
+        "set torneo.actor",
+        "set local torneo.actor",
+        "set session torneo.actor",
+        "set_config ( torneo.actor",
     ];
 
+    /// The SQL without its comments. String literals stay whole: `'/api/*'` and `'--'` open
+    /// nothing, and a statement run through `execute '…'` stays visible.
     fn without_sql_comments(sql: &str) -> String {
         let mut out = String::with_capacity(sql.len());
         let mut rest = sql;
-        while let Some(start) = rest.find("--").into_iter().chain(rest.find("/*")).min() {
-            out.push_str(&rest[..start]);
-            out.push(' ');
-            let end = if rest[start..].starts_with("--") {
-                "\n"
+        while let Some(c) = rest.chars().next() {
+            let comment = [("--", "\n"), ("/*", "*/")]
+                .into_iter()
+                .find(|(open, _)| rest.starts_with(open));
+            if let Some((_, end)) = comment {
+                out.push(' ');
+                rest = rest.split_once(end).map_or("", |(_, after)| after);
+            } else if let Some(literal) = rest.strip_prefix('\'') {
+                let len = literal.find('\'').map_or(literal.len(), |end| end + 1);
+                out.push('\'');
+                out.push_str(&literal[..len]);
+                rest = &literal[len..];
             } else {
-                "*/"
-            };
-            rest = rest[start..].split_once(end).map_or("", |(_, after)| after);
+                out.push(c);
+                rest = &rest[c.len_utf8()..];
+            }
         }
-        out.push_str(rest);
         out
     }
 
     /// Each `(form, target)` of the SQL of a migration that switches a guard off. By statement and
-    /// by substring, so a schema, quotes, `if exists` or a `do` block change nothing; a false
-    /// positive only asks for a look.
+    /// by substring, with the quotes of literals and of `$$` gone, so a schema, quotes, `if exists`
+    /// or a `do` block change nothing; a false positive only asks for a look.
     fn weakens_a_guard(sql: &str) -> Vec<(&'static str, &'static str)> {
         let mut found = Vec::new();
         for statement in without_sql_comments(sql).split(';') {
-            let text = tokens(statement).join(" ") + " ";
+            let text = tokens(&statement.replace(['\'', '$'], " ")).join(" ") + " ";
             for (guard, _) in GUARD_TRIGGERS {
                 if text.contains(guard) {
                     for form in WEAKENS_A_NAMED_GUARD {
@@ -630,12 +657,18 @@ mod source_rules {
         found
     }
 
-    /// `(version, form, target)` of what a migration may do to a guard. Only 009: `UPDATE OF` can
-    /// not be altered, so naming the new `admin_account_cutoff` took a drop and a create of
-    /// `users_privileged_guard` in the same migration, which runs in one transaction. A later
-    /// migration needs its own line here, and a review.
-    const GUARD_CHANGES_ALLOWED: [(i64, &str, &str); 1] =
-        [(20261030000000, "drop trigger", "users_privileged_guard")];
+    /// `(version, form, target)` of what a migration may do to a guard, in the order of the file.
+    /// Only 009: the guard also had to refuse `admin_account_cutoff`, which took a new body and,
+    /// as `UPDATE OF` can not be altered, a drop and a create in the same migration, which runs in
+    /// one transaction. A later migration needs its own line here, and a review.
+    const GUARD_CHANGES_ALLOWED: [(i64, &str, &str); 2] = [
+        (
+            20261030000000,
+            "or replace function",
+            "users_privileged_guard",
+        ),
+        (20261030000000, "drop trigger", "users_privileged_guard"),
+    ];
 
     /// `(version, file name, text)` of every migration.
     fn migrations() -> Vec<(i64, String, String)> {
@@ -911,6 +944,8 @@ mod source_rules {
             r#"sqlx::query("INSERT INTO public.sessions(token_hash, auth_account_id) SELECT $1, $2")"#,
             r#"sqlx::query("INSERT INTO sessions VALUES ($1, $2, $3)")"#,
             r#"sqlx::query("INSERT INTO sessions SELECT * FROM sessions")"#,
+            r#"sqlx::query("INSERT INTO sessions (SELECT * FROM sessions)")"#,
+            r#"sqlx::query("UPDATE sessions SET ip_hash = '{}', authenticated_at = now()")"#,
             r#"sqlx::query("INSERT INTO sessions (token_hash) VALUES ($1) ON CONFLICT (token_hash) DO UPDATE SET authenticated_at = now()")"#,
             r#"sqlx::query("MERGE INTO sessions s USING x ON true WHEN MATCHED THEN UPDATE SET authenticated_at = now()")"#,
             r#"sqlx::query("MERGE INTO ONLY sessions s USING x ON true WHEN NOT MATCHED THEN INSERT (auth_link_seq) VALUES (1)")"#,
@@ -926,7 +961,12 @@ mod source_rules {
             r#"sqlx::query("UPDATE users u SET theme = s.auth_link_seq FROM sessions s WHERE s.user_id = u.id")"#,
             r#"sqlx::query("INSERT INTO auth_events (user_id, kind) SELECT s.user_id, s.auth_account_id FROM sessions s")"#,
             r#"sqlx::query("INSERT INTO sessions (token_hash) VALUES ($1) RETURNING authenticated_at")"#,
-            r#"sqlx::query("DELETE FROM sessions WHERE authenticated_at < $1")"#,
+            r#"sqlx::query("INSERT INTO sessions (token_hash, user_id) SELECT $1, o.authenticated_at FROM sessions o")"#,
+            // Split: `sessions_are_deleted_only_here` reads this file too.
+            concat!(
+                r#"sqlx::query("DELETE FROM"#,
+                r#" sessions WHERE authenticated_at < $1")"#
+            ),
             r#"sqlx::query("UPDATE users SET locale = $1 WHERE id = $2")"#,
         ] {
             assert!(!writes_session_auth(sql), "{sql}");
@@ -959,6 +999,9 @@ mod source_rules {
             );
         }
         for (version, form, target) in GUARD_CHANGES_ALLOWED {
+            if form != "drop trigger" {
+                continue;
+            }
             let text = normalized(version);
             let dropped = text.rfind(&format!("{form} {target}")).unwrap();
             let created = text.rfind(&format!("create trigger {target}")).unwrap();
@@ -1050,12 +1093,68 @@ mod source_rules {
                 "session_replication_role",
                 "every trigger",
             ),
+            (
+                "DO $$ BEGIN EXECUTE 'ALTER TABLE users DISABLE TRIGGER ALL'; END $$;",
+                "disable trigger all",
+                "every trigger",
+            ),
+            (
+                "SELECT '/api/*'; DROP TRIGGER users_privileged_guard ON users;",
+                "drop trigger",
+                users,
+            ),
+            (
+                "SELECT '--'; DROP TRIGGER users_privileged_guard ON users;",
+                "drop trigger",
+                users,
+            ),
+            (
+                "-- it's gone\nDROP TRIGGER oauth_accounts_identity_guard ON oauth_accounts;",
+                "drop trigger",
+                oauth,
+            ),
+            (
+                "CREATE OR REPLACE FUNCTION users_privileged_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$;",
+                "or replace function",
+                users,
+            ),
+            (
+                "UPDATE pg_trigger SET tgenabled = 'D'",
+                "pg_trigger",
+                "every trigger",
+            ),
+            ("DROP SCHEMA public CASCADE", "drop schema", "every trigger"),
+            (
+                "DROP OWNED BY CURRENT_USER CASCADE",
+                "drop owned",
+                "every trigger",
+            ),
+            (
+                "SET LOCAL torneo.actor = 'cli'",
+                "set local torneo.actor",
+                "every trigger",
+            ),
+            (
+                "SET torneo.actor TO 'cli'",
+                "set torneo.actor",
+                "every trigger",
+            ),
+            (
+                "ALTER ROLE CURRENT_USER SET torneo.actor = 'cli'",
+                "set torneo.actor",
+                "every trigger",
+            ),
+            (
+                "SELECT set_config('torneo.actor', 'cli', true)",
+                "set_config ( torneo.actor",
+                "every trigger",
+            ),
         ] {
             assert_eq!(weakens_a_guard(sql), vec![(form, target)], "{sql}");
         }
         for sql in [
             "CREATE TRIGGER users_privileged_guard BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION users_privileged_guard();",
-            "CREATE OR REPLACE FUNCTION users_privileged_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$;",
+            "CREATE FUNCTION users_privileged_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF current_setting('torneo.actor', true) = 'cli' THEN RETURN NEW; END IF; END; $$;",
             "DROP TRIGGER other ON users; ALTER TABLE users ADD COLUMN users_privileged_guard_note text;",
             "ALTER TABLE ledger_entries DISABLE TRIGGER other;",
             "-- DROP TRIGGER users_privileged_guard ON users\n/* ALTER TABLE users DISABLE TRIGGER ALL */ SELECT 1;",
@@ -1166,6 +1265,7 @@ mod source_rules {
             r#"sqlx::query("insert into users (display_name, banned_at) values ($1, now())")"#,
             r#"sqlx::query("INSERT INTO users VALUES ($1, $2, $3)")"#,
             r#"sqlx::query("INSERT INTO users AS u (display_name, role) VALUES ($1, $2)")"#,
+            r#"sqlx::query("INSERT INTO users (SELECT * FROM x)")"#,
             r#"sqlx::query("MERGE INTO users u USING x ON true WHEN MATCHED THEN UPDATE SET role = 'admin'")"#,
             r#"sqlx::query("INSERT INTO oauth_accounts (a) VALUES ($1) ON CONFLICT (a) DO UPDATE SET role = 'admin'")"#,
         ] {
