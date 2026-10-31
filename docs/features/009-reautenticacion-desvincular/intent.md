@@ -70,13 +70,16 @@ Hay además un detalle de #55: `unlink` comprueba la sesión antes de abrir su t
 - Pedir reautenticación para renombrar, `logout-all` o apostar. Vincular no se descarta: es la pregunta 7.
 - Rutas de admin y peleas en vivo (TA-13), despliegue (TA-6, TA-8).
 
-## Riesgos aceptados (pendientes del owner)
+## Riesgos aceptados
+El owner los aceptó el 2026-10-30 (ver "Decisiones"), con la descripción más precisa de la spec, Áreas 3, 4, 5, 12 y 13. El segundo punto no aplica: la regla elegida aguanta la espera.
+
 - **El atacante convive con la víctima hasta que ella note X.** Esta feature evita que se excluya a la víctima, pero no saca al atacante: con una sesión robada, X queda vinculado y le sirve para entrar (y `logout-all` no lo saca) hasta que la víctima lo vea en `/account` y lo desvincule. Con un admin, eso es acceso de admin permanente, y es el peor caso. Lo cubrirían el aviso de "vinculado hace poco" o un vincular que pida autenticación reciente (pregunta 7).
 - **Si la regla de la pregunta 1 no aguanta la espera** (opción (a) sin aviso), el ataque vuelve tras el plazo. Solo vale si el owner lo acepta por escrito.
 
 ## Decisiones
 - **Dirección (owner, 2026-10-30).** La sesión coordinadora le preguntó "¿Arranco la feature de TA-29 con la opción recomendada?", y el owner contestó en el chat: "Sí, arráncala". La opción recomendada: desvincular exige una autenticación reciente con un proveedor ya vinculado, y uno vinculado hace poco no cuenta; vincular no cuenta como reautenticación para `RecentAdmin`; `unlink` vuelve a comprobar la sesión en su transacción. El período de espera y el aviso quedan fuera.
 - **Delegación (owner, 2026-10-29), textual:** "el merge tambien lo puedes hacer y puedes continuar con todo lo que falte sin pedirme permiso, haz todo de una vez, solo ve siguiendo los procesos de los agentes y ya. No importa por ahora que sea de alto riesgo, esto todavía esta en desarrollo y no hay nada montado asi que no pasa nada. Intenta hacer todo sin pedirme las aprobaciones directas a mi". "Todo lo que falte" es lo que la extiende a 009 y a la enmienda de ADR-0008. No cubre un tag `v*` ni un deploy.
+- **Riesgos residuales (owner, 2026-10-30).** La sesión coordinadora le preguntó "¿Aceptas estos riesgos residuales para cuando haya deploy?", después de listarlos, y el owner contestó en el chat: "Los acepto".
 - **Lo que sigue siendo del owner.** Aceptar un riesgo residual (ver Riesgos aceptados) o un período de espera es una decisión de producto. El coordinador se lo señala al owner en su reporte en lugar de bloquear el pipeline.
 
 ## Preguntas abiertas
