@@ -16,6 +16,8 @@ pub mod matchup;
 pub mod release;
 pub mod roster;
 pub mod runner;
+#[cfg(feature = "dev-fights")]
+pub mod script;
 pub mod sealed;
 pub mod snapshot;
 pub mod state;
@@ -141,6 +143,9 @@ pub struct FightSettings {
     pub sink: Arc<dyn release::EventSink>,
     pub probe: Arc<dyn PassProbe>,
     pub timings: RunnerTimings,
+    /// The source of the seeds and the fights with this feature (RF45).
+    #[cfg(feature = "dev-fights")]
+    pub script: Option<Arc<script::FightScript>>,
 }
 
 impl Default for FightSettings {
@@ -152,6 +157,8 @@ impl Default for FightSettings {
             sink: Arc::new(release::DiscardEvents),
             probe: Arc::new(NoProbe),
             timings: RunnerTimings::default(),
+            #[cfg(feature = "dev-fights")]
+            script: None,
         }
     }
 }

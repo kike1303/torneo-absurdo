@@ -178,8 +178,8 @@ async fn echo_disabled_closes_with_1008() {
     );
 }
 
-// A non-loopback origin never starts with `dev-auth`.
-#[cfg(not(feature = "dev-auth"))]
+// A non-loopback origin never starts with a feature of development.
+#[cfg(not(any(feature = "dev-auth", feature = "dev-fights")))]
 #[tokio::test]
 async fn echo_flag_with_an_https_origin_stays_off() {
     // Outside loopback the four OAuth credentials are required (plan-c decision 3).

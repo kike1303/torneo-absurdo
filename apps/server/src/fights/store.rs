@@ -161,6 +161,15 @@ pub async fn unsettled(pool: &PgPool) -> Result<Vec<FightRow>, sqlx::Error> {
     rows.iter().map(decode).collect()
 }
 
+/// How many fights come before this id. Fights are never deleted, so it never changes (RF45).
+#[cfg(feature = "dev-fights")]
+pub async fn fight_rank(pool: &PgPool, id: i32) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT count(*) FROM fights WHERE id < $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+}
+
 /// The last fight settled, by the hour it settled (RF35): a fight halted for a while settles after a
 /// later one that was cancelled.
 pub async fn last_settled(pool: &PgPool) -> Result<Option<FightRow>, sqlx::Error> {

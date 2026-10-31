@@ -631,9 +631,18 @@ impl Runner {
 
     /// RF3: the seed, its row, the commit and the state in one transaction.
     async fn open(&mut self, id: i32, now: i64) -> Result<(), sqlx::Error> {
+        #[cfg(feature = "dev-fights")]
+        let scripted = self.scripted_seed(id).await?;
         let mut tx = self.pool.begin().await?;
         store::set_lock_timeout(&mut tx, self.settings.timings.lock_timeout_ms).await?;
-        match sealed::open_window(&mut tx, id, now).await {
+        #[cfg(feature = "dev-fights")]
+        let opened = match scripted {
+            Some(seed) => sealed::open_window_with_seed(&mut tx, id, &seed, now).await,
+            None => sealed::open_window(&mut tx, id, now).await,
+        };
+        #[cfg(not(feature = "dev-fights"))]
+        let opened = sealed::open_window(&mut tx, id, now).await;
+        match opened {
             Ok(_) => {
                 tx.commit().await?;
                 tracing::debug!(event = "fights.opened");
@@ -647,6 +656,16 @@ impl Runner {
         self.refresh(id).await?;
         self.publish();
         Ok(())
+    }
+
+    /// RF45: the seed of the row of this fight in the script, if there is one.
+    #[cfg(feature = "dev-fights")]
+    async fn scripted_seed(&self, id: i32) -> Result<Option<[u8; 32]>, sqlx::Error> {
+        let (Some(script), Some(row)) = (&self.settings.script, self.rows.get(&id)) else {
+            return Ok(None);
+        };
+        let rank = store::fight_rank(&self.pool, id).await?;
+        Ok(script.seed_for(rank, &row.spec_a, &row.spec_b))
     }
 
     async fn close(&mut self, id: i32, now: i64) -> Result<(), sqlx::Error> {
@@ -885,6 +904,11 @@ impl Runner {
 
     /// RF12, RF20, RF21: the row of the next slot, from the roster loaded at startup.
     async fn announce(&mut self, now: i64) -> Result<(), sqlx::Error> {
+        #[cfg(feature = "dev-fights")]
+        if let Some(script) = self.settings.script.clone() {
+            script.announce(&self.pool, &self.config, now).await?;
+            return self.reload_rows_only().await;
+        }
         let Some(roster) = self.roster.clone() else {
             return Ok(());
         };

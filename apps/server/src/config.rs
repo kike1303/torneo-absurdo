@@ -250,6 +250,9 @@ fn is_credential(text: &str) -> bool {
 
 #[derive(Clone)]
 pub struct Config {
+    /// The scripted fights (RF45). Its type has no `Debug`, so the `Debug` below cannot print it.
+    #[cfg(feature = "dev-fights")]
+    pub fight_script: Option<std::sync::Arc<fights::script::FightScript>>,
     pub database: PgConnectOptions,
     /// Exact `Origin` the WebSocket handshake accepts.
     pub public_origin: String,
@@ -487,6 +490,26 @@ impl Config {
                 return Err(ConfigError::Invalid { var: BIND_ADDR });
             }
         }
+        // 010 RF45: the same gate, and before reading the file: a path that does not exist outside
+        // loopback says DEV_FIGHTS. With both features DEV_AUTH comes first, so a test runs this one
+        // with this feature alone.
+        #[cfg(feature = "dev-fights")]
+        let fight_script = {
+            if !loopback {
+                return Err(ConfigError::Invalid { var: "DEV_FIGHTS" });
+            }
+            if !bind_addr.is_loopback() || bind_addr.is_unspecified() {
+                return Err(ConfigError::Invalid { var: BIND_ADDR });
+            }
+            let var = fights::script::VAR;
+            match text(var)? {
+                None => None,
+                Some(path) => Some(std::sync::Arc::new(
+                    fights::script::FightScript::read(&path)
+                        .map_err(|_| ConfigError::Invalid { var })?,
+                )),
+            }
+        };
         let cookies = cookie_policy(loopback);
         let fights = fights_from(&text)?;
 
@@ -505,6 +528,8 @@ impl Config {
             cookies,
             oauth,
             fights,
+            #[cfg(feature = "dev-fights")]
+            fight_script,
         })
     }
 }
