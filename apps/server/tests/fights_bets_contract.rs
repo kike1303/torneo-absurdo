@@ -211,6 +211,29 @@ async fn only_an_open_window_accepts() {
     tx.rollback().await.unwrap();
 }
 
+/// RF29: a call on a fight that is not open takes no lock. With overlapping bets of TA-27 on a
+/// scheduled fight, its opening would wait for them, and it could end up missing its window.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bet_on_a_scheduled_fight_does_not_hold_back_its_opening() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let vector = Vector::of(KO);
+    let id = f::announce(&pool, T0, &vector.a, &vector.b).await;
+    let (settings, clock) = f::settings_at(T0 - 1);
+    let (shared, _runner) = f::start(&pool, &settings);
+    ready(&shared).await;
+
+    let mut early = pool.begin().await.unwrap();
+    assert_eq!(
+        shared.lock_open_for_bet(&mut early, id, T0 - 1).await,
+        Err(WindowClosed)
+    );
+    // Its transaction stays open, as a bet that goes on with other work would.
+    clock.set(T0);
+    wait_state(&pool, id, FightState::BettingOpen).await;
+    early.rollback().await.unwrap();
+}
+
 /// RF17: the proof the log needs does not exist before the close.
 #[tokio::test]
 async fn there_is_no_closed_window_before_the_close() {

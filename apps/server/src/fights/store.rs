@@ -378,29 +378,25 @@ pub(super) async fn write_decided(
     Ok(done == 1)
 }
 
-/// The share lock of RF29: no row once `closes_at` passed, so it never waits past the hour. Returns
-/// its state and `closes_at`.
+/// The share lock of RF29, only on an open window: past `closes_at` it finds no row, so it never
+/// waits past the hour, and on a `scheduled` fight neither, so it never holds back its opening.
+/// Returns its `closes_at`.
 pub(super) async fn lock_for_bet(
     conn: &mut PgConnection,
     id: i32,
     now_ms: i64,
-) -> Result<Option<(FightState, i64)>, sqlx::Error> {
+) -> Result<Option<i64>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT state, (extract(epoch FROM closes_at) * 1000)::bigint FROM fights \
-         WHERE id = $1 AND closes_at > timestamptz 'epoch' + $2::bigint * interval '1 millisecond' \
+        "SELECT (extract(epoch FROM closes_at) * 1000)::bigint FROM fights \
+         WHERE id = $1 AND state = 'betting_open' \
+         AND closes_at > timestamptz 'epoch' + $2::bigint * interval '1 millisecond' \
          FOR SHARE",
     )
     .bind(id)
     .bind(now_ms)
     .fetch_optional(conn)
     .await?;
-    let Some(row) = row else {
-        return Ok(None);
-    };
-    let state: String = row.try_get(0)?;
-    let state = FightState::parse(&state)
-        .ok_or_else(|| sqlx::Error::Protocol("fights.state".to_owned()))?;
-    Ok(Some((state, row.try_get(1)?)))
+    row.map(|row| row.try_get(0)).transpose()
 }
 
 /// The ids of the unsettled fights with `closes_at` in `[from, to)` (RF32).

@@ -1,6 +1,5 @@
 //! What TA-27 can assume, proved here without any bet (RF29, RF32, RF33).
 
-use protocol::FightState;
 use sqlx::{PgConnection, PgPool};
 
 use super::{FightsShared, store};
@@ -19,7 +18,8 @@ pub struct WindowClosed;
 impl FightsShared {
     /// The serializable close (RF29). `WindowClosed` during a halt, without the lock of RF10 and
     /// until the first evaluation ends, without touching the database. Otherwise a `FOR SHARE` that
-    /// filters by the hour: past `closes_at` it finds no row and takes no lock and waits for none.
+    /// filters by the state and the hour: outside an open window it finds no row, takes no lock and
+    /// waits for none, so it never holds back the opening of a `scheduled` fight.
     /// It must be `FOR SHARE`, because the `FOR KEY SHARE` of a foreign key does not conflict with
     /// the `UPDATE` of the close. A database error is `WindowClosed` too: the transaction is lost.
     ///
@@ -35,8 +35,8 @@ impl FightsShared {
             return Err(WindowClosed);
         }
         match store::lock_for_bet(tx, id, now_ms).await {
-            Ok(Some((FightState::BettingOpen, closes_at_ms))) => Ok(OpenWindow { closes_at_ms }),
-            Ok(_) => Err(WindowClosed),
+            Ok(Some(closes_at_ms)) => Ok(OpenWindow { closes_at_ms }),
+            Ok(None) => Err(WindowClosed),
             Err(error) => {
                 tracing::warn!(
                     event = "fights.db_unavailable",
