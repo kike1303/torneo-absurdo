@@ -740,6 +740,54 @@ const CASES = [
     /final-stage: ENV CONTENT_DIR=\/content\/characters is required/,
   ],
   [
+    'server Dockerfile: a second ENV of CONTENT_DIR, which would win',
+    {
+      [SD]: [
+        [
+          'ENV CONTENT_DIR=/content/characters\n',
+          'ENV CONTENT_DIR=/content/characters\nENV CONTENT_DIR=/tmp\n',
+        ],
+      ],
+    },
+    /final-stage: ENV CONTENT_DIR=\/tmp moves the characters/,
+  ],
+  [
+    'server Dockerfile: CONTENT_DIR among other pairs of an ENV',
+    {
+      [SD]: [
+        [
+          'ENV CONTENT_DIR=/content/characters\n',
+          'ENV CONTENT_DIR=/content/characters\nENV A=1 CONTENT_DIR=/x\n',
+        ],
+      ],
+    },
+    /final-stage: ENV A=1 CONTENT_DIR=\/x moves the characters/,
+  ],
+  [
+    'server Dockerfile: the same ENV twice',
+    {
+      [SD]: [
+        [
+          'ENV CONTENT_DIR=/content/characters\n',
+          'ENV CONTENT_DIR=/content/characters\nENV CONTENT_DIR=/content/characters\n',
+        ],
+      ],
+    },
+    /final-stage: ENV CONTENT_DIR=\/content\/characters is repeated/,
+  ],
+  [
+    'server Dockerfile: a second COPY over the characters',
+    {
+      [SD]: [
+        [
+          'COPY content/characters /content/characters\n',
+          'COPY content/characters /content/characters\nCOPY content/names /content/characters\n',
+        ],
+      ],
+    },
+    /final-stage: COPY content\/names \/content\/characters moves the characters/,
+  ],
+  [
     'server Dockerfile: a RUN in the final stage',
     { [SD]: [['EXPOSE 8080\n', 'RUN true\nEXPOSE 8080\n']] },
     /final-stage: RUN is not allowed/,

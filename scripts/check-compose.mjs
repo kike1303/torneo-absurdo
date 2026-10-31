@@ -933,13 +933,20 @@ function checkServerFinalStage(text, problems) {
   for (const { line, keyword } of final) {
     if (keyword === 'RUN') problems.push(`${file}:${line}: final-stage: RUN is not allowed`);
   }
-  const has = (keyword, args) => final.some((i) => i.keyword === keyword && i.args === args);
-  for (const [keyword, args] of [
+  const required = [
     ['COPY', 'content/characters /content/characters'],
     ['ENV', 'CONTENT_DIR=/content/characters'],
-  ]) {
-    if (!has(keyword, args)) {
-      problems.push(`${file}: final-stage: ${keyword} ${args} is required`);
+  ];
+  for (const [keyword, args] of required) {
+    const count = final.filter((i) => i.keyword === keyword && i.args === args).length;
+    if (count === 0) problems.push(`${file}: final-stage: ${keyword} ${args} is required`);
+    if (count > 1) problems.push(`${file}: final-stage: ${keyword} ${args} is repeated`);
+  }
+  // Only those two lines: a later ENV would win over the required one and still pass.
+  for (const { line, keyword, args } of final) {
+    const exact = required.some(([k, a]) => k === keyword && a === args);
+    if (!exact && (args.includes('CONTENT_DIR') || args.includes('/content'))) {
+      problems.push(`${file}:${line}: final-stage: ${keyword} ${args} moves the characters`);
     }
   }
 }
