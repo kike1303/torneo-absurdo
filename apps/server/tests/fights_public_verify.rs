@@ -114,3 +114,87 @@ async fn every_kind_of_final_verifies_with_public_data() {
     assert_eq!(body.log, None);
     assert_eq!(row(&pool, cancelled).await.revealed_seed, None);
 }
+
+/// RF7: the verification is repeated after `content/` changes: a fight is what it was announced with.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_fight_verifies_after_its_content_changed() {
+    let db = TestDb::create().await;
+    let (fight_settings, clock): (FightSettings, _) = f::settings_at(T0 + 1);
+    let settings = Settings {
+        fights: fight_settings.clone(),
+        ..Settings::default()
+    };
+    let (app, pool, shared) = f::start_app(&db, &[], &settings).await;
+    let content = f::copy_of_content("verify");
+    let runner = f::spawn_runner(
+        &pool,
+        &shared,
+        f::config_on(&content),
+        fight_settings.clone(),
+    );
+    f::wait_for("the announcement", || async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM fights")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            == 1
+    })
+    .await;
+    let id: i32 = sqlx::query_scalar("SELECT min(id) FROM fights")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let announced = row(&pool, id).await;
+    clock.set(announced.opens_at);
+    wait_state(&pool, id, FightState::BettingOpen).await;
+    runner.stop().await;
+
+    // The content of one of the two changes, and then it is gone: the fight does not notice.
+    let character = content.join(&announced.slug_a).join("character.json");
+    let mut json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&character).unwrap()).unwrap();
+    json["stats"]["hp"] = serde_json::json!(1);
+    std::fs::write(&character, serde_json::to_vec(&json).unwrap()).unwrap();
+    let runner = f::spawn_runner(&pool, &shared, f::config_on(&content), fight_settings);
+    drive_to_settled(&pool, &clock, id).await;
+    runner.stop().await;
+    verify(&detail(app.addr, id).await).unwrap();
+
+    std::fs::remove_dir_all(&content).unwrap();
+    let body = detail(app.addr, id).await;
+    verify(&body).unwrap();
+    assert_eq!(body.spec_a.unwrap().as_bytes(), announced.spec_a);
+}
+
+/// RF7: a voided fight skips RF2 only with `snapshot_invalid`, and always proves its commit.
+#[tokio::test]
+async fn a_voided_fight_with_a_bad_snapshot_still_proves_its_commit() {
+    let db = TestDb::create().await;
+    let (app, pool, _shared) = f::start_app(&db, &[], &Settings::default()).await;
+    let vector = Vector::of(KO);
+    let id = f::announce_with(&pool, T0, &vector.a, &vector.b, |raw| {
+        raw.snapshot_sha256 = vec![0; 32];
+    })
+    .await;
+    f::open_with(&pool, id, &vector.seed, T0).await;
+    f::close_by_sql(&pool, id, T0 + f::WINDOW).await;
+    let mut tx = pool.begin().await.unwrap();
+    f::void_by_sql(&mut tx, id, &vector.seed, "snapshot_invalid").await;
+    tx.commit().await.unwrap();
+
+    let body = detail(app.addr, id).await;
+    verify(&body).unwrap();
+
+    // The same bad hash with the other reason does not verify, and neither does another seed.
+    let mut other_reason = body.clone();
+    other_reason.fight.final_result = Some(FightFinal::Voided {
+        reason: protocol::VoidReason::EngineError,
+    });
+    assert!(verify(&other_reason).is_err());
+    let mut other_seed = body.clone();
+    other_seed.seed = Some("00".repeat(32));
+    assert!(verify(&other_seed).is_err());
+    let mut no_seed = body;
+    no_seed.seed = None;
+    assert!(verify(&no_seed).is_err());
+}
