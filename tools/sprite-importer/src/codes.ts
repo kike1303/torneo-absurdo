@@ -52,6 +52,12 @@ export const LINK_CODES = Object.freeze({
   characterUnreadable: 'link.character_unreadable',
 } as const);
 
+/** `normalize`, raw frames + recipe → export (004). */
+export const NORMALIZE_CODES = Object.freeze({
+  recipeInvalid: 'normalize.recipe_invalid',
+  sourceMissing: 'normalize.source_missing',
+} as const);
+
 /** The cut of the output at `LIMITS.maxErrors` lines. */
 export const REPORT_CODES = Object.freeze({ tooManyErrors: 'report.too_many_errors' } as const);
 

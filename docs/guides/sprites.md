@@ -260,6 +260,14 @@ En `import`, un error de píxeles sobre un frame del manifest (`/frames/<i>`) sa
 | `link.misplaced_sprites` | Hay una carpeta `sprites/` dentro del personaje; los sets van en `content/sprites/`. |
 | `link.character_unreadable` | `character.json` no se puede leer (falta, es un enlace, es muy grande o no es un objeto JSON). |
 
+### Normalizar
+`normalize` (feature 004) convierte frames crudos más una receta en un export. Es opcional: el export puede salir de cualquier herramienta.
+
+| Código | Qué significa |
+|---|---|
+| `normalize.recipe_invalid` | La receta no es JSON o le falta o sobra algo; `path` dice dónde. |
+| `normalize.source_missing` | Un frame que pide la receta no existe o no es un PNG; `path` lo nombra. |
+
 ## Revisión
 ### game-designer — 2026-10-28 — APPROVE
 - Verifiqué: las tablas generadas contra "Guía: números" de la spec 007 que aprobé: celda 192, pivote (96, 184), margen 8, alto 64–176, pies 181–183, alcance ≥ 32 px (columna 128), frames 33–1000, `windupStepMs` 100, pesos 4 MiB / 1 MiB; y por acción, `idle` 4–12 (≥ 3 distintos, ciclo 600–2400, ≤ 250 por frame), windups 100–250 / 250–400 / 300–400, `impact_frame` ≥ 1/2/3 con 50/66/66, R ≥ 200, reacciones 200–1000 con primer frame ≤ 134, `ko` y `knockdown` ≤ 1500, `intro` ≤ 1600, `walk` 300–1200. La recuperación recomendada sale de `min_v strike_gap_min_ms` (`guideTable` en `packages/renderer/src/guide/table.ts`, dorado con 700 en v1) y la prosa la atribuye a `strike_gap_min()` de 006 como no validada. C1/C2, `guide.windup_order` y la aclaración del `idle` irregular topado en 250 dicen lo mismo que los puntos 1 a 3 de game-designer en la spec. Recomendaciones (≤ 32 colores, alfa binaria, contorno de 1 px, ciclo de `idle` 800–1600) coinciden con la spec y quedan como no validadas. No elige ni recomienda herramientas de arte (sección 1 y flujo neutros), y el ejemplo de referencia es `ref_a`, no los placeholders. Para quien dibuja se entiende: cada regla trae su porqué y la sección 6 da el export mínimo y el flujo de prueba en la arena.
