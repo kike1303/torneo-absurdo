@@ -28,16 +28,27 @@ test('RF-A10: no CSP violations on /es/ and /en/, and the theme script runs', as
 });
 
 test('RF-A10: no CSP violations in the catalog with a menu and a dialog open', async ({ page }) => {
+  const t0 = Date.now();
+  const mark = (step: string) => console.log(`[TA-34] catalog ${step} +${Date.now() - t0}ms`);
+  page.on('crash', () => mark('page crash'));
   await collectViolations(page);
   await page.goto('/es/dev/components');
+  mark('goto');
   await waitForHydration(page);
+  mark('hydrated');
   await page.getByTestId('dropdown-trigger').click();
+  mark('dropdown clicked');
   await expect(page.getByTestId('dropdown-content')).toBeVisible();
+  mark('dropdown visible');
   await page.keyboard.press('Escape');
+  mark('escape');
   await page.getByTestId('dialog-trigger').click();
+  mark('dialog clicked');
   await expect(page.getByTestId('dialog-content')).toBeVisible();
+  mark('dialog visible');
   await page.waitForTimeout(300);
   expect(await violations(page)).toEqual([]);
+  mark('body done');
 });
 
 // 002 RF-A18 and ADR-0012 B6.1: Pixi runs under the CSP as it is, in Chromium and WebKit. If the
