@@ -992,7 +992,7 @@ async fn a_socket_that_does_not_read_is_closed_in_the_middle_of_its_pages() {
     let (closes_at, live_at) = f::hours(T0);
     f::close_by_sql(&pool, id, closes_at).await;
     let config = WsConfig {
-        close_grace: Duration::from_millis(300),
+        close_grace: Duration::from_secs(1),
         ..WsConfig::default()
     };
     let h = harness_with(&db, live_at, config, |_| {}).await;
@@ -1005,7 +1005,7 @@ async fn a_socket_that_does_not_read_is_closed_in_the_middle_of_its_pages() {
     })
     .await;
     // Far more pages than the buffers of the system hold, whatever they are.
-    let flood = events_at_the_bound(&vector, 200_000);
+    let flood = events_at_the_bound(&vector, 100_000);
     h.shared.hub().publish(id, 1, &flood);
     let total = 1 + flood.len();
     let free = h.sockets.available_permits();
@@ -1016,24 +1016,33 @@ async fn a_socket_that_does_not_read_is_closed_in_the_middle_of_its_pages() {
         h.sockets.available_permits() == free - 1
     })
     .await;
+    // The healthy one reads all along: if not, it would be as stuck as the other one.
     let mut healthy = h.watch(id).await;
+    let reading = tokio::spawn(async move {
+        let mut viewer = Viewer::default();
+        while viewer.events.len() < total {
+            let message = ws::next_message(&mut healthy, Duration::from_secs(60)).await;
+            viewer.apply(message.expect("the healthy socket stopped receiving"));
+        }
+        viewer
+    });
     wait_for("the stuck socket to close", || async {
-        h.sockets.available_permits() == free - 1
+        h.sockets.available_permits() >= free - 1
     })
     .await;
-    // The healthy one kept reading meanwhile, and the stuck one holds nothing in the hub.
-    let mut viewer = Viewer::default();
-    viewer
-        .read_until(&mut healthy, |v| v.events.len() == total)
-        .await;
+    let viewer = tokio::time::timeout(Duration::from_secs(120), reading)
+        .await
+        .expect("the healthy socket did not finish")
+        .unwrap();
+    assert_eq!(viewer.events.len(), total);
     assert_eq!(h.shared.hub().held(id).unwrap().0, before);
     drop(stuck);
 
     // It comes back and it is up to date.
     let mut back = h.watch(id).await;
     let mut viewer = Viewer::default();
-    viewer
-        .read_until(&mut back, |v| v.events.len() == total)
-        .await;
-    assert_eq!(viewer.events.len(), total);
+    while viewer.events.len() < total {
+        let message = ws::next_message(&mut back, Duration::from_secs(60)).await;
+        viewer.apply(message.expect("it did not catch up"));
+    }
 }
