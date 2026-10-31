@@ -2,7 +2,7 @@ import type { Provider, ReauthStatus } from '@torneo/protocol';
 import { render } from 'svelte/server';
 import { beforeAll, describe, expect, it } from 'vitest';
 import ProviderList from '../../src/lib/components/account/ProviderList.svelte';
-import { linkPanel, providerRows } from '../../src/lib/features/account/providers.js';
+import { linkBlocked, linkPanel, providerRows } from '../../src/lib/features/account/providers.js';
 import { overwriteGetLocale } from '../../src/lib/paraglide/runtime.js';
 import es from '../../messages/es.json' with { type: 'json' };
 
@@ -40,6 +40,7 @@ function html(options: Options = {}): string {
     props: {
       rows: providerRows(linked, enabled, reauth),
       linkPanel: linkPanel(reauth, linked, enabled),
+      linkBlocked: linkBlocked(reauth, linked, enabled),
       locale: 'es',
       error,
       idPrefix: options.idPrefix ?? '',
@@ -232,5 +233,33 @@ describe('ids', () => {
   it('one list repeats no id', () => {
     const all = ids(html({ reauth: NOT_READY }));
     expect(new Set(all).size).toBe(all.length);
+  });
+});
+
+// TA-31: an old session whose only linked provider is switched off.
+describe('ProviderList, a link that nothing can confirm', () => {
+  const SWITCHED_OFF = { linked: ['discord'], enabled: ['google', 'dev'] } satisfies Options;
+  const reauth = (link_ready: boolean): ReauthStatus => ({
+    link_ready,
+    unlink: [{ provider: 'discord', ready: false, reauth_with: [] }],
+  });
+
+  it('offers no link button and says why', () => {
+    const body = html({ ...SWITCHED_OFF, reauth: reauth(false) });
+    expect(body).not.toContain('data-testid="link-google"');
+    expect(body).toContain('data-testid="link-blocked"');
+    expect(body).toContain(escaped(es.account_link_unavailable));
+  });
+
+  it('with a provider that can confirm, the panel stays and the explanation does not show', () => {
+    const body = html({ reauth: NOT_READY });
+    expect(body).toContain('data-testid="reauth-panel-link"');
+    expect(body).not.toContain('data-testid="link-blocked"');
+  });
+
+  it('with a confirmation, the link buttons stay', () => {
+    const body = html({ ...SWITCHED_OFF, reauth: reauth(true) });
+    expect(body).toContain('data-testid="link-google"');
+    expect(body).not.toContain('data-testid="link-blocked"');
   });
 });

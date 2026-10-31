@@ -10,7 +10,7 @@ beforeAll(() => overwriteGetLocale(() => 'es'));
 
 const escaped = (text: string) => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;');
 
-function html(error: string | null, signedIn: boolean): string {
+function rendered(error: string | null, signedIn: boolean) {
   return render(LoginPage, {
     props: {
       data: {
@@ -20,7 +20,11 @@ function html(error: string | null, signedIn: boolean): string {
         next: '/es/welcome',
       },
     } as never,
-  }).body;
+  });
+}
+
+function html(error: string | null, signedIn: boolean): string {
+  return rendered(error, signedIn).body;
 }
 
 /** The opening tag of the element with a `data-testid`. */
@@ -73,5 +77,36 @@ describe('/login without a session', () => {
       expect(page).not.toContain('login-account-link');
       expect(page).toContain('login-provider-dev');
     }
+  });
+});
+
+// TA-31 (009 amendment of RF24): with a session there is nothing to sign in to.
+describe('/login, its texts', () => {
+  it('after a failed confirmation, with a session, it does not ask to sign in', () => {
+    const page = html('auth.reauth_required', true);
+    expect(page).toContain(escaped(es.login_signed_in_title));
+    expect(page).toContain(escaped(es.login_signed_in_error_title));
+    expect(page).not.toContain(escaped(es.login_lead));
+    expect(page).not.toContain(escaped(es.login_error_title));
+    expect(page).not.toContain(`>${escaped(es.login_title)}<`);
+  });
+
+  it('with a session and no error, it does not ask to sign in either', () => {
+    const page = html(null, true);
+    expect(page).toContain(escaped(es.login_signed_in_title));
+    expect(page).not.toContain(escaped(es.login_lead));
+  });
+
+  it('without a session, the sign-in texts stay, the error included', () => {
+    const page = html('auth.reauth_required', false);
+    expect(page).toContain(escaped(es.login_title));
+    expect(page).toContain(escaped(es.login_lead));
+    expect(page).toContain(escaped(es.login_error_title));
+    expect(page).not.toContain(escaped(es.login_signed_in_title));
+  });
+
+  it('the <title> follows the session', () => {
+    expect(rendered(null, true).head).toContain(`<title>${escaped(es.login_signed_in_title)} `);
+    expect(rendered(null, false).head).toContain(`<title>${escaped(es.login_title)} `);
   });
 });
