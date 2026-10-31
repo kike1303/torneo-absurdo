@@ -368,8 +368,11 @@ pub async fn still_valid(pool: &PgPool, ids: &[SessionId]) -> Result<Vec<Session
 
 /// The authentication rule of 009, in one place (plan decision 2). Over `sessions s` joined to
 /// `users u`, `join` adds `acc`: the `max(id)` of the user's accounts and whether the account of
-/// the authentication is one of them. Every column is wrapped in `COALESCE(…, false)`: a session
-/// of before 009 (both columns NULL) is "no", never a NULL that reads as a database error.
+/// the authentication is one of them. Every column is wrapped in `COALESCE(…, false)`, so a NULL
+/// never reads as a database error. It happens in two cases: a user with no accounts whose session
+/// names an account of someone else (`bool_or` and `max` over nothing), and an admin with the
+/// cutoff in NULL (`<= NULL`). A session of before 009 (both columns NULL) is not one: its
+/// `IS NOT NULL` is false, and `false AND NULL` is false.
 /// Only literals: the windows are the `*_WINDOW_MINUTES` constants, pinned by a unit test.
 macro_rules! auth_state {
     (join) => {
