@@ -213,8 +213,12 @@ export function createPlayer(options: RendererOptions, stage: Stage): RendererHa
       const first = playback === INITIAL_PLAYBACK;
       playback = playPlayback(playback, now(), p.durationMs);
       const t = timeAt(playback, now(), p.durationMs);
-      // Coming in late: what was skipped does not fire (010 RF50).
-      if (first && live?.installed === true) cursor = cursorAt(p.cueTimes, t);
+      // Coming in late: what was skipped does not fire (010 RF50), and the scene and `snapshot()`
+      // already show that moment, because if the fight is over no frame will announce it.
+      if (first && live?.installed === true) {
+        cursor = cursorAt(p.cueTimes, t);
+        render(p, t);
+      }
       setState(reachedEnd(p, t) ? 'finished' : 'playing');
     },
     pause() {

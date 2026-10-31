@@ -365,6 +365,30 @@ describe('coming in late (010 RF50)', () => {
     expect(player.snapshot()).toMatchObject({ ending: 'draw' });
   });
 
+  it('after the end, the first play() already shows the result, without a frame', async () => {
+    const { player, stage } = await setup(DRAW, DRAW.duration_ms + 1000);
+    const seen: unknown[] = [];
+    player.onState((state) => seen.push([state, player.snapshot()?.ending]));
+    player.play();
+    expect(seen).toEqual([['finished', 'draw']]);
+    expect(player.snapshot()).toMatchObject({
+      t: DRAW.duration_ms,
+      phase: 'finished',
+      ending: 'draw',
+    });
+    expect(stage.last?.t).toBe(DRAW.duration_ms);
+  });
+
+  it('in the middle, the first play() already shows that moment, without a frame', async () => {
+    const lastStrike = CUES.filter((c) => c.at_ms <= 30_000).findLast((c) => c.type === 'strike');
+    const { player } = await setup(cut(40_000), 30_000);
+    player.play();
+    const snapshot = player.snapshot();
+    expect(snapshot?.t).toBe(30_000);
+    expect(snapshot?.lastCue?.index).toBe(CUES.lastIndexOf(lastStrike as Cue));
+    expect(snapshot?.hp).not.toEqual({ a: DRAW.fighters.a.max_hp, b: DRAW.fighters.b.max_hp });
+  });
+
   it('resuming after a pause does not move the cursor', async () => {
     const { player, stage, clock, fired } = await setup(cut(40_000), 30_000);
     player.play();

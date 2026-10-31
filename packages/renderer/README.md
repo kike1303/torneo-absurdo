@@ -52,7 +52,7 @@ handle.play();
 - **Sin `seek` ni `pause`:** `t = clock()`, así que todos los espectadores ven lo mismo.
 - **Timeline parcial:** las mismas reglas de la v2, sin `ending_missing` ni `closing_missing`. Mientras no llega el cierre, `duration_ms` es la cota de la pelea, y `finished` no existe ni como estado ni como fase, aunque el reloj la pase. Cuando llega el cierre, `duration_ms` es el fin real.
 - **`extend`** es síncrono, no recarga hojas y no mueve la reproducción ni el cursor. Lanza `RendererError('timeline_invalid')` sin cambiar nada si no hay un `loadLive` vigente, si la timeline no es válida, si cambia un cue anterior o un luchador, o si cambia `duration_ms` sin que llegue el cierre o después de que llegó.
-- **Cues:** el primer `play()` deja el cursor en `t`, así que quien entra tarde no recibe `onCue` por lo saltado: el resultado se lee de `snapshot().ending`. Con el reloj negativo, `t = 0` y no sale ningún cue. Un lote atrasado dispara sus cues en el siguiente frame, en ráfaga si son varios.
+- **Cues:** el primer `play()` deja el cursor en `t` y pinta ese instante, así que quien entra tarde no recibe `onCue` por lo saltado, y `snapshot()` ya muestra el HP y el resultado. Con el reloj negativo, `t = 0` y no sale ningún cue. Un lote atrasado dispara sus cues en el siguiente frame, en ráfaga si son varios.
 
 `/dev/arena?log=<nombre>&live=1` entrega un dorado por lotes según su `t`, sin server. `?t=` es el tiempo del server ya transcurrido al abrir, y sirve para probar una entrada tarde.
 
