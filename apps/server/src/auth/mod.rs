@@ -325,7 +325,7 @@ mod source_rules {
     }
 
     /// B4.6: a redirect of ours never keeps the method and the body (307, 308). The redirect of
-    /// `start` and `link` to the provider is a 303; `tests/oauth_providers.rs` reads its status.
+    /// `start`, `link` and `reauth` to the provider is a 303; `tests/oauth_providers.rs` reads its status.
     #[test]
     fn no_redirect_of_the_server_is_307_or_308() {
         let needles = [

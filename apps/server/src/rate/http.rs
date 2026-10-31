@@ -45,7 +45,7 @@ pub async fn layer(
 /// What a navigation route does with its cookies when the quota refuses it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnLimit {
-    /// `start` and `link`: no flow cookie is set, and nothing else changes.
+    /// `start`, `link` and `reauth`: no flow cookie is set, and nothing else changes.
     KeepCookies,
     /// `callback`: the flow cookie is expired, by the same function as every callback error.
     ExpireFlow(CookiePolicy),
@@ -176,8 +176,8 @@ mod tests {
     }
 
     /// 008 "Enmienda 2026-10-30" of RF-B5: over the burst, and with the key table full, a 303
-    /// to `auth.try_again` with no `Retry-After` and no body. `start` and `link` set no cookie;
-    /// the callback expires the flow cookie with the handler's own function.
+    /// to `auth.try_again` with no `Retry-After` and no body. `start`, `link` and `reauth` set no
+    /// cookie; the callback expires the flow cookie with the handler's own function.
     #[tokio::test]
     async fn the_navigation_layer_redirects_instead_of_answering_json() {
         let policy = CookiePolicy::production();
