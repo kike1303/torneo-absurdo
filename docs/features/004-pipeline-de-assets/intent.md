@@ -53,18 +53,18 @@ Opciones a evaluar (como mínimo):
 - [x] `ogro-del-pantano`, del roster existente, queda como personaje de prueba completo (todas las animaciones obligatorias de `docs/guides/sprites.md`) hecho con la opción ganadora, que pasa `run import` y se reproduce en `/[lang]/dev/arena`. Solo se le agrega el campo `sprites`, sin tocar su balance, y `just sim --check` se corre de todos modos.
   - Estado (2026-10-31): `sprites` no se agrega porque RF7 de la spec y la casilla siguiente lo condicionan a que el set esté en `content/sprites/`, y se queda en local.
   - `just sim --check` pasó el 2026-10-31 (exit 0).
-  - Las 9 acciones están en el set y `run import` pasa. La arena se revisó en capturas: ver las 9 acciones en movimiento y el escritorio en tema claro siguen abiertos en el plan.
+  - Las 9 acciones están en el set y `run import` pasa. La arena reprodujo las 9 acciones sin errores, también en escritorio con tema claro; la calidad de las poses de `block` y `dodge` queda sin juzgar (ver el plan).
 - [ ] El set se commitea en `content/sprites/<id>/` y pasa `check`, si la licencia lo permite sin duda y el owner da su OK. Si falta alguna de las dos, se queda en `content/_local/` y esta casilla no se marca.
   - Estado (2026-10-31): no se marca. El owner no acepta la licencia para publicar, por ahora, porque es un personaje de prueba y no arte final. El set se queda en `content/_local/`.
 - [x] Ese personaje pasa el checklist "¿se parece demasiado?" de `write-character`, con su ítem de diseño visual ya aplicado a los sprites. Lo aprueba game-designer o product-owner, distinto del autor, con el OK del owner.
   - Estado (2026-10-31): `APPROVE` de game-designer, prompts incluidos, y OK del owner transmitido por el coordinador. Vale **solo como personaje de prueba local**: no sirve para publicar el set ni para llevarlo a arte final.
-  - El motivo del lore se corrige en una tarea aparte, por decisión del owner. El comentario firmado que pide `write-character` va en el PR.
+  - El motivo del lore se corrige en TA-41, por decisión del owner. El comentario firmado que pide `write-character` está en el PR de cierre (#72).
 - [x] El owner da su visto bueno visual al personaje.
   - Estado (2026-10-31): dado sobre el set regenerado, transmitido por el coordinador.
 - [x] Un ADR con el pipeline elegido, que incluye cómo se declara `origin` en un set hecho con AI.
   - Estado (2026-10-31): [ADR-0013](../../decisions/0013-pipeline-de-sprites.md), aceptado por el owner con D4.
 - [x] Una receta paso a paso de idea a export, en el ADR o en un doc que él enlace, que se pueda seguir sin depender de lo que recuerde quien hizo la prueba.
-  - Estado (2026-10-31): [receta del pipeline](../../guides/pipeline-de-sprites.md). Sus cambios de esta fecha tienen re-revisión pedida a game-designer y architect. Nadie la ha seguido todavía desde cero con otro personaje.
+  - Estado (2026-10-31): [receta del pipeline](../../guides/pipeline-de-sprites.md). Sus cambios de esta fecha los aprobaron game-designer y architect. Nadie la ha seguido todavía desde cero con otro personaje.
 
 ## Fuera de alcance
 Producir el roster completo del MVP.
