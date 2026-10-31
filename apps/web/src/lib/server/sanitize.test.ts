@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { MAX_INPUT, REDACTED_IP, sanitize } from './sanitize.js';
 
 // A limit in ms applies to the fastest run, the one the load touched least, because a single run
-// measures the load of the machine (TA-38). A run over the limit gets more rounds before it fails.
+// measures the load of the machine (TA-38). A run over the limit gets more rounds before it fails,
+// within a budget: `sanitize` is synchronous, so Vitest could not stop a real regression.
 const MAX_MS = 50;
 const MAX_ROUNDS = 50;
+const RETRY_BUDGET_MS = 5000;
 
 function elapsed(input: string): number {
   const start = performance.now();
@@ -182,9 +184,11 @@ describe('sanitize: bounded input (TA-10)', () => {
   it.each(adversarial)('sanitizes 160 KB of %s in under 50 ms', (_name, input) => {
     expect(input.length).toBeGreaterThanOrEqual(160_000);
     sanitize('warm up 2001:db8::1 203.0.113.5');
+    const deadline = performance.now() + RETRY_BUDGET_MS;
     let fastest = Infinity;
     for (let round = 1; round <= MAX_ROUNDS && fastest >= MAX_MS; round++) {
       fastest = Math.min(fastest, elapsed(input));
+      if (performance.now() > deadline) break;
     }
     expect(fastest).toBeLessThan(MAX_MS);
   });
@@ -275,7 +279,8 @@ describe('sanitize: truncation without whitespace (PR #2 review)', () => {
 describe('sanitize: every pattern is linear on 8 KB, the worst real case (PR #2 review)', () => {
   // How much the time grows with the input (TA-38): 4x the input takes 4x the time if linear and 16x
   // if quadratic. The small size stays above the 1 KB bound of URL_CREDENTIALS, whose cost per start
-  // only grows up to there (4.9x on `a://b:`), and the limit is the geometric mean of that and 16x.
+  // only grows up to there (4.9x on `a://b:`), and the limit is about the geometric mean of that
+  // and 16x.
   // Growth alone misses a linear pattern that is simply slow, so MAX_MS still applies.
   const large = MAX_INPUT;
   const small = large / 4;
@@ -327,11 +332,12 @@ describe('sanitize: every pattern is linear on 8 KB, the worst real case (PR #2 
       const largeInput = unit(s, large);
       let fastestSmall = Infinity;
       let fastestLarge = Infinity;
+      const deadline = performance.now() + RETRY_BUDGET_MS;
       for (let round = 1; round <= MAX_ROUNDS; round++) {
         fastestSmall = Math.min(fastestSmall, elapsed(smallInput));
         fastestLarge = Math.min(fastestLarge, elapsed(largeInput));
         const ok = fastestLarge / fastestSmall < maxGrowth && fastestLarge < MAX_MS;
-        if (round >= minRounds && ok) break;
+        if ((round >= minRounds && ok) || performance.now() > deadline) break;
       }
       expect(fastestLarge / fastestSmall).toBeLessThan(maxGrowth);
       expect(fastestLarge).toBeLessThan(MAX_MS);
