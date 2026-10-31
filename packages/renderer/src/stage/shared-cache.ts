@@ -2,7 +2,8 @@
 // two renderers that overlap (a fighter switched quickly, a retry) get the same texture for the
 // same URL, so an `Assets.unload` from the old one would destroy what the new one draws. Each URL
 // is loaded once, unloaded only after its last owner releases it, and a new acquire waits for an
-// unload in flight. A load that failed is forgotten, never unloaded.
+// unload in flight. A failed unload does not fail that acquire: Pixi forgets the URL before it
+// destroys the asset, so the load starts clean. A load that failed is forgotten, never unloaded.
 
 export interface SharedCache<T> {
   acquire(url: string): Promise<T>;
@@ -29,7 +30,8 @@ export function createSharedCache<T>(loader: {
         return existing.promise;
       }
       const pending = unloading.get(url) ?? Promise.resolve();
-      const promise = pending.then(() => loader.load(url));
+      const load = () => loader.load(url);
+      const promise = pending.then(load, load);
       const entry: Entry<T> = { count: 1, promise };
       entries.set(url, entry);
       promise.catch(() => {

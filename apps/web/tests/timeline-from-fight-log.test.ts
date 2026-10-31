@@ -13,6 +13,7 @@ import dummyB from '@torneo/renderer/placeholders/dummy_b/manifest.json';
 import {
   CLOSING_DELAY_MS,
   WIN_DELAY_MS,
+  liveTimelineFromEvents,
   timelineFromFightLog,
   type AdapterResult,
 } from '../src/lib/features/fight/timeline-from-fight-log.js';
@@ -500,5 +501,79 @@ describe('timelineFromFightLog', () => {
     const one = timelineFromFightLog(koLog(), ASSETS);
     const two = timelineFromFightLog(koLog(), ASSETS);
     expect(JSON.stringify(one)).toBe(JSON.stringify(two));
+  });
+});
+
+// 010 RF51: the prefixes of a fight, through the same core.
+describe('liveTimelineFromEvents', () => {
+  const MAX = 90_000;
+  const log = koLog();
+  const live = (events: readonly FightEvent[], max = MAX): AdapterResult =>
+    liveTimelineFromEvents(log, events, ASSETS, max);
+  const upTo = (index: number) => log.events.slice(0, index);
+  const typeAt = (type: FightEvent['type']) => log.events.findIndex((e) => e.type === type);
+
+  it('with all the events it is the timeline of the log', () => {
+    expect(live(log.events)).toEqual(timelineFromFightLog(log, ASSETS));
+  });
+
+  it('a pending attack at the end and the lack of end are not errors', () => {
+    const result = live(upTo(typeAt('attack') + 1));
+    expect(result).toMatchObject({
+      ok: true,
+      timeline: { duration_ms: MAX, cues: [{ type: 'intro' }] },
+    });
+  });
+
+  it('before end, the duration is the given maximum and there is no closing; with it, end.t', () => {
+    const before = live(upTo(typeAt('end')));
+    if (!before.ok) throw new Error(JSON.stringify(before.errors));
+    expect(before.timeline.duration_ms).toBe(MAX);
+    expect(before.timeline.cues.at(-1)?.type).toBe('ko');
+    const full = live(log.events);
+    if (!full.ok) throw new Error(JSON.stringify(full.errors));
+    expect(full.timeline.duration_ms).toBe(log.events.at(-1)?.t);
+    expect(full.timeline.cues.at(-1)?.type).toBe('win');
+  });
+
+  it('every cut by time passes validateTimeline with partial, and only adds cues at the end', () => {
+    let previous: readonly unknown[] = [];
+    for (const c of new Set(log.events.map((e) => e.t))) {
+      const result = live(log.events.filter((e) => e.t <= c));
+      if (!result.ok) throw new Error(JSON.stringify(result.errors));
+      expect(validateTimeline(result.timeline, MANIFESTS, { partial: true }).ok).toBe(true);
+      expect(result.timeline.cues.slice(0, previous.length)).toEqual(previous);
+      previous = result.timeline.cues;
+    }
+  });
+
+  it('an attack without a resolution in the middle is still an error', () => {
+    const events = withEvents((e) => {
+      e.splice(at(e, 'hit'), 1);
+    }).events;
+    expect(codes(live(events))).toContain('adapter.attack_without_resolution');
+  });
+
+  it('an empty list has no intro: the host waits for the first event', () => {
+    expect(codes(live([]))).toEqual(['adapter.intro_missing']);
+  });
+
+  it('an event past the maximum is an error, with its data', () => {
+    const last = log.events.at(-1) as FightEvent;
+    expect(live(log.events, last.t - 1)).toMatchObject({
+      ok: false,
+      errors: [
+        {
+          code: 'adapter.past_max_duration',
+          path: `/events/${log.events.length - 1}`,
+          data: { t: last.t, max: last.t - 1 },
+        },
+      ],
+    });
+  });
+
+  it('takes the header alone, without the rest of a log', () => {
+    const header = { a: { max_hp: log.a.max_hp }, b: { max_hp: log.b.max_hp } };
+    expect(liveTimelineFromEvents(header, log.events, ASSETS, MAX)).toEqual(live(log.events));
   });
 });

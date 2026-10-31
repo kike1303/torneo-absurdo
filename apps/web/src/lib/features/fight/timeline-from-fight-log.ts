@@ -1,5 +1,6 @@
 // The narrow adapter from the engine log to the renderer timeline v2 (002 RF-C1, plan-c decisions
-// 1 to 3; the endings by time in 005 RF11 to RF13). The only file that knows both shapes
+// 1 to 3; the endings by time in 005 RF11 to RF13; the prefixes of a fight in 010 RF51). The only
+// file that knows both shapes
 // (tests/fight-boundary.test.ts). Pure: no I/O, no clock and no randomness; codes only, no text
 // (ADR-0007). It never fixes nor invents anything (RF-C4): what v2 can check is left to
 // `validateTimeline` in `load`.
@@ -26,6 +27,17 @@ export type AdaptedTimeline = Extract<AdapterResult, { ok: true }>['timeline'];
 
 /** The log the adapter reads, for callers that must not import the protocol types too. */
 export type AdapterLog = FightLog;
+
+/** The events the adapter reads, for callers that must not import the protocol types too. */
+export type AdapterEvent = FightEvent;
+
+/**
+ * The header of a fight in progress, the least the adapter needs: `FightLog` and `FightSummary`
+ * both fit it by structure (010 RF51).
+ */
+export type LiveHeader = Readonly<Record<Side, { readonly max_hp: number }>>;
+
+type AdapterFighters = Readonly<Record<Side, { readonly asset: string }>>;
 
 /** Gap between `ko` and `win` (equal to `TIMELINE_LIMITS.winGapMs`, checked by a test). */
 export const WIN_DELAY_MS = 1500;
@@ -67,9 +79,30 @@ interface Pending {
   readonly index: number;
 }
 
-export function timelineFromFightLog(
-  log: FightLog,
-  fighters: Readonly<Record<Side, { readonly asset: string }>>,
+export function timelineFromFightLog(log: FightLog, fighters: AdapterFighters): AdapterResult {
+  return adaptEvents(log.events, log, fighters, null);
+}
+
+/**
+ * The timeline of the events released so far (010 RF51): an `attack` still unresolved at the end
+ * and the lack of `end` are not errors. Until `end` arrives, `duration_ms` is `maxDurationMs`; from
+ * then on, `end.t` (RF48). The first event must be the `intro`, so the host waits for it.
+ */
+export function liveTimelineFromEvents(
+  header: LiveHeader,
+  events: readonly FightEvent[],
+  fighters: AdapterFighters,
+  maxDurationMs: number,
+): AdapterResult {
+  return adaptEvents(events, header, fighters, maxDurationMs);
+}
+
+/** The one core: with `liveMaxDurationMs`, `events` is a prefix of a fight; if null, all of it. */
+function adaptEvents(
+  events: readonly FightEvent[],
+  header: LiveHeader,
+  fighters: AdapterFighters,
+  liveMaxDurationMs: number | null,
 ): AdapterResult {
   const errors: AdapterError[] = [];
   let full = false;
@@ -83,12 +116,11 @@ export function timelineFromFightLog(
     errors.push(data === undefined ? { code, path } : { code, path, data });
   };
 
-  const events: readonly FightEvent[] = log.events;
   const first = events[0];
   if (first === undefined || first.type !== 'intro' || first.t !== 0)
     fail('adapter.intro_missing', '/events/0');
 
-  const hp: Record<Side, number> = { a: log.a.max_hp, b: log.b.max_hp };
+  const hp: Record<Side, number> = { a: header.a.max_hp, b: header.b.max_hp };
   // After a bad resolution the HP is uncertain: `hp` follows the log and `alt` the other reading
   // (the chain without the bad value, or without the orphan event). The next hit or block on that
   // side accepts either and settles it, so one bad event gives one error.
@@ -121,6 +153,9 @@ export function timelineFromFightLog(
       continue;
     }
     if (t < previousT) fail('adapter.unsorted', path);
+    // It would be a cue the playback can never reach.
+    if (liveMaxDurationMs !== null && t > liveMaxDurationMs)
+      fail('adapter.past_max_duration', path, { t, max: liveMaxDurationMs });
     previousT = Math.max(previousT, t);
 
     switch (event.type) {
@@ -229,18 +264,22 @@ export function timelineFromFightLog(
     }
   }
 
-  unresolved();
-  if (end === null) fail('adapter.end_missing', '/events');
-  if (errors.length > 0 || end === null) return { ok: false, errors };
+  if (liveMaxDurationMs === null) {
+    unresolved();
+    if (end === null) fail('adapter.end_missing', '/events');
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  const durationMs = end?.t ?? liveMaxDurationMs;
+  if (durationMs === null) return { ok: false, errors };
 
   return {
     ok: true,
     timeline: {
       timeline_version: VERSION,
-      duration_ms: end.t,
+      duration_ms: durationMs,
       fighters: {
-        a: { asset: fighters.a.asset, max_hp: log.a.max_hp },
-        b: { asset: fighters.b.asset, max_hp: log.b.max_hp },
+        a: { asset: fighters.a.asset, max_hp: header.a.max_hp },
+        b: { asset: fighters.b.asset, max_hp: header.b.max_hp },
       },
       cues,
     },
