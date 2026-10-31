@@ -12,7 +12,7 @@ use protocol::{CancelReason, FightFinal, FightState};
 use server::fights::hook::{SettleFuture, SettlementError, SettlementHook, SettlingFight};
 use server::fights::sealed::{self, SealedLog, SealedSeed};
 use server::fights::snapshot::FightSnapshot;
-use server::fights::{FightSettings, FightsShared, PassProbe, store};
+use server::fights::{FightClock, FightSettings, FightsShared, PassProbe, store};
 use sqlx::{PgConnection, PgPool};
 use support::db::TestDb;
 use support::fights::{
@@ -146,6 +146,25 @@ async fn wait_calls(hook: &TestHook, at_least: u32) {
     .await;
 }
 
+/// The same with the clock going by: when only the retry matters, not its exact hour. An attempt that
+/// read the old mode may end after any one `advance`, and its retry would wait for a clock that no
+/// longer moves.
+async fn wait_calls_advancing(hook: &TestHook, clock: &FightClock, at_least: u32) {
+    wait_for("the hook", || async {
+        clock.advance(2000);
+        hook.calls.load(Ordering::SeqCst) >= at_least
+    })
+    .await;
+}
+
+async fn wait_end_of_halt(shared: &FightsShared, clock: &FightClock) {
+    wait_for("the end of the halt", || async {
+        clock.advance(2000);
+        shared.current().halted == Some(false)
+    })
+    .await;
+}
+
 fn assert_still_live(fight: &server::fights::state::FightRow) {
     assert_eq!(fight.state, FightState::Live);
     assert_eq!(fight.revealed_seed, None);
@@ -185,18 +204,14 @@ async fn a_failing_hook_reverts_the_reveal_and_halts_after_a_minute() {
     })
     .await;
     clock.advance(70_000);
-    wait_calls(&hook, 3).await;
+    wait_calls_advancing(&hook, &clock, 3).await;
     assert_eq!(row(&pool, next).await.state, FightState::Scheduled);
     assert_still_live(&row(&pool, id).await);
 
     // It is fixed: the final, once, and the halt ends.
     hook.set(Mode::Ok);
-    clock.advance(60_000);
-    wait_state(&pool, id, FightState::Settled).await;
-    wait_for("the end of the halt", || async {
-        shared.current().halted == Some(false)
-    })
-    .await;
+    f::wait_state_advancing(&pool, &clock, id, FightState::Settled).await;
+    wait_end_of_halt(&shared, &clock).await;
     let fight = row(&pool, id).await;
     assert_eq!(fight.log.as_deref(), Some(vector.canonical().as_slice()));
     assert_eq!(fight.revealed_seed.as_deref(), Some(vector.seed.as_slice()));
@@ -214,12 +229,10 @@ async fn a_hook_that_panics_is_one_more_failure() {
     let (settings, clock) = f::settings_at(live_at + 100_000);
     let (_shared, _runner) = f::start(&pool, &with_hook(settings, &hook));
     wait_calls(&hook, 1).await;
-    clock.advance(1100);
-    wait_calls(&hook, 2).await;
+    wait_calls_advancing(&hook, &clock, 2).await;
     assert_still_live(&row(&pool, id).await);
     hook.set(Mode::Ok);
-    clock.advance(10_000);
-    wait_state(&pool, id, FightState::Settled).await;
+    f::wait_state_advancing(&pool, &clock, id, FightState::Settled).await;
     assert_eq!(hook_rows(&pool, id).await.len(), 1);
 }
 
@@ -371,8 +384,7 @@ async fn the_hook_sees_every_kind_of_final() {
         assert_still_live(&row(&pool, id).await);
         assert!(hook_rows(&pool, id).await.is_empty());
         hook.set(Mode::Ok);
-        clock.advance(10_000);
-        wait_state(&pool, id, FightState::Settled).await;
+        f::wait_state_advancing(&pool, &clock, id, FightState::Settled).await;
         runner.stop().await;
         let rows = hook_rows(&pool, id).await;
         let expected = row(&pool, id).await.final_result().unwrap();
@@ -390,8 +402,7 @@ async fn the_hook_sees_every_kind_of_final() {
     assert_eq!(row(&pool, id).await.state, FightState::Scheduled);
     assert!(hook_rows(&pool, id).await.is_empty());
     hook.set(Mode::Ok);
-    clock.advance(10_000);
-    wait_state(&pool, id, FightState::Settled).await;
+    f::wait_state_advancing(&pool, &clock, id, FightState::Settled).await;
     runner.stop().await;
     let cancelled = FightFinal::Cancelled {
         reason: CancelReason::MissedWindow,
@@ -454,7 +465,7 @@ async fn a_long_failure_opens_no_windows_and_leaves_one_final_per_fight() {
     let _runner = f::spawn_runner(&pool, &shared, f::config(), with_hook(settings, &hook));
     wait_calls(&hook, 1).await;
     clock.advance(61_000);
-    wait_calls(&hook, 2).await;
+    wait_calls_advancing(&hook, &clock, 2).await;
     wait_for("the halt", || async {
         shared.current().halted == Some(true)
     })
@@ -484,21 +495,18 @@ async fn a_long_failure_opens_no_windows_and_leaves_one_final_per_fight() {
     assert_eq!(opened, 0, "no new windows during a halt");
 
     hook.set(Mode::Ok);
-    clock.advance(CADENCE);
-    wait_state(&pool, id, FightState::Settled).await;
+    f::wait_state_advancing(&pool, &clock, id, FightState::Settled).await;
     assert_eq!(hook_rows(&pool, id).await.len(), 1);
-    wait_for("the end of the halt", || async {
-        shared.current().halted == Some(false)
-    })
-    .await;
-    // One announcement ahead, not one per slot that went by. A missed fight whose cancellation is
-    // on its way may still count for a moment.
-    wait_for("one fight ahead", || async {
+    wait_end_of_halt(&shared, &clock).await;
+    // No marathon: with the clock now still, the fight of this slot and the next one at most, and
+    // not one per slot that went by. A missed fight whose cancellation is on its way may still count
+    // for a moment.
+    wait_for("no marathon", || async {
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM fights WHERE state <> 'settled'")
             .fetch_one(&pool)
             .await
             .unwrap()
-            <= 1
+            <= 2
     })
     .await;
 }
