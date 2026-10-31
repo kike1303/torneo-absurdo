@@ -108,6 +108,7 @@ async fn the_detail_has_a_quota_and_the_board_does_not() {
     assert_eq!(limited.status, 429);
     assert_eq!(limited.text(), r#"{"error":"http.rate_limited"}"#);
     assert!(limited.header("retry-after").is_some());
+    assert_no_store(&limited);
     for _ in 0..50 {
         assert_eq!(get(app.addr, "/api/fights/current").await.status, 200);
     }
