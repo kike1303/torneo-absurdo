@@ -68,6 +68,22 @@ export function linkPanel(
   return ORDER.filter((p) => linked.includes(p) && enabled.includes(p));
 }
 
+/**
+ * Whether a link would end in `auth.reauth_required` with nothing that can confirm it (TA-31, 009
+ * RF20): no confirmation, something left to link, and no linked provider is enabled. Then neither
+ * the buttons nor the panel can help. False without `reauth-status`: the action decides.
+ */
+export function linkBlocked(
+  reauth: ReauthStatus | null,
+  linked: readonly Provider[],
+  enabled: readonly Provider[] | null,
+): boolean {
+  if (reauth === null || reauth.link_ready || enabled === null) return false;
+  return (
+    enabled.some((p) => !linked.includes(p)) && linkPanel(reauth, linked, enabled).length === 0
+  );
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { ReauthStatus } from '@torneo/protocol';
-import { isProvider, linkPanel, parseReauthStatus, providerRows } from './providers.js';
+import {
+  isProvider,
+  linkBlocked,
+  linkPanel,
+  parseReauthStatus,
+  providerRows,
+} from './providers.js';
 
 // 008 RF-C3 and plan-d decision 9: what the account shows for each provider.
 describe('providerRows', () => {
@@ -153,6 +159,31 @@ describe('linkPanel', () => {
 
   it('is empty without the list of enabled providers: nothing can be linked', () => {
     expect(linkPanel(status(), ['dev'], null)).toEqual([]);
+  });
+});
+
+// TA-31: without this, the link buttons stayed and the action sent the person in circles.
+describe('linkBlocked', () => {
+  it('without link_ready, with something to link and no linked provider enabled', () => {
+    expect(linkBlocked(status(), ['discord'], ['google', 'dev'])).toBe(true);
+  });
+
+  it('is false when a linked provider can confirm: the panel is there', () => {
+    expect(linkBlocked(status(), ['discord', 'dev'], ['google', 'dev'])).toBe(false);
+  });
+
+  it('is false with link_ready: the link buttons work', () => {
+    expect(linkBlocked(status({ link_ready: true }), ['discord'], ['google', 'dev'])).toBe(false);
+  });
+
+  it('is false when nothing enabled is left to link', () => {
+    expect(linkBlocked(status(), ['discord'], ['discord'])).toBe(false);
+    expect(linkBlocked(status(), ['discord'], [])).toBe(false);
+  });
+
+  it('is false without reauth-status or the enabled providers: the action decides', () => {
+    expect(linkBlocked(null, ['discord'], ['google'])).toBe(false);
+    expect(linkBlocked(status(), ['discord'], null)).toBe(false);
   });
 });
 

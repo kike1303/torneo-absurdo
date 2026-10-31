@@ -4,7 +4,12 @@
   import * as Alert from '#lib/components/ui/alert/index.js';
   import { Button } from '#lib/components/ui/button/index.js';
   import * as Card from '#lib/components/ui/card/index.js';
-  import { isProvider, linkPanel, providerRows } from '#lib/features/account/providers.js';
+  import {
+    isProvider,
+    linkBlocked,
+    linkPanel,
+    providerRows,
+  } from '#lib/features/account/providers.js';
   import { resolveApiError } from '#lib/features/auth/error-text.js';
   import { formatCoins } from '#lib/i18n/format.js';
   import { m } from '#lib/paraglide/messages.js';
@@ -18,6 +23,9 @@
   );
   const panel = $derived(
     data.state === 'ready' ? linkPanel(data.reauth, data.linked, data.enabled) : [],
+  );
+  const blocked = $derived(
+    data.state === 'ready' && linkBlocked(data.reauth, data.linked, data.enabled),
   );
   const renameError = $derived(
     form && 'value' in form && form.code !== undefined ? resolveApiError(form.code) : null,
@@ -83,7 +91,13 @@
         <Card.Title><h2>{m.account_providers_heading()}</h2></Card.Title>
       </Card.Header>
       <Card.Content>
-        <ProviderList {rows} {locale} error={providerError} linkPanel={panel} />
+        <ProviderList
+          {rows}
+          {locale}
+          error={providerError}
+          linkPanel={panel}
+          linkBlocked={blocked}
+        />
       </Card.Content>
     </Card.Root>
 

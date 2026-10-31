@@ -10,37 +10,41 @@
 
   let { data } = $props();
   const locale = $derived(getLocale());
+  // With a session there is nothing to sign in to, and the error did not end it (009 RF24, TA-31).
+  const title = $derived(data.signedIn ? m.login_signed_in_title() : m.login_title());
 </script>
 
 <svelte:head>
-  <title>{m.login_title()} · {m.app_name()}</title>
+  <title>{title} · {m.app_name()}</title>
 </svelte:head>
 
 <section class="mx-auto flex w-full max-w-md flex-col gap-6">
   <header class="flex flex-col gap-2">
-    <h1 class="font-display text-3xl font-bold tracking-tight">{m.login_title()}</h1>
-    <p class="text-muted-foreground">{m.login_lead()}</p>
+    <h1 class="font-display text-3xl font-bold tracking-tight" data-testid="login-title">
+      {title}
+    </h1>
+    {#if !data.signedIn}
+      <p class="text-muted-foreground">{m.login_lead()}</p>
+    {/if}
   </header>
 
   {#if data.errorKey}
-    <AuthErrorNotice key={data.errorKey} title={m.login_error_title()} />
+    <AuthErrorNotice
+      key={data.errorKey}
+      title={data.signedIn ? m.login_signed_in_error_title() : m.login_error_title()}
+    />
   {/if}
 
   {#if data.signedIn}
-    <div class="flex flex-col gap-3">
-      {#if !data.errorKey}
-        <p data-testid="login-signed-in">{m.login_already_signed_in()}</p>
-      {/if}
-      <!-- After an error, going back is the main action (009 RF24). -->
-      <Button
-        href={`/${locale}/account`}
-        variant={data.errorKey ? 'default' : 'outline'}
-        class="w-full"
-        data-testid="login-account-link"
-      >
-        {data.errorKey ? m.login_back_to_account() : m.account_link()}
-      </Button>
-    </div>
+    <!-- After an error, going back is the main action (009 RF24). -->
+    <Button
+      href={`/${locale}/account`}
+      variant={data.errorKey ? 'default' : 'outline'}
+      class="w-full"
+      data-testid="login-account-link"
+    >
+      {data.errorKey ? m.login_back_to_account() : m.account_link()}
+    </Button>
   {:else if data.providers === null}
     <Alert.Root role="status">
       <Alert.Description>
