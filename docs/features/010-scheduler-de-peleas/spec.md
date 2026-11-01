@@ -2,7 +2,7 @@
 id: "010"
 title: Scheduler de peleas en vivo
 type: spec
-status: approved
+status: done
 risk: high
 author: architect
 reviewers: [product-owner, security-reviewer, game-designer]
@@ -16,7 +16,7 @@ approvals:
 linear: TA-13
 depends_on: ["002", "003", "005", "008"]
 created: 2026-10-30
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # Spec: Scheduler de peleas en vivo
@@ -369,7 +369,7 @@ No se edita antes de aprobar y solo cuando la pieza exista:
 - ADR-0002: sin cambios en 010. TA-27 enmienda su punto 4 (preocupación 13).
 - Spec de 001: enmienda de RF-B13 y de su frase en la línea 277 ("ningún socket vive… más de 120 s sin mensajes aceptados"), por RF42. Spec de 003: RF22 resuelta con (a).
 - `CLAUDE.md`: `dev-fights`, `CONTENT_DIR` y variables `FIGHT_*`. `apps/server/.env.example`. `apps/server/README.md`: cómo verificar una pelea con datos públicos. `REVIEW.md`: regla de RF6.
-- Linear: comprobar en TA-27 los criterios bloqueantes: reembolso de empate y cancelación con asientos, `voided` completo (RF59), las garantías del gancho (RF31), la regla de probar el binario anterior antes de anular (preocupación 3), la salida de la preocupación 13 con sus cinco condiciones ("Decisiones de 2026-10-31") y el gate de la enmienda de ADR-0002, donde se le muestra el riesgo al owner. Comprobar la delegación en TA-13.
+- Linear (**hecho, 2026-11-01:** TA-27 tiene los criterios bloqueantes delegados, con las decisiones 1, 3 y 13 actualizadas, y la descripción de TA-13 recoge la delegación): comprobar en TA-27 los criterios bloqueantes: reembolso de empate y cancelación con asientos, `voided` completo (RF59), las garantías del gancho (RF31), la regla de probar el binario anterior antes de anular (preocupación 3), la salida de la preocupación 13 con sus cinco condiciones ("Decisiones de 2026-10-31") y el gate de la enmienda de ADR-0002, donde se le muestra el riesgo al owner. Comprobar la delegación en TA-13.
 
 ## Alternativas consideradas
 
@@ -530,7 +530,7 @@ Recoge la "Enmienda propuesta a la spec" de [plan-c.md](./plan-c.md) y las desvi
 | E4-11 | plan-d, desviación 6 | Cómo se comprueba el socket | RF57 | Un navegador no puede enviar un ping. Usa `subscribe schedule` y no gasta DP-B7 | No |
 | E4-12 | plan-d, desviación 7, de product-owner | El commit va en un `<details>` cerrado, completo y copiable | RF54 | Un atributo no se ve en un teléfono, y truncarlo impedía leerlo | No |
 
-**Confirmación de product-owner.** Según lo registrado en `plan-d.md` a partir del resumen de quien coordina, confirmó E4-3 y E4-4, esta solo como aproximación y con el prerrequisito 8 abierto, y aceptó E4-6 y E4-7. Falta que confirme el texto final de RF54 antes del PR de la fase D.
+**Confirmación de product-owner.** Según lo registrado en `plan-d.md` a partir del resumen de quien coordina, confirmó E4-3 y E4-4, esta solo como aproximación y con el prerrequisito 8 abierto, y aceptó E4-6 y E4-7. **Confirmó el texto final de RF54 sin cambios: APPROVE, 2026-10-31.**
 
 **Sin cambio de la spec.** El resto de las decisiones de producto de `plan-d.md` (pose, `pre_live`, modo degradado, disposición a 375 px y textos) no contradice ningún RF y se queda en ese plan.
 

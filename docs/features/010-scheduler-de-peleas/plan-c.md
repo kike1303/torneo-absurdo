@@ -2,7 +2,7 @@
 id: "010"
 title: Scheduler de peleas en vivo, fase C (reproducción parcial en el renderer)
 type: plan
-status: approved
+status: done
 risk: medium
 author: frontend-engineer
 reviewers: [architect]
@@ -12,7 +12,7 @@ approvals:
 linear: TA-13
 depends_on: ["002", "005"]
 created: 2026-10-31
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # Plan: Scheduler de peleas en vivo, fase C (desde spec.md 2026-10-31)

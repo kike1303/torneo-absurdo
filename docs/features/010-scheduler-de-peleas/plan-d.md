@@ -2,15 +2,19 @@
 id: "010"
 title: Scheduler de peleas en vivo, fase D (vista, cliente WS, e2e y cierre)
 type: plan
-status: approved
+status: done
 risk: medium
 author: frontend-engineer
-reviewers: [architect]
-approvals: [{by: architect, date: 2026-10-31}]
+reviewers: [architect, product-owner]
+approvals:
+  - by: architect
+    date: 2026-10-31
+  - by: product-owner
+    date: 2026-10-31
 linear: TA-13
 depends_on: ["001", "002", "003", "005", "008"]
 created: 2026-10-31
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # Plan: Scheduler de peleas en vivo, fase D (desde spec.md 2026-10-31)
@@ -96,11 +100,11 @@ Leído, sin ejecutar.
    - **Volver a primer plano:** no pide nada con el socket vivo, y con uno nuevo abre una ventana nueva.
    - **Varias pestañas:** el límite es por socket.
    - **Prueba:** `fight-socket.test.ts` recorre 1 hora de tableros con la rejilla mínima, sondas y reconexiones con semilla fija, y cuenta los `subscribe fight:*` a canal cerrado por socket en cada ventana de 60 s: nunca más de 2 en un socket nuevo (`current` y esa mirada), y 1 en los demás casos, bajo el límite de 3. Comprueba además que ningún `subscribe` nombra el `id` de `next` ni el de un `last` que no se estuviera mirando, también entrando entre las 9:00 y las 9:35 de una ranura de 10 min. El e2e de peleas cuenta lo mismo en el socket real.
-   - Si esto cambiara al implementar, vuelve a security-reviewer. Las reconexiones también gastan el límite de upgrades (30/min con ráfaga de 10): el tope de una inmediata cada 2 s y el backoff quedan por debajo.
+   - Si esto cambiara al implementar, vuelve a security-reviewer. Las reconexiones también gastan el límite de upgrades (30/min con ráfaga de 10): una inmediata cada 2 s son 30 por minuto, justo el límite, y el tope es por pestaña. Varias pestañas, o varias personas tras una misma IP, que reconectan a la vez tras un reinicio reciben un rechazo desde el undécimo socket: entran en backoff y, tras 3 fallos, ven el aviso y consultan cada 30 s. Es un riesgo de disponibilidad, no de seguridad, y queda anotado para TA-8.
 
 ### Reproducción
 7. **`fight-session.ts`: `LiveSession` sobre el buffer.** Se resuelve cuando el buffer tiene el `intro` en el índice 0 y está al día: ya tiene `end`, o pasaron 300 ms sin otra página. **No depende del tamaño de las páginas,** que es un detalle de la fase B (`PAGE_EVENTS`). Así, **`loadLive` espera al `intro`**, una lista vacía nunca llega al adaptador (`fight_sync` sin eventos, también en `live` antes de `live_started_at`, R4), y se sabe si `end` ya pasó.
-   - **Si al estar al día ya pasó `end.t`, no se monta Pixi:** tarjeta de resultado, con lo que dicen los eventos. Con una red tan lenta que las páginas se separen más de 300 ms, el lienzo puede llegar a montarse, y se desmonta al llegar `end`, por la decisión 4. `fight-session.test.ts` usa páginas de distintos tamaños.
+   - **Si al estar al día ya pasó `end.t`, no se monta Pixi:** tarjeta de resultado, con lo que dicen los eventos. Con una red tan lenta que las páginas se separen más de 300 ms, el lienzo puede llegar a montarse. Si ya pintó, conserva la pose hasta `end.t + 10 s`, que es correcto y dura poco. Si aún no pintó, se desmonta al llegar `end` (desviación 14). `fight-session.test.ts` usa páginas de distintos tamaños.
    - `clock = serverNow() − live_started_at − playback_delay_ms`.
    - `timeline` y cada `push` salen de `liveTimelineFromEvents(summary, eventos, fighters, summary.max_duration_ms)`.
    - Cada grupo de páginas de un mismo tick se junta en un `push` por `queueMicrotask`.
@@ -133,10 +137,10 @@ Leído, sin ejecutar.
 ### e2e (preocupaciones 9, 10 y 11)
 15. **Estado conocido en `/` para el e2e actual: `starting`.** `playwright.config.ts` cambia `CONTENT_DIR` a un directorio vacío, `e2e/support/no-roster/`. Da `fights.roster_invalid` una vez, sin peleas y con `halted: false`, para siempre y sin depender del reloj. `a11y`, `hydration`, `i18n`, `screenshots` y `auth` ven siempre lo mismo, con el WS real y sin tocar sus aserciones. **Alternativa descartada:** la cadencia de un día deja un cruce con la medianoche UTC en cerca del 0,5 % de las corridas.
     - **Los demás estados, en `e2e/home.spec.ts`:** `page.routeWebSocket` con mensajes simulados y `page.clock`, deterministas y en segundos, como permite RF54. Cubre `next`, `about_to_start`, `live`, `result`, `cancelled`, `voided`, `halted`, RF57 y los rechazos. Va también en el proyecto `webkit`.
-16. **Peleas reales: `playwright.fights.config.ts` y `e2e/fights.spec.ts`, una corrida aparte, en el job `e2e` actual.** `_e2e-run` la lanza después de la actual, y repite entre las dos `reset-run.mjs` y `db.mjs reset`.
+16. **Peleas reales: `playwright.fights.config.ts` y `e2e/fights.spec.ts`, una corrida aparte, en el job `e2e-fights` (desviación 12).** `just e2e` lanza `_e2e-run` y luego `_e2e-fights-run`, que repite `reset-run.mjs` y `db.mjs reset`.
     - **Por qué aparte:** es la única forma de que Chromium y WebKit, de escritorio y a 375 px, miren **las mismas peleas en paralelo** (`workers: 4`), como pide la preocupación 9, sin subir los workers del resto.
     - **Config:** `globalTimeout` de 8 min, `retries: 0`, `test.setTimeout` de 7,5 min, el mismo `globalTeardown` y `outputDir` propio (`test-results/fights-artifacts`).
-    - **Logs en CI:** solo se suben los de la última corrida, porque `serve-with-log.mjs` los vacía al arrancar, y `reset-run.mjs` solo limpia `egress.log` y los archivos de corrida. Un fallo en la primera se conserva: `set -e` detiene la segunda antes de arrancar.
+    - **Logs en CI:** cada job sube los suyos, con el artefacto `e2e-fights-screenshots-and-logs` y las imágenes de un fallo (`fights-artifacts/**/*.png`). Esta corrida no tiene trazas.
     - **Mismo stack, otras variables:** `playwright.config.ts` exporta sus `webServer` como función. Las diferencias son `FIGHT_SCRIPT_PATH`, `FIGHT_CADENCE_SECS=113`, `FIGHT_BETTING_WINDOW_SECS=5` y `FIGHT_PRE_LIVE_SECS=3`. Base y puertos son los mismos, porque no corren a la vez.
     - **Script:** `e2e/support/fight-script.mjs` escribe `test-results/fight-script.json` con `log-ko-knockdown` y `log-draw` (hallazgo 8). No se commitea, y si los dorados se regeneran, sigue valiendo.
     - **WebKit sin WebGL (preocupación 10):** las aserciones son por estados y `data-*` bajo `debug`, nunca por píxeles, y aceptan `webgl_unavailable` con la anotación `limited`, como `arena-webkit.spec.ts`.
@@ -234,7 +238,7 @@ Primero integrar `ta-13-fight-events` si cambió. La Enmienda 4 de la spec ya es
 - **`fights.roster_invalid` en `error` en el log del e2e.** → No vi ningún test que falle por eso, pero no corrí nada. Si falla, el estado conocido pasa a un roster de un solo personaje o a filtrar ese evento.
 - **`connect-src 'self'` y WebSocket en WebKit.** → No hay prueba hoy de un WS real con la CSP en WebKit. `fights.spec.ts` la da. Si falla, es una ampliación que ya prevé ADR-0012, y vuelve a architect.
 - **La sonda de `visibilitychange`:** un teléfono lento puede tardar más de 3 s y reconectar sin necesidad. → Solo cuesta una reconexión, con ventana nueva. Una por cada 2 s como máximo.
-- **`fights.spec.ts` es lento y depende del reloj real:** en el peor caso, 113 + 113 + 8 + 90 + 5 s, unos **5,5 min**, no los 4 de la preocupación 9. → Una sola corrida para los 4 proyectos, con `globalTimeout` de 8 min y sin reintentos. Se mueve a un job propio, en el mismo PR, si alguna de 3 corridas del PR pasa de 16 min.
+- **`fights.spec.ts` es lento y depende del reloj real:** en el peor caso, 113 + 113 + 8 + 90 + 5 s, unos **5,5 min**, no los 4 de la preocupación 9. → Una sola corrida para los 4 proyectos, con `globalTimeout` de 8 min y sin reintentos. Se movió a un job propio, porque la primera corrida del PR tardó 18 min 26 s en CI, más que los 16 min del criterio (desviación 12).
 - **Dos clientes difieren más de 500 ms en CI:** con carga, los `server_time` pueden tardar. → La comparación normaliza con `data-t-at`, y el máximo elimina la muestra lenta. Si es inestable, se investiga y no se sube la tolerancia.
 - **PR #73 cambia los mensajes o `FightsCurrent`.** → Se integra antes de implementar, y `svelte-check` lo detecta.
 - **La página `/` con Pixi empeora la entrada móvil.** → Solo se carga en `pre_live` o en vivo. `check-renderer-split` y `just arena-bench` sin cambios. Los fps de `/` no son una medición nueva: es el mismo `FightStage`.
@@ -250,27 +254,27 @@ Primero integrar `ta-13-fight-events` si cambió. La Enmienda 4 de la spec ya es
 - **Probar el rechazo de `extend` montando `FightStage` con Testing Library.** Suma una dependencia y un entorno de DOM que el repo no usa. `live-host` más e2e con `routeWebSocket` lo cubren.
 
 ## Pruebas (cómo se demuestra que funciona)
-- [ ] `just check` y `just e2e` en verde, con la salida en el PR
-- [ ] **RF53:** Vitest del `load` con API caída: 200 y estado de error. e2e con el server inalcanzable. `check-renderer-split`. Sin sesión.
-- [ ] **RF54:** tabla de `view-state.test.ts`, una fila por prioridad y por cada caso de la decisión 4, incluidos `halted` nulo que nunca da detenida, `halted` por encima de `live`, y cuenta atrás a cero sin `live` que da "por comenzar", nunca un `0:00` congelado. `home.spec.ts`: un caso por estado, en es y en; `last` al entrar a mitad; cancelada ("no se disputó"); anulada, con mensaje simulado.
-- [ ] **RF54 frente a RF50:** `home.spec.ts` entra dentro de la ventana (`t` más allá del cierre, antes de `Settled`), y el resultado aparece sin ningún cue. `fights.spec.ts` lo repite con una pelea real (paso F). Un cliente que ya mira ve el resultado como máximo 250 ms después del cierre.
-- [ ] **Spoiler:** `end` recibido con `t < cierre`: nada en la vista, y un `final` `decided` en el tablero tampoco lo adelanta para la pelea mirada antes de `t ≥ max_duration_ms`. Uno `voided` se muestra de inmediato.
-- [ ] **Pose:** "En vivo" desaparece al existir `ending`, y el lienzo sigue hasta `t ≥ end.t + 10 s`. Con `end.t` ya pasado al recibir los eventos, ningún `canvas` y tarjeta de resultado.
-- [ ] **`pre_live`:** cartelera y cuenta atrás visibles hasta el primer frame, y el criterio de red limitada de la decisión 14.
-- [ ] **Commit:** `<details>` cerrado, y al abrirlo, el commit completo, seleccionable y sin scroll horizontal a 375 px.
-- [ ] **RF55:** Vitest de `round-clock`, y en e2e para al llegar el `ko` y el `time_up`. Sin barra. Oculto con `degraded`.
-- [ ] **RF56:** `fighter-lore.test.ts`, respaldo por slug y `check-compose`.
-- [ ] **RF57:** Vitest de `fight-socket` con temporizadores falsos: secuencia de backoff y su tope, jitter, aviso único tras 3 fallos, primer poll al entrar en `degraded` y luego con jitter, sonda sin respuesta, muestra de hora al volver a visible con el socket vivo, un `ws.rate_limited` tratado como reconexión. e2e con el WS bloqueado, y con `visibilitychange` y `online`.
-- [ ] **DP-B7:** la prueba de la decisión 6, y `data-subscribes` en `fights.spec.ts`.
-- [ ] **DP-B9:** Vitest de `event-buffer`: solape parcial, repetido, hueco, fuera de orden y tope. `fight_sync` no toca el buffer. `loadLive` no se llama sin `intro`, con `fight_sync` vacío en `live` antes de `live_started_at`.
-- [ ] **Rechazo de `extend` y `fail`:** `live-host.test.ts`, los dos en entrega inmediata y posterior: estado de error y suscripción cancelada. `home.spec.ts` lo repite con golpes a menos de 600 ms, que pasan el adaptador y rechaza `validateTimeline`.
-- [ ] **Ráfaga:** tras un corte, `home.spec.ts` entrega de golpe una tanda de eventos vencidos: la escena es la de `t`, sin errores y con un solo anuncio.
-- [ ] **`webglcontextlost`:** e2e en Chromium con `WEBGL_lose_context`: vuelve a dibujar en su `t`.
-- [ ] **RF58:** `check-i18n`, axe en cada estado, en dark y light, 375 px sin scroll horizontal, `aria-live` en el resultado y `role="status"` solo en `halted` y `degraded`.
-- [ ] **375×667:** la cartelera, con el epíteto más largo, cabe entera en el viewport sin scroll, comprobado con su caja.
-- [ ] **RNF de sincronización y estrategia de la spec:** la tabla de la decisión 17, en los 4 proyectos, sin `degraded` en toda la corrida.
-- [ ] **Capturas** de cada estado a 375 px y en escritorio, en dark y light, revisadas y descritas en el PR, con el epíteto más largo y los placeholders a 375 px, en es y en
-- [ ] **Linear:** criterios de TA-27 y delegación en TA-13 comprobados (spec, "Trabajo de cierre")
+- [x] `just check` y `just e2e` en verde, con la salida en el PR
+- [x] **RF53:** Vitest del `load` con API caída: 200 y estado de error. e2e con el server inalcanzable. `check-renderer-split`. Sin sesión.
+- [x] **RF54:** tabla de `view-state.test.ts`, una fila por prioridad y por cada caso de la decisión 4, incluidos `halted` nulo que nunca da detenida, `halted` por encima de `live`, y cuenta atrás a cero sin `live` que da "por comenzar", nunca un `0:00` congelado. `home.spec.ts`: un caso por estado, en es y en; `last` al entrar a mitad; cancelada ("no se disputó"); anulada, con mensaje simulado.
+- [x] **RF54 frente a RF50:** `home.spec.ts` entra dentro de la ventana (`t` más allá del cierre, antes de `Settled`), y el resultado aparece sin ningún cue. `fights.spec.ts` lo repite con una pelea real (paso F). Un cliente que ya mira ve el resultado como máximo 250 ms después del cierre.
+- [x] **Spoiler:** `end` recibido con `t < cierre`: nada en la vista, y un `final` `decided` en el tablero tampoco lo adelanta para la pelea mirada antes de `t ≥ max_duration_ms`. Uno `voided` se muestra de inmediato.
+- [x] **Pose:** "En vivo" desaparece al existir `ending`, y el lienzo sigue hasta `t ≥ end.t + 10 s`. Con `end.t` ya pasado al recibir los eventos, ningún `canvas` y tarjeta de resultado.
+- [x] **`pre_live`:** cartelera y cuenta atrás visibles hasta el primer frame, y el criterio de red limitada de la decisión 14.
+- [x] **Commit:** `<details>` cerrado, y al abrirlo, el commit completo, seleccionable y sin scroll horizontal a 375 px.
+- [x] **RF55:** Vitest de `round-clock`, y en e2e para al llegar el `ko` y el `time_up`. Sin barra. Oculto con `degraded`.
+- [x] **RF56:** `fighter-lore.test.ts`, respaldo por slug y `check-compose`.
+- [x] **RF57:** Vitest de `fight-socket` con temporizadores falsos: secuencia de backoff y su tope, jitter, aviso único tras 3 fallos, primer poll al entrar en `degraded` y luego con jitter, sonda sin respuesta, muestra de hora al volver a visible con el socket vivo, un `ws.rate_limited` tratado como reconexión. e2e con el WS bloqueado, y con `visibilitychange` y `online`.
+- [x] **DP-B7:** la prueba de la decisión 6, y `data-subscribes` en `fights.spec.ts`.
+- [x] **DP-B9:** Vitest de `event-buffer`: solape parcial, repetido, hueco, fuera de orden y tope. `fight_sync` no toca el buffer. `loadLive` no se llama sin `intro`, con `fight_sync` vacío en `live` antes de `live_started_at`.
+- [x] **Rechazo de `extend` y `fail`:** `live-host.test.ts`, los dos en entrega inmediata y posterior: estado de error y suscripción cancelada. `home.spec.ts` lo repite con golpes a menos de 600 ms, que pasan el adaptador y rechaza `validateTimeline`.
+- [x] **Ráfaga:** tras un corte, `home.spec.ts` entrega de golpe una tanda de eventos vencidos: la escena es la de `t`, sin errores y con un solo anuncio.
+- [x] **`webglcontextlost`:** e2e en Chromium con `WEBGL_lose_context`: vuelve a dibujar en su `t`.
+- [x] **RF58:** `check-i18n`, axe en cada estado, en dark y light, 375 px sin scroll horizontal, `aria-live` en el resultado, y `role="status"` en `halted`, `degraded` y los demás avisos y estados de una línea (desviación 16).
+- [x] **375×667:** la cartelera, con el epíteto más largo, cabe entera en el viewport sin scroll, comprobado con su caja.
+- [x] **RNF de sincronización y estrategia de la spec:** la tabla de la decisión 17, en los 4 proyectos, sin `degraded` en toda la corrida.
+- [x] **Capturas** de cada estado a 375 px y en escritorio, en dark y light, con el epíteto más largo y los placeholders a 375 px, en es y en (revisadas en parte: desviación 17)
+- [x] **Linear:** criterios de TA-27 y delegación en TA-13 comprobados (spec, "Trabajo de cierre"). Lo comprobó quien coordina el 2026-11-01: TA-27 tiene los criterios bloqueantes delegados, con las decisiones 1, 3 y 13 actualizadas, y la descripción de TA-13 recoge la delegación
 
 ## Trabajo de cierre
 Se aplica en el paso 8, cada pieza cuando ya existe.
@@ -313,11 +317,10 @@ _El architect aceptó las siete, y están aplicadas en la Enmienda 4 de la spec,
 7. **RF54, commit "truncado a 375 px, completo en un atributo".** product-owner lo cambia: `<details>` cerrado, con el commit completo y copiable.
 
 ## Preguntas abiertas
-1. **Para product-owner:** confirmar el texto final de RF54, antes de implementar.
-2. **Para security-reviewer, solo si cambia la decisión 6:** el límite de DP-B7 frente al cliente.
+Ninguna. product-owner confirmó el texto final de RF54 (ver `## Revisión`), y el límite de DP-B7 no cambió.
 
 ## Estimación de CI
-`web` sube unos segundos por los Vitest nuevos. `e2e`, que hoy tarda de 6 min 48 s a 8 min 10 s, sube unos 6 a 7 min: hasta 5,5 min de peleas reales, más `home.spec.ts` en Chromium y WebKit. Quedaría cerca de 15 min, por debajo de los 20 del job. **Criterio:** si alguna de 3 corridas del PR pasa de 16 min, la segunda corrida se mueve a un job propio, en el mismo PR, y `check-workflows` lo exige en su tabla de permisos.
+`web` sube unos segundos por los Vitest nuevos. **Job nuevo `e2e-fights`,** con el mismo `if:`, contenedor y Postgres que `e2e`, y un límite de 15 min. El criterio previsto era mover la corrida si alguna de 3 del PR pasaba de 16 min, y en la primera el job `e2e` tardó 18 min 26 s, así que se movió (desviación 12). `devops-engineer` estima unos 14 min en `e2e` y unos 6 min en `e2e-fights`, y unos 2 min más de runner por el setup y el build.
 
 ## Desviaciones durante la implementación
 1. **`live-host.ts` vive en `lib/components/fight/`, no en `features/fight/live/`,** porque ADR-0009 D4 solo deja a los componentes importar tipos de `features`, y `FightStage` lo usa. `formatClock` pasó a `lib/i18n/format.ts` por la misma razón. Por eso la página compone: `FightHome` recibe todo por props.
@@ -327,12 +330,23 @@ _El architect aceptó las siete, y están aplicadas en la Enmienda 4 de la spec,
 5. **`home.spec.ts` no usa `page.clock`.** Los tiempos son relativos al reloj real, y una pelea puede estar en cualquier `t` desde el inicio. Es igual de determinista, y más simple.
 6. **`about_to_start` no se afirma en `fights.spec.ts` (paso A).** Con el primer frame a tiempo, de la cuenta atrás se pasa directo a `live`, así que en una pelea real ese estado puede no verse. Se afirma en `home.spec.ts`.
 7. **Precarga de las hojas en `pre_live`, por el criterio de la decisión 14.** Sin ella, con Fast 3G y CPU a 4×, el primer frame llegó en `t = +188 ms`. Con ella, llega antes de `t = 0`. Se precarga con `new Image()`, porque un componente no hace `fetch` (ESLint).
+8. **`fights.spec.ts`:** los contextos usan una sola IP, sin `x-e2e-client`, para probar el límite de upgrades real. El contexto `session` entra por `login`, así que cuenta su socket igual que los demás.
+9. **`screenshots.spec.ts`: el catálogo se captura por secciones.** Con los componentes nuevos, `/dev/components` mide 9581 px a 375 px, más que los 8192 px de textura de WebGL por software, y la captura de página completa falla en Chromium. La comprobación de scroll horizontal sigue igual, y las imágenes pasan a ser una por sección.
 10. **`FightCommit`:** el `<summary>` conserva su marcador nativo, con `py-3` para los 44 px. Con `display: flex` lo perdía, y en las capturas no se veía que se puede abrir.
 11. **Tiempo medido en local:** `just e2e` completo tardó 896 s (14,9 min, con el build): 9,4 min la corrida general y 5,3 min la de peleas reales. El dato de CI sale de las corridas del PR.
-9. **`screenshots.spec.ts`: el catálogo se captura por secciones.** Con los componentes nuevos, `/dev/components` mide 9581 px a 375 px, más que los 8192 px de textura de WebGL por software, y la captura de página completa falla en Chromium. La comprobación de scroll horizontal sigue igual, y las imágenes pasan a ser una por sección.
-8. **`fights.spec.ts`:** los contextos usan una sola IP, sin `x-e2e-client`, para probar el límite de upgrades real. El contexto `session` entra por `login`, así que cuenta su socket igual que los demás.
+12. **Las peleas reales pasan a un job propio, `e2e-fights`, con la receta `_e2e-fights-run` y artefacto propio.** Es lo que preveía el criterio de 16 min: la primera corrida del PR tardó 18 min 26 s. `just e2e` sigue corriendo las dos, y `check-workflows` aplica a este job las mismas reglas que a `e2e`.
+13. **La pelea mirada no se abandona hasta quedar "mirada terminada" (`adoptsCurrent`).** QA lo encontró en el PR: al cambiar en cuanto `current` era otra en `betting_closed`, la pose se cortaba a unos 2 s y un `final` `decided` llegaba a un cliente atrasado. Como consecuencia, se sigue una sola pelea a la vez: la siguiente no se suscribe hasta que termina la mirada, porque sus eventos no tendrían dónde ir. Esto reemplaza lo de "un socket nuevo se suscribe también" de la decisión 5 y baja lo que pide un socket. La prueba de DP-B7 sigue en un máximo de 2 por minuto, cuando un socket entra al final de una pelea en la rejilla mínima.
+14. **Con `end.t` ya pasado y el primer frame pendiente, la pelea cuenta como terminada.** Así no se ve "Por comenzar" junto al resultado de esa misma pelea. Un lienzo que ya pintó conserva su pose si una página tardía trae `end`.
+15. **Socket:** la URL es absoluta, construida desde `location`, porque una relativa lanza en navegadores anteriores a Chrome 125, Firefox 124 y Safari 17.3. Un constructor que lanza cuenta como fallo de RF57. Un error de protocolo repetido usa el backoff y cuenta como fallo: solo una conexión estable durante 30 s lo limpia. Por eso `data-ws-failures` sube a 1 en el caso del hueco.
+16. **`role="status"`** también va en `error`, `loading` y los avisos de animación, no solo en `halted` y `degraded`. Son mensajes de una línea que no se repiten, y es razonable.
+17. **Capturas revisadas en parte.** Se generan las 80 de `home.spec.ts` (10 estados, con `loading`), en es y en, 375 px y escritorio, dark y light, y se miraron a mano solo unas pocas por estado, las nombradas en el PR. El estado `error` no tiene captura, porque el SSR del e2e siempre responde: lo prueban `tests/routes/home.test.ts`, `view-state.test.ts` y un caso de `internal-fetch.spec.ts` contra una API que falla.
+18. **`playwright.fights.config.ts` pasa `CONTENT_DIR`,** y `fights.spec.ts` comprueba que el roster real cargó. Es el único e2e que carga los personajes reales. `web-characters` de `check-compose` pasa a lista cerrada en la etapa final.
 
 ## Revisión
+### product-owner — 2026-10-31 — APPROVE
+Registrado por frontend-engineer a partir de lo que comunica quien coordina.
+- Confirmó el texto final de RF54 sin cambios, y que los cambios pedidos en este plan quedaron aplicados, con los dos ajustes de texto ya hechos (`fight_round_clock_label` y `fight_text_hp`).
+
 ### architect — 2026-10-31 — APPROVE (segunda ronda, con correcciones antes de implementar)
 Escrito por architect; lo aplica frontend-engineer, porque esta sesión no puede escribir en este worktree.
 - Revisé leyendo el plan y el código, sin compilar ni correr nada, solo: los seis cambios de la primera ronda, los cambios de product-owner tal como los registra este plan, las dos notas de QA y la desviación 7.

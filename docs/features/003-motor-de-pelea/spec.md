@@ -14,7 +14,7 @@ approvals:
 linear: TA-3
 depends_on: ["001"]
 created: 2026-10-26
-updated: 2026-10-28
+updated: 2026-11-01
 ---
 
 # Spec: Motor de pelea v0
