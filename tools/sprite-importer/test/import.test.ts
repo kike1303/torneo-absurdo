@@ -126,7 +126,8 @@ function extend(dir: string, frameMs: Record<string, number[]>): void {
   writeExportJson(dir, json);
 }
 
-describe('runImport packing', () => {
+// Encodes up to 401 PNGs: 8.3 s at worst with 24 CPU burners on 10 cores, past the 5 s default.
+describe('runImport packing', { timeout: 60_000 }, () => {
   it('opens a second sheet at the 101st unique frame', () => {
     const dir = copyExportRef();
     const n = (count: number, ms: number) => Array.from({ length: count }, () => ms);
