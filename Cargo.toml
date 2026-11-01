@@ -54,7 +54,7 @@ governor = { version = "=0.10.4", default-features = false, features = ["std"] }
 # Constant-time comparison of X-Internal-Secret (already in the lock via rustls).
 subtle = "=2.6.1"
 # INTERNAL_API_SECRET decoding (already in the lock via rustls).
-base64 = "=0.22.1"
+base64 = "=0.23.1"
 # Session token hashes and ip_hash (008 phase B; already in the lock via sqlx, digest 0.11).
 sha2 = "=0.11.1"
 hmac = "=0.13.0"
