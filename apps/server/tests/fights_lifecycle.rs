@@ -5,7 +5,7 @@
 mod support;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
 use engine::canonical_spec_json;
@@ -516,6 +516,7 @@ async fn a_win_and_a_draw_are_told_apart_in_public_data() {
 struct FailsFor {
     id: i32,
     fixed: AtomicBool,
+    calls: AtomicU32,
 }
 
 impl SettlementHook for FailsFor {
@@ -524,6 +525,9 @@ impl SettlementHook for FailsFor {
         _tx: &'a mut sqlx::PgConnection,
         fight: &'a SettlingFight,
     ) -> SettleFuture<'a> {
+        if fight.id == self.id {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+        }
         let fails = fight.id == self.id && !self.fixed.load(Ordering::SeqCst);
         Box::pin(async move {
             if fails {
@@ -548,6 +552,7 @@ async fn last_is_the_last_one_settled_not_the_last_slot() {
     let hook = Arc::new(FailsFor {
         id: halted,
         fixed: AtomicBool::new(false),
+        calls: AtomicU32::new(0),
     });
     let (settings, clock) = f::settings_at(T0);
     let settings = FightSettings {
@@ -578,6 +583,15 @@ async fn last_is_the_last_one_settled_not_the_last_slot() {
     })
     .await;
 
+    // An attempt that started before the cancellation carries an hour that is not later than its own,
+    // and on a tie the higher id wins, which is right. So one whole attempt fails first, and the next
+    // one has a later hour.
+    let seen = hook.calls.load(Ordering::SeqCst);
+    wait_for("an attempt after the cancellation", || async {
+        clock.advance(2000);
+        hook.calls.load(Ordering::SeqCst) >= seen + 2
+    })
+    .await;
     hook.fixed.store(true, Ordering::SeqCst);
     f::wait_state_advancing(&pool, &clock, halted, FightState::Settled).await;
     wait_for("the last one settled on the board", || async {
