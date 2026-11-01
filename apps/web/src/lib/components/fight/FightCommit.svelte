@@ -8,7 +8,7 @@
 
 <details class="text-sm" data-testid="fight-commit">
   <summary
-    class="flex min-h-11 cursor-pointer items-center rounded-lg text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
+    class="cursor-pointer rounded-lg py-3 text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
   >
     {m.fight_view_commit()}
   </summary>
