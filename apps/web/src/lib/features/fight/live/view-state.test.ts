@@ -364,6 +364,17 @@ describe('viewState: the cases of the review', () => {
     expect(view({ board: board({ current: summary, last }) }).result).toBeNull();
   });
 
+  it('degraded, a watched fight waiting for its first frame is live, without a canvas in view', () => {
+    const current = liveFight(2, 1000);
+    const v = view({
+      board: board({ current }),
+      watched: watched(current, 1000, { painted: false }),
+      degraded: true,
+    });
+    expect(v).toMatchObject({ kind: 'live', showRoundClock: false });
+    expect(v.stage).not.toBe('visible');
+  });
+
   it('degraded adds no state, and hides the round clock', () => {
     const current = liveFight(2, 1000);
     expect(view({ board: board({ current }), degraded: true })).toMatchObject({

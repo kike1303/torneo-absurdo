@@ -136,6 +136,18 @@
     return local.loadManifest(id);
   }
 
+  function preloadSheets(ids: readonly ArenaFighterId[]): void {
+    for (const fid of ids) {
+      if (!isPlaceholder(fid)) continue;
+      for (const load of Object.values(SHEETS[fid])) {
+        // A failure here is not one: `loadLive` asks for them again and reports it.
+        void load()
+          .then(({ default: url }) => fetch(url))
+          .catch(() => undefined);
+      }
+    }
+  }
+
   /** The spike script with the assets of each side (the default `source`). */
   async function spikeTimeline(assets: Readonly<Record<Side, string>>): Promise<Timeline> {
     const spike = (await import('@torneo/renderer/fixtures/spike.timeline.json'))
@@ -237,6 +249,9 @@
     try {
       const ids = [...new Set([side.a, side.b])];
       const opening = live?.(side);
+      // The events only come at the start, so the sheets are in the cache before them: with a slow
+      // network the first frame would not arrive in time (010 plan-d decision 14).
+      if (opening !== undefined) preloadSheets(ids);
       const [rendererModule, cast, ...manifestModules] = await Promise.all([
         import('@torneo/renderer'),
         opening === undefined

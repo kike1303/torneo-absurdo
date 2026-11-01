@@ -87,6 +87,7 @@
   data-subscribes={debug?.subscribes ?? undefined}
   data-ws-failures={debug?.failures ?? undefined}
   data-connection={debug?.connection ?? undefined}
+  data-painted-t={debug?.paintedT ?? undefined}
 >
   <h1 class="font-display text-2xl font-bold tracking-tight text-balance sm:text-4xl">
     {m.home_title()}

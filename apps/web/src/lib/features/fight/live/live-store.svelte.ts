@@ -30,6 +30,8 @@ export interface FightDebug {
   readonly subscribes: number;
   readonly failures: number;
   readonly connection: 'live' | 'degraded';
+  /** `t` when the first frame was on screen. */
+  readonly paintedT: number | null;
 }
 
 function isBoard(value: unknown): value is FightsCurrent {
@@ -66,6 +68,7 @@ export class FightStore {
   noAnimation = $state(false);
   private debugSocket = $state({ subscribes: 0, failures: 0 });
   private tAt = $state(0);
+  private paintedT = $state<number | null>(null);
 
   private buffer: EventBuffer = createEventBuffer();
   private session: FightSession | null = null;
@@ -153,6 +156,7 @@ export class FightStore {
     subscribes: this.debugSocket.subscribes,
     failures: this.debugSocket.failures,
     connection: this.degraded ? 'degraded' : 'live',
+    paintedT: this.paintedT,
   }));
 
   private maxHp(summary: FightSummary) {
@@ -171,6 +175,8 @@ export class FightStore {
 
   onPainted = (): void => {
     this.painted = true;
+    this.tick();
+    this.paintedT = this.t;
   };
 
   onStageFailure = (code: StageErrorCode): void => {
@@ -213,7 +219,9 @@ export class FightStore {
       followedFights(
         this.board,
         this.watchedSummary?.id ?? null,
-        endEvent(this.buffer.events) !== null,
+        // Nothing else will come: an end, or a final that has none.
+        endEvent(this.buffer.events) !== null ||
+          (this.watchedSummary?.final != null && this.watchedSummary.final.kind !== 'decided'),
       ),
     );
   }
@@ -225,6 +233,7 @@ export class FightStore {
     this.watchedSummary = summary;
     this.snapshot = null;
     this.painted = false;
+    this.paintedT = null;
     this.textMode = false;
     this.lateNoPixi = false;
     this.playbackError = false;

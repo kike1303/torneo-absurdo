@@ -166,7 +166,8 @@ export function viewState(input: ViewInput): View {
 
   const watchedIsCurrent = watched !== null && current?.id === watched.summary.id;
   if (current !== null && current.state === 'live' && inLive(current)) {
-    if (!watchedIsCurrent) {
+    // Degraded, no event will come: it must not wait for a frame that needs them.
+    if (!watchedIsCurrent || (degraded && !finished)) {
       return {
         ...base,
         kind: 'live',
