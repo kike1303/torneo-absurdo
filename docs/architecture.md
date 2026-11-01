@@ -274,7 +274,7 @@ Son los cambios en el proxy compartido que el owner aprobó el 2026-10-21. Se ha
 > - **"Reset configuration to default" del proxy en Coolify quita `torneo-edge` y la IP `10.250.0.2`.** Después de un reset, de reiniciar el proxy o de actualizar Coolify, se repite el paso 2 y la verificación 15 de ADR-0006.
 
 ### Prerrequisitos del primer despliegue a producción (bloquean; RF-C18)
-Ninguno se cumple en la feature 001. Los puntos 1 a 4 se siguen en Linear (TA-8, bloqueado por la feature de auth y por TA-6), el 5 en TA-13, el 6 en la feature 002 y del 7 al 9 en TA-8.
+Ninguno se cumple en la feature 001. Los puntos 1 a 4 se siguen en Linear (TA-8, bloqueado por la feature de auth y por TA-6), el 5 en TA-13, el 6 en la feature 002 y del 7 al 10 en TA-8.
 
 1. **Límites anónimos de ADR-0008 D6 y D7 en `/ws`, implementados y probados:** como máximo 50 sockets simultáneos por `ip_key`, y upgrade a 30/min con ráfaga de 10 por IP, con `TRUSTED_PROXIES=10.250.0.2/32` (ADR-0006 D2).
 2. **Las verificaciones de ADR-0006 que no se hicieron en el cierre de 001** (RF-C19), más dos comprobaciones con el stack desplegado:
@@ -297,3 +297,4 @@ Ninguno se cumple en la feature 001. Los puntos 1 a 4 se siguen en Linear (TA-8,
 7. **Primera entrada de la tabla de RF6 (spec de 010).** `apps/server/tests/ruleset_freeze.rs` lleva al menos la entrada de la versión de reglas con la que corre la primera pelea de producción. Desde 010 la imagen corre peleas sola, y con la tabla vacía nada ata esa versión a un comportamiento.
 8. **Medición en Android (spec de 002 y "Decisiones de 2026-10-31" de la de 010).** La RNF "Rendimiento" de 002 se mide en su dispositivo de referencia, un Android de gama media, antes del primer despliegue público. Hasta ahora solo se midió en un iPhone de gama alta.
 9. **El Postgres de producción no registra parámetros de sentencias (spec de 010).** El `INSERT` en `fight_secrets` escribiría la semilla en el log. Se comprueba con la consulta del punto 2 (ADR-0012 A9), en el recurso de Coolify.
+10. **Repetir los escenarios A a F de `fights_fanout.rs` (spec de 010, DP-B9).** En Linux amd64, con el `mem_limit` real y detrás de Traefik. El criterio es `memory.peak` del cgroup ≤ 200 MiB y ningún OOM kill, y F mide el enlace real de salida. Si no se cumple, bajar `WS_MAX_CONNECTIONS` por defecto o subir el `mem_limit` pasa por el gate de ADRs. También se revisa ahí `ORDER BY settled_at` sin índice.

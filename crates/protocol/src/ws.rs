@@ -142,7 +142,7 @@ pub enum ServerMessage {
         server_time: TimestampMs,
     },
     /// Released events, and only those: a batch or, for whoever came late or fell behind, a page of at
-    /// most 64. `from_index` is the index of the first one: the client discards what it already has.
+    /// most 8 KiB. `from_index` is the index of the first one: the client discards what it already has.
     FightEvents {
         fight_id: u32,
         from_index: u32,

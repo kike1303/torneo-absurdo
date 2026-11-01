@@ -919,6 +919,13 @@ function checkServerDockerfileFeatures(text, problems) {
   }
 }
 
+/** The instructions of the final stage of the server, besides the two of the characters. */
+const FINAL_STAGE_REST = [
+  ['COPY', '--from=build /app/target/x86_64-unknown-linux-musl/release/server /server'],
+  ['EXPOSE', '8080'],
+  ['ENTRYPOINT', '["/server"]'],
+];
+
 /**
  * 010 RNF "Imagen": the final stage carries the characters and says where they are, and has no RUN
  * (distroless has no shell to run it with).
@@ -942,11 +949,13 @@ function checkServerFinalStage(text, problems) {
     if (count === 0) problems.push(`${file}: final-stage: ${keyword} ${args} is required`);
     if (count > 1) problems.push(`${file}: final-stage: ${keyword} ${args} is repeated`);
   }
-  // Only those two lines: a later ENV would win over the required one and still pass.
+  // A closed list: a later ENV would win over the required one, and another COPY could write over the
+  // characters or bring anything into the image.
+  const allowed = [...required, ...FINAL_STAGE_REST];
   for (const { line, keyword, args } of final) {
-    const exact = required.some(([k, a]) => k === keyword && a === args);
-    if (!exact && (args.includes('CONTENT_DIR') || args.includes('/content'))) {
-      problems.push(`${file}:${line}: final-stage: ${keyword} ${args} moves the characters`);
+    if (keyword === 'RUN') continue;
+    if (!allowed.some(([k, a]) => k === keyword && a === args)) {
+      problems.push(`${file}:${line}: final-stage: ${keyword} ${args} is not allowed`);
     }
   }
 }

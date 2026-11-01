@@ -320,7 +320,7 @@ Reloj manual y `TestDb`, salvo lo indicado.
 
 También:
 - [ ] `just gen` sin diferencias y `svelte-check` en verde.
-- [ ] Con `just dev`, un cliente de prueba con Node (`WebSocket` global) ve `schedule_update`, entra tarde a una pelea real y recibe solo lo liberado. Salida en el PR.
+- [ ] Con `just dev`, un cliente de prueba con Node (`WebSocket` global) ve `schedule_update`, entra tarde a una pelea real y recibe solo lo liberado. Salida en el PR. La corrida es anterior a DP-B9 (ver "Prueba manual sin `just dev`"). Tras DP-B9 lo cubren QA, que reconstruyó el log con el binario real, y `fights_binary.rs`.
 - [ ] `just e2e` en verde con el binario de las dos features.
 - [ ] `just deny`. El lock no cambia.
 - [ ] `just check` en verde, con la salida pegada en el PR.
@@ -345,7 +345,7 @@ Sin jobs nuevos. `rust` suma unos 2 a 3 min por tests, dos clippy más y la comp
 - **`FightHub::held`.** Un método público que da los eventos y los bytes en caché de una pelea. Lo usan las pruebas de memoria y para esperar a la liberación. No da más de lo que ya es público.
 - **`fights.orphan_invalid` solo se prueba como unidad (`orphan_outcome`).** Hoy no se puede llegar a él en integración: una fila `settled` decodifica siempre, y un `state` fuera de la lista aborta antes `store::unsettled` (ver abajo).
 - **Una fila `settled` sin final que el protocolo pueda decir (`summary()` nulo)** se trata como una que no decodifica: se borra con `fights.orphan_invalid`.
-- **Prueba manual sin `just dev`.** El worktree no tiene `.env`, y `just dev` no admite una rejilla corta sin tocarlo. Corrí el binario con los valores de `.env.example`, una base propia, borrada después, y `FIGHT_CADENCE_SECS=113`, con un cliente de Node. Resultado: la pelea #1 (110 eventos, KO en 68 642 ms) coincide con el log publicado, y quien entró a los 20 024 ms recibió exactamente los 27 eventos de esa hora. Vi las cuatro transiciones por socket, y lag de 2 ms en los lotes de `ko` y `end`.
+- **Prueba manual sin `just dev`, anterior a DP-B9, y no repetida.** Tras DP-B9 lo mismo lo cubren QA, que reconstruyó el log con el binario real, y `fights_binary.rs`. El worktree no tiene `.env`, y `just dev` no admite una rejilla corta sin tocarlo. Corrí el binario con los valores de `.env.example`, una base propia, borrada después, y `FIGHT_CADENCE_SECS=113`, con un cliente de Node. Resultado: la pelea #1 (110 eventos, KO en 68 642 ms) coincide con el log publicado, y quien entró a los 20 024 ms recibió exactamente los 27 eventos de esa hora. Vi las cuatro transiciones por socket, y lag de 2 ms en los lotes de `ko` y `end`.
 - **`fights_fanout.rs`, cómo se mide.** Un proceso por escenario, porque el asignador no devuelve lo que usó, un solo worker, por el vCPU del server, y los clientes en otra copia del proceso de test. F2 quita DP-B7 con una ventana de 1 ms.
 
 ### Primera medición, antes de DP-B9
@@ -357,6 +357,8 @@ Con `fight_sync` llevando todos los eventos: D retuvo 226 MiB y E llegó a 224 +
 - **Sesión:** `subscribed`, `fight_sync` y luego páginas. Un brazo armado mientras queden (`pending`), el último del `select!` y con un mensaje por vuelta, así que ping, apagado y revocación se atienden entre páginas.
 - **`WsConfig`:** `max_write_buffer` de 16 KiB, y `MAX_SERVER_MESSAGE_BYTES` de 8 KiB.
 - **Desviación en `fights_fanout.rs`:** con páginas, suscribirse y desuscribirse de inmediato corta las páginas, y F no mediría nada. Por eso quien insiste se queda suscrito 400 ms (`HOLD_PAGES`) antes de desuscribirse, también al reconectar. La medición de latencia de F empieza después de conectar, porque esas páginas llevan una hora anterior.
+
+- **`PAGE_EVENTS` baja de 64 a 56 (revisión del PR #73).** Con un `ability.id` de 32 caracteres, que `validate` admite, 64 eventos pasaban de 8 KiB. Un test lo comprueba con el id más largo y los números más anchos. Menos eventos por página no empeora la memoria, así que no repetí A a F: la tabla de abajo es de 64.
 
 ### Medición con DP-B9 (2026-10-31)
 Mismo método: Mac ARM con páginas de 16 KiB, `--release`, `mimalloc`, un worker y loopback, con carga de 4 a 10 por otras sesiones. F4 se repitió, porque en la primera corrida su cliente de reconexión aún cortaba sus páginas.
@@ -380,7 +382,7 @@ Mismo método: Mac ARM con páginas de 16 KiB, `--release`, `mimalloc`, un worke
 - **El p99 de D2 no es un criterio.** Sale 796 ms porque mide la hora de páginas serializadas una vez, no el retraso de quien mira.
 
 ### Fila con un `state` fuera de la lista: se registra, no se cambia
-Una fila así aborta `store::unsettled`, y con eso cada pasada. No lo trato como DP-B8, porque no es el mismo caso. Una huérfana es una pelea ya terminada cuyo final solo falta difundir, y descartarla no toca nada. Esta fila es una pelea sin liquidar, quizá con commit y apuestas, y saltársela dejaría seguir el vivo con ella sin resolver, contra RF16. Hoy el efecto es el correcto: las pasadas abortan y a los 60 s hay detención, igual que con una fila que no pasa RF5. Solo se llega con la credencial, quitando el `CHECK` y el guard. Lo que no da es un `error_kind` propio. Queda para quien revise RF16 con TA-27, si hace falta distinguirlo.
+Una fila así aborta `store::unsettled`, y con eso cada pasada. No lo trato como DP-B8, porque no es el mismo caso. Una huérfana es una pelea ya terminada cuyo final solo falta difundir, y descartarla no toca nada. Esta fila es una pelea sin liquidar, quizá con commit y apuestas, y saltársela dejaría seguir el vivo con ella sin resolver, contra RF16. Hoy el efecto es el correcto: las pasadas abortan y a los 60 s hay detención, igual que con una fila que no pasa RF5. Solo se llega con la credencial, quitando el `CHECK` y el guard. Desde la revisión del PR #73 lleva un error propio (`store::BadFightRow`) con `error_kind = row_invalid`, y `orphan_outcome` ya no captura `Protocol`, para que un fallo real durante `read_orphans` no borre la entrada.
 
 ## Revisión
 ### architect — 2026-10-31 — REQUEST_CHANGES

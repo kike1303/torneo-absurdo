@@ -26,10 +26,16 @@ macro_rules! columns {
     };
 }
 
+/// A row that a `CHECK` of the table forbids, so only someone with the credential can have written it.
+/// Its own error, so it is not taken for a failure of the protocol of the database.
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+#[error("a row of fights does not decode")]
+pub struct BadFightRow;
+
 fn decode(row: &PgRow) -> Result<FightRow, sqlx::Error> {
     let state: String = row.try_get(1)?;
-    let state = FightState::parse(&state)
-        .ok_or_else(|| sqlx::Error::Protocol("fights.state".to_owned()))?;
+    let state =
+        FightState::parse(&state).ok_or_else(|| sqlx::Error::Decode(Box::new(BadFightRow)))?;
     Ok(FightRow {
         id: row.try_get(0)?,
         state,

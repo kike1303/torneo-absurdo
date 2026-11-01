@@ -248,7 +248,7 @@ async fn serve(
                                         match checked {
                                             Ok((channel, already_open)) => {
                                                 // Open: `subscribed` and nothing else, or a message
-                                                // of 40 bytes would ask for one of 50 KB (RF38).
+                                                // of 40 bytes would ask for the whole fight (RF38).
                                                 if !already_open {
                                                     if matches!(channel, Channel::Fight(_))
                                                         && !sync_requests.allow(now)

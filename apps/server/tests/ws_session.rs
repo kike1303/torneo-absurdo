@@ -569,7 +569,8 @@ async fn the_sixth_socket_of_a_user_is_503_and_they_do_not_use_anonymous_slots()
     assert_eq!(sixth.text(), r#"{"error":"ws.user_capacity"}"#);
     // The anonymous cap of this IP (1 here) is still free.
     clients.push(connect(app.addr, None, None).await.unwrap());
-    assert_eq!(ws_state.session_sockets(), 5);
+    // Registered in `on_upgrade`, after the 101 the client already saw.
+    wait_until(|| ws_state.session_sockets() == 5).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -593,7 +594,7 @@ async fn an_invalid_cookie_is_an_anonymous_socket_without_self() {
     .unwrap();
     // The sixth, with an expired cookie, gets in as anonymous (no ws.user_capacity).
     let mut anonymous = connect(app.addr, Some(&expired), None).await.unwrap();
-    assert_eq!(ws_state.session_sockets(), 5);
+    wait_until(|| ws_state.session_sockets() == 5).await;
     ws::send_text(&mut anonymous, r#"{"type":"subscribe","channel":"self"}"#).await;
     assert_eq!(
         ws::next_data(&mut anonymous, Duration::from_secs(2)).await,
@@ -646,7 +647,7 @@ async fn the_201st_socket_with_a_session_from_one_64_is_503() {
             .await
             .is_ok()
     );
-    assert_eq!(ws_state.session_sockets(), 201);
+    wait_until(|| ws_state.session_sockets() == 201).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

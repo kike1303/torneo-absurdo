@@ -749,7 +749,7 @@ const CASES = [
         ],
       ],
     },
-    /final-stage: ENV CONTENT_DIR=\/tmp moves the characters/,
+    /final-stage: ENV CONTENT_DIR=\/tmp is not allowed/,
   ],
   [
     'server Dockerfile: CONTENT_DIR among other pairs of an ENV',
@@ -761,7 +761,7 @@ const CASES = [
         ],
       ],
     },
-    /final-stage: ENV A=1 CONTENT_DIR=\/x moves the characters/,
+    /final-stage: ENV A=1 CONTENT_DIR=\/x is not allowed/,
   ],
   [
     'server Dockerfile: the same ENV twice',
@@ -785,8 +785,22 @@ const CASES = [
         ],
       ],
     },
-    /final-stage: COPY content\/names \/content\/characters moves the characters/,
+    /final-stage: COPY content\/names \/content\/characters is not allowed/,
   ],
+  ...[
+    [
+      'COPY content/names content/characters/x',
+      /COPY content\/names content\/characters\/x is not allowed/,
+    ],
+    ['COPY . /', /COPY \. \/ is not allowed/],
+    ['LABEL a=b', /LABEL a=b is not allowed/],
+    ['USER root', /USER root is not allowed/],
+    ['ENV PATH=/x', /ENV PATH=\/x is not allowed/],
+  ].map(([line, pattern]) => [
+    `server Dockerfile: ${line} in the final stage`,
+    { [SD]: [['EXPOSE 8080\n', `${line}\nEXPOSE 8080\n`]] },
+    pattern,
+  ]),
   [
     'server Dockerfile: a RUN in the final stage',
     { [SD]: [['EXPOSE 8080\n', 'RUN true\nEXPOSE 8080\n']] },
