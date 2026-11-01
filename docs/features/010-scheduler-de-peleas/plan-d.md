@@ -326,7 +326,8 @@ _El architect aceptó las siete, y están aplicadas en la Enmienda 4 de la spec,
 4. **`followed-fights.ts` es un módulo aparte,** para que la prueba de DP-B7 use la misma regla que el store. También deja de seguir una mirada con un final que no es `decided`, porque no traerá `end`.
 5. **`home.spec.ts` no usa `page.clock`.** Los tiempos son relativos al reloj real, y una pelea puede estar en cualquier `t` desde el inicio. Es igual de determinista, y más simple.
 6. **`about_to_start` no se afirma en `fights.spec.ts` (paso A).** Con el primer frame a tiempo, de la cuenta atrás se pasa directo a `live`, así que en una pelea real ese estado puede no verse. Se afirma en `home.spec.ts`.
-7. **Precarga de las hojas en `pre_live`, por el criterio de la decisión 14.** Sin ella, con Fast 3G y CPU a 4×, el primer frame llegó en `t = +188 ms`. Con ella, llega antes de `t = 0`.
+7. **Precarga de las hojas en `pre_live`, por el criterio de la decisión 14.** Sin ella, con Fast 3G y CPU a 4×, el primer frame llegó en `t = +188 ms`. Con ella, llega antes de `t = 0`. Se precarga con `new Image()`, porque un componente no hace `fetch` (ESLint).
+9. **`screenshots.spec.ts`: el catálogo se captura por secciones.** Con los componentes nuevos, `/dev/components` mide 9581 px a 375 px, más que los 8192 px de textura de WebGL por software, y la captura de página completa falla en Chromium. La comprobación de scroll horizontal sigue igual, y las imágenes pasan a ser una por sección.
 8. **`fights.spec.ts`:** los contextos usan una sola IP, sin `x-e2e-client`, para probar el límite de upgrades real. El contexto `session` entra por `login`, así que cuenta su socket igual que los demás.
 
 ## Revisión
