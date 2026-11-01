@@ -713,6 +713,82 @@ const CASES = [
     { [SD]: [['static-debian13:nonroot@', 'static-debian13:latest@']] },
     /nonroot: the final base must be a :nonroot tag/,
   ],
+  // 010 RF56: the build of the web reads the characters, and the final stage does not have them.
+  [
+    'web Dockerfile: without the characters',
+    { [WD]: [['COPY content/characters content/characters\n', '']] },
+    /web-characters: COPY content\/characters content\/characters is required once/,
+  ],
+  [
+    'web Dockerfile: the characters after the build',
+    {
+      [WD]: [
+        [
+          'COPY content/characters content/characters\nRUN pnpm --filter web build\n',
+          'RUN pnpm --filter web build\nCOPY content/characters content/characters\n',
+        ],
+      ],
+    },
+    /web-characters: COPY content\/characters content\/characters must come before the build/,
+  ],
+  [
+    'web Dockerfile: more of content/ in the build',
+    {
+      [WD]: [
+        [
+          'COPY content/characters content/characters\n',
+          'COPY content/characters content/characters\nCOPY content content\n',
+        ],
+      ],
+    },
+    /web-characters: COPY content content is not allowed/,
+  ],
+  [
+    'web Dockerfile: the characters in the final stage',
+    {
+      [WD]: [
+        [
+          'EXPOSE 3000\n',
+          'EXPOSE 3000\nCOPY --from=build /app/content/characters content/characters\n',
+        ],
+      ],
+    },
+    /web-characters: COPY --from=build \/app\/content\/characters content\/characters is not allowed/,
+  ],
+  [
+    'web Dockerfile: ADD of content in the build',
+    {
+      [WD]: [
+        [
+          'COPY content/characters content/characters\n',
+          'COPY content/characters content/characters\nADD content content\n',
+        ],
+      ],
+    },
+    /web-characters: ADD content content is not allowed/,
+  ],
+  [
+    'web Dockerfile: the whole context in the build',
+    {
+      [WD]: [
+        [
+          'COPY content/characters content/characters\n',
+          'COPY content/characters content/characters\nCOPY . .\n',
+        ],
+      ],
+    },
+    /web-characters: COPY \. \. is not allowed/,
+  ],
+  [
+    'web Dockerfile: ADD of the characters in the final stage',
+    { [WD]: [['EXPOSE 3000\n', 'EXPOSE 3000\nADD content/characters /x\n']] },
+    /web-characters: ADD content\/characters \/x is not allowed/,
+  ],
+  [
+    'web Dockerfile: all of the build in the final stage',
+    { [WD]: [['EXPOSE 3000\n', 'EXPOSE 3000\nCOPY --from=build /app /x\n']] },
+    /web-characters: COPY --from=build \/app \/x is not allowed/,
+  ],
   // 010 RNF "Imagen": the final stage carries the characters, and has no RUN.
   [
     'server Dockerfile: without the characters',

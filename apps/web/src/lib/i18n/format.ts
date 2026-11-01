@@ -49,3 +49,16 @@ export function formatRelative(date: Date, locale: Locale, now: Date = new Date(
   }
   return format.format(0, 'second');
 }
+
+/** A countdown: `m:ss`, and `h:mm:ss` from one hour on. Rounds up: the zero only shows at the zero. */
+export function formatClock(ms: number, locale: Locale): string {
+  const total = Math.ceil(Math.max(0, ms) / 1000);
+  const digits = (n: number, min: number) =>
+    new Intl.NumberFormat(locale, { minimumIntegerDigits: min, useGrouping: false }).format(n);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  return hours > 0
+    ? `${digits(hours, 1)}:${digits(minutes, 2)}:${digits(seconds, 2)}`
+    : `${digits(minutes, 1)}:${digits(seconds, 2)}`;
+}

@@ -133,7 +133,7 @@ jobs:
           cache-from: type=gha,scope=server
 
       # The runner's Node, no setup-js: the script uses Node built-ins only.
-      - name: The release binary has no dev-auth (RF-D9)
+      - name: The release binary has no dev-auth nor dev-fights (RF-D9, RF45)
         if: github.event_name == 'push'
         run: |
           set -euo pipefail

@@ -2,7 +2,7 @@
 id: "010"
 title: Scheduler de peleas en vivo
 type: intent
-status: approved
+status: done
 risk: high
 author: product-owner
 reviewers: [architect]
@@ -10,7 +10,7 @@ approvals: [{by: architect, date: 2026-10-30}]
 linear: TA-13
 depends_on: ["002", "003", "005", "008"]
 created: 2026-10-30
-updated: 2026-10-30
+updated: 2026-11-01
 ---
 
 # Intent: Scheduler de peleas en vivo

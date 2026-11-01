@@ -835,6 +835,7 @@ function checkDockerfiles(read, problems) {
       if (!froms.some((f) => /^(?:docker\.io\/)?(?:library\/)?node:/.test(f.image))) {
         problems.push(`${file}: node-version: the build stage must use node:`);
       }
+      checkWebCharacters(text, problems);
     }
   }
 }
@@ -956,6 +957,57 @@ function checkServerFinalStage(text, problems) {
     if (keyword === 'RUN') continue;
     if (!allowed.some(([k, a]) => k === keyword && a === args)) {
       problems.push(`${file}:${line}: final-stage: ${keyword} ${args} is not allowed`);
+    }
+  }
+}
+
+/** The final stage of the web, whole (010 RF56). A null argument is checked by other rules. */
+const WEB_FINAL_STAGE = [
+  ['WORKDIR', '/app'],
+  ['COPY', '--from=build /app/apps/web/build build/'],
+  ['COPY', '--from=build /app/apps/web/package.json package.json'],
+  ['ENV', 'NODE_ENV=production'],
+  ['EXPOSE', '3000'],
+  ['CMD', '["build/index.js"]'],
+];
+
+/**
+ * 010 RF56: the build stage of the web reads the name and the epithet of each fighter, so it needs
+ * the characters before building. The final stage never has them.
+ * @param {string} text
+ * @param {string[]} problems
+ */
+function checkWebCharacters(text, problems) {
+  const file = FILES.webDockerfile;
+  const required = 'content/characters content/characters';
+  const instructions = dockerInstructions(text);
+  const start = instructions.map((i) => i.keyword).lastIndexOf('FROM');
+  const build = instructions.slice(0, start);
+  const copies = build.flatMap((i, at) =>
+    i.keyword === 'COPY' && i.args === required ? [at] : [],
+  );
+  const builds = build.findIndex((i) => i.keyword === 'RUN' && /\bbuild\b/.test(i.args));
+  if (copies.length !== 1) {
+    problems.push(`${file}: web-characters: COPY ${required} is required once in the build stage`);
+  } else if (builds !== -1 && (copies[0] ?? 0) > builds) {
+    problems.push(`${file}: web-characters: COPY ${required} must come before the build`);
+  }
+  // The build reads only the characters of content/, and copies by name.
+  for (const { line, keyword, args } of build) {
+    const wide =
+      keyword === 'COPY' && /(?:^|\s)(?:\.\/?|\/|\*)(?:\s|$)/.test(args.replace(/\s\S+$/, ' '));
+    const content = (keyword === 'COPY' || keyword === 'ADD') && /\bcontent\b/.test(args);
+    if (keyword === 'ADD' || wide || (content && args !== required)) {
+      problems.push(`${file}:${line}: web-characters: ${keyword} ${args} is not allowed`);
+    }
+  }
+  // A closed list, as in the server: anything else could bring the characters or the code.
+  for (const { line, keyword, args } of instructions.slice(start + 1)) {
+    if (
+      keyword !== 'RUN' &&
+      !WEB_FINAL_STAGE.some(([k, a]) => k === keyword && (a === args || a === null))
+    ) {
+      problems.push(`${file}:${line}: web-characters: ${keyword} ${args} is not allowed`);
     }
   }
 }

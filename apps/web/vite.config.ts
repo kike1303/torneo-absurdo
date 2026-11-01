@@ -6,6 +6,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vitest/config';
 import paraglideOptions from './paraglide.options.js';
 import { chunkModules } from './vite/chunk-modules.js';
+import { fighterLore } from './vite/fighter-lore.js';
 import { localSprites } from './vite/local-sprites.js';
 
 // Kit 3 has no svelte.config.js: all Kit options live here (plan-a, decision 17).
@@ -17,6 +18,7 @@ export default defineConfig({
     // First, so /__local-sprites/ is answered before Kit; only in `vite dev` (002 RF-B7).
     localSprites(),
     chunkModules(),
+    fighterLore(),
     tailwindcss(),
     paraglideVitePlugin(paraglideOptions),
     sveltekit({

@@ -19,11 +19,19 @@ for (const size of SIZES) {
     test(`catalog ${size.name} ${theme}`, async ({ page }) => {
       await page.setViewportSize(size);
       await page.goto(`/es/dev/components?theme=${theme}`);
-      await page.screenshot({ path: `${DIR}/catalog-${size.name}-${theme}.png`, fullPage: true });
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
       );
       expect(overflow).toBeLessThanOrEqual(0);
+      // One image per section: the page is taller than the 8192 px a whole capture can have with
+      // WebGL by software, and the catalog only grows (010 plan-d, deviation 9).
+      const sections = await page.getByTestId('catalog').locator('> *').all();
+      expect(sections.length).toBeGreaterThan(0);
+      for (const [index, section] of sections.entries()) {
+        await section.screenshot({
+          path: `${DIR}/catalog-${size.name}-${theme}-${String(index).padStart(2, '0')}.png`,
+        });
+      }
     });
 
     for (const [name, path] of [

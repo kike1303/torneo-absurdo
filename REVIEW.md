@@ -12,6 +12,9 @@ Lo usan los agentes revisores (ver skill `review-pr`). Cada hallazgo se etiqueta
 ## Qué es "Important" aquí
 Algo que rompe comportamiento, filtra datos o resultados, permite crear o duplicar monedas, rompe el determinismo o viola un ADR aceptado. El estilo y los nombres son **nits**.
 
+## Regla de RF6 (spec de 010)
+Cambiar o quitar una entrada de la tabla de `apps/server/tests/ruleset_freeze.rs` es **bloqueante**: rompería la verificación de las peleas pasadas de esa versión. Un cambio de reglas lleva una versión nueva.
+
 ## Límite de nits
 Máximo 5 por review. El resto se resume como un conteo.
 
