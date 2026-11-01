@@ -26,10 +26,16 @@ macro_rules! columns {
     };
 }
 
+/// A row that a `CHECK` of the table forbids, so only someone with the credential can have written it.
+/// Its own error, so it is not taken for a failure of the protocol of the database.
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+#[error("a row of fights does not decode")]
+pub struct BadFightRow;
+
 fn decode(row: &PgRow) -> Result<FightRow, sqlx::Error> {
     let state: String = row.try_get(1)?;
-    let state = FightState::parse(&state)
-        .ok_or_else(|| sqlx::Error::Protocol("fights.state".to_owned()))?;
+    let state =
+        FightState::parse(&state).ok_or_else(|| sqlx::Error::Decode(Box::new(BadFightRow)))?;
     Ok(FightRow {
         id: row.try_get(0)?,
         state,
@@ -161,12 +167,22 @@ pub async fn unsettled(pool: &PgPool) -> Result<Vec<FightRow>, sqlx::Error> {
     rows.iter().map(decode).collect()
 }
 
-/// The last settled fight.
+/// How many fights come before this id. Fights are never deleted, so it never changes (RF45).
+#[cfg(feature = "dev-fights")]
+pub async fn fight_rank(pool: &PgPool, id: i32) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT count(*) FROM fights WHERE id < $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+}
+
+/// The last fight settled, by the hour it settled (RF35): a fight halted for a while settles after a
+/// later one that was cancelled.
 pub async fn last_settled(pool: &PgPool) -> Result<Option<FightRow>, sqlx::Error> {
     let row = sqlx::query(concat!(
         "SELECT ",
         columns!(),
-        " FROM fights WHERE state = 'settled' ORDER BY opens_at DESC LIMIT 1"
+        " FROM fights WHERE state = 'settled' ORDER BY settled_at DESC, id DESC LIMIT 1"
     ))
     .fetch_optional(pool)
     .await?;

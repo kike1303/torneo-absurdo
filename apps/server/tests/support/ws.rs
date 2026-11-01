@@ -41,6 +41,30 @@ pub async fn connect_with(
         .map(|(client, _)| client)
 }
 
+/// Like [`connect_with`], with the response of the upgrade (its headers are checked too).
+pub async fn connect_with_response(
+    addr: SocketAddr,
+    origin: &str,
+    headers: &[(&str, &str)],
+) -> Result<
+    (
+        Client,
+        tokio_tungstenite::tungstenite::handshake::client::Response,
+    ),
+    Error,
+> {
+    let mut request = format!("ws://{addr}/ws").into_client_request()?;
+    let map = request.headers_mut();
+    map.insert("origin", origin.parse().unwrap());
+    for (name, value) in headers {
+        map.append(
+            tokio_tungstenite::tungstenite::http::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+            value.parse().unwrap(),
+        );
+    }
+    tokio_tungstenite::connect_async(request).await
+}
+
 pub async fn send_text(client: &mut Client, text: &str) {
     client.send(Message::Text(text.into())).await.unwrap();
 }
@@ -61,6 +85,35 @@ pub async fn next_data(client: &mut Client, timeout: Duration) -> Option<Message
     .await
     .ok()
     .flatten()
+}
+
+/// The next message of the server, parsed; `None` if nothing came in time or the stream ended.
+pub async fn next_message(
+    client: &mut Client,
+    timeout: Duration,
+) -> Option<protocol::ServerMessage> {
+    match next_data(client, timeout).await? {
+        Message::Text(text) => Some(serde_json::from_str(text.as_str()).unwrap()),
+        _ => None,
+    }
+}
+
+/// What arrives until the socket stays quiet for `quiet`.
+pub async fn drain(client: &mut Client, quiet: Duration) -> Vec<protocol::ServerMessage> {
+    let mut out = Vec::new();
+    while let Some(message) = next_message(client, quiet).await {
+        out.push(message);
+    }
+    out
+}
+
+/// Subscribes and checks the answer. What the channel sends next is still to read.
+pub async fn subscribe(client: &mut Client, channel: &str) {
+    let text = serde_json::json!({"type": "subscribe", "channel": channel}).to_string();
+    send_text(client, &text).await;
+    let answer = next_data(client, Duration::from_secs(10)).await;
+    let expected = format!(r#"{{"type":"subscribed","channel":"{channel}"}}"#);
+    assert_eq!(answer, Some(Message::Text(expected.into())), "{channel}");
 }
 
 /// What ended the stream: a close frame (code, reason), or the connection ending without one.

@@ -10,14 +10,16 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-use protocol::{CancelReason, FightState};
+use protocol::{CancelReason, FightEvent, FightState};
 use rand_core::{OsRng, TryRngCore};
 use sqlx::postgres::PgConnectOptions;
 use sqlx::{Connection, PgConnection, PgPool};
 use tokio::task::{Id, JoinError, JoinSet};
 use tokio_util::sync::CancellationToken;
 
+use super::board::BoardUpdate;
 use super::hook::{SettlementError, SettlingFight};
+use super::hub::{HubUpdate, SettledFight};
 use super::roster::Roster;
 use super::sealed::{self, FinalLog, SealedLog, SealedSeed, SecretError};
 use super::snapshot::FightSnapshot;
@@ -159,6 +161,11 @@ struct Runner {
     tasks: JoinSet<TaskOutput>,
     task_kinds: HashMap<Id, (i32, TaskKind)>,
     last: Option<FightRow>,
+    /// The events of the log of `last`, decoded once per fight.
+    last_events: Option<(i32, Option<Arc<[FightEvent]>>)>,
+    /// What the last reread found of the orphans of the hub, until the next publication.
+    orphan_finals: Vec<SettledFight>,
+    gone: Vec<i32>,
     dirty: bool,
     next_reread: i64,
 }
@@ -189,6 +196,9 @@ impl Runner {
             tasks: JoinSet::new(),
             task_kinds: HashMap::new(),
             last: None,
+            last_events: None,
+            orphan_finals: Vec::new(),
+            gone: Vec::new(),
             dirty: true,
             next_reread: i64::MIN,
         }
@@ -480,6 +490,7 @@ impl Runner {
         let rows = store::unsettled(&self.pool).await?;
         self.last = store::last_settled(&self.pool).await?;
         self.rows = rows.into_iter().map(|row| (row.id, row)).collect();
+        self.read_orphans().await?;
         self.dirty = false;
         self.next_reread = now.saturating_add(self.settings.timings.reread_ms);
         // What is no longer unsettled was settled by someone else (RF18, RF59): its emission closes.
@@ -497,6 +508,25 @@ impl Runner {
             self.forget(id);
         }
         self.snapshot_errors.clear();
+        Ok(())
+    }
+
+    /// Amendment DP-B8: what the hub still has as unsettled and is no longer in the rows. Its `settled`
+    /// summary is the only thing that counts as its final. Anything else ends its entry, and a row that
+    /// does not decode must not stop the live fights.
+    async fn read_orphans(&mut self) -> Result<(), sqlx::Error> {
+        let known: BTreeSet<i32> = self.rows.keys().copied().collect();
+        let last = self.last.as_ref().map(|row| row.id);
+        for id in self.shared.hub().orphans(&known, last) {
+            match orphan_outcome(store::by_id(&self.pool, id).await)? {
+                Orphan::Settled(fight) => self.orphan_finals.push(*fight),
+                Orphan::Gone => self.gone.push(id),
+                Orphan::Invalid => {
+                    tracing::warn!(event = "fights.orphan_invalid", error_kind = "bad_row");
+                    self.gone.push(id);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -601,9 +631,18 @@ impl Runner {
 
     /// RF3: the seed, its row, the commit and the state in one transaction.
     async fn open(&mut self, id: i32, now: i64) -> Result<(), sqlx::Error> {
+        #[cfg(feature = "dev-fights")]
+        let scripted = self.scripted_seed(id).await?;
         let mut tx = self.pool.begin().await?;
         store::set_lock_timeout(&mut tx, self.settings.timings.lock_timeout_ms).await?;
-        match sealed::open_window(&mut tx, id, now).await {
+        #[cfg(feature = "dev-fights")]
+        let opened = match scripted {
+            Some(seed) => sealed::open_window_with_seed(&mut tx, id, &seed, now).await,
+            None => sealed::open_window(&mut tx, id, now).await,
+        };
+        #[cfg(not(feature = "dev-fights"))]
+        let opened = sealed::open_window(&mut tx, id, now).await;
+        match opened {
             Ok(_) => {
                 tx.commit().await?;
                 tracing::debug!(event = "fights.opened");
@@ -614,7 +653,19 @@ impl Runner {
                 return Err(sqlx::Error::Protocol("os_rng".to_owned()));
             }
         }
-        self.refresh(id).await
+        self.refresh(id).await?;
+        self.publish();
+        Ok(())
+    }
+
+    /// RF45: the seed of the row of this fight in the script, if there is one.
+    #[cfg(feature = "dev-fights")]
+    async fn scripted_seed(&self, id: i32) -> Result<Option<[u8; 32]>, sqlx::Error> {
+        let (Some(script), Some(row)) = (&self.settings.script, self.rows.get(&id)) else {
+            return Ok(None);
+        };
+        let rank = store::fight_rank(&self.pool, id).await?;
+        Ok(script.seed_for(rank, &row.spec_a, &row.spec_b))
     }
 
     async fn close(&mut self, id: i32, now: i64) -> Result<(), sqlx::Error> {
@@ -623,8 +674,11 @@ impl Runner {
         if closed.is_some() {
             tracing::debug!(event = "fights.closed");
         }
-        // Only the update of the row: the log is computed in the next action, from the row.
-        self.refresh(id).await
+        // Only the update of the row: the log is computed in the next action, from the row. What the
+        // sockets see of the close goes first, so its hour does not depend on that computation.
+        self.refresh(id).await?;
+        self.publish();
+        Ok(())
     }
 
     async fn go_live(&mut self, id: i32, started_at_ms: i64) -> Result<(), sqlx::Error> {
@@ -639,6 +693,7 @@ impl Runner {
             tracing::debug!(event = "fights.live");
         }
         self.refresh(id).await?;
+        self.publish();
         self.start_emission_if_ready(id);
         Ok(())
     }
@@ -654,11 +709,21 @@ impl Runner {
         let Some(started_at_ms) = row.live_started_at else {
             return;
         };
+        if !self.sealed.contains_key(&id) {
+            return;
+        }
+        // Only with the row in `live`: this also runs when a computation ends in `betting_closed`,
+        // and nothing may go out at an hour that depends on it. The hub knows the fight before its
+        // first tick, also when resuming with no transition.
+        self.publish();
         let Some(log) = self.sealed.remove(&id) else {
             return;
         };
         let clock = self.settings.clock.clone();
-        let sink = self.settings.sink.clone();
+        let sink: Arc<dyn release::EventSink> = Arc::new(release::HubAndSink {
+            hub: self.shared.hub().clone(),
+            sink: self.settings.sink.clone(),
+        });
         let handle = self.tasks.spawn(async move {
             let final_log = release::run(id, log, started_at_ms, clock, sink).await;
             TaskOutput::Released { id, final_log }
@@ -839,6 +904,11 @@ impl Runner {
 
     /// RF12, RF20, RF21: the row of the next slot, from the roster loaded at startup.
     async fn announce(&mut self, now: i64) -> Result<(), sqlx::Error> {
+        #[cfg(feature = "dev-fights")]
+        if let Some(script) = self.settings.script.clone() {
+            script.announce(&self.pool, &self.config, now).await?;
+            return self.reload_rows_only().await;
+        }
         let Some(roster) = self.roster.clone() else {
             return Ok(());
         };
@@ -855,15 +925,83 @@ impl Runner {
         Ok(())
     }
 
-    fn publish(&self) {
+    fn publish(&mut self) {
         let mut rows: Vec<&FightRow> = self.rows.values().collect();
         rows.sort_unstable_by_key(|row| row.opens_at);
-        let mut summaries = rows.iter().filter_map(|row| row.summary());
-        let current = summaries.next();
-        let next = summaries.next();
+        let summaries: Vec<_> = rows.iter().filter_map(|row| row.summary()).collect();
         let last = self.last.as_ref().and_then(FightRow::summary);
-        self.shared.publish(self.halted(), current, next, last);
+        let events = self.events_of_last();
+        let update = BoardUpdate {
+            halted: self.halted(),
+            current: summaries.first().cloned(),
+            next: summaries.get(1).cloned(),
+            last: last.clone(),
+            hub: HubUpdate {
+                rows: summaries,
+                last: last.map(|summary| SettledFight { summary, events }),
+                finals: std::mem::take(&mut self.orphan_finals),
+                gone: std::mem::take(&mut self.gone),
+            },
+        };
+        self.shared.publish(update);
     }
+
+    /// RF38: after a restart, `last` only has its events in its log. They are decoded once per fight.
+    fn events_of_last(&mut self) -> Option<Arc<[FightEvent]>> {
+        let row = self.last.as_ref()?;
+        if let Some((id, events)) = &self.last_events
+            && *id == row.id
+        {
+            return events.clone();
+        }
+        let events = events_of_row(row);
+        self.last_events = Some((row.id, events.clone()));
+        events
+    }
+}
+
+/// The events of a settled row. A log that does not decode leaves the summary without events.
+fn events_of_row(row: &FightRow) -> Option<Arc<[FightEvent]>> {
+    let bytes = row.log.as_deref()?;
+    match sealed::events_of_settled(bytes) {
+        Ok(events) => Some(events.into()),
+        Err(_) => {
+            tracing::warn!(event = "fights.last_log_invalid", error_kind = "bad_log");
+            None
+        }
+    }
+}
+
+/// What the row of an orphan of the hub says.
+enum Orphan {
+    Settled(Box<SettledFight>),
+    /// No row, or not settled: for instance, a restored backup. It goes without a word.
+    Gone,
+    Invalid,
+}
+
+/// Only a settled summary is a final. A row that does not decode ends the entry, and any other error
+/// is a failure talking to the database: it stops the pass and the row is read again, so a passing
+/// failure never loses a final.
+fn orphan_outcome(read: Result<Option<FightRow>, sqlx::Error>) -> Result<Orphan, sqlx::Error> {
+    let row = match read {
+        Ok(Some(row)) => row,
+        Ok(None) => return Ok(Orphan::Gone),
+        Err(
+            sqlx::Error::Decode(_)
+            | sqlx::Error::ColumnDecode { .. }
+            | sqlx::Error::ColumnNotFound(_)
+            | sqlx::Error::ColumnIndexOutOfBounds { .. },
+        ) => return Ok(Orphan::Invalid),
+        Err(error) => return Err(error),
+    };
+    if row.state != FightState::Settled {
+        return Ok(Orphan::Gone);
+    }
+    Ok(row.summary().map_or(Orphan::Invalid, |summary| {
+        let events = events_of_row(&row);
+        Orphan::Settled(Box::new(SettledFight { summary, events }))
+    }))
 }
 
 /// One transaction of a final, in its own task: a panic here is one more failure, and never kills
@@ -981,5 +1119,40 @@ async fn heartbeat(mut connection: PgConnection, every: Duration, timeout: Durat
         if !matches!(proof, Ok(Ok(()))) {
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::state::tests::row;
+    use super::*;
+
+    /// Amendment DP-B8: only a settled summary is a final.
+    #[test]
+    fn only_a_settled_row_is_the_final_of_an_orphan() {
+        let invalid = orphan_outcome(Err(sqlx::Error::Decode(Box::new(store::BadFightRow))));
+        assert!(matches!(invalid, Ok(Orphan::Invalid)));
+        assert!(matches!(orphan_outcome(Ok(None)), Ok(Orphan::Gone)));
+        // A database that fails is another thing: the pass aborts, and it is read again.
+        assert!(orphan_outcome(Err(sqlx::Error::PoolTimedOut)).is_err());
+        assert!(orphan_outcome(Err(sqlx::Error::Protocol("cut".to_owned()))).is_err());
+        // Another state, as after restoring a backup.
+        for state in [FightState::Scheduled, FightState::Live] {
+            assert!(matches!(
+                orphan_outcome(Ok(Some(row(state)))),
+                Ok(Orphan::Gone)
+            ));
+        }
+        // Settled with no final that the protocol can say: as a row that does not decode.
+        assert!(matches!(
+            orphan_outcome(Ok(Some(row(FightState::Settled)))),
+            Ok(Orphan::Invalid)
+        ));
+        let mut settled = row(FightState::Settled);
+        settled.cancel_reason = Some("missed_window".to_owned());
+        assert!(matches!(
+            orphan_outcome(Ok(Some(settled))),
+            Ok(Orphan::Settled(fight)) if fight.events.is_none()
+        ));
     }
 }

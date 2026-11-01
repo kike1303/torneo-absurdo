@@ -740,6 +740,68 @@ const CASES = [
     /final-stage: ENV CONTENT_DIR=\/content\/characters is required/,
   ],
   [
+    'server Dockerfile: a second ENV of CONTENT_DIR, which would win',
+    {
+      [SD]: [
+        [
+          'ENV CONTENT_DIR=/content/characters\n',
+          'ENV CONTENT_DIR=/content/characters\nENV CONTENT_DIR=/tmp\n',
+        ],
+      ],
+    },
+    /final-stage: ENV CONTENT_DIR=\/tmp is not allowed/,
+  ],
+  [
+    'server Dockerfile: CONTENT_DIR among other pairs of an ENV',
+    {
+      [SD]: [
+        [
+          'ENV CONTENT_DIR=/content/characters\n',
+          'ENV CONTENT_DIR=/content/characters\nENV A=1 CONTENT_DIR=/x\n',
+        ],
+      ],
+    },
+    /final-stage: ENV A=1 CONTENT_DIR=\/x is not allowed/,
+  ],
+  [
+    'server Dockerfile: the same ENV twice',
+    {
+      [SD]: [
+        [
+          'ENV CONTENT_DIR=/content/characters\n',
+          'ENV CONTENT_DIR=/content/characters\nENV CONTENT_DIR=/content/characters\n',
+        ],
+      ],
+    },
+    /final-stage: ENV CONTENT_DIR=\/content\/characters is repeated/,
+  ],
+  [
+    'server Dockerfile: a second COPY over the characters',
+    {
+      [SD]: [
+        [
+          'COPY content/characters /content/characters\n',
+          'COPY content/characters /content/characters\nCOPY content/names /content/characters\n',
+        ],
+      ],
+    },
+    /final-stage: COPY content\/names \/content\/characters is not allowed/,
+  ],
+  ...[
+    [
+      'COPY content/names content/characters/x',
+      /COPY content\/names content\/characters\/x is not allowed/,
+    ],
+    ['COPY . /', /COPY \. \/ is not allowed/],
+    ['LABEL a=b', /LABEL a=b is not allowed/],
+    ['USER root', /USER root is not allowed/],
+    ['ENV PATH=/x', /ENV PATH=\/x is not allowed/],
+  ].map(([line, pattern]) => [
+    `server Dockerfile: ${line} in the final stage`,
+    { [SD]: [['EXPOSE 8080\n', `${line}\nEXPOSE 8080\n`]] },
+    pattern,
+  ]),
+  [
     'server Dockerfile: a RUN in the final stage',
     { [SD]: [['EXPOSE 8080\n', 'RUN true\nEXPOSE 8080\n']] },
     /final-stage: RUN is not allowed/,
@@ -886,6 +948,61 @@ const CASES = [
       ],
     },
     /dev-auth outside its definition/,
+  ],
+  // 010 RF45: dev-fights, under the same rules as dev-auth.
+  ...[
+    [
+      'default = ["dev-fights"]',
+      'default = ["dev-fights"]\ndev-auth = []',
+      /default reaches dev-fights/,
+    ],
+    [
+      'default reaches dev-fights through x',
+      'default = ["x"]\nx = ["dev-fights"]\ndev-auth = []',
+      /default reaches dev-fights through x/,
+    ],
+    ['"x/dev-fights"', 'default = ["x/dev-fights"]\ndev-auth = []', /default reaches dev-fights/],
+  ].map(([name, table, pattern]) => [
+    `server Cargo.toml: ${name}`,
+    { [SC]: [['dev-auth = []', table]] },
+    pattern,
+  ]),
+  [
+    'server Cargo.toml: no dev-fights',
+    { [SC]: [['dev-fights = []\n', '']] },
+    /must define exactly dev-fights = \[\]/,
+  ],
+  [
+    'server Cargo.toml: dev-fights enabling something',
+    { [SC]: [['dev-fights = []', 'dev-fights = ["dev-auth"]']] },
+    /must define exactly dev-fights = \[\]/,
+  ],
+  [
+    'server Cargo.toml: dev-fights in a comment',
+    { [SC]: [['# The dev OAuth', '# dev-fights\n# The dev OAuth']] },
+    /dev-fights outside its definition/,
+  ],
+  [
+    'server Dockerfile: dev-fights in a RUN',
+    { [SD]: [[BUILD_RUN, `${BUILD_RUN} # dev-fights`]] },
+    /no-dev-fights: RUN names dev-fights/,
+  ],
+  [
+    'server Dockerfile: ARG FEATURES=dev-fights',
+    { [SD]: [['ARG APP_VERSION=dev\n', 'ARG APP_VERSION=dev\nARG FEATURES=dev-fights\n']] },
+    /no-dev-fights: ARG names dev-fights/,
+  ],
+  [
+    'server Dockerfile: the variable of the script',
+    { [SD]: [['EXPOSE 8080\n', 'ENV FIGHT_SCRIPT_PATH=/x\nEXPOSE 8080\n']] },
+    /no-fight-script: ENV names FIGHT_SCRIPT_PATH/,
+  ],
+  [
+    'server compose: the variable of the script',
+    {
+      [C]: [['RUST_LOG: info', 'RUST_LOG: info\n      FIGHT_SCRIPT_PATH: /x']],
+    },
+    /env-allowlist: FIGHT_SCRIPT_PATH is not an allowed variable/,
   ],
   // SECURITY_HEADERS is the source of the Traefik values
   [

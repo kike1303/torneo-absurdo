@@ -114,7 +114,11 @@ pub async fn handler(
     let config = ws.config;
     let echo = ws.echo;
     let pool = state.db.clone();
+    let hub = state.fights.hub().clone();
     upgrade
+        .read_buffer_size(config.read_buffer)
+        .write_buffer_size(config.write_buffer)
+        .max_write_buffer_size(config.max_write_buffer)
         .max_message_size(MAX_MESSAGE_BYTES)
         .max_frame_size(MAX_MESSAGE_BYTES)
         .on_upgrade(move |mut socket| async move {
@@ -157,7 +161,7 @@ pub async fn handler(
                 }
             };
             let context = session::Context { echo, config };
-            session::run(socket, context, shutdown, auth).await;
+            session::run(socket, context, shutdown, auth, hub).await;
             drop(admission);
         })
 }

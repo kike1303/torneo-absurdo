@@ -12,22 +12,37 @@ use protocol::FightEvent;
 use tokio::time::MissedTickBehavior;
 
 use super::FightClock;
+use super::hub::FightHub;
 use super::sealed::{FinalLog, SealedLog};
 
 /// The period of the release, the same for every fight.
 pub const TICK: Duration = Duration::from_millis(50);
 
-/// Where the released events go. The hub of phase B implements it. It must not log the events.
+/// Where the released events go: the hub, and in the tests whoever watches. It must not log them.
 pub trait EventSink: Send + Sync {
     /// A batch of a tick; `from_index` is the index of its first event in the fight.
     fn publish(&self, fight_id: i32, from_index: usize, events: &[FightEvent]);
 }
 
-/// The sink until phase B.
+/// The sink of the settings by default: only the hub gets the events.
 pub struct DiscardEvents;
 
 impl EventSink for DiscardEvents {
     fn publish(&self, _fight_id: i32, _from_index: usize, _events: &[FightEvent]) {}
+}
+
+/// The hub always, plus the sink of the settings. So forgetting to connect the hub cannot leave the
+/// live fights empty, and a test can still watch what is released.
+pub struct HubAndSink {
+    pub hub: Arc<FightHub>,
+    pub sink: Arc<dyn EventSink>,
+}
+
+impl EventSink for HubAndSink {
+    fn publish(&self, fight_id: i32, from_index: usize, events: &[FightEvent]) {
+        self.hub.publish(fight_id, from_index, events);
+        self.sink.publish(fight_id, from_index, events);
+    }
 }
 
 /// Releases the fight until its `end`. `None` only if the log says it finished and could not give

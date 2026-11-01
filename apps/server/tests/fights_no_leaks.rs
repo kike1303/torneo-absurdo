@@ -1,6 +1,8 @@
 //! 010 RF27, test 12 of ADR-0008: for each state of the cycle, as an anonymous visitor, with a session
 //! and with a session of an admin, every route of the manifest and the `/ws` channels. Before
 //! `Settled` neither the seed nor the log appears, in any encoding, in a body, an error or a header.
+//! Over a socket, never, and an event comes at its hour: what was received is exactly the prefix of
+//! the log for that hour.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod support;
@@ -16,7 +18,8 @@ use axum::http::{Request, StatusCode};
 use axum::routing::get;
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
-use protocol::FightState;
+use engine::FightEvent;
+use protocol::{FightState, ServerMessage};
 use server::admin::{AdminAction, AdminCommand};
 use server::app::{AppState, Settings};
 use server::fights::{FightClock, hex};
@@ -60,6 +63,21 @@ fn canaries(vector: &Vector) -> Vec<String> {
         out.push(fragment.to_owned());
     }
     out
+}
+
+/// What never goes over a socket, not even after `Settled` (RF26).
+fn secret_canaries(vector: &Vector) -> Vec<String> {
+    let seed = vector.seed.as_slice();
+    vec![
+        hex(seed),
+        hex(seed).to_uppercase(),
+        STANDARD.encode(seed),
+        URL_SAFE_NO_PAD.encode(seed),
+        serde_json::to_string(seed).unwrap(),
+        format!("{seed:?}"),
+        format!("{seed:?}").replace(' ', ""),
+        String::from_utf8(vector.canonical()).unwrap(),
+    ]
 }
 
 /// What delates the result, and is only public once the fight is settled: the final of the summary.
@@ -239,23 +257,169 @@ async fn sweep(
         recent_admin_status(&who.state, &user_cookie).await,
         StatusCode::FORBIDDEN
     );
+}
 
-    // The channels of `/ws` that exist in phase A: `self`, with a session, and the refusal of the
-    // others. Anything that arrives is checked too.
-    let token = session_for(pool, who.user).await;
-    let cookie = session(token);
-    let mut client = ws::connect_with(addr, ORIGIN, &[("cookie", cookie.as_str())])
-        .await
-        .unwrap();
-    ws::send_text(&mut client, r#"{"type":"subscribe","channel":"self"}"#).await;
-    ws::send_text(&mut client, r#"{"type":"subscribe","channel":"schedule"}"#).await;
-    ws::send_text(&mut client, r#"{"type":"subscribe","channel":"fight:1"}"#).await;
-    while let Some(message) = ws::next_data(&mut client, Duration::from_millis(100)).await {
-        let text = message.into_text().unwrap();
-        for canary in canaries {
-            assert!(!text.contains(canary.as_str()), "/ws has {canary}");
+fn assert_no_canary(what: &str, text: &str, canaries: &[String]) {
+    for canary in canaries {
+        assert!(
+            !text.contains(canary.as_str()),
+            "{what} has {canary}: {text}"
+        );
+    }
+}
+
+/// What a socket holds of a fight, with each batch checked to be in its place.
+#[derive(Default)]
+struct Received {
+    events: Vec<FightEvent>,
+}
+
+impl Received {
+    fn apply(&mut self, what: &str, message: &ServerMessage) {
+        if let ServerMessage::FightEvents {
+            from_index, events, ..
+        } = message
+        {
+            // In its place, discarding what a page repeats, and what repeats has to be the same.
+            let from = usize::try_from(*from_index).unwrap();
+            assert!(from <= self.events.len(), "{what}: a gap");
+            for (i, event) in events.iter().enumerate() {
+                match self.events.get(from + i) {
+                    Some(held) => assert_eq!(held, event, "{what}: it changed"),
+                    None => self.events.push(event.clone()),
+                }
+            }
         }
     }
+}
+
+/// `/ws` with one identity at this hour: it connects, subscribes to every channel, reads what comes and
+/// forces a close. The headers of the upgrade, every message and the reason of the close have no
+/// canary, and what it received is exactly `expected`, the prefix of the log for this hour.
+async fn sweep_socket(
+    addr: SocketAddr,
+    identity: &str,
+    cookie: Option<&str>,
+    id: i32,
+    state: FightState,
+    canaries: &[String],
+    expected: &[FightEvent],
+) {
+    let what = format!("/ws {state:?} {identity}");
+    let ip = next_ip();
+    let mut headers = vec![("x-forwarded-for", ip.as_str())];
+    if let Some(cookie) = cookie {
+        headers.push(("cookie", cookie));
+    }
+    let (mut client, response) = ws::connect_with_response(addr, ORIGIN, &headers)
+        .await
+        .unwrap();
+    for (name, value) in response.headers() {
+        let value = String::from_utf8_lossy(value.as_bytes());
+        assert_no_canary(&format!("{what} header {name}"), &value, canaries);
+    }
+    let subscribe = |channel: &str| format!(r#"{{"type":"subscribe","channel":"{channel}"}}"#);
+    if cookie.is_some() {
+        ws::send_text(&mut client, &subscribe("self")).await;
+    }
+    ws::send_text(&mut client, &subscribe("schedule")).await;
+    ws::send_text(&mut client, &subscribe(&format!("fight:{id}"))).await;
+    let mut received = Received::default();
+    let mut proof = 0;
+    while let Some(message) = ws::next_data(&mut client, Duration::from_millis(100)).await {
+        let text = message.into_text().unwrap();
+        assert_no_canary(&what, text.as_str(), canaries);
+        let parsed: ServerMessage = serde_json::from_str(text.as_str()).unwrap();
+        if matches!(parsed, ServerMessage::FightSync { .. }) {
+            proof += 1;
+        }
+        received.apply(&what, &parsed);
+    }
+    assert_eq!(proof, 1, "{what}: the channel of the fight said nothing");
+    assert_eq!(received.events, expected, "{what}");
+    // A close forced by the client, whose reason is checked too.
+    ws::send_text(&mut client, "not json").await;
+    match ws::ending(&mut client, Duration::from_secs(5)).await {
+        ws::Ending::Close(code, reason) => {
+            assert_eq!(code, 1008, "{what}");
+            assert_no_canary(&what, &reason, canaries);
+        }
+        ws::Ending::NoCloseFrame => panic!("{what}: no close"),
+    }
+}
+
+/// `/ws` with the three identities.
+async fn sweep_sockets(
+    addr: SocketAddr,
+    pool: &PgPool,
+    who: &Identities,
+    cookie_name: &str,
+    id: i32,
+    (state, canaries, expected): (FightState, &[String], &[FightEvent]),
+) {
+    sweep_socket(addr, "anonymous", None, id, state, canaries, expected).await;
+    let user = format!("{cookie_name}={}", session_for(pool, who.user).await);
+    sweep_socket(addr, "user", Some(&user), id, state, canaries, expected).await;
+    let admin = format!("{cookie_name}={}", admin_session(pool, who).await);
+    sweep_socket(addr, "admin", Some(&admin), id, state, canaries, expected).await;
+}
+
+/// The observer that stays connected for the whole fight: at each hour, once quiet, it holds exactly
+/// what is due.
+async fn observer_reaches(
+    observer: &mut ws::Client,
+    received: &mut Received,
+    canaries: &[String],
+    expected: &[FightEvent],
+) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while received.events.len() < expected.len() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "never: {}",
+            expected.len()
+        );
+        read_observer(observer, received, canaries, Duration::from_millis(100)).await;
+    }
+    // Several ticks of silence: nothing beyond.
+    read_observer(observer, received, canaries, Duration::from_millis(300)).await;
+    assert_eq!(received.events, expected, "the observer");
+}
+
+async fn read_observer(
+    observer: &mut ws::Client,
+    received: &mut Received,
+    canaries: &[String],
+    quiet: Duration,
+) {
+    while let Some(message) = ws::next_data(observer, quiet).await {
+        let text = message.into_text().unwrap();
+        assert_no_canary("the observer", text.as_str(), canaries);
+        received.apply(
+            "the observer",
+            &serde_json::from_str(text.as_str()).unwrap(),
+        );
+    }
+}
+
+/// What is due at `elapsed` from the start of the fight.
+fn prefix(vector: &Vector, elapsed: i64) -> Vec<FightEvent> {
+    let due: Vec<FightEvent> = vector
+        .log
+        .events
+        .iter()
+        .take_while(|event| i64::from(event.t()) <= elapsed)
+        .cloned()
+        .collect();
+    assert!(
+        vector
+            .log
+            .events
+            .iter()
+            .skip(due.len())
+            .all(|event| i64::from(event.t()) > elapsed)
+    );
+    due
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -305,12 +469,18 @@ async fn nothing_leaks_in_any_state_with_any_identity() {
     let vector = Vector::of(KO);
     let settled_canaries = canaries(&vector);
     let canaries = result_canaries(&settled_canaries);
+    let secrets = secret_canaries(&vector);
     let id = f::announce(&pool, T0, &vector.a, &vector.b).await;
     let _runner = f::spawn_runner(&pool, &shared, f::config_without_roster(), fight_settings);
     wait_for("the board", || async {
         shared.current().halted == Some(false)
     })
     .await;
+    wait_for("the hub", || async { shared.hub().knows(id) }).await;
+    // Connected from the start: what it receives is what a whole fight sends.
+    let mut observer = ws::connect(app.addr, ORIGIN).await.unwrap();
+    ws::subscribe(&mut observer, &format!("fight:{id}")).await;
+    let mut seen = Received::default();
 
     sweep(
         app.addr,
@@ -322,6 +492,16 @@ async fn nothing_leaks_in_any_state_with_any_identity() {
         &canaries,
     )
     .await;
+    sweep_sockets(
+        app.addr,
+        &pool,
+        &who,
+        &cookie_name,
+        id,
+        (FightState::Scheduled, &canaries, &[]),
+    )
+    .await;
+    observer_reaches(&mut observer, &mut seen, &canaries, &[]).await;
 
     // The test puts the seed of its vector on the legal route, so its canaries are the real ones.
     f::open_with(&pool, id, &vector.seed, T0).await;
@@ -341,6 +521,16 @@ async fn nothing_leaks_in_any_state_with_any_identity() {
         &canaries,
     )
     .await;
+    sweep_sockets(
+        app.addr,
+        &pool,
+        &who,
+        &cookie_name,
+        id,
+        (FightState::BettingOpen, &canaries, &[]),
+    )
+    .await;
+    observer_reaches(&mut observer, &mut seen, &canaries, &[]).await;
 
     let (closes_at, live_at) = f::hours(T0);
     clock.set(closes_at);
@@ -355,9 +545,23 @@ async fn nothing_leaks_in_any_state_with_any_identity() {
         &canaries,
     )
     .await;
+    sweep_sockets(
+        app.addr,
+        &pool,
+        &who,
+        &cookie_name,
+        id,
+        (FightState::BettingClosed, &canaries, &[]),
+    )
+    .await;
+    observer_reaches(&mut observer, &mut seen, &canaries, &[]).await;
 
     clock.set(live_at);
     wait_state(&pool, id, FightState::Live).await;
+    wait_for("the release of the first events", || async {
+        shared.hub().held(id).is_some_and(|(events, _)| events > 0)
+    })
+    .await;
     sweep(
         app.addr,
         &pool,
@@ -368,9 +572,49 @@ async fn nothing_leaks_in_any_state_with_any_identity() {
         &canaries,
     )
     .await;
+    // On air, the events are public as they become due, each at its hour: a text search for `"t":` no
+    // longer says anything, so the messages are read. The seed, the log and the final stay canaries.
+    let mut on_air = secrets.clone();
+    on_air.push(r#""kind":"decided""#.to_owned());
+    let ko_t = vector
+        .log
+        .events
+        .iter()
+        .find(|event| matches!(event, FightEvent::Ko { .. }))
+        .expect("a KO vector")
+        .t();
+    let (ko_t, end_t) = (i64::from(ko_t), vector.end_t());
+    for elapsed in [0, 1000, ko_t - 1, ko_t, ko_t + 1, end_t - 1, end_t] {
+        clock.set(live_at + elapsed);
+        let due = prefix(&vector, elapsed);
+        wait_for("the release", || async {
+            shared
+                .hub()
+                .held(id)
+                .is_some_and(|(events, _)| events == due.len())
+        })
+        .await;
+        observer_reaches(&mut observer, &mut seen, &on_air, &due).await;
+        sweep_sockets(
+            app.addr,
+            &pool,
+            &who,
+            &cookie_name,
+            id,
+            (FightState::Live, &on_air, &due),
+        )
+        .await;
+    }
 
     clock.set(live_at + 100_000);
     wait_state(&pool, id, FightState::Settled).await;
+    wait_for("the final in the hub", || async {
+        shared
+            .current()
+            .last
+            .is_some_and(|last| last.id == u32::try_from(id).unwrap())
+    })
+    .await;
     // RF34: and now it is the detail that has them, and no other route.
     sweep(
         app.addr,
@@ -382,6 +626,17 @@ async fn nothing_leaks_in_any_state_with_any_identity() {
         &settled_canaries,
     )
     .await;
+    // RF26: not even now does a socket get the seed or the log, only the events it already had.
+    sweep_sockets(
+        app.addr,
+        &pool,
+        &who,
+        &cookie_name,
+        id,
+        (FightState::Settled, &secrets, &vector.log.events),
+    )
+    .await;
+    observer_reaches(&mut observer, &mut seen, &secrets, &vector.log.events).await;
     let published = http::send(app.addr, "GET", &format!("/api/fights/{id}"), &[]).await;
     assert_eq!(published.status, 200);
     assert!(published.text().contains(&hex(&vector.seed)));

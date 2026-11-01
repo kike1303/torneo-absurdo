@@ -349,6 +349,35 @@ pub async fn open_window(conn: &mut PgConnection, id: i32, at_ms: i64) -> Result
     OsRng
         .try_fill_bytes(&mut seed)
         .map_err(|_| OpenError::OsRng)?;
+    write_open(conn, id, &seed, at_ms).await?;
+    Ok(true)
+}
+
+/// Like [`open_window`], with the seed of a script instead of `OsRng` (RF45).
+///
+/// # Errors
+/// [`OpenError`], and the caller's transaction reverts.
+#[cfg(feature = "dev-fights")]
+pub async fn open_window_with_seed(
+    conn: &mut PgConnection,
+    id: i32,
+    seed: &[u8; 32],
+    at_ms: i64,
+) -> Result<bool, OpenError> {
+    if !store::lock_scheduled(&mut *conn, id).await? {
+        return Ok(false);
+    }
+    write_open(conn, id, seed, at_ms).await?;
+    Ok(true)
+}
+
+/// The row of the seed, its commit and the state.
+async fn write_open(
+    conn: &mut PgConnection,
+    id: i32,
+    seed: &[u8; 32],
+    at_ms: i64,
+) -> Result<(), sqlx::Error> {
     sqlx::query("INSERT INTO fight_secrets (fight_id, seed) VALUES ($1, $2)")
         .bind(id)
         .bind(seed.as_slice())
@@ -356,7 +385,7 @@ pub async fn open_window(conn: &mut PgConnection, id: i32, at_ms: i64) -> Result
         .await?;
     let commit = Sha256::digest(seed);
     store::mark_open(&mut *conn, id, commit.as_slice(), at_ms).await?;
-    Ok(true)
+    Ok(())
 }
 
 /// Why a window did not open.

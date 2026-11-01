@@ -192,11 +192,20 @@ pub async fn serve(
     tracing::info!(event = "server.listening", port);
     // Only here: the tests in process do not program fights unless they ask (010 RF14).
     let stop_fights = CancellationToken::new();
+    let fight_settings = settings.fights.clone();
+    #[cfg(feature = "dev-fights")]
+    let fight_settings = FightSettings {
+        script: config
+            .fight_script
+            .clone()
+            .or(fight_settings.script.clone()),
+        ..fight_settings
+    };
     tokio::spawn(fights::runner::run(
         state.db.clone(),
         state.fights.clone(),
         config.fights.clone(),
-        settings.fights.clone(),
+        fight_settings,
         stop_fights.clone(),
     ));
     let shutdown = async move {

@@ -144,13 +144,7 @@ fn tokens(text: &str) -> Vec<String> {
     out
 }
 
-const NAMES: [&str; 5] = [
-    "simulate",
-    "canonical_json",
-    "FightLog",
-    "Seed",
-    "fight_secrets",
-];
+const NAMES: [&str; 4] = ["simulate", "canonical_json", "FightLog", "Seed"];
 
 /// The first form that breaks RF24 in this text, outside `fights/sealed.rs`.
 fn violation(text: &str) -> Option<String> {
@@ -158,6 +152,10 @@ fn violation(text: &str) -> Option<String> {
     let at = |i: usize| tokens.get(i).map(String::as_str);
     for (i, token) in tokens.iter().enumerate() {
         if NAMES.contains(&token.as_str()) {
+            return Some(token.clone());
+        }
+        // SQL does not tell `FIGHT_SECRETS` from `fight_secrets`.
+        if token.eq_ignore_ascii_case("fight_secrets") {
             return Some(token.clone());
         }
         // `.outcome` and `::outcome`, whatever is in between. A local `outcome` is not one.
@@ -225,6 +223,8 @@ fn the_search_catches_every_form() {
         "protocol::FightLog",
         "canonical_json(&log)",
         "sqlx::query(\"DELETE FROM fight_secrets\")",
+        "sqlx::query(\"DELETE FROM FIGHT_SECRETS\")",
+        "sqlx::query(\"delete from Fight_Secrets\")",
         "let s = \"SELECT seed FROM\\n fight_secrets\";",
         // R1: a raw identifier is the same identifier.
         "log.r#outcome()",
@@ -284,6 +284,211 @@ fn the_reveal_stays_in_the_fights_module() {
     }
 }
 
+/// The file relative to `src`, with `/`.
+fn relative(path: &Path) -> String {
+    path.strip_prefix(src())
+        .unwrap()
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn has_token(text: &str, name: &str) -> bool {
+    tokens(text).iter().any(|token| token == name)
+}
+
+/// Outside `allowed` nobody names `name`.
+fn only_in(name: &str, allowed: &[&str]) {
+    for (path, text) in sources() {
+        let file = relative(&path);
+        if !allowed.contains(&file.as_str()) {
+            assert!(!has_token(&text, name), "{name} in {file}");
+        }
+    }
+}
+
+/// The code without comments or spaces: `include !` and `# [path` are the same to the compiler.
+fn compact(text: &str) -> String {
+    strip_comments(text)
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect()
+}
+
+/// `include!` and `#[path` bring in code that this test does not read as what it is. The exception
+/// is the exact line of `profile/name.rs`, its tests in their own file under `cfg(test)`.
+fn brings_in_code(file: &str, text: &str) -> bool {
+    let code = compact(text);
+    let code = if file == "profile/name.rs" {
+        code.replacen("#[cfg(test)]#[path=\"name_tests.rs\"]modtests;", "", 1)
+    } else {
+        code
+    };
+    code.contains("include!") || code.contains("#[path")
+}
+
+#[test]
+fn the_search_for_code_brought_in_catches_every_form() {
+    for text in [
+        "include!(\"x.rs\");",
+        "include ! (\"x.rs\");",
+        "#[path = \"x.rs\"] mod x;",
+        "# [ path = \"x.rs\" ] mod x;",
+        "#[path = \"name_tests.rs\"]\nmod tests;",
+    ] {
+        assert!(brings_in_code("fights/hub.rs", text), "{text}");
+        assert!(brings_in_code("profile/name.rs", text), "{text}");
+    }
+    for text in [
+        "// include!(\"x.rs\");\nlet x = 1;",
+        "/* #[path = \"x.rs\"] */ let x = 1;",
+        "let a = include_str!(\"x.txt\");",
+    ] {
+        assert!(!brings_in_code("fights/hub.rs", text), "{text}");
+    }
+    // A second one in the file of the exception is not the exception.
+    let two = "#[cfg(test)]\n#[path = \"name_tests.rs\"]\nmod tests;\n#[path = \"x.rs\"] mod x;";
+    assert!(brings_in_code("profile/name.rs", two));
+    assert!(!brings_in_code(
+        "profile/name.rs",
+        "#[cfg(test)]\n#[path = \"name_tests.rs\"]\nmod tests;"
+    ));
+    assert!(brings_in_code(
+        "fights/hub.rs",
+        "#[cfg(test)]\n#[path = \"name_tests.rs\"]\nmod tests;"
+    ));
+}
+
+/// RF24: nothing in `src` brings in code around this test.
+#[test]
+fn nothing_brings_in_code_around_these_searches() {
+    for (path, text) in sources() {
+        let file = relative(&path);
+        assert!(!brings_in_code(&file, &text), "{file}");
+    }
+}
+
+#[test]
+fn the_search_for_a_name_catches_every_form() {
+    for (text, name) in [
+        ("log.release_due(u32::MAX);", "release_due"),
+        ("log\n    .release_due(0)", "release_due"),
+        ("log . r#release_due (0)", "release_due"),
+        ("SealedLog::release_due(&mut log, 0)", "release_due"),
+        ("log.into_final(0)", "into_final"),
+        ("clock.stopwatch(i64::MIN)", "stopwatch"),
+        ("sealed::events_of_settled(bytes)", "events_of_settled"),
+        (
+            "sealed::open_window_with_seed(tx, 1, &s, 0)",
+            "open_window_with_seed",
+        ),
+    ] {
+        assert!(has_token(text, name), "{text}");
+    }
+    assert!(!has_token("// log.release_due(0)", "release_due"));
+    assert!(!has_token("let stopwatch_of = 1;", "stopwatch"));
+}
+
+/// RF24 (`release_due(u32::MAX)`, the known limit): against mistakes, only the release asks for
+/// events, and only with the time of its stopwatch. Whoever edits `release.rs` on purpose gets past
+/// this, and that is for the review.
+#[test]
+fn only_the_release_asks_for_events() {
+    only_in("release_due", &["fights/sealed.rs", "fights/release.rs"]);
+    only_in("stopwatch", &["fights/clock.rs", "fights/release.rs"]);
+    only_in("into_final", &["fights/sealed.rs", "fights/release.rs"]);
+    for name in ["SealedLog", "FinalLog"] {
+        only_in(
+            name,
+            &["fights/sealed.rs", "fights/release.rs", "fights/runner.rs"],
+        );
+    }
+    only_in(
+        "events_of_settled",
+        &["fights/sealed.rs", "fights/runner.rs"],
+    );
+
+    let release = tokens(&std::fs::read_to_string(src().join("fights/release.rs")).unwrap());
+    let calls: Vec<usize> = release
+        .iter()
+        .enumerate()
+        .filter(|(_, token)| *token == "release_due")
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    // `release_due`, the parenthesis and its only argument.
+    let call = calls[0];
+    assert_eq!(release.get(call + 2).map(String::as_str), Some("elapsed"));
+    assert_eq!(release.get(call + 3).map(String::as_str), Some(" "));
+    assert!(!release.iter().any(|token| token == "MAX"));
+    let text = strip_comments(&std::fs::read_to_string(src().join("fights/release.rs")).unwrap());
+    assert!(text.contains("let Some(elapsed) = stopwatch.elapsed_ms() else {"));
+}
+
+/// RF38: a socket reads the hub, never what is sealed nor the database of the fights, and the hub
+/// only holds what it was given.
+#[test]
+fn the_hub_and_the_sockets_do_not_reach_what_is_sealed() {
+    let hub = std::fs::read_to_string(src().join("fights/hub.rs")).unwrap();
+    assert!(!has_token(&hub, "sealed"));
+    let ws = src().join("ws");
+    let mut checked = 0;
+    for (path, text) in sources() {
+        if path.starts_with(&ws) {
+            checked += 1;
+            for name in ["sealed", "runner", "store"] {
+                assert!(!has_token(&text, name), "{name} in {}", path.display());
+            }
+        }
+    }
+    assert!(checked >= 7, "{checked}");
+}
+
+/// RF45: the feature is the only way into a script, and without it none of this compiles.
+#[test]
+fn the_script_stays_behind_its_feature() {
+    only_in(
+        "open_window_with_seed",
+        &["fights/sealed.rs", "fights/runner.rs"],
+    );
+    for (path, text) in sources() {
+        let file = relative(&path);
+        if file != "fights/script.rs" {
+            assert!(!text.contains("FIGHT_SCRIPT_PATH"), "{file}");
+        }
+    }
+    let gated = "#[cfg(feature=\"dev-fights\")]";
+    for (file, item) in [
+        ("fights/sealed.rs", "pubasyncfnopen_window_with_seed("),
+        ("fights/store.rs", "pubasyncfnfight_rank("),
+        ("fights/mod.rs", "pubmodscript;"),
+    ] {
+        let code = compact(&std::fs::read_to_string(src().join(file)).unwrap());
+        assert_eq!(code.matches(item).count(), 1, "{file}");
+        assert!(code.contains(&format!("{gated}{item}")), "{file}: {item}");
+    }
+}
+
+/// A filter that finds no test passes: the gate of `dev-fights` with that feature alone exists, under
+/// its `cfg`, and the recipe that runs it names it.
+#[test]
+fn the_test_of_the_gate_of_dev_fights_exists_and_runs() {
+    let name = "dev_fights_needs_a_loopback_origin_and_bind_addr";
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/startup.rs");
+    let code = compact(&std::fs::read_to_string(tests).unwrap());
+    let declared = format!(
+        "#[cfg(all(feature=\"dev-fights\",not(feature=\"dev-auth\")))]#[tokio::test]asyncfn{name}()"
+    );
+    assert!(code.contains(&declared), "{declared}");
+    let justfile = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../justfile");
+    let justfile = std::fs::read_to_string(justfile).unwrap();
+    assert!(
+        justfile.contains(&format!(
+            "cargo test -p server --features dev-fights --locked --test startup {name}"
+        )),
+        "the justfile does not run {name}"
+    );
+}
+
 /// RF23: `sealed.rs` cannot write a log line.
 #[test]
 fn the_sealed_module_has_no_tracing() {
@@ -296,6 +501,15 @@ fn the_sealed_module_has_no_tracing() {
 fn the_release_has_no_tracing() {
     let text = std::fs::read_to_string(src().join("fights/release.rs")).unwrap();
     assert!(!tokens(&text).iter().any(|t| t == "tracing"));
+}
+
+/// RF43 and RF45: neither do the hub and the script.
+#[test]
+fn the_hub_and_the_script_have_no_tracing() {
+    for file in ["fights/hub.rs", "fights/script.rs"] {
+        let text = std::fs::read_to_string(src().join(file)).unwrap();
+        assert!(!has_token(&text, "tracing"), "{file}");
+    }
 }
 
 /// RF5: the roster is only read to announce, never to simulate.

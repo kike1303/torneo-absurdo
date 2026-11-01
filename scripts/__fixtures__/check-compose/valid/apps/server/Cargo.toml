@@ -11,6 +11,9 @@ protocol.workspace = true
 # The dev OAuth provider and the loopback cookie names (008 RF-B6, RF-B9). Never in `default`
 # and never in the release image (RF-D9).
 dev-auth = []
+# The scripted fights of the integrations and the e2e (010 RF45). The same rules: only on loopback,
+# never in `default` and never in the release image.
+dev-fights = []
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["process", "test-util"] }

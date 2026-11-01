@@ -1,20 +1,22 @@
 #!/usr/bin/env node
-// 008 RF-D9 (plan-d decision 12): the server binary of a release never carries `dev-auth`.
+// 008 RF-D9 (plan-d decision 12), 010 RF45: the server binary of a release never carries `dev-auth`
+// nor `dev-fights`.
 //
-//   node scripts/check-release-binary.mjs <binary>               release: no dev-auth strings
-//   node scripts/check-release-binary.mjs --expect-dev <binary>  e2e: the dev-auth binary
+//   node scripts/check-release-binary.mjs <binary>               release: no strings of them
+//   node scripts/check-release-binary.mjs --expect-dev <binary>  e2e: the binary with both
 //
 // First the executable header: ELF for a release (it is always the Linux image); ELF or Mach-O
 // with --expect-dev, because `just e2e` also runs on macOS. So a wrong file that happens to
 // contain `__Host-session` never passes. Then the bytes: a release fails if it contains any of
-// the dev-auth strings, and also if it does not contain `__Host-session` (positive control: a
-// compressed or empty file never passes). --expect-dev demands the three dev-auth strings.
+// the strings of those features, and also if it does not contain `__Host-session` (positive control:
+// a compressed or empty file never passes). --expect-dev demands all of them.
 // Node built-ins only: release.yml runs it with the runner's Node, without setup-js.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const DEV_STRINGS = ['/api/auth/dev/', 'ta_dev_session', 'ta_dev_oauth'];
+export const DEV_FIGHTS_STRINGS = ['FIGHT_SCRIPT_PATH'];
 export const ALWAYS = '__Host-session';
 
 const ELF = Buffer.from([0x7f, 0x45, 0x4c, 0x46]);
@@ -43,10 +45,15 @@ export function checkBinary(bytes, { expectDev }) {
   if (!bytes.includes(ALWAYS)) {
     problems.push(`does not contain ${ALWAYS} (positive control: is this the server binary?)`);
   }
-  for (const text of DEV_STRINGS) {
-    const found = bytes.includes(text);
-    if (expectDev && !found) problems.push(`does not contain ${text}: not built with dev-auth`);
-    if (!expectDev && found) problems.push(`contains ${text}: built with dev-auth`);
+  for (const [feature, strings] of [
+    ['dev-auth', DEV_STRINGS],
+    ['dev-fights', DEV_FIGHTS_STRINGS],
+  ]) {
+    for (const text of strings) {
+      const found = bytes.includes(text);
+      if (expectDev && !found) problems.push(`does not contain ${text}: not built with ${feature}`);
+      if (!expectDev && found) problems.push(`contains ${text}: built with ${feature}`);
+    }
   }
   return problems;
 }
@@ -72,5 +79,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     for (const problem of problems) console.error(`  ${problem}`);
     process.exit(1);
   }
-  console.log(`check-release-binary: ${file} ok (${expectDev ? 'dev-auth' : 'release'})`);
+  console.log(`check-release-binary: ${file} ok (${expectDev ? 'dev' : 'release'})`);
 }

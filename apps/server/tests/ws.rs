@@ -22,6 +22,10 @@ const SLOW: WsConfig = WsConfig {
     revalidate_interval: Duration::from_secs(300),
     revalidate_timeout: Duration::from_secs(5),
     handshake_validate_timeout: Duration::from_secs(5),
+    read_buffer: 8 * 1024,
+    write_buffer: 8 * 1024,
+    max_write_buffer: 16 * 1024,
+    subscribe_sync_limit: (3, Duration::from_secs(60)),
 };
 
 async fn start(ws: WsState) -> (RunningApp, Arc<WsState>) {
@@ -174,8 +178,8 @@ async fn echo_disabled_closes_with_1008() {
     );
 }
 
-// A non-loopback origin never starts with `dev-auth`.
-#[cfg(not(feature = "dev-auth"))]
+// A non-loopback origin never starts with a feature of development.
+#[cfg(not(any(feature = "dev-auth", feature = "dev-fights")))]
 #[tokio::test]
 async fn echo_flag_with_an_https_origin_stays_off() {
     // Outside loopback the four OAuth credentials are required (plan-c decision 3).
@@ -298,6 +302,7 @@ async fn a_client_that_never_reads_is_closed_after_the_pong_timeout() {
         revalidate_interval: Duration::from_secs(300),
         revalidate_timeout: Duration::from_secs(5),
         handshake_validate_timeout: Duration::from_secs(5),
+        ..WsConfig::default()
     };
     let (app, _) = start_echo(true, 2000, config).await;
     // A client that never writes after the handshake: no pongs, no close reply. It starts
@@ -329,6 +334,7 @@ async fn a_client_that_only_answers_pings_is_closed_when_idle() {
         revalidate_interval: Duration::from_secs(300),
         revalidate_timeout: Duration::from_secs(5),
         handshake_validate_timeout: Duration::from_secs(5),
+        ..WsConfig::default()
     };
     let (app, _) = start_echo(true, 2000, config).await;
     let mut client = ws::connect(app.addr, ORIGIN).await.unwrap();
@@ -355,6 +361,7 @@ async fn accepted_messages_reset_the_idle_timer() {
         revalidate_interval: Duration::from_secs(300),
         revalidate_timeout: Duration::from_secs(5),
         handshake_validate_timeout: Duration::from_secs(5),
+        ..WsConfig::default()
     };
     let (app, _) = start_echo(true, 2000, config).await;
     let mut client = ws::connect(app.addr, ORIGIN).await.unwrap();
@@ -370,6 +377,112 @@ async fn accepted_messages_reset_the_idle_timer() {
         client.next().await.is_some(),
         "still open after 1.2 s of activity"
     );
+}
+
+/// 010 RF42: a viewer sends nothing for minutes. With a subscription the idle timer does not run, and
+/// the ping and its timeout stay.
+#[tokio::test]
+async fn a_subscribed_socket_is_not_idle_until_it_unsubscribes() {
+    let config = WsConfig {
+        ping_interval: Duration::from_millis(100),
+        pong_timeout: Duration::from_millis(600),
+        idle_timeout: Duration::from_millis(500),
+        close_grace: Duration::from_millis(500),
+        ..WsConfig::default()
+    };
+    let (app, _) = start_echo(true, 2000, config).await;
+    let mut client = ws::connect(app.addr, ORIGIN).await.unwrap();
+    ws::send_text(&mut client, r#"{"type":"subscribe","channel":"schedule"}"#).await;
+    assert!(
+        ws::next_data(&mut client, Duration::from_secs(1))
+            .await
+            .is_some()
+    );
+    assert!(
+        ws::next_data(&mut client, Duration::from_secs(1))
+            .await
+            .is_some()
+    );
+    // Reading answers the pings. Well past the idle timeout, nothing closes it.
+    assert_eq!(
+        ws::next_data(&mut client, Duration::from_millis(1500)).await,
+        None
+    );
+    ws::send_text(
+        &mut client,
+        r#"{"type":"unsubscribe","channel":"schedule"}"#,
+    )
+    .await;
+    assert!(
+        ws::next_data(&mut client, Duration::from_secs(1))
+            .await
+            .is_some()
+    );
+    let unsubscribed = Instant::now();
+    assert_eq!(
+        ws::ending(&mut client, Duration::from_secs(3)).await,
+        Ending::Close(1008, "ws.idle_timeout".into())
+    );
+    assert!(unsubscribed.elapsed() >= Duration::from_millis(400));
+}
+
+/// A refused subscription opens nothing, so the idle timer goes on.
+#[tokio::test]
+async fn a_refused_subscription_does_not_stop_the_idle_timer() {
+    let config = WsConfig {
+        ping_interval: Duration::from_millis(100),
+        pong_timeout: Duration::from_millis(600),
+        idle_timeout: Duration::from_millis(500),
+        close_grace: Duration::from_millis(500),
+        ..WsConfig::default()
+    };
+    let (app, _) = start_echo(true, 2000, config).await;
+    let mut client = ws::connect(app.addr, ORIGIN).await.unwrap();
+    ws::send_text(&mut client, r#"{"type":"subscribe","channel":"fight:1"}"#).await;
+    assert_eq!(
+        ws::next_data(&mut client, Duration::from_secs(1)).await,
+        Some(Message::Text(
+            r#"{"type":"error","code":"ws.forbidden_channel"}"#.into()
+        ))
+    );
+    assert_eq!(
+        ws::ending(&mut client, Duration::from_secs(3)).await,
+        Ending::Close(1008, "ws.idle_timeout".into())
+    );
+}
+
+/// RF42: the ping is what still closes a subscribed socket that stopped answering.
+#[tokio::test]
+async fn a_subscribed_socket_that_does_not_answer_closes_by_the_pong_timeout() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let config = WsConfig {
+        ping_interval: Duration::from_millis(100),
+        pong_timeout: Duration::from_millis(400),
+        idle_timeout: Duration::from_millis(100),
+        close_grace: Duration::from_millis(200),
+        ..WsConfig::default()
+    };
+    let (app, _) = start_echo(true, 2000, config).await;
+    // A raw client: it subscribes, in a masked frame, and never writes again.
+    let mut stream = tokio::net::TcpStream::connect(app.addr).await.unwrap();
+    let request = format!(
+        "GET /ws HTTP/1.1\r\nHost: {}\r\nOrigin: {ORIGIN}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+        app.addr
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let text = br#"{"type":"subscribe","channel":"schedule"}"#;
+    let mut frame = vec![0x81, 0x80 | u8::try_from(text.len()).unwrap(), 0, 0, 0, 0];
+    frame.extend_from_slice(text);
+    stream.write_all(&frame).await.unwrap();
+    let mut bytes = Vec::new();
+    tokio::time::timeout(Duration::from_secs(3), stream.read_to_end(&mut bytes))
+        .await
+        .expect("the server did not close the connection")
+        .unwrap();
+    let seen = String::from_utf8_lossy(&bytes);
+    assert!(seen.contains("schedule_update"), "{seen}");
+    assert!(seen.contains("ws.pong_timeout"), "{seen}");
+    assert!(!seen.contains("ws.idle_timeout"), "{seen}");
 }
 
 // --- Per-IP limits of the anonymous /ws (008 RF-A7, RF-A4) ------------------------------

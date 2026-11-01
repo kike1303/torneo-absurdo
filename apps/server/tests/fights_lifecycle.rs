@@ -5,14 +5,16 @@
 mod support;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
 use engine::canonical_spec_json;
 use protocol::{CancelReason, EndReason, FightFinal, FightState};
+use server::fights::hook::{SettleFuture, SettlementError, SettlementHook, SettlingFight};
 use server::fights::sealed;
 use server::fights::snapshot::snapshot_sha256;
 use server::fights::state::FightRow;
-use server::fights::{FightClock, FightsConfig, FightsShared, store};
+use server::fights::{FightClock, FightSettings, FightsConfig, FightsShared, store};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use support::db::TestDb;
@@ -508,4 +510,96 @@ async fn a_win_and_a_draw_are_told_apart_in_public_data() {
     );
     assert_eq!(row(&pool, first).await.log.unwrap(), ko.canonical());
     assert_eq!(row(&pool, second).await.log.unwrap(), draw.canonical());
+}
+
+/// The hook of a fight that cannot settle until the test says so. The others go through.
+struct FailsFor {
+    id: i32,
+    fixed: AtomicBool,
+    calls: AtomicU32,
+}
+
+impl SettlementHook for FailsFor {
+    fn settle<'a>(
+        &'a self,
+        _tx: &'a mut sqlx::PgConnection,
+        fight: &'a SettlingFight,
+    ) -> SettleFuture<'a> {
+        if fight.id == self.id {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+        }
+        let fails = fight.id == self.id && !self.fixed.load(Ordering::SeqCst);
+        Box::pin(async move {
+            if fails {
+                Err(SettlementError { kind: "test" })
+            } else {
+                Ok(())
+            }
+        })
+    }
+}
+
+/// RF35 (amendment DP-B8): during a halt the next fight loses its window and is cancelled. When the
+/// halted one finally settles, it is the last one settled, whatever the order of their slots.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn last_is_the_last_one_settled_not_the_last_slot() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let vector = Vector::of(KO);
+    let halted = f::open_vector(&pool, T0, &vector).await;
+    let cancelled = f::announce(&pool, T0 + 2 * CADENCE, &vector.a, &vector.b).await;
+
+    let hook = Arc::new(FailsFor {
+        id: halted,
+        fixed: AtomicBool::new(false),
+        calls: AtomicU32::new(0),
+    });
+    let (settings, clock) = f::settings_at(T0);
+    let settings = FightSettings {
+        hook: hook.clone(),
+        ..settings
+    };
+    let (shared, _runner) = f::start(&pool, &settings);
+
+    // The fight ends, its settlement fails, and the time goes by until the next one is lost.
+    let (closes_at, live_at) = f::hours(T0);
+    clock.set(closes_at);
+    wait_state(&pool, halted, FightState::BettingClosed).await;
+    clock.set(live_at);
+    wait_state(&pool, halted, FightState::Live).await;
+    clock.set(live_at + vector.end_t() + 10_000);
+    wait_for("the halt", || async {
+        clock.advance(2000);
+        shared.current().halted == Some(true)
+    })
+    .await;
+    clock.set(clock.now_ms().max(T0 + 2 * CADENCE + WINDOW));
+    wait_state(&pool, cancelled, FightState::Settled).await;
+    wait_for("the cancelled one on the board", || async {
+        shared
+            .current()
+            .last
+            .is_some_and(|last| last.id == u32::try_from(cancelled).unwrap())
+    })
+    .await;
+
+    // An attempt that started before the cancellation carries an hour that is not later than its own,
+    // and on a tie the higher id wins, which is right. So one whole attempt fails first, and the next
+    // one has a later hour.
+    let seen = hook.calls.load(Ordering::SeqCst);
+    wait_for("an attempt after the cancellation", || async {
+        clock.advance(2000);
+        hook.calls.load(Ordering::SeqCst) >= seen + 2
+    })
+    .await;
+    hook.fixed.store(true, Ordering::SeqCst);
+    f::wait_state_advancing(&pool, &clock, halted, FightState::Settled).await;
+    wait_for("the last one settled on the board", || async {
+        clock.advance(2000);
+        shared
+            .current()
+            .last
+            .is_some_and(|last| last.id == u32::try_from(halted).unwrap())
+    })
+    .await;
 }

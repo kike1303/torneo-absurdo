@@ -67,7 +67,7 @@ pub async fn warm_up() {
 
 /// Variables every server run needs since phase B (008 RF-B18) and, outside loopback, phase C
 /// (the OAuth credentials, RF-C1), with test-only values. The variables of each test go after
-/// them, so a test can override or check any of them. With `dev-auth`, the gate needs a
+/// them, so a test can override or check any of them. With a feature of development, its gate needs a
 /// loopback `BIND_ADDR`.
 pub const DEFAULT_ENV: &[(&str, &str)] = &[
     // `cargo test` runs in apps/server, and the default is relative to the root (010 RF22).
@@ -82,7 +82,7 @@ pub const DEFAULT_ENV: &[(&str, &str)] = &[
     super::config::PROVIDER_VARS[1],
     super::config::PROVIDER_VARS[2],
     super::config::PROVIDER_VARS[3],
-    #[cfg(feature = "dev-auth")]
+    #[cfg(any(feature = "dev-auth", feature = "dev-fights"))]
     ("BIND_ADDR", "127.0.0.1"),
 ];
 

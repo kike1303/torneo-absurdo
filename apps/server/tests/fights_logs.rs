@@ -1,6 +1,7 @@
 //! 010 RF28 (ADR-0012 A4.8, A4.9 and A8): with `RUST_LOG=trace`, a whole run with a known seed, with
 //! failures in between: no line of any target has the seed, the log or a fragment of an event, and
-//! no field outside the allowlist. Phase B repeats it with a socket connected.
+//! no field outside the allowlist. It runs with a socket connected, which has to have received the
+//! whole fight: if not, the absence of canaries would prove nothing.
 //!
 //! Exactly one test in this binary (`tests/test_layout.rs`).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -9,17 +10,20 @@ mod support;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
-use protocol::FightState;
+use protocol::{FightState, ServerMessage};
+use server::app::Settings;
 use server::fights::hook::{SettleFuture, SettlementError, SettlementHook, SettlingFight};
 use server::fights::{FightSettings, hex};
 use server::telemetry::ALLOWED_FIELDS;
 use sqlx::PgConnection;
+use support::app::{ORIGIN, TRUST_LOOPBACK};
 use support::db::TestDb;
 use support::fights::{self as f, CADENCE, KO, T0, Vector, WINDOW, row, wait_for, wait_state};
-use support::logs;
+use support::{logs, ws};
 
 struct FailingUntilFixed {
     fixed: AtomicBool,
@@ -50,7 +54,6 @@ fn a_whole_run_logs_no_seed_and_no_fragment_of_the_log() {
     let secret_lost = Vector::of(KO);
     let captured = logs::run("trace", |_captured| async {
         let db = TestDb::create().await;
-        let pool = db.migrated_pool().await;
         let hook = Arc::new(FailingUntilFixed {
             fixed: AtomicBool::new(false),
             called: AtomicBool::new(false),
@@ -60,10 +63,19 @@ fn a_whole_run_logs_no_seed_and_no_fragment_of_the_log() {
             hook: hook.clone(),
             ..settings
         };
-        let (shared, runner) = f::start(&pool, &settings);
+        let app_settings = Settings {
+            fights: settings.clone(),
+            ..Settings::default()
+        };
+        let (app, pool, shared) = f::start_app(&db, &[TRUST_LOOPBACK], &app_settings).await;
+        let runner = f::spawn_runner(&pool, &shared, f::config_without_roster(), settings);
 
-        // A fight from start to finish, opened with the known seed.
+        // A fight from start to finish, opened with the known seed, with a socket on it.
         let id = f::open_vector(&pool, T0 + CADENCE, &vector).await;
+        wait_for("the hub", || async { shared.hub().knows(id) }).await;
+        let mut client = ws::connect(app.addr, ORIGIN).await.unwrap();
+        ws::subscribe(&mut client, &format!("fight:{id}")).await;
+        ws::send_text(&mut client, r#"{"type":"subscribe","channel":"schedule"}"#).await;
         clock.set(T0 + CADENCE + WINDOW);
         wait_state(&pool, id, FightState::BettingClosed).await;
         let (_, live_at) = f::hours(T0 + CADENCE);
@@ -75,6 +87,24 @@ fn a_whole_run_logs_no_seed_and_no_fragment_of_the_log() {
         hook.fixed.store(true, Ordering::SeqCst);
         f::wait_state_advancing(&pool, &clock, id, FightState::Settled).await;
         assert_eq!(row(&pool, id).await.log, Some(vector.canonical()));
+
+        // The positive control: the socket saw the whole fight, and its final.
+        let mut seen_final = false;
+        let mut seen_events = 0;
+        while !seen_final || seen_events < vector.log.events.len() {
+            let message = ws::next_message(&mut client, Duration::from_secs(30)).await;
+            match message.expect("the socket did not see the whole fight") {
+                ServerMessage::FightSync { fight, .. } => {
+                    seen_final = fight.state == FightState::Settled;
+                }
+                ServerMessage::FightEvents {
+                    from_index, events, ..
+                } => {
+                    seen_events = usize::try_from(from_index).unwrap() + events.len();
+                }
+                _ => {}
+            }
+        }
 
         // A safe stop, with the secret lost, so its path logs too.
         let lost = f::open_vector(&pool, T0 + 2 * CADENCE, &secret_lost).await;
@@ -111,6 +141,10 @@ fn a_whole_run_logs_no_seed_and_no_fragment_of_the_log() {
         r#""attacker":"#,
         r#""winner":"#,
         r#""ability":"#,
+        // The messages of the socket, whole or by name.
+        "fight_sync",
+        "fight_events",
+        "schedule_update",
     ] {
         canaries.push(fragment.to_owned());
     }

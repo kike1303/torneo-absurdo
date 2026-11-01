@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
-import { ALWAYS, DEV_STRINGS, checkBinary } from '../check-release-binary.mjs';
+import { ALWAYS, DEV_FIGHTS_STRINGS, DEV_STRINGS, checkBinary } from '../check-release-binary.mjs';
 
 // 008 RF-D9, plan-d decision 12. Buffers built here: no binary is committed.
 const ELF = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0]);
@@ -14,7 +14,7 @@ const bin = (head, ...texts) =>
   Buffer.concat([head, filler, ...texts.map((t) => Buffer.from(`\0${t}\0`))]);
 
 const release = bin(ELF, ALWAYS, '/api/health');
-const dev = bin(ELF, ALWAYS, ...DEV_STRINGS);
+const dev = bin(ELF, ALWAYS, ...DEV_STRINGS, ...DEV_FIGHTS_STRINGS);
 
 describe('checkBinary, release', () => {
   it('a release binary passes', () => {
@@ -24,6 +24,11 @@ describe('checkBinary, release', () => {
   it.each(DEV_STRINGS)('%s fails', (text) => {
     const problems = checkBinary(bin(ELF, ALWAYS, text), { expectDev: false });
     expect(problems).toEqual([`contains ${text}: built with dev-auth`]);
+  });
+
+  it.each(DEV_FIGHTS_STRINGS)('%s fails', (text) => {
+    const problems = checkBinary(bin(ELF, ALWAYS, text), { expectDev: false });
+    expect(problems).toEqual([`contains ${text}: built with dev-fights`]);
   });
 
   it('without __Host-session fails (positive control)', () => {
@@ -48,15 +53,24 @@ describe('checkBinary, release', () => {
 });
 
 describe('checkBinary, --expect-dev', () => {
-  it('the dev-auth binary passes, ELF or Mach-O', () => {
+  it('the binary with both features passes, ELF or Mach-O', () => {
     expect(checkBinary(dev, { expectDev: true })).toEqual([]);
-    expect(checkBinary(bin(MACH_O, ALWAYS, ...DEV_STRINGS), { expectDev: true })).toEqual([]);
+    expect(
+      checkBinary(bin(MACH_O, ALWAYS, ...DEV_STRINGS, ...DEV_FIGHTS_STRINGS), { expectDev: true }),
+    ).toEqual([]);
+  });
+
+  it('a binary with dev-auth alone fails', () => {
+    expect(checkBinary(bin(ELF, ALWAYS, ...DEV_STRINGS), { expectDev: true })).toEqual(
+      DEV_FIGHTS_STRINGS.map((t) => `does not contain ${t}: not built with dev-fights`),
+    );
   });
 
   it('a release binary fails, naming each missing string', () => {
-    expect(checkBinary(release, { expectDev: true })).toEqual(
-      DEV_STRINGS.map((t) => `does not contain ${t}: not built with dev-auth`),
-    );
+    expect(checkBinary(release, { expectDev: true })).toEqual([
+      ...DEV_STRINGS.map((t) => `does not contain ${t}: not built with dev-auth`),
+      ...DEV_FIGHTS_STRINGS.map((t) => `does not contain ${t}: not built with dev-fights`),
+    ]);
   });
 
   it('a script that names the strings fails', () => {

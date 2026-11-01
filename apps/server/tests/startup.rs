@@ -178,8 +178,9 @@ async fn bind_addr_must_be_an_ip() {
     assert_eq!(line["var"], "BIND_ADDR");
 }
 
-// With `dev-auth` a non-loopback BIND_ADDR never reaches the bind (see the gate test below).
-#[cfg(not(feature = "dev-auth"))]
+// With a feature of development a non-loopback BIND_ADDR never reaches the bind (see the gate tests
+// below).
+#[cfg(not(any(feature = "dev-auth", feature = "dev-fights")))]
 #[tokio::test]
 async fn a_failed_bind_exits_with_one_without_the_address() {
     let db = TestDb::create().await;
@@ -327,6 +328,100 @@ async fn dev_auth_needs_a_loopback_origin_and_bind_addr() {
     }
 }
 
+/// 010 RF45, with this feature alone, because with both DEV_AUTH comes first and would hide it. `just
+/// check` runs this test by this name, and `fights_source_guard.rs` checks that it exists: a filter
+/// that finds no test passes. The path does not exist, which proves the gate comes before reading it.
+#[cfg(all(feature = "dev-fights", not(feature = "dev-auth")))]
+#[tokio::test]
+async fn dev_fights_needs_a_loopback_origin_and_bind_addr() {
+    for (vars, var) in [
+        (
+            vec![
+                ("PUBLIC_ORIGIN", "https://torneo.example"),
+                ("BIND_ADDR", "127.0.0.1"),
+                ("FIGHT_SCRIPT_PATH", "/nonexistent/script.json"),
+            ],
+            "DEV_FIGHTS",
+        ),
+        (
+            vec![
+                ("PUBLIC_ORIGIN", "https://torneo.example"),
+                ("BIND_ADDR", "127.0.0.1"),
+            ],
+            "DEV_FIGHTS",
+        ),
+        (
+            vec![
+                ("PUBLIC_ORIGIN", "http://localhost:5173"),
+                ("BIND_ADDR", "0.0.0.0"),
+                ("FIGHT_SCRIPT_PATH", "/nonexistent/script.json"),
+            ],
+            "BIND_ADDR",
+        ),
+    ] {
+        let mut envs = vec![("DATABASE_URL", "postgres://u:p@127.0.0.1:1/x")];
+        envs.extend(vars.iter().copied());
+        let finished = run_to_exit(&envs).await;
+        assert_eq!(finished.status.code(), Some(1), "{vars:?}");
+        let line = single_json_line(&finished.stdout);
+        assert_eq!(line["event"], "config.invalid");
+        assert_eq!(line["var"], var, "{vars:?}");
+    }
+}
+
+/// 010 RF45: a script that cannot be used stops the start, naming the variable and nothing of it, and
+/// its seed never reaches the output.
+#[cfg(feature = "dev-fights")]
+#[tokio::test]
+async fn a_script_that_cannot_be_used_stops_the_start_without_its_content() {
+    let canary = "c4n4ry0123456789c4n4ry0123456789c4n4ry0123456789c4n4ry0123456789";
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let bad = dir.join(format!("bad-script-{}.json", uuid::Uuid::new_v4().simple()));
+    std::fs::write(
+        &bad,
+        format!(r#"[{{"seed":"{canary}","spec_a":"{canary}"}}]"#),
+    )
+    .unwrap();
+    let bad = bad.to_str().unwrap().to_owned();
+    for path in ["/nonexistent/script.json", bad.as_str()] {
+        let finished = run_to_exit(&[
+            ("DATABASE_URL", "postgres://u:p@127.0.0.1:1/x"),
+            ("PUBLIC_ORIGIN", "http://localhost:5173"),
+            ("BIND_ADDR", "127.0.0.1"),
+            ("FIGHT_SCRIPT_PATH", path),
+        ])
+        .await;
+        assert_eq!(finished.status.code(), Some(1), "{path}");
+        let line = single_json_line(&finished.stdout);
+        assert_eq!(line["event"], "config.invalid");
+        assert_eq!(line["var"], "FIGHT_SCRIPT_PATH");
+        for text in finished.stdout.iter().chain(&finished.stderr) {
+            assert!(!text.contains(canary), "{text}");
+            assert!(!text.contains("script.json"), "{text}");
+        }
+    }
+}
+
+/// 010 RF45: without the feature the binary does not know this variable, whatever it points to.
+#[cfg(not(feature = "dev-fights"))]
+#[tokio::test]
+async fn without_its_feature_the_binary_ignores_the_script() {
+    let db = TestDb::create().await;
+    let url = db.url();
+    let server = bin::spawn(
+        &[],
+        &[
+            ("DATABASE_URL", url.as_str()),
+            ("PUBLIC_ORIGIN", "http://localhost:5173"),
+            ("PORT", "0"),
+            ("BIND_ADDR", "127.0.0.1"),
+            ("FIGHT_SCRIPT_PATH", "/nonexistent/script.json"),
+        ],
+    );
+    server.wait_listening(Duration::from_secs(15)).await;
+    server.kill().await;
+}
+
 /// 008 RF-C1, plan-c decision 3: an empty half of a provider pair (loopback) or a missing
 /// credential (outside loopback) stops the start with only the variable name in the log.
 #[tokio::test]
@@ -347,8 +442,8 @@ async fn oauth_credentials_are_config_invalid_without_the_value() {
             "GOOGLE_CLIENT_ID",
         ),
     ];
-    // Outside loopback the binary with `dev-auth` never starts anyway (DEV_AUTH).
-    if cfg!(not(feature = "dev-auth")) {
+    // Outside loopback the binary with a feature of development never starts anyway.
+    if cfg!(not(any(feature = "dev-auth", feature = "dev-fights"))) {
         cases.push((
             vec![
                 ("PUBLIC_ORIGIN", "https://torneo.example"),

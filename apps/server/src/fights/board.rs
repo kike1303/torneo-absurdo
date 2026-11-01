@@ -1,12 +1,13 @@
 //! What the runner publishes in memory: the board of `GET /api/fights/current`, which never touches
-//! the database (RF35), and the gate of `lock_open_for_bet` (RF29). Phase B reuses it for its hub.
+//! the database (RF35), the gate of `lock_open_for_bet` (RF29) and the hub of the sockets (RF38).
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{PoisonError, RwLock};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 use protocol::{FightSummary, FightsCurrent, TimestampMs};
 
 use super::FightClock;
+use super::hub::{FightHub, HubUpdate};
 
 #[derive(Debug, Clone, Default)]
 struct Board {
@@ -15,19 +16,46 @@ struct Board {
     last: Option<FightSummary>,
 }
 
-/// Shared between the runner, the API and, from TA-27, the bets.
-#[derive(Debug)]
+/// The board without its hour: what a socket on `schedule` has to be told about.
+type Announced = (
+    Option<bool>,
+    Option<FightSummary>,
+    Option<FightSummary>,
+    Option<FightSummary>,
+);
+
+/// What the runner says in one go: the board and the fights of the hub.
+#[derive(Default)]
+pub struct BoardUpdate {
+    pub halted: bool,
+    pub current: Option<FightSummary>,
+    pub next: Option<FightSummary>,
+    pub last: Option<FightSummary>,
+    pub hub: HubUpdate,
+}
+
+/// Shared between the runner, the API, the sockets and, from TA-27, the bets.
 pub struct FightsShared {
     clock: FightClock,
     has_lock: AtomicBool,
     initial_done: AtomicBool,
     halted: AtomicBool,
     board: RwLock<Board>,
+    hub: Arc<FightHub>,
+    announced: Mutex<Announced>,
+}
+
+impl std::fmt::Debug for FightsShared {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FightsShared(..)")
+    }
 }
 
 impl FightsShared {
     pub fn new(clock: FightClock) -> Self {
         Self {
+            hub: Arc::new(FightHub::new(clock.clone())),
+            announced: Mutex::new((None, None, None, None)),
             clock,
             has_lock: AtomicBool::new(false),
             initial_done: AtomicBool::new(false),
@@ -40,33 +68,57 @@ impl FightsShared {
         &self.clock
     }
 
+    pub const fn hub(&self) -> &Arc<FightHub> {
+        &self.hub
+    }
+
+    /// Tells the sockets if the board changed, with or without a pass of the runner: `halted` also
+    /// changes with the lock and with the first evaluation (amendment DP-B3). The hour alone is no
+    /// change, so more passes never mean more messages.
+    fn announce(&self) {
+        let mut announced = self
+            .announced
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let board = self.current();
+        let now = (
+            board.halted,
+            board.current.clone(),
+            board.next.clone(),
+            board.last.clone(),
+        );
+        if *announced != now {
+            *announced = now;
+            self.hub.schedule_changed(board);
+        }
+    }
+
     pub(super) fn lock_taken(&self) {
         self.has_lock.store(true, Ordering::SeqCst);
+        self.announce();
     }
 
     /// Also resets the initial evaluation: it has to be done again with the lock.
     pub(super) fn lock_lost(&self) {
         self.has_lock.store(false, Ordering::SeqCst);
         self.initial_done.store(false, Ordering::SeqCst);
+        self.announce();
     }
 
     pub(super) fn initial_evaluation_done(&self) {
         self.initial_done.store(true, Ordering::SeqCst);
+        self.announce();
     }
 
-    pub(super) fn publish(
-        &self,
-        halted: bool,
-        current: Option<FightSummary>,
-        next: Option<FightSummary>,
-        last: Option<FightSummary>,
-    ) {
-        self.halted.store(halted, Ordering::SeqCst);
+    pub(super) fn publish(&self, update: BoardUpdate) {
+        self.halted.store(update.halted, Ordering::SeqCst);
         *self.board.write().unwrap_or_else(PoisonError::into_inner) = Board {
-            current,
-            next,
-            last,
+            current: update.current,
+            next: update.next,
+            last: update.last,
         };
+        self.hub.update(update.hub);
+        self.announce();
     }
 
     /// `false` unless the runner has the lock, finished its evaluation and nothing is halted: a bet
@@ -115,10 +167,13 @@ mod tests {
         assert_eq!(shared.current().halted, Some(false));
         assert!(shared.accepts_bets());
 
-        shared.publish(true, None, None, None);
+        shared.publish(BoardUpdate {
+            halted: true,
+            ..BoardUpdate::default()
+        });
         assert_eq!(shared.current().halted, Some(true));
         assert!(!shared.accepts_bets());
-        shared.publish(false, None, None, None);
+        shared.publish(BoardUpdate::default());
         assert!(shared.accepts_bets());
 
         // Losing the lock: unknown again, and the evaluation has to be done again.

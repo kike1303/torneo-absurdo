@@ -15,6 +15,7 @@ use server::fights::snapshot::{max_duration_ms, max_hp, snapshot_sha256};
 use server::fights::state::FightRow;
 use server::fights::store::{self, NewFight};
 use server::fights::{FightClock, FightSettings, FightsConfig, FightsShared, RunnerTimings};
+use server::ws::WsState;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use tokio::task::JoinHandle;
@@ -489,6 +490,22 @@ pub async fn start_app(
     let state = AppState::from_config(&config, settings, pool.clone(), Arc::new(AlwaysUp)).unwrap();
     let shared = state.fights.clone();
     (super::app::start(state).await, pool, shared)
+}
+
+/// Like [`start_app`], with the state of the sockets too.
+pub async fn start_app_ws(
+    db: &TestDb,
+    vars: &[(&str, &str)],
+    settings: &Settings,
+) -> (RunningApp, PgPool, Arc<FightsShared>, Arc<WsState>) {
+    let url = db.url();
+    let mut all = vec![("DATABASE_URL", url.as_str())];
+    all.extend_from_slice(vars);
+    let config = super::config::config(&all);
+    let pool = db.migrated_pool().await;
+    let state = AppState::from_config(&config, settings, pool.clone(), Arc::new(AlwaysUp)).unwrap();
+    let (shared, ws) = (state.fights.clone(), state.ws.clone());
+    (super::app::start(state).await, pool, shared, ws)
 }
 
 /// A sink that remembers every batch.
