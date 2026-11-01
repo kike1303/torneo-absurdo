@@ -54,6 +54,16 @@ Con dos cuentas de Google o de Discord a mano:
 4. Vincular una cuenta que ya es de otro usuario. El desvincular del paso 3 consumió la confirmación, así que `/account` muestra otra vez el panel en lugar de los botones de vincular: confirma tu identidad y vincula. Resultado: `/login?error=auth.already_linked`, sin fusión.
 5. Volver a `/account`, empezar a vincular y cancelar en la pantalla del proveedor: `/login?error=auth.provider_error`. El intento fallido del paso 4 no consume la confirmación: los botones siguen ahí mientras la confirmación tenga menos de 10 minutos. Si ya pasaron, la web vuelve a pedirla.
 
+## Verificar una pelea con datos públicos
+
+Cualquiera puede comprobar una pelea terminada solo con `GET /api/fights/{id}` (ADR-0002, RF7 de la spec de 010), que da `fight`, `spec_a`, `spec_b`, `seed` y `log`:
+
+1. **El commit:** `SHA-256(bytes de seed)` es igual a `fight.seed_commit`. Para quien archivó el commit al abrir las apuestas, eso prueba que la semilla es la de entonces.
+2. **El snapshot:** `SHA-256({"ruleset_version":N,"a":<spec_a>,"b":<spec_b>})`, con esos bytes exactos y sin espacios, es igual a `fight.snapshot_sha256`.
+3. **La pelea:** simular con `seed`, `spec_a`, `spec_b` y `Ruleset::for_version(fight.ruleset_version)`, con `engine::simulate` o `engine_wasm::run`, y el `canonical_json` del resultado es igual a `log`, byte a byte.
+
+Una `cancelled` no tiene semilla ni log. Una `voided` tiene semilla y no tiene log. `apps/server/tests/fights_public_verify.rs` lo comprueba de esta misma forma, sin importar nada de `server`.
+
 ## Admin y ban por CLI
 
 El rol `admin` y los bans solo se cambian con la CLI del binario (RF-C6). Cada comando, en una transacción, cambia el usuario, cierra todas sus sesiones (sus sockets se cierran al instante) y escribe una fila en `admin_audit`.

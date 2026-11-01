@@ -110,7 +110,7 @@ Leído, sin ejecutar.
    - **Cómo se entera.** Mientras hay `live`, `FightStage` lee `handle.snapshot()` cada 250 ms y llama a una prop `onsnapshot`. `onCue` no sirve para quien entra tarde, porque RF50 no dispara lo saltado, y `onState` llega 2500 ms tarde. El primer `play()` ya pinta `t` (fase C), así que quien entra tras el cierre lo ve en la primera lectura. La lectura para al llegar a `finished`, y no toca el renderer.
    - **Regla para no adelantar el final:** `Settled` llega en `end + 5000` y el cierre se ve en `end + 3500 − 2500`, pero un cliente con la red atrasada puede ir tarde. Para la pelea mirada, un final `decided` no adelanta el resultado antes de `t ≥ max_duration_ms`. Un final que no es `decided` se muestra de inmediato, porque esa pelea nunca traerá `end` y quedaría en vivo para siempre (decisión 4). Tampoco se adelanta en modo degradado si la pelea sigue mirándose: la decisión 6 de producto solo desmonta al llegar a esa regla.
    - **Sin WebGL (`webgl_unavailable`): `text-scene.ts`, puro.** Dados los cues y `t`, da HP, fase y resultado, este solo con `t ≥ end.t`, igual que RF54, y se refresca con el mismo intervalo de 250 ms.
-   - **`halted` con el final ya visto:** se conserva lo derivado de los eventos, junto al aviso (RF54). Modo texto del HP: `{name}: {hp}/{max}`.
+   - **`halted` con el final ya visto:** se conserva lo derivado de los eventos, junto al aviso (RF54). Modo texto del HP: `fight_text_hp`.
 10. **Ráfaga de cues vencidos: la vista no depende de `onCue`.** Nada de `/` se engancha a `onCue`: ni el resultado, ni el HP, ni el reloj de ronda. No hay sonido ni efectos por cue. En un corte largo o una entrada tarde, la ráfaga solo llega a listeners inexistentes y la escena es correcta por `t`. El `onCue(refresh)` de `debug` queda solo en la arena.
 11. **`live-host.ts`, puro: lo que hoy está dentro de `FightStage`.** Mueve el orden de la fase C (`loadLive`, sin esperar `subscribe`, `await`, `play`) a una función con el `handle` y la sesión inyectados. Esa extracción es lo que hace comprobable el rechazo sin montar Pixi.
     - **Rechazo de `extend`:** estado de error y suscripción cancelada, **tanto en la entrega inmediata de `subscribe` como en una posterior** (criterio del architect). Hoy, `renderer !== handle` cubre el primero; pasa a estar en esta función.
@@ -200,8 +200,8 @@ Con las correcciones de product-owner; `fight_notice_playback_error`, `fight_rou
 | `fight_view_commit_help` | Se revela al terminar, para que cualquiera pueda comprobar la pelea. | Revealed after the fight so anyone can check it. |
 | `fight_view_halted` | Las peleas están detenidas por un problema nuestro. Esta página se actualizará sola cuando vuelvan. | Fights are on hold because of a problem on our end. This page will update on its own when they're back. |
 | `fight_view_last` | Pelea anterior | Previous fight |
-| `fight_round_clock_label` | Tiempo de ronda | Round time |
-| `fight_text_hp` | {name}: {hp}/{max} | {name}: {hp}/{max} |
+| `fight_round_clock_label` | Tiempo restante de la ronda | Round time left |
+| `fight_text_hp` | {name}: {hp}/{max} de vida | {name}: {hp}/{max} HP |
 | `fight_result_ko` | {name} ganó por KO | {name} won by KO |
 | `fight_result_decision` | {name} ganó por decisión | {name} won by decision |
 | `fight_result_draw` | Empate | Draw |
@@ -320,7 +320,14 @@ _El architect aceptó las siete, y están aplicadas en la Enmienda 4 de la spec,
 `web` sube unos segundos por los Vitest nuevos. `e2e`, que hoy tarda de 6 min 48 s a 8 min 10 s, sube unos 6 a 7 min: hasta 5,5 min de peleas reales, más `home.spec.ts` en Chromium y WebKit. Quedaría cerca de 15 min, por debajo de los 20 del job. **Criterio:** si alguna de 3 corridas del PR pasa de 16 min, la segunda corrida se mueve a un job propio, en el mismo PR, y `check-workflows` lo exige en su tabla de permisos.
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+1. **`live-host.ts` vive en `lib/components/fight/`, no en `features/fight/live/`,** porque ADR-0009 D4 solo deja a los componentes importar tipos de `features`, y `FightStage` lo usa. `formatClock` pasó a `lib/i18n/format.ts` por la misma razón. Por eso la página compone: `FightHome` recibe todo por props.
+2. **`FightStage`:** la prop de los nombres es `displayNames`, y suma `onpainted` y `onfailure`, que el plan no nombraba.
+3. **La pelea con `degraded` esperando su primer frame es `live` sin lienzo.** La fila 6 daba `about_to_start` para siempre, porque en ese modo no llegan eventos. Lo encontró el e2e del WS bloqueado, y tiene su fila en `view-state.test.ts`.
+4. **`followed-fights.ts` es un módulo aparte,** para que la prueba de DP-B7 use la misma regla que el store. También deja de seguir una mirada con un final que no es `decided`, porque no traerá `end`.
+5. **`home.spec.ts` no usa `page.clock`.** Los tiempos son relativos al reloj real, y una pelea puede estar en cualquier `t` desde el inicio. Es igual de determinista, y más simple.
+6. **`about_to_start` no se afirma en `fights.spec.ts` (paso A).** Con el primer frame a tiempo, de la cuenta atrás se pasa directo a `live`, así que en una pelea real ese estado puede no verse. Se afirma en `home.spec.ts`.
+7. **Precarga de las hojas en `pre_live`, por el criterio de la decisión 14.** Sin ella, con Fast 3G y CPU a 4×, el primer frame llegó en `t = +188 ms`. Con ella, llega antes de `t = 0`.
+8. **`fights.spec.ts`:** los contextos usan una sola IP, sin `x-e2e-client`, para probar el límite de upgrades real. El contexto `session` entra por `login`, así que cuenta su socket igual que los demás.
 
 ## Revisión
 ### architect — 2026-10-31 — APPROVE (segunda ronda, con correcciones antes de implementar)

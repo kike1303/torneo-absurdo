@@ -199,6 +199,8 @@ Se entrega en dos fases, con un PR y un plan cada una:
   - (a) los `canonical_spec_json` de los dos personajes y la `ruleset_version` se publican como snapshot inmutable al abrir las apuestas, junto con el commit;
   - (b) el commit se extiende a `SHA-256(seed ‖ canonical_spec_json(a) ‖ canonical_spec_json(b) ‖ ruleset_version)`, lo que es una enmienda de ADR-0002 con el OK del owner.
 
+  **Resuelta con la opción (a) por la [spec de 010](../010-scheduler-de-peleas/spec.md) (RF1, RF2 y RF5, y sus "Alternativas"):** el snapshot se publica al anunciar la pelea, antes de que exista la semilla, y el commit no cambia.
+
   TA-13 también cubre la confidencialidad del `FightLog` hasta `Settled`. 003 aporta lo necesario para las dos opciones (RF4, RF11 y RF16 c), y el requisito se agrega a "Prerrequisitos del primer despliegue" de `docs/architecture.md`.
 
 ## Requisitos no funcionales

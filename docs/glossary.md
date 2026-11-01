@@ -20,6 +20,14 @@ updated: 2026-10-28
 | Semilla | `Seed` | 256 bits aleatorios que, junto con los personajes, determinan la pelea por completo. |
 | Commit | `SeedCommit` | `SHA-256(seed)` publicado al abrir las apuestas. |
 | Reveal | `SeedReveal` | Publicación de la semilla al terminar la pelea, para verificarla. |
+| Snapshot de la pelea | `FightSnapshot` | Los dos `canonical_spec_json` y la `ruleset_version` de una pelea, publicados al anunciarla, antes de que exista la semilla. Es lo único que alimenta al motor. |
+| Estado de la pelea | `FightState` | `scheduled`, `betting_open`, `betting_closed`, `live` o `settled`. |
+| Final de la pelea | `FightFinal` | Cómo terminó una pelea `settled`: exactamente uno entre `decided`, `cancelled` y `voided`. |
+| Cancelada | `cancelled` | Final de una pelea que no llegó a abrir: sin semilla, sin log y sin apuestas. |
+| Anulada | `voided` | Final manual de una pelea con commit que no se puede terminar: revela la semilla y reembolsa. No tiene log. |
+| Parada segura | `fights.safe_stop` | Una pelea en `betting_closed` o `live` cuyo log no se puede reconstruir queda detenida, sin inventar un final. |
+| Detención | `halted` | Mientras dura, no se abren ventanas ni se crean peleas nuevas, y las ventanas abiertas no aceptan apuestas. El server lo publica sin causa. |
+| Retraso de reproducción | `playback_delay_ms` | Lo que el cliente reproduce por detrás del server (3500 ms): el margen para conocer el impacto y el cierre antes de mostrarlos. |
 | Log de eventos | `FightLog` | Secuencia ordenada de `FightEvent` con offset de tiempo; el renderizador la reproduce. |
 | Ventana de apuestas | `BettingWindow` | Periodo en que se aceptan apuestas, antes de que empiece la pelea. |
 | Pozo (parimutuel) | `Pool` | Suma de lo apostado por lado; las ganancias se reparten proporcionalmente entre los ganadores. |
