@@ -15,7 +15,7 @@
     "prettier": "3.9.10",
     "prettier-plugin-svelte": "4.1.1",
     "prettier-plugin-tailwindcss": "0.8.1",
-    "svelte": "5.57.2",
+    "svelte": "5.57.3",
     "vitest": "5.0.5",
     "yaml": "2.9.1"
   }
