@@ -7,23 +7,26 @@ import { describe, expect, it } from 'vitest';
 const ASSET = 'data:text/plain,contract';
 
 describe('Pixi Loader.unload', () => {
-  it('rejects with the parser error and has already forgotten the URL', async () => {
+  it('forgets the URL before the parser unloads and rejects with the parser error', async () => {
     const failure = new Error('unload failed');
-    const parser = {
+    const loader = new Loader();
+    const entriesDuringUnload: unknown[] = [];
+    const parser: LoaderParser = {
       id: 'contract',
       test: () => true,
       load: async () => ({}),
       unload: () => {
+        entriesDuringUnload.push(loader.promiseCache[ASSET]);
         throw failure;
       },
-    } as unknown as LoaderParser;
-    const loader = new Loader();
+    };
     loader.parsers.push(parser);
 
     const first = await loader.load<object>(ASSET);
     expect(loader.promiseCache[ASSET]).toBeDefined();
 
     await expect(loader.unload(ASSET)).rejects.toBe(failure);
+    expect(entriesDuringUnload).toEqual([undefined]);
     expect(loader.promiseCache[ASSET]).toBeUndefined();
     expect(await loader.load<object>(ASSET)).not.toBe(first);
   });
