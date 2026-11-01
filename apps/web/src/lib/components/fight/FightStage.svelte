@@ -142,7 +142,9 @@
       for (const load of Object.values(SHEETS[fid])) {
         // A failure here is not one: `loadLive` asks for them again and reports it.
         void load()
-          .then(({ default: url }) => fetch(url))
+          .then(({ default: url }) => {
+            new Image().src = url;
+          })
           .catch(() => undefined);
       }
     }
