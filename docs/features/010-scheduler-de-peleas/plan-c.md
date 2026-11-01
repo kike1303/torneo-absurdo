@@ -259,6 +259,8 @@ _Ninguna está aplicada. La spec no se edita desde este plan._
 5. **e2e.** Además de lo previsto, `arena.spec.ts` suma "Reiniciar" en vivo y `?log=…&live=0`. La parte de RF52 "con los mismos HP que `?t=`" comprueba al perdedor en 0, sin comparar los dos HP.
 
 ## Enmienda propuesta a la spec
+_Aplicada en la Enmienda 4 de la spec._
+
 _Redactada por el architect a partir de las desviaciones 1 a 5. **No está aplicada. Se aplica en la fase D, al cierre,** porque `spec.md` recibe en paralelo una enmienda de la fase A en `ta-13-fight-runner`, y va con la confirmación de product-owner para RF50 y el RNF. Lo aplica el plan D, que lo lista en su trabajo de cierre, y con eso queda escrito en la spec el plazo de la medición en Android: antes del primer despliegue público. Hasta entonces, `spec.md` sigue diciendo que `prepareScene` corre en cada `extend`, y lo vigente es esta sección. Cada entrada reemplaza completo el texto citado. El APPROVE de abajo cubre el plan del frontend-engineer, no esta sección, porque el architect no aprueba lo que escribe: RF50 y el RNF cambian una regla o su prueba y los confirma product-owner al aplicarla. RF46, RF47 y la tabla solo precisan lo que ya era cierto._
 
 **RF46** (desviación 1):
