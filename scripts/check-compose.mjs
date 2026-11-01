@@ -835,6 +835,7 @@ function checkDockerfiles(read, problems) {
       if (!froms.some((f) => /^(?:docker\.io\/)?(?:library\/)?node:/.test(f.image))) {
         problems.push(`${file}: node-version: the build stage must use node:`);
       }
+      checkWebCharacters(text, problems);
     }
   }
 }
@@ -956,6 +957,34 @@ function checkServerFinalStage(text, problems) {
     if (keyword === 'RUN') continue;
     if (!allowed.some(([k, a]) => k === keyword && a === args)) {
       problems.push(`${file}:${line}: final-stage: ${keyword} ${args} is not allowed`);
+    }
+  }
+}
+
+/**
+ * 010 RF56: the build stage of the web reads the name and the epithet of each fighter, so it needs
+ * the characters before building. The final stage never has them.
+ * @param {string} text
+ * @param {string[]} problems
+ */
+function checkWebCharacters(text, problems) {
+  const file = FILES.webDockerfile;
+  const required = 'content/characters content/characters';
+  const instructions = dockerInstructions(text);
+  const start = instructions.map((i) => i.keyword).lastIndexOf('FROM');
+  const build = instructions.slice(0, start);
+  const copies = build.flatMap((i, at) =>
+    i.keyword === 'COPY' && i.args === required ? [at] : [],
+  );
+  const builds = build.findIndex((i) => i.keyword === 'RUN' && /\bbuild\b/.test(i.args));
+  if (copies.length !== 1) {
+    problems.push(`${file}: web-characters: COPY ${required} is required once in the build stage`);
+  } else if (builds !== -1 && (copies[0] ?? 0) > builds) {
+    problems.push(`${file}: web-characters: COPY ${required} must come before the build`);
+  }
+  for (const { line, keyword, args } of [...build, ...instructions.slice(start)]) {
+    if (keyword === 'COPY' && /\bcontent\b/.test(args) && args !== required) {
+      problems.push(`${file}:${line}: web-characters: COPY ${args} is not allowed`);
     }
   }
 }

@@ -24,6 +24,9 @@ RUN --mount=type=cache,id=torneo-pnpm-store,target=/pnpm/store \
 
 COPY apps/web apps/web
 COPY packages packages
+# Only for the name and the epithet of each fighter (010 RF56): nothing else of content/ is read,
+# and the final stage does not have it.
+COPY content/characters content/characters
 RUN pnpm --filter web build
 
 # distroless/nodejs22-debian13:nonroot, index digest (Node v22.23.4, uid 65532, no shell).
