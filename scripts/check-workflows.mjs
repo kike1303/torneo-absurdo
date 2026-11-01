@@ -30,6 +30,7 @@ export const JOB_PERMISSIONS = {
     web: READ,
     'e2e-server': READ,
     e2e: READ,
+    'e2e-fights': READ,
     images: READ,
     'ci-ok': {},
   },
@@ -421,8 +422,14 @@ function checkE2eCache(jobs, file, problems) {
 function checkE2e(jobs, file, problems, tree) {
   const server = jobs['e2e-server'];
   const e2e = jobs.e2e;
-  if (isMap(e2e) && String(e2e.if ?? '').trim() !== E2E_IF) {
-    problems.push(`${file}: e2e-server-if: jobs.e2e must run with if: ${E2E_IF}`);
+  // 010 plan-d decision 16: the real fights run exactly when the general e2e does.
+  for (const [id, job] of [
+    ['e2e', e2e],
+    ['e2e-fights', jobs['e2e-fights']],
+  ]) {
+    if (isMap(job) && String(job.if ?? '').trim() !== E2E_IF) {
+      problems.push(`${file}: e2e-server-if: jobs.${id} must run with if: ${E2E_IF}`);
+    }
   }
   if (isMap(server)) {
     if (String(server.if ?? '').trim() !== String(e2e?.if ?? '').trim()) {

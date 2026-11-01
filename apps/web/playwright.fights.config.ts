@@ -55,6 +55,9 @@ export default defineConfig({
   ],
   webServer: stackServers({
     FIGHT_SCRIPT_PATH: path.resolve(FIGHT_SCRIPT),
+    // The script takes the place of the roster, and the real characters still load: the only e2e
+    // that sees them, because the general one has no roster on purpose.
+    CONTENT_DIR: path.resolve(import.meta.dirname, '../../content/characters'),
     FIGHT_CADENCE_SECS: '113',
     FIGHT_BETTING_WINDOW_SECS: '5',
     FIGHT_PRE_LIVE_SECS: '3',

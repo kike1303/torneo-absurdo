@@ -755,6 +755,40 @@ const CASES = [
     },
     /web-characters: COPY --from=build \/app\/content\/characters content\/characters is not allowed/,
   ],
+  [
+    'web Dockerfile: ADD of content in the build',
+    {
+      [WD]: [
+        [
+          'COPY content/characters content/characters\n',
+          'COPY content/characters content/characters\nADD content content\n',
+        ],
+      ],
+    },
+    /web-characters: ADD content content is not allowed/,
+  ],
+  [
+    'web Dockerfile: the whole context in the build',
+    {
+      [WD]: [
+        [
+          'COPY content/characters content/characters\n',
+          'COPY content/characters content/characters\nCOPY . .\n',
+        ],
+      ],
+    },
+    /web-characters: COPY \. \. is not allowed/,
+  ],
+  [
+    'web Dockerfile: ADD of the characters in the final stage',
+    { [WD]: [['EXPOSE 3000\n', 'EXPOSE 3000\nADD content/characters /x\n']] },
+    /web-characters: ADD content\/characters \/x is not allowed/,
+  ],
+  [
+    'web Dockerfile: all of the build in the final stage',
+    { [WD]: [['EXPOSE 3000\n', 'EXPOSE 3000\nCOPY --from=build /app /x\n']] },
+    /web-characters: COPY --from=build \/app \/x is not allowed/,
+  ],
   // 010 RNF "Imagen": the final stage carries the characters, and has no RUN.
   [
     'server Dockerfile: without the characters',

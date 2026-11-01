@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import {
   expect,
   test,
@@ -11,6 +12,7 @@ import {
 import type { FightDetail, FightSummary, FightsCurrent } from '@torneo/protocol';
 import { VECTORS, goldenLog } from './support/fight-script.mjs';
 import { login } from './auth/fixtures.js';
+import { SERVER_LOG } from './support/logs.js';
 import { EGRESS_PROXY, PUBLIC_ORIGIN } from './support/topology.js';
 
 // The real fights (010 preocupaciones 9 and 10, plan-d decisions 16 and 17): one flow per project,
@@ -249,6 +251,8 @@ test('the same real fights in every project', async ({ browser, request }, info)
 
   try {
     await Promise.all([koFlow(), drawFlow()]);
+    // The real characters loaded, whatever the script does with them.
+    expect(readFileSync(SERVER_LOG, 'utf8')).not.toContain('fights.roster_invalid');
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
   }
