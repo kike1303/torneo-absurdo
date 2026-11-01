@@ -1,20 +1,36 @@
 <script lang="ts">
-  import * as Card from '#lib/components/ui/card/index.js';
+  // The home page (010 RF53, RF54): the store decides, and the components only draw what it says.
+  import { onMount } from 'svelte';
+  import FightHome from '#lib/components/fight/FightHome.svelte';
+  import { fighterDisplay } from '#lib/features/fight/live/fighter-names.js';
+  import { FightStore } from '#lib/features/fight/live/live-store.svelte.js';
   import { m } from '#lib/paraglide/messages.js';
+
+  let { data } = $props();
+
+  // One per page: `data` only changes by navigating away.
+  // svelte-ignore state_referenced_locally
+  const store = new FightStore(data.board);
+  onMount(() => store.connect());
 </script>
 
 <svelte:head>
   <title>{m.app_name()}</title>
 </svelte:head>
 
-<section class="flex flex-col gap-6">
-  <h1 class="font-display text-3xl font-bold tracking-tight text-balance sm:text-4xl">
-    {m.home_title()}
-  </h1>
-  <p class="max-w-prose text-lg text-muted-foreground">{m.home_lead()}</p>
-  <Card.Root class="max-w-prose">
-    <Card.Content>
-      <p>{m.home_coming_soon()}</p>
-    </Card.Content>
-  </Card.Root>
-</section>
+<FightHome
+  view={store.view}
+  serverNow={store.serverNow}
+  roundClock={store.roundClock}
+  textScene={store.textScene}
+  degraded={store.degraded}
+  playbackError={store.playbackError}
+  noAnimation={store.noAnimation}
+  stageFight={store.stageFight}
+  session={store.openSession}
+  onsnapshot={store.onSnapshot}
+  onpainted={store.onPainted}
+  onfailure={store.onStageFailure}
+  display={fighterDisplay}
+  debug={data.debug ? store.debug : null}
+/>
