@@ -192,6 +192,12 @@ _e2e-run: _web-prepare
     # old egress.log must not stand in for a proxy that did not start.
     node apps/web/e2e/support/reset-run.mjs
     pnpm --filter web exec playwright test
+    # The real fights (010 plan-d decision 16), after the general run and from zero. With `set -e`, a
+    # failure above stops here, and its logs stay for the artifact of CI.
+    node apps/web/e2e/support/db.mjs reset
+    node apps/web/e2e/support/reset-run.mjs
+    node apps/web/e2e/support/fight-script.mjs
+    pnpm --filter web exec playwright test -c playwright.fights.config.ts
 
 # HOST is fixed to 127.0.0.1 (never read from the environment): adapter-node listens on 0.0.0.0 by
 # default, and SOCKET_PATH and LISTEN_FDS, which it prefers over HOST, are cleared. On Android,
