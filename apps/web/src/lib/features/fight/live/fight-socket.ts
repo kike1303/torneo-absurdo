@@ -91,7 +91,7 @@ export function createFightSocket(deps: FightSocketDeps): FightSocket {
   let lastCheck = Number.NEGATIVE_INFINITY;
   let wanted: readonly number[] = [];
   let open = new Set<number>();
-  let forbidden = new Set<number>();
+  const forbidden = new Set<number>();
   let awaiting: Awaiting[] = [];
 
   const cancel = (timer: unknown): null => {

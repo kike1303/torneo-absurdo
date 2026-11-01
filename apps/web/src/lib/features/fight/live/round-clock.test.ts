@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { FightEvent } from '@torneo/protocol';
-import { formatClock, roundClockMs } from './round-clock.js';
+import { formatClock } from '#lib/i18n/format.js';
+import { roundClockMs } from './round-clock.js';
 
 // 010 RF55 and plan-d decisions 12 and 14.
 const LIMIT = 86_000;

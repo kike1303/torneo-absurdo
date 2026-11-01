@@ -9,7 +9,8 @@ export interface LiveSession {
   readonly timeline: Timeline;
   /**
    * Calls `push` with each newer timeline, and right away with the current one if it is newer than
-   * `timeline`: an `end` released before subscribing is not lost. Returns the unsubscribe function.
+   * `timeline`: an `end` released before subscribing is not lost. `fail` is for events the adapter
+   * refuses (010 plan-d decision 8). Returns the unsubscribe function.
    */
-  subscribe(push: (timeline: Timeline) => void): () => void;
+  subscribe(push: (timeline: Timeline) => void, fail?: (code: string) => void): () => void;
 }

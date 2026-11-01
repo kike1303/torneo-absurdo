@@ -3,7 +3,7 @@ import type { FightEvent } from '@torneo/protocol';
 import { createEventBuffer } from './event-buffer.js';
 
 // 010 DP-B9 and plan-d decision 3.
-const event = (t: number): FightEvent => ({ type: 'low_hp', t, side: 'a' });
+const event = (t: number): FightEvent => ({ type: 'low_hp', t, side: 'a', hp: 1 });
 const page = (from: number, to: number) =>
   Array.from({ length: to - from }, (_, i) => event(from + i));
 const times = (events: readonly FightEvent[]) => events.map((e) => e.t);
