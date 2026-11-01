@@ -187,7 +187,9 @@ test('the same real fights in every project', async ({ browser, request }, info)
     await turn(info);
     const sessionContext = await opened();
     const sessionPage = await sessionContext.newPage();
-    await login(sessionPage, `e2e-fights-${info.project.name}`, 'es', '/es/?debug=1');
+    // A first login goes through the onboarding: the view comes after it, by address.
+    await login(sessionPage, `e2e-fights-${info.project.name}`, 'es');
+    await sessionPage.goto('/es/?debug=1');
     await sleep(10_000);
     await turn(info);
     const anon = await watch(await opened(), 'en');
