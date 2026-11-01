@@ -23,7 +23,7 @@ engine = { path = "crates/engine" }
 content = { path = "crates/content" }
 engine-wasm = { path = "crates/engine-wasm" }
 # No default features: no `std`, `os_rng` nor `serde` in the engine (003 RF5, RF6).
-rand_chacha = { version = "=0.9.0", default-features = false }
+rand_chacha = { version = "=0.10.0", default-features = false }
 wasm-bindgen = "=0.2.129"
 axum = { version = "=0.8.9", default-features = false, features = ["form", "http1", "json", "matched-path", "query", "tokio", "ws"] }
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync", "io-util"] }
