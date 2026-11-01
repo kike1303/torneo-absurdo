@@ -6,7 +6,9 @@ import type { PageServerLoad } from './$types';
 // The home page (010 RF53): what is on now, without a session. A failure is the error state of the
 // view, with a 200, never a 500: the client still tries by itself. `debug` only exists next to the
 // dev catalog, so production never gets those attributes (plan-d decision 14).
-export const load: PageServerLoad = async ({ fetch, url }) => {
+export const load: PageServerLoad = async ({ fetch, url, setHeaders }) => {
+  // What is on now: a cached board would show an old fight as the current one.
+  setHeaders({ 'cache-control': 'no-store' });
   const result = await getFightsCurrent(internalApi(fetch));
   return {
     board: result.ok ? result.data : null,

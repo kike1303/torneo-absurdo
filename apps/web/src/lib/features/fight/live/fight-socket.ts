@@ -1,13 +1,13 @@
 import type { ClientMessage, ServerMessage } from '@torneo/protocol';
 
-// The connection of the fight view to /ws (010 RF57, DP-B7, plan-d decisions 5 and 6). The URL is
-// relative, so no absolute URL is built here (ADR-0012), and everything from outside is injected.
+// The connection of the fight view to /ws (010 RF57, DP-B7, plan-d decisions 5 and 6). Everything
+// from outside is injected.
 //
 // What it asks for: `schedule`, and the fights the caller wants. The caller wants `current` and a
 // watched fight without `end`, never `next` nor a `last` it is not watching: the board already
 // brings their summaries, and following them could go over the limit of DP-B7. A channel is never
 // closed to open it again, and the probe uses `schedule`, so a socket asks for one `fight_sync` per
-// fight, and for 2 fights only when it is new and has a watched fight to finish.
+// fight, and for one fight at a time.
 
 export const OPEN = 1;
 export const BACKOFF_MAX_MS = 30_000;
@@ -19,6 +19,16 @@ export const POLL_MS = 30_000;
 /** At most one probe, and one immediate reconnection, in this time. */
 export const CHECK_THROTTLE_MS = 2000;
 export const PROBE_TIMEOUT_MS = 3000;
+/** After a protocol error, this long without another one before trusting the connection again. */
+export const STABLE_MS = 30_000;
+
+/**
+ * The address of the socket. A relative URL throws in `new WebSocket` on browsers before Chrome 125,
+ * Firefox 124 and Safari 17.3, and it would freeze the view.
+ */
+export function socketUrl(location: { readonly protocol: string; readonly host: string }): string {
+  return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+}
 
 const SCHEDULE = 'schedule';
 const fightChannel = (id: number): string => `fight:${id}`;
@@ -88,6 +98,9 @@ export function createFightSocket(deps: FightSocketDeps): FightSocket {
   let retry: unknown = null;
   let pollTimer: unknown = null;
   let probeTimer: unknown = null;
+  let stableTimer: unknown = null;
+  /** A protocol error, and no stable connection since: a first message does not clear it. */
+  let suspect = false;
   let lastCheck = Number.NEGATIVE_INFINITY;
   let wanted: readonly number[] = [];
   let open = new Set<number>();
@@ -138,7 +151,14 @@ export function createFightSocket(deps: FightSocketDeps): FightSocket {
     gotMessage = false;
     open = new Set();
     awaiting = [];
-    const next = deps.open();
+    let next: SocketLike;
+    try {
+      next = deps.open();
+    } catch {
+      // A failure like any other: never a view frozen without retrying.
+      lost();
+      return;
+    }
     socket = next;
     deps.onNewConnection();
     next.onopen = () => {
@@ -170,20 +190,34 @@ export function createFightSocket(deps: FightSocketDeps): FightSocket {
     old.close();
   }
 
+  function countFailure(): void {
+    failures++;
+    failuresInRow++;
+    if (failuresInRow >= FAILURES_TO_DEGRADE && !degraded) {
+      degraded = true;
+      deps.poll();
+      schedulePoll();
+    }
+    deps.onChange();
+  }
+
+  function healthy(): void {
+    suspect = false;
+    attempts = 0;
+    failuresInRow = 0;
+    if (degraded) {
+      degraded = false;
+      stopPolling();
+    }
+    deps.onChange();
+  }
+
   function lost(): void {
     socket = null;
     probeTimer = cancel(probeTimer);
+    stableTimer = cancel(stableTimer);
     if (!running) return;
-    if (!gotMessage) {
-      failures++;
-      failuresInRow++;
-      if (failuresInRow >= FAILURES_TO_DEGRADE && !degraded) {
-        degraded = true;
-        deps.poll();
-        schedulePoll();
-      }
-      deps.onChange();
-    }
+    if (!gotMessage) countFailure();
     const delay = Math.min(BACKOFF_MAX_MS, BACKOFF_FIRST_MS * 2 ** attempts);
     attempts++;
     retry = deps.setTimer(connect, jittered(delay));
@@ -199,13 +233,14 @@ export function createFightSocket(deps: FightSocketDeps): FightSocket {
     }
     if (!gotMessage) {
       gotMessage = true;
-      attempts = 0;
-      failuresInRow = 0;
-      if (degraded) {
-        degraded = false;
-        stopPolling();
+      if (suspect) {
+        stableTimer = deps.setTimer(() => {
+          stableTimer = null;
+          healthy();
+        }, STABLE_MS);
+      } else {
+        healthy();
       }
-      deps.onChange();
     }
     probeTimer = cancel(probeTimer);
     if (message.type === 'subscribed') {
@@ -232,6 +267,7 @@ export function createFightSocket(deps: FightSocketDeps): FightSocket {
       running = false;
       retry = cancel(retry);
       probeTimer = cancel(probeTimer);
+      stableTimer = cancel(stableTimer);
       stopPolling();
       degraded = false;
       drop();
@@ -268,9 +304,11 @@ export function createFightSocket(deps: FightSocketDeps): FightSocket {
     },
     protocolError() {
       if (socket === null) return;
-      const old = socket;
-      old.onclose = null;
       drop();
+      // A first message arrived, so `lost` would not count it, and the next one would reset the
+      // backoff: a server that repeats the error would make it reconnect without a brake.
+      suspect = true;
+      gotMessage = false;
       lost();
     },
     state() {

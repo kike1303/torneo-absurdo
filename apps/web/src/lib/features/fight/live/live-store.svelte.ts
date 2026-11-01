@@ -6,13 +6,14 @@ import { createFightSession, type FightSession } from './fight-session.js';
 import {
   CHECK_THROTTLE_MS,
   createFightSocket,
+  socketUrl,
   type FightSocket,
   type SocketLike,
 } from './fight-socket.js';
 import { followedFights } from './followed-fights.js';
 import { roundClockMs } from './round-clock.js';
 import { endEvent, hasPendingEvents, textSceneAt, type TextScene } from './text-scene.js';
-import { viewState, type View, type Watched } from './view-state.js';
+import { adoptsCurrent, viewState, type View, type Watched } from './view-state.js';
 
 // Joins the socket, the clock and the buffers of the home page (010 plan-d decisions 2 to 9), and
 // gives what the view reads. All the decisions are in the pure modules around it.
@@ -188,6 +189,8 @@ export class FightStore {
   private tick(): void {
     if (this.clock.known()) this.serverNow = this.clock.now();
     this.tAt = Date.now();
+    // No message says when a pose ends.
+    this.adoptCurrent();
   }
 
   private sampleOf(serverTime: string): void {
@@ -200,12 +203,17 @@ export class FightStore {
     this.sampleOf(board.server_time);
     const named = [board.current, board.next, board.last];
     for (const fight of named) if (fight !== null) this.socket?.allow(fight.id);
-    const current = board.current;
-    if (current !== null && (current.state === 'betting_closed' || current.state === 'live')) {
-      if (current.id !== this.watchedSummary?.id) this.watch(current);
-    }
     const seen = named.find((fight) => fight?.id === this.watchedSummary?.id);
     if (seen !== undefined && seen !== null) this.updateWatched(seen);
+    this.adoptCurrent();
+    this.follow();
+  }
+
+  /** The next fight takes the stage only when the one watched is finished. */
+  private adoptCurrent(): void {
+    const current = this.board?.current ?? null;
+    if (current === null || !adoptsCurrent(current, this.watched)) return;
+    this.watch(current);
     this.follow();
   }
 
@@ -291,8 +299,8 @@ export class FightStore {
     const board = this.board;
     if (board !== null) this.clock.sample(Number(board.server_time));
     const socket = createFightSocket({
-      // Relative, so no absolute URL is built here (ADR-0012). `SocketLike` is the part it uses.
-      open: () => new WebSocket('/ws') as unknown as SocketLike,
+      // `SocketLike` is the part it uses.
+      open: () => new WebSocket(socketUrl(location)) as unknown as SocketLike,
       setTimer: (run, ms) => setTimeout(run, ms),
       clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
       now: () => performance.now(),

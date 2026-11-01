@@ -18,6 +18,19 @@ function sources(dir: string): string[] {
 }
 
 describe('the FightLog → Timeline boundary', () => {
+  // `live-session.ts` names two types of the renderer so the store does not import it: a test on
+  // imports does not see through an alias, so its uses are kept to that one file.
+  it('only the store uses the aliases of the renderer types', () => {
+    const uses = sources(SRC)
+      .filter((file) => /\bStage(?:Snapshot|ErrorCode)\b/.test(readFileSync(file, 'utf8')))
+      .map((file) => path.relative(SRC, file))
+      .sort();
+    expect(uses).toEqual([
+      path.join('lib', 'features', 'fight', 'live-session.ts'),
+      path.join('lib', 'features', 'fight', 'live', 'live-store.svelte.ts'),
+    ]);
+  });
+
   it('only the adapter imports from both @torneo/protocol and @torneo/renderer', () => {
     const both = sources(SRC)
       .filter((file) => {

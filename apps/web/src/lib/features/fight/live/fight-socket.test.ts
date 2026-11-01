@@ -6,7 +6,9 @@ import {
   OPEN,
   POLL_MS,
   PROBE_TIMEOUT_MS,
+  STABLE_MS,
   createFightSocket,
+  socketUrl,
   type SocketLike,
 } from './fight-socket.js';
 import { followedFights } from './followed-fights.js';
@@ -215,6 +217,80 @@ describe('reconnecting (RF57)', () => {
     expect(first.closed).toBe(true);
     advance(1000);
     expect(sockets).toHaveLength(2);
+  });
+});
+
+describe('a protocol error that repeats', () => {
+  function again(last: () => FakeSocket, socket: ReturnType<typeof setup>['socket']) {
+    last().accept();
+    last().deliver(subscribed('schedule'));
+    socket.protocolError();
+  }
+
+  it('backs off, counts as a failure and ends up degraded', () => {
+    const { socket, sockets, advance, last, polls } = setup();
+    socket.start();
+    again(last, socket);
+    expect(socket.state().failures).toBe(1);
+    for (const [i, ms] of [1000, 2000, 4000, 8000].entries()) {
+      advance(ms - 1);
+      expect(sockets).toHaveLength(i + 1);
+      advance(1);
+      expect(sockets).toHaveLength(i + 2);
+      again(last, socket);
+    }
+    expect(socket.state().failures).toBe(5);
+    expect(socket.state().degraded).toBe(true);
+    expect(polls()).toBeGreaterThan(0);
+  });
+
+  it('a connection stable for a while clears it', () => {
+    const { socket, advance, last } = setup();
+    socket.start();
+    for (const ms of [1000, 2000]) {
+      again(last, socket);
+      advance(ms);
+    }
+    again(last, socket);
+    expect(socket.state().degraded).toBe(true);
+    advance(4000);
+    last().accept();
+    last().deliver(subscribed('schedule'));
+    expect(socket.state().degraded).toBe(true);
+    advance(STABLE_MS);
+    expect(socket.state().degraded).toBe(false);
+  });
+});
+
+describe('opening a socket', () => {
+  it('builds the address from the location', () => {
+    expect(socketUrl({ protocol: 'https:', host: 'a.example' })).toBe('wss://a.example/ws');
+    expect(socketUrl({ protocol: 'http:', host: 'localhost:4173' })).toBe('ws://localhost:4173/ws');
+  });
+
+  it('a constructor that throws is one more failure, not a frozen view', () => {
+    let opens = 0;
+    const timers: (() => void)[] = [];
+    const socket = createFightSocket({
+      open: () => {
+        opens++;
+        throw new Error('SyntaxError');
+      },
+      setTimer: (run) => timers.push(run),
+      clearTimer: () => undefined,
+      now: () => 0,
+      random: () => 0.5,
+      onMessage: () => undefined,
+      onNewConnection: () => undefined,
+      onChange: () => undefined,
+      poll: () => undefined,
+    });
+    socket.start();
+    expect(socket.state().failures).toBe(1);
+    timers.shift()?.();
+    timers.shift()?.();
+    expect(opens).toBe(3);
+    expect(socket.state().degraded).toBe(true);
   });
 });
 
@@ -477,8 +553,9 @@ describe('DP-B7: an hour of boards, with a legitimate client', () => {
       total += list.length;
       for (const [i, entry] of list.entries()) {
         const window = list.slice(i).filter((other) => other.at - entry.at < 60_000);
-        // 2 only when the socket is new; never the 3 of the limit.
-        const allowed = entry === list[0] ? 2 : 1;
+        // One fight at a time: 2 in a minute only if a socket enters at the end of one, with the
+        // smallest grid. Never the 3 of the limit.
+        const allowed = 2;
         expect(window.length, `socket asked for ${JSON.stringify(window)}`).toBeLessThanOrEqual(
           allowed,
         );
@@ -533,10 +610,15 @@ describe('followedFights', () => {
     expect(followedFights(b, 2, false)).toEqual([2]);
   });
 
-  it('a watched fight without end stays followed, and is the only way to 2', () => {
-    const b = board({ current: fight(2, 'live'), last: fight(1, 'settled') });
-    expect(followedFights(b, 1, false)).toEqual([2, 1]);
-    expect(followedFights(b, 1, true)).toEqual([2]);
+  it('a watched fight without end stays followed, and the next one waits for it', () => {
+    const b = board({ current: fight(2, 'betting_closed'), last: fight(1, 'settled') });
+    expect(followedFights(b, 1, false)).toEqual([1]);
+    expect(followedFights(b, 1, true)).toEqual([]);
+  });
+
+  it('a watched current stays followed with its end, until it settles', () => {
+    const b = board({ current: fight(2, 'live') });
+    expect(followedFights(b, 2, true)).toEqual([2]);
   });
 
   it('without a board it only keeps the watched fight', () => {

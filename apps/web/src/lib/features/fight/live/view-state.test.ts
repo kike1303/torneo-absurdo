@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { FightFinal, FightSummary, FightsCurrent } from '@torneo/protocol';
-import { POSE_AFTER_END_MS, viewState, type ViewInput, type Watched } from './view-state.js';
+import {
+  POSE_AFTER_END_MS,
+  adoptsCurrent,
+  viewState,
+  watchedFinished,
+  type ViewInput,
+  type Watched,
+} from './view-state.js';
 
 // 010 RF54 and plan-d decision 4: a row per case.
 const NOW = 1_000_000;
@@ -217,7 +224,92 @@ describe('viewState: the rows of the table', () => {
   });
 });
 
+// The review of PR #82: the fight being watched is not left until it is finished.
+describe('adoptsCurrent', () => {
+  const closed = fight(3, { state: 'betting_closed' });
+  const ko = { t: 55_123, winner: 'a' as const, reason: 'ko' as const };
+
+  it('with nothing watched, current from pre_live on', () => {
+    expect(adoptsCurrent(closed, null)).toBe(true);
+    expect(adoptsCurrent(liveFight(3, 0), null)).toBe(true);
+    expect(adoptsCurrent(fight(3), null)).toBe(false);
+    expect(adoptsCurrent(fight(3, { state: 'betting_open' }), null)).toBe(false);
+    expect(adoptsCurrent(null, null)).toBe(false);
+  });
+
+  it('the fight watched is not adopted again', () => {
+    const summary = liveFight(3, 1000);
+    expect(adoptsCurrent(summary, watched(summary, 1000))).toBe(false);
+  });
+
+  it('the pose in course keeps it, with the next fight in pre_live', () => {
+    const summary = settled(2, KO, 56_736);
+    const w = watched(summary, 56_736, { end: ko, ending: ko, pending: false });
+    expect(adoptsCurrent(closed, w)).toBe(false);
+  });
+
+  it('a late client far from its KO keeps it, and its final does not show', () => {
+    const summary = settled(2, KO, 12_403);
+    const w = watched(summary, 12_403);
+    expect(adoptsCurrent(closed, w)).toBe(false);
+    const v = view({ board: board({ current: closed, last: summary }), watched: w });
+    expect(v).toMatchObject({ kind: 'live', stage: 'visible', result: null });
+  });
+
+  it('the pose over: the next fight', () => {
+    const summary = settled(2, KO, ko.t + POSE_AFTER_END_MS);
+    const w = watched(summary, ko.t + POSE_AFTER_END_MS, { end: ko, ending: ko, pending: false });
+    expect(adoptsCurrent(closed, w)).toBe(true);
+  });
+
+  it('a voided fight is over at once', () => {
+    const summary = settled(2, VOIDED, 5000);
+    expect(adoptsCurrent(closed, watched(summary, 5000))).toBe(true);
+  });
+
+  it('a fight the board no longer names does not hold the next one forever', () => {
+    const summary = liveFight(2, MAX + POSE_AFTER_END_MS);
+    expect(adoptsCurrent(closed, watched(summary, MAX + POSE_AFTER_END_MS))).toBe(true);
+    expect(adoptsCurrent(closed, watched(summary, MAX + POSE_AFTER_END_MS - 1))).toBe(false);
+  });
+
+  it('one that never started does not hold it either', () => {
+    expect(adoptsCurrent(closed, watched(fight(2, { state: 'betting_closed' }), null))).toBe(true);
+  });
+});
+
 describe('viewState: the cases of the review', () => {
+  it('coming in past end.t with its first frame pending: the fight is over, no "about to start"', () => {
+    const summary = liveFight(2, 56_000);
+    const w = watched(summary, 56_000, {
+      end: { t: 54_000, winner: 'a', reason: 'ko' },
+      painted: false,
+      pending: false,
+    });
+    expect(watchedFinished(w)).toBe(true);
+    expect(view({ board: board({ current: summary }), watched: w })).toMatchObject({
+      kind: 'result',
+      stage: 'none',
+    });
+  });
+
+  it('a canvas already painted when a late end arrives keeps its pose', () => {
+    const summary = liveFight(2, 56_000);
+    const w = watched(summary, 56_000, {
+      end: { t: 54_000, winner: 'a', reason: 'ko' },
+      pending: false,
+    });
+    expect(watchedFinished(w)).toBe(false);
+  });
+
+  it('halted in text mode keeps the fight in view', () => {
+    const summary = liveFight(2, 5000);
+    const w = watched(summary, 5000, { textMode: true });
+    const v = view({ board: board({ halted: true, current: summary }), watched: w });
+    expect(v).toMatchObject({ kind: 'halted', stage: 'none' });
+    expect(v.live?.id).toBe(2);
+  });
+
   it('current live with t < 0, without next nor last: its countdown, not an empty view', () => {
     const current = fight(2, { state: 'live', live_started_at: String(NOW - 1000) });
     const v = view({ board: board({ current }) });

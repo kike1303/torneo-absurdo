@@ -179,11 +179,11 @@ test.describe('the states of the view (RF54)', () => {
     await expect(page.getByTestId('fight-about-to-start')).toBeVisible();
   });
 
-  test('the error of the SSR is a 200, and data clears it', async ({ page }) => {
-    await page.route('**/es/__data.json*', (route) => route.continue());
+  test('the page is a 200 without a cache, and the socket brings the board', async ({ page }) => {
     const server = await fakeServer(page, () => board({ current: fight(2) }));
     const response = await page.goto('/es/');
     expect(response?.status()).toBe(200);
+    expect(response?.headers()['cache-control']).toContain('no-store');
     await waitForHydration(page);
     await expect(page.getByTestId('fight-billboard')).toBeVisible();
     server.closeAll();
@@ -275,6 +275,45 @@ test.describe('in live (RF54, RF55)', () => {
     await expect(home(page)).toHaveAttribute('data-stage', 'none');
   });
 
+  test('a late client far from its KO: the next fight does not take it, nor shows the result', async ({
+    page,
+  }) => {
+    const { server, summary } = await watching(page, 12_000, koFight(KO_AT));
+    await expect(home(page)).toHaveAttribute('data-stage', 'visible', { timeout: 15_000 });
+    const settled: FightSummary = {
+      ...summary,
+      state: 'settled',
+      final: { kind: 'decided', winner: 'a', reason: 'ko' },
+    };
+    const next = fight(3, { state: 'betting_closed' });
+    server.update(board({ current: next, last: settled }));
+    await page.waitForTimeout(400);
+    await expect(page.getByTestId('fight-result')).toHaveCount(0);
+    await expect(home(page)).toHaveAttribute('data-stage', 'visible');
+    await expect(page.getByTestId('fight-live')).toBeVisible();
+    expect(server.received()).not.toContainEqual({ type: 'subscribe', channel: 'fight:3' });
+  });
+
+  test('the next fight in pre_live waits for the pose: 10 s after end.t', async ({ page }) => {
+    const { server, summary } = await watching(page, KO_AT + 3000, koFight(KO_AT));
+    await expect(home(page)).toHaveAttribute('data-stage', 'visible', { timeout: 15_000 });
+    const settled: FightSummary = {
+      ...summary,
+      state: 'settled',
+      final: { kind: 'decided', winner: 'a', reason: 'ko' },
+    };
+    const next = fight(3, { state: 'betting_closed' });
+    server.update(board({ current: next, last: settled }));
+    await page.waitForTimeout(5000);
+    await expect(home(page)).toHaveAttribute('data-stage', 'visible');
+    await expect(page.getByTestId('fight-result')).toHaveAttribute('data-result', 'ko');
+    await expect(page.getByTestId('fight-billboard')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('fight-result')).toHaveAttribute('data-result', 'ko');
+    await expect
+      .poll(() => server.received())
+      .toContainEqual({ type: 'subscribe', channel: 'fight:3' });
+  });
+
   test('a fight_sync without events in live waits for the intro', async ({ page }) => {
     const summary = liveAt(2, -2000);
     const server = await fakeServer(
@@ -324,7 +363,7 @@ test.describe('in live (RF54, RF55)', () => {
     server.events(2, 10, events.slice(10, 12));
     await expect(home(page)).toHaveAttribute('data-events', '3');
     await expect.poll(() => server.connections()).toBeGreaterThan(before);
-    await expect(home(page)).toHaveAttribute('data-ws-failures', '0');
+    await expect(home(page)).toHaveAttribute('data-ws-failures', '1');
   });
 
   test('a burst of cues overdue after a cut: the scene is right, with no errors', async ({
@@ -366,6 +405,17 @@ test.describe('without the canvas', () => {
     await expect(page.getByTestId('fight-result')).toHaveAttribute('data-result', 'ko', {
       timeout: 5000,
     });
+  });
+
+  test('halted in text mode keeps the names and the HP', async ({ page }) => {
+    await noWebGl(page);
+    const { server, summary } = await watching(page, 5000, strikes(30_000));
+    await expect(page.getByTestId('fight-text-hp')).toBeVisible();
+    server.update(board({ halted: true, current: summary }));
+    await expect(page.getByTestId('fight-halted')).toBeVisible();
+    await expect(page.getByTestId('fight-text-hp')).toBeVisible();
+    await expect(page.getByTestId('fight-live')).toBeVisible();
+    await expect(page.getByTestId('fight-live-badge')).toHaveCount(0);
   });
 
   test('extend rejected in a later delivery: the notice, and the fight in text', async ({
@@ -622,6 +672,13 @@ type State = {
 };
 
 const STATES: readonly State[] = [
+  {
+    name: 'loading',
+    set: async (page) => {
+      await fakeServer(page, () => board({ halted: null }));
+    },
+    ready: (page) => expect(page.getByTestId('fight-loading')).toBeVisible(),
+  },
   {
     name: 'starting',
     set: async () => undefined,

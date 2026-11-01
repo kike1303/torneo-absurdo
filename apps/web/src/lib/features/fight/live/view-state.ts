@@ -78,9 +78,29 @@ export function watchedFinished(watched: Watched): boolean {
   const { summary, end, t } = watched;
   if (end !== null && t !== null && t >= end.t + POSE_AFTER_END_MS) return true;
   if (watched.lateNoPixi) return true;
+  // `end.t` went by before anything was on screen: nothing to wait for. A canvas already painted
+  // keeps its pose, also if a late page brought the end.
+  if (end !== null && t !== null && t >= end.t && !watched.painted) return true;
   const final = summary.final;
   if (final === null || !finalVisible(summary, watched)) return false;
   return end === null || final.kind !== 'decided';
+}
+
+/**
+ * Whether `current` becomes the fight watched. The one being watched is not left until it is
+ * finished: its `final` would stop being held back and its pose would be cut (review of PR #82).
+ * Only one that the board forgot does not hold the next one forever.
+ */
+export function adoptsCurrent(current: FightSummary | null, watched: Watched | null): boolean {
+  if (current === null || (current.state !== 'betting_closed' && current.state !== 'live')) {
+    return false;
+  }
+  if (watched === null) return true;
+  if (watched.summary.id === current.id) return false;
+  if (watched.t === null) return true;
+  return (
+    watchedFinished(watched) || watched.t >= watched.summary.max_duration_ms + POSE_AFTER_END_MS
+  );
 }
 
 function resultOfFinal(fight: FightSummary, final: FightFinal): FightResult {
@@ -144,7 +164,12 @@ export function viewState(input: ViewInput): View {
   if (halted === true) {
     // The canvas stays only while there is something left to play.
     const playing = onScreen && watched.pending;
-    return { ...base, kind: 'halted', stage: mounted && playing ? 'visible' : 'none' };
+    return {
+      ...base,
+      kind: 'halted',
+      live: onScreen ? watched.summary : null,
+      stage: mounted && playing ? 'visible' : 'none',
+    };
   }
 
   if (nothing && watched === null) {

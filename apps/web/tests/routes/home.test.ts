@@ -20,15 +20,22 @@ const BOARD: FightsCurrent = {
   last: null,
 };
 
-type Load = (event: { fetch: typeof fetch; url: URL }) => Promise<{
+type Load = (event: {
+  fetch: typeof fetch;
+  url: URL;
+  setHeaders: (headers: Record<string, string>) => void;
+}) => Promise<{
   board: FightsCurrent | null;
   debug: boolean;
 }>;
+
+const headers: Record<string, string>[] = [];
 
 function run(respond: () => Promise<Response>, query = '') {
   return (load as unknown as Load)({
     fetch: vi.fn(respond) as unknown as typeof fetch,
     url: new URL(`http://localhost/es/${query}`),
+    setHeaders: (values) => headers.push(values),
   });
 }
 
@@ -61,11 +68,18 @@ describe('the load of the home page', () => {
     expect(result).toEqual({ board: null, debug: false });
   });
 
+  it('is never cached: a stored board would show an old fight as the current one', async () => {
+    headers.length = 0;
+    await run(() => json(BOARD));
+    expect(headers).toEqual([{ 'cache-control': 'no-store' }]);
+  });
+
   it('calls the API with a read', async () => {
     const respond = vi.fn(() => json(BOARD));
     await (load as unknown as Load)({
       fetch: respond as unknown as typeof fetch,
       url: new URL('http://localhost/es/'),
+      setHeaders: () => undefined,
     });
     const [url, init] = respond.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('http://127.0.0.1:8080/api/fights/current');

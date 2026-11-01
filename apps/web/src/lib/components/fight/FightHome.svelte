@@ -127,7 +127,7 @@
         />
       {/if}
 
-      {#if view.kind === 'live' && liveFight !== null && liveNames !== null}
+      {#if liveFight !== null && liveNames !== null}
         <div class="flex flex-wrap items-center gap-2" data-testid="fight-live">
           {#if view.liveBadge}
             <Badge variant="destructive" data-testid="fight-live-badge">{m.fight_view_live()}</Badge
