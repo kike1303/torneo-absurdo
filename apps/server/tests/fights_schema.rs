@@ -702,3 +702,28 @@ async fn the_bounds_of_the_summary_and_the_hours_are_checks() {
         "fights_opens_at_key"
     ));
 }
+
+/// A state that the `CHECK` forbids, as only someone with the credential can write it, is its own
+/// error, with its own `error_kind`, and not a failure of the protocol of the database.
+#[tokio::test]
+async fn a_row_with_a_state_out_of_the_list_is_its_own_error() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let vector = support::fights::Vector::of(support::fights::KO);
+    let id = support::fights::announce(&pool, support::fights::T0, &vector.a, &vector.b).await;
+    let mut tx = pool.begin().await.unwrap();
+    for statement in [
+        "ALTER TABLE fights DISABLE TRIGGER fights_guard",
+        "ALTER TABLE fights DROP CONSTRAINT fights_state_ck",
+        "UPDATE fights SET state = 'bogus', seed_commit = decode(repeat('00', 32), 'hex')",
+    ] {
+        sqlx::query(statement).execute(&mut *tx).await.unwrap();
+    }
+    tx.commit().await.unwrap();
+    let error = server::fights::store::by_id(&pool, id).await.err().unwrap();
+    assert_eq!(server::db::error_kind(&error), "row_invalid");
+    let sqlx::Error::Decode(inner) = &error else {
+        panic!("{error:?}");
+    };
+    assert!(inner.is::<server::fights::store::BadFightRow>());
+}

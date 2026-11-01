@@ -65,6 +65,8 @@ pub fn error_kind(error: &sqlx::Error) -> &'static str {
         sqlx::Error::Io(_) => "io",
         sqlx::Error::Tls(_) => "tls",
         sqlx::Error::Protocol(_) => "protocol",
+        // A row that does not decode, not a database that fails (010 `store::BadFightRow`).
+        sqlx::Error::Decode(_) | sqlx::Error::ColumnDecode { .. } => "row_invalid",
         sqlx::Error::PoolTimedOut => "timeout",
         sqlx::Error::PoolClosed => "pool",
         _ => "other",

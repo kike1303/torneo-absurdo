@@ -980,17 +980,18 @@ enum Orphan {
     Invalid,
 }
 
-/// Only a settled summary is a final, and only an error talking to the database stops the pass.
+/// Only a settled summary is a final. A row that does not decode ends the entry, and any other error
+/// is a failure talking to the database: it stops the pass and the row is read again, so a passing
+/// failure never loses a final.
 fn orphan_outcome(read: Result<Option<FightRow>, sqlx::Error>) -> Result<Orphan, sqlx::Error> {
     let row = match read {
         Ok(Some(row)) => row,
         Ok(None) => return Ok(Orphan::Gone),
         Err(
-            sqlx::Error::Protocol(_)
+            sqlx::Error::Decode(_)
             | sqlx::Error::ColumnDecode { .. }
             | sqlx::Error::ColumnNotFound(_)
-            | sqlx::Error::ColumnIndexOutOfBounds { .. }
-            | sqlx::Error::Decode(_),
+            | sqlx::Error::ColumnIndexOutOfBounds { .. },
         ) => return Ok(Orphan::Invalid),
         Err(error) => return Err(error),
     };
@@ -1129,11 +1130,12 @@ mod tests {
     /// Amendment DP-B8: only a settled summary is a final.
     #[test]
     fn only_a_settled_row_is_the_final_of_an_orphan() {
-        let invalid = orphan_outcome(Err(sqlx::Error::Protocol("state".to_owned())));
+        let invalid = orphan_outcome(Err(sqlx::Error::Decode(Box::new(store::BadFightRow))));
         assert!(matches!(invalid, Ok(Orphan::Invalid)));
         assert!(matches!(orphan_outcome(Ok(None)), Ok(Orphan::Gone)));
-        // A database that is down is another thing: the pass aborts, and it is read again.
+        // A database that fails is another thing: the pass aborts, and it is read again.
         assert!(orphan_outcome(Err(sqlx::Error::PoolTimedOut)).is_err());
+        assert!(orphan_outcome(Err(sqlx::Error::Protocol("cut".to_owned()))).is_err());
         // Another state, as after restoring a backup.
         for state in [FightState::Scheduled, FightState::Live] {
             assert!(matches!(
