@@ -894,7 +894,7 @@ async fn the_bound_of_events_goes_in_pages_of_at_most_8_kib() {
         }
         if name == "late" {
             assert_eq!(viewer.events.len(), 418, "{name}");
-            assert_eq!(pages, 7, "{name}");
+            assert_eq!(pages, 8, "{name}");
         } else {
             // It already had the first one: it asks from there, and it discards the repeated part.
             assert_eq!(viewer.repeated + viewer.events.len(), 418, "{name}");
@@ -1045,4 +1045,113 @@ async fn a_socket_that_does_not_read_is_closed_in_the_middle_of_its_pages() {
         let message = ws::next_message(&mut back, Duration::from_secs(60)).await;
         viewer.apply(message.expect("it did not catch up"));
     }
+}
+
+/// A fight on air with far more pages than the buffers of the system hold, so the socket that
+/// subscribes has them pending for as long as it does not read.
+async fn with_pending_pages(db: &TestDb, config: WsConfig) -> (Harness, i32, usize) {
+    let vector = Vector::of(KO);
+    let pool = db.migrated_pool().await;
+    let id = f::open_vector(&pool, T0, &vector).await;
+    let (closes_at, live_at) = f::hours(T0);
+    f::close_by_sql(&pool, id, closes_at).await;
+    let h = harness_with(db, live_at, config, |_| {}).await;
+    wait_state(&pool, id, FightState::Live).await;
+    wait_for("the intro", || async {
+        h.shared
+            .hub()
+            .held(id)
+            .is_some_and(|(events, _)| events == 1)
+    })
+    .await;
+    let flood = events_at_the_bound(&vector, 100_000);
+    h.shared.hub().publish(id, 1, &flood);
+    (h, id, 1 + flood.len())
+}
+
+/// Reads until the close, and says with how many events it came and how.
+async fn read_to_the_close(client: &mut Client, viewer: &mut Viewer) -> (u16, String) {
+    let deadline = tokio::time::Instant::now() + IN_TIME;
+    loop {
+        assert!(tokio::time::Instant::now() < deadline, "no close");
+        match ws::next_data(client, Duration::from_secs(5)).await {
+            Some(Message::Text(text)) => viewer.apply(serde_json::from_str(text.as_str()).unwrap()),
+            Some(Message::Close(Some(frame))) => {
+                return (u16::from(frame.code), frame.reason.to_string());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
+/// DP-B9: pages are the last arm of the loop of the socket. Above the shutdown, the socket would send
+/// them all before closing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_shutdown_does_not_wait_for_the_pending_pages() {
+    let db = TestDb::create().await;
+    let (h, id, total) = with_pending_pages(&db, WsConfig::default()).await;
+    let mut client = h.watch(id).await;
+    let mut viewer = Viewer::default();
+    viewer
+        .read_until(&mut client, |v| !v.events.is_empty())
+        .await;
+
+    h.sockets.shutdown_token().cancel();
+    let (code, reason) = read_to_the_close(&mut client, &mut viewer).await;
+    assert_eq!((code, reason.as_str()), (1012, ""));
+    assert!(viewer.events.len() < total, "it sent every page first");
+}
+
+/// DP-B9: nor does a revocation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_revocation_does_not_wait_for_the_pending_pages() {
+    let db = TestDb::create().await;
+    let (h, id, total) = with_pending_pages(&db, WsConfig::default()).await;
+    let (_, token) = user_with_session(&h.pool).await;
+    let cookie_name = support::config::config(&[])
+        .cookies
+        .session_name()
+        .to_owned();
+    let cookie = format!("{cookie_name}={token}");
+    let mut client = ws::connect_with(h.app.addr, ORIGIN, &[("cookie", cookie.as_str())])
+        .await
+        .unwrap();
+    ws::subscribe(&mut client, &format!("fight:{id}")).await;
+    let mut viewer = Viewer::default();
+    viewer
+        .read_until(&mut client, |v| !v.events.is_empty())
+        .await;
+
+    let registry = h.sockets.registry();
+    let sessions = registry.sessions();
+    assert_eq!(sessions.len(), 1);
+    registry.close(sessions[0]);
+    let (code, reason) = read_to_the_close(&mut client, &mut viewer).await;
+    assert_eq!((code, reason.as_str()), (1008, "auth.unauthenticated"));
+    assert!(viewer.events.len() < total, "it sent every page first");
+}
+
+/// DP-B9: nor do the pings. Above them, no ping would come until the last page.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_pings_go_between_the_pending_pages() {
+    use futures_util::StreamExt;
+    let db = TestDb::create().await;
+    let config = WsConfig {
+        ping_interval: Duration::from_millis(20),
+        ..WsConfig::default()
+    };
+    let (h, id, total) = with_pending_pages(&db, config).await;
+    let mut client = h.watch(id).await;
+    let mut viewer = Viewer::default();
+    let mut pings_before_the_end = 0;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    while viewer.events.len() < total {
+        assert!(tokio::time::Instant::now() < deadline, "never reached");
+        match client.next().await.unwrap().unwrap() {
+            Message::Text(text) => viewer.apply(serde_json::from_str(text.as_str()).unwrap()),
+            Message::Ping(_) => pings_before_the_end += 1,
+            _ => {}
+        }
+    }
+    assert!(pings_before_the_end > 0, "no ping until the last page");
 }

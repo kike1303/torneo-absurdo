@@ -20,9 +20,9 @@ use tokio::sync::watch;
 use super::FightClock;
 use super::release::EventSink;
 
-/// The events of a page, and of the longest batch kept to send as it is. With the longest event of the
-/// golden logs, 111 bytes, that is under 8 KiB.
-pub const PAGE_EVENTS: usize = 64;
+/// The events of a page, and of the longest batch kept to send as it is. With the longest event that
+/// `validate` admits, an ability id of 32 characters, that is under 8 KiB.
+pub const PAGE_EVENTS: usize = 56;
 
 /// A shared `fight_sync` or `schedule_update` older than this is serialized again when served: its
 /// `server_time` can only delay the sample, and the client keeps the maximum (amendment DP-B4).
@@ -601,13 +601,13 @@ mod tests {
         let mut held = Vec::new();
         assert_eq!(
             drain(&hub, &mut cursor, &mut held),
-            7,
-            "418 events, 64 a page"
+            8,
+            "418 events, 56 a page"
         );
         assert_eq!(held, all);
 
         // Behind from the middle of a page: the page repeats what it has, and it is discarded.
-        for have in [1_usize, 63, 64, 65, 70, 127, 128, 417] {
+        for have in [1_usize, 55, 56, 57, 70, 111, 112, 417] {
             let mut cursor = Cursor {
                 version: start.version,
                 released: have,
@@ -630,23 +630,27 @@ mod tests {
         assert_eq!(from_390, held);
     }
 
-    /// DP-B9: 64 events of 111 bytes, the longest of the golden logs, are under 8 KiB.
+    /// DP-B9: a page of the longest event there can be: an ability id of 32 characters, the longest
+    /// that `validate` admits, and every number at its widest.
     #[test]
     fn a_page_of_the_longest_events_fits_in_8_kib() {
-        let mut longest = FightEvent::Hit {
+        let text = include_str!("../../../../crates/engine/tests/golden/spec-striker.json");
+        let ruleset = engine::Ruleset::for_version(1).unwrap();
+        let mut spec: engine::CharacterSpec = serde_json::from_str(text).unwrap();
+        spec.abilities[0].id = "a".repeat(32);
+        assert_eq!(spec.validate(&ruleset), Ok(()));
+        spec.abilities[0].id = "a".repeat(33);
+        assert!(spec.validate(&ruleset).is_err());
+
+        let longest = FightEvent::Hit {
             t: 90_000,
             attacker: protocol::Side::A,
-            ability: String::new(),
-            damage: 999,
-            crit: true,
-            weak: true,
-            hp: 860,
+            ability: "a".repeat(32),
+            damage: u16::MAX,
+            crit: false,
+            weak: false,
+            hp: u16::MAX,
         };
-        let size = serde_json::to_string(&longest).unwrap().len();
-        if let FightEvent::Hit { ability, .. } = &mut longest {
-            *ability = "x".repeat(111 - size);
-        }
-        assert_eq!(serde_json::to_string(&longest).unwrap().len(), 111);
         let clock = FightClock::manual(1_800_000_000_000);
         let (hub, start) = live_hub(&clock);
         hub.publish(1, 0, &vec![longest; PAGE_EVENTS]);
@@ -661,20 +665,21 @@ mod tests {
     fn a_batch_larger_than_a_page_goes_in_pages() {
         let clock = FightClock::manual(100);
         let (hub, start) = live_hub(&clock);
-        let at_the_limit: Vec<FightEvent> = (0..64).map(event).collect();
+        let limit = u32::try_from(PAGE_EVENTS).unwrap();
+        let at_the_limit: Vec<FightEvent> = (0..limit).map(event).collect();
         hub.publish(1, 0, &at_the_limit);
         let mut cursor = start;
         assert!(matches!(
             message(&hub.next_for(1, &mut cursor).unwrap()),
             ServerMessage::FightEvents { .. }
         ));
-        assert_eq!(cursor.released, 64);
+        assert_eq!(cursor.released, PAGE_EVENTS);
 
-        let over: Vec<FightEvent> = (64..129).map(event).collect();
-        hub.publish(1, 64, &over);
+        let over: Vec<FightEvent> = (limit..limit * 2 + 1).map(event).collect();
+        hub.publish(1, PAGE_EVENTS, &over);
         let mut held = at_the_limit;
         assert_eq!(drain(&hub, &mut cursor, &mut held), 2);
-        assert_eq!(held.len(), 129);
+        assert_eq!(held.len(), PAGE_EVENTS * 2 + 1);
     }
 
     /// DP-B9: a socket that is up to date gets the small sync at the final, and no events again.
