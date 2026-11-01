@@ -3,9 +3,9 @@ import type { ClientMessage, ServerMessage } from '@torneo/protocol';
 // The connection of the fight view to /ws (010 RF57, DP-B7, plan-d decisions 5 and 6). Everything
 // from outside is injected.
 //
-// What it asks for: `schedule`, and the fights the caller wants. The caller wants `current` and a
-// watched fight without `end`, never `next` nor a `last` it is not watching: the board already
-// brings their summaries, and following them could go over the limit of DP-B7. A channel is never
+// What it asks for: `schedule`, and the one fight the caller follows (`followed-fights.ts`), never
+// `next` nor a `last` it is not watching: the board already brings their summaries, and following
+// them could go over the limit of DP-B7. A channel is never
 // closed to open it again, and the probe uses `schedule`, so a socket asks for one `fight_sync` per
 // fight, and for one fight at a time.
 

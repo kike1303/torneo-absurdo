@@ -62,7 +62,7 @@ Leído, sin ejecutar.
    - **`watched`:** la pelea con sesión abierta. El store conserva su resumen, actualizado por `fight_sync` y por el tablero, así que sigue disponible aunque `current` cambie. Lleva `t`, los cues, `ending` y `end.t` si ya llegó.
    - **`painted`:** primer frame pintado, o modo texto activo (`webgl_unavailable`, 2 pérdidas de contexto, rechazo o `fail`).
    - **Pelea por venir:** `current` mientras no tenga `live_started_at` o `serverNow < live_started_at + delay`; si no, `next`. Su objetivo es `(live_started_at ?? live_at) + playback_delay_ms`.
-   - **`final` visible:** de una pelea no mirada, siempre. De la mirada, de inmediato si no es `decided` (`voided`, y lo mismo si `ws.forbidden_channel` la dejó sin eventos), y si es `decided`, desde `t ≥ max_duration_ms`.
+   - **`final` visible:** de una pelea no mirada, siempre. De la mirada, de inmediato si no es `decided` (`voided`), y si es `decided`, desde `t ≥ max_duration_ms`, también si `ws.forbidden_channel` la dejó sin eventos: una pelea sale del hub 60 s después de liquidarse, cuando `t` ya suele pasar de ese valor.
    - **Mirada terminada:** se cumple una de estas: tiene `end` y `t ≥ end.t + 10 s`; al estar al día ya había pasado `end.t` (decisión 7, sin Pixi); no tiene `end` y tiene `final` visible; o tiene `final` visible que no es `decided`.
 
    **Prioridad:**
