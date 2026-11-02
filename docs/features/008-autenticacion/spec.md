@@ -18,7 +18,7 @@ approvals:
 linear: TA-26
 depends_on: ["001"]
 created: 2026-10-28
-updated: 2026-10-30
+updated: 2026-11-02
 ---
 
 # Spec: Autenticación y sesiones
@@ -383,7 +383,7 @@ admin_audit (                             -- fase C; solo inserción (mismo trig
 | Método y ruta | Sesión | Respuesta | Fase |
 |---|---|---|---|
 | `POST /api/auth/{provider}/start` | no | 303 al proveedor y cookie del flujo; 429 o 503: 303 a `/login?error=auth.try_again` (Enmienda 2026-10-30) | B (dev), C |
-| `GET /api/auth/{provider}/callback` | opcional | 303 a `next` y cookie de sesión; si falla, 303 a `/login?error=<code>`, incluido el 429 de la capa (Enmienda 2026-10-30) | B, C |
+| `GET /api/auth/{provider}/callback` | opcional | 303 a `next` y cookie de sesión; si falla, 303 a `/login?error=<code>`, incluido el 429 de la capa (Enmienda 2026-10-30), con prefijo `/es` o `/en` si hay flujo (Enmienda 2026-11-02 de ADR-0008, TA-35) | B, C |
 | `GET /api/auth/providers` | no | `["google","discord","dev"]` (los habilitados) | B |
 | `POST /api/auth/link/{provider}` | sí | 303 al proveedor; sin sesión, 303 a `/login`; 429 o 503: 303 a `/login?error=auth.try_again` (Enmienda 2026-10-30) | C |
 | `POST /api/auth/unlink/{provider}` | sí | 303 a `/` (desde form); 404 `http.not_found` si no está vinculado (Enmienda 2026-10-29) | C |

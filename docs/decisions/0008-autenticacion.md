@@ -27,7 +27,7 @@ supersedes: null
 linear: TA-5
 depends_on: ["0002", "0003", "0005", "0006", "0007"]
 created: 2026-10-20
-updated: 2026-10-30
+updated: 2026-11-02
 ---
 
 # ADR-0008: Autenticación y sesiones
@@ -328,7 +328,7 @@ Aprobada por el owner el 2026-10-28 (transmitida por la sesión coordinadora). R
   - no crea ni rota ninguna sesión;
   - expira siempre la cookie del flujo y consume la fila de `oauth_flows` si existía;
   - lleva `Cache-Control: no-store`;
-  - nunca usa `next`.
+  - nunca usa `next`. *(Ver la "Enmienda 2026-11-02: idioma del error del callback": sí deriva de él un prefijo fijo de idioma.)*
 - **Lista cerrada de códigos.** `error` solo puede valer `auth.invalid_state`, `auth.banned`, `auth.provider_error`, `auth.try_again`, `auth.already_linked` o `auth.provider_already_linked`. Es un enum de `crates/protocol`, y el server nunca copia al `Location` nada que venga de la petición ni del proveedor.
   - *Ver la "Enmienda 2026-10-30: reautenticación para vincular, desvincular y admin" (security-reviewer firmó el 2026-10-30, ver "Revisión"): la lista suma `auth.reauth_required` y `auth.reauth_mismatch`, y son ocho códigos.*
 - **En la web.** `/login` resuelve `error` a una llave i18n solo si está en la lista. Un valor desconocido se muestra con un texto genérico, y **nunca se refleja** en la página, en un atributo ni en un log.
@@ -370,6 +370,17 @@ Viene del hallazgo de security-reviewer en la revisión de 008 (TA-29). Con la l
   33. Un flujo `reauth` con una identidad que no es del usuario responde `auth.reauth_mismatch`, no crea nada y deja la sesión como estaba.
   34. Tras un `unlink` exitoso, la misma sesión no puede vincular ni volver a desvincular sin reautenticarse.
 - **Riesgo residual (el owner lo aceptó el 2026-10-30, ver "Decisiones" del intent de 009; no lo crea esta enmienda).** Un atacante que vinculó X sigue entrando con X, con acceso de usuario y nunca de admin, hasta que la víctima lo vea en `/account` y lo quite. Con esta enmienda, vincular X exige una sesión de los 10 min posteriores a un login real o a una reautenticación. Con esa sola sesión hace una de dos cosas: quitar una identidad de la víctima (nunca la última) o vincular X, porque un `unlink` exitoso consume la confirmación. Si además consigue otra sesión reciente de la víctima (un segundo robo), puede quitar el proveedor de la víctima: es el mismo riesgo de convivencia, y lo cierra lo mismo. Aparte, el proveedor más antiguo es la raíz de la cuenta: quien pierde el control de él no lo puede quitar, y quien lo controla puede quitar los demás. Antes de esta enmienda era peor, y no lo resuelve ninguna regla. Esta feature tampoco cierra el navegador desatendido con el proveedor V abierto: quien lo use consigue, sin segundo robo, la toma de cuenta completa de TA-29 (reautenticarse con V, vincular X, reautenticarse con V y quitar V), y la víctima queda fuera para siempre. "Nunca de admin" vale con solo X: las excepciones están en el Área 12 de la spec de 009. Lo detalla la spec de 009 ("Áreas de preocupación", 2 a 4, 12 y 13).
+
+## Enmienda 2026-11-02: idioma del error del callback (TA-35)
+**Firmas:** escrita por backend-engineer en TA-35. Firma de security-reviewer: ver el PR de TA-35. El gate del owner lo cubre su delegación del 2026-10-29 mientras no haya nada desplegado, y el owner lo pidió en el alcance de TA-35.
+
+Cambia una regla de la "Enmienda 2026-10-28: errores del callback OAuth": el `Location` ya no es siempre `/login?error=<code>`.
+
+- **Por qué.** En `/es/`, sin cookie `locale` y con el navegador en inglés, un error de callback terminaba en `/en/login` y seguía en inglés. Ni el perfil, ni la cookie, ni `Accept-Language` saben de dónde venía la persona, y el `Referer` viene del proveedor. Escribir la cookie rompería "solo por elección explícita", y una cookie nueva habría que declararla en el aviso de privacidad.
+- **Regla.** Con un flujo en `oauth_flows`, un error **después de consumirlo** responde 303 a `/es/login?error=<code>` o `/en/login?error=<code>`, según el primer segmento de su `next`, comparado exacto. Si ese segmento no es `es` ni `en`, va sin prefijo.
+- **Sin flujo, como hoy.** Sin cookie del flujo, con un flujo que no existe o si falla la base al buscarlo, y en la capa de cuota: `/login?error=<code>`, y la web elige.
+- **Lo que no cambia.** `next` nunca se copia: el `Location` solo lleva uno de dos prefijos fijos, así que no hay redirección abierta, y quien controle `next` solo elige entre `es` y `en`. No se crea ni rota ninguna sesión, y la cookie del flujo se expira, con `no-store` y la lista cerrada de códigos. El prefijo se usa también si el `state` no coincide o el flujo venció: la fila es del servidor y está atada a la cookie del flujo de ese navegador.
+- → UT de `next::locale_of`, IT en `tests/auth_flow.rs` (en rojo primero) y e2e en `e2e/auth/errors.spec.ts`.
 
 ## Revisión
 ### security-reviewer — 2026-10-20 — REQUEST_CHANGES

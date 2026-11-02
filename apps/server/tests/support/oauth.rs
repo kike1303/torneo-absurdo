@@ -208,11 +208,14 @@ pub fn session_of(response: &Response) -> String {
     token.to_owned()
 }
 
-/// The error code of a callback that failed: 303 to `/login?error=<code>` and no session.
+/// The error code of a callback that failed: 303 to `/login?error=<code>`, with the fixed prefix
+/// of the language of its flow if it has one (TA-35), and no session.
 pub fn error_of(response: &Response) -> String {
     assert_eq!(response.status, 303, "{}", response.text());
     let location = response.header("location").unwrap();
     let code = location
+        .trim_start_matches("/es")
+        .trim_start_matches("/en")
         .strip_prefix("/login?error=")
         .unwrap_or_else(|| panic!("not an error redirect: {location}"));
     assert!(
