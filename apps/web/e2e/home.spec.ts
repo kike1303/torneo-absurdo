@@ -588,7 +588,10 @@ test.describe('reconnection and capacity (RF57)', () => {
     server.block();
     await open(page);
     const notice = page.getByTestId('fight-notice-degraded');
-    await expect(notice).toHaveText(ES.fight_notice_degraded as string, { timeout: 20_000 });
+    // The notice and its link to the past fights (011 RF26), and nothing else.
+    await expect(notice).toHaveText(`${ES.fight_notice_degraded} ${ES.replay_degraded_link}`, {
+      timeout: 20_000,
+    });
     await expect(notice).toHaveCount(1);
     await expect(notice).toHaveAttribute('role', 'status');
     await expect(home(page)).toHaveAttribute('data-connection', 'degraded');
