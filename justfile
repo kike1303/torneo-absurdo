@@ -222,6 +222,11 @@ _e2e-fights-run: _web-prepare
     node apps/web/e2e/support/reset-run.mjs
     node apps/web/e2e/support/fight-script.mjs
     pnpm --filter web exec playwright test -c playwright.fights.config.ts
+    # The seeded replays (011): a new torneo_e2e, without a roster, so that no other fight appears.
+    node apps/web/e2e/support/db.mjs reset
+    node apps/web/e2e/support/db.mjs a9 --check
+    node apps/web/e2e/support/reset-run.mjs
+    pnpm --filter web exec playwright test -c playwright.replays.config.ts
 
 # HOST is fixed to 127.0.0.1 (never read from the environment): adapter-node listens on 0.0.0.0 by
 # default, and SOCKET_PATH and LISTEN_FDS, which it prefers over HOST, are cleared. On Android,

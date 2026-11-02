@@ -87,3 +87,22 @@ authTest('B4.6: no CSP violations on /login and /account', async ({ page, identi
   await waitForHydration(page);
   expect(await violations(page), '/en/account').toEqual([]);
 });
+
+// ADR-0012 B4.1 and B6.1 (011 RF6): the verification compiles the `.wasm` under the CSP, and the only
+// new source is 'wasm-unsafe-eval'. With seeded fights: playwright.replays.config.ts.
+test(
+  'B4.1: no CSP violations on /es/fights and on a fight with its check done',
+  { tag: '@replays' },
+  async ({ page }) => {
+    await collectViolations(page);
+    await page.goto('/es/fights');
+    await waitForHydration(page);
+    await expect(page.getByTestId('fight-list-row').first()).toBeVisible();
+    expect(await violations(page), '/es/fights').toEqual([]);
+    await page.goto('/es/fights/1');
+    await expect(page.getByTestId('replay-verdict')).toHaveAttribute('data-status', 'match', {
+      timeout: 30_000,
+    });
+    expect(await violations(page), '/es/fights/1').toEqual([]);
+  },
+);
