@@ -13,7 +13,7 @@ supersedes: null
 linear: TA-5
 depends_on: ["0002", "0003", "0005"]
 created: 2026-10-20
-updated: 2026-10-30
+updated: 2026-11-02
 ---
 
 # ADR-0006: Despliegue en Coolify y CI con presupuesto cero
@@ -103,7 +103,7 @@ updated: 2026-10-30
      - `api`: valida que el tag cumple `^v[0-9]+\.[0-9]+\.[0-9]+$`, fija `IMAGE_TAG` del recurso (`PATCH /api/v1/applications/{uuid}/envs`) y dispara el deploy (`GET /api/v1/deploy?uuid=…`). Solo usa `curl`; ninguna action de terceros toca el token.
      - `manual` (**valor por defecto** mientras el owner no decida): el job no llama a Coolify. El owner fija `IMAGE_TAG` en la UI de Coolify, despliega a mano y después aprueba el environment; la aprobación es la señal de "ya desplegué".
   3. `verify`: consulta `https://${PUBLIC_HOST}/api/health` hasta 5 min y falla si `version` no es el tag desplegado. Como `version` está horneada (D3), un `IMAGE_TAG` cambiado sin redeploy no la engaña.
-- **Rollback** = `workflow_dispatch` con el tag anterior; pasa por la misma aprobación.
+- **Rollback** = `workflow_dispatch` con el tag anterior; pasa por la misma aprobación, y su checklist suma revisar lo que dice D10 ("El esquema no es todo").
 - En ningún caso `latest`.
 - **Token de la API de Coolify (riesgo declarado).** En Coolify v4 los tokens tienen alcance de **equipo**, no de recurso, con permisos `read`/`write`/`deploy`/`read:sensitive`/`root`. Actualizar `IMAGE_TAG` exige `write`, y ese permiso alcanza a **todas** las apps del owner en ese equipo y en ese VPS. Un token con "el mínimo permiso para ese recurso" no existe. Si se usa `DEPLOY_MODE=api`:
   - Permisos `write` + `deploy`; **nunca** `root` ni `read:sensitive`.
@@ -163,6 +163,10 @@ updated: 2026-10-30
   - **Cliente**: reconexión automática con backoff exponencial (1, 2, 4… hasta 30 s, con jitter). Al reconectar se resincroniza: recibe `server_time`, el estado de la pelea y los eventos **ya ocurridos**, nunca futuros (ADR-0002).
   - **Server al arrancar**: retoma las peleas no liquidadas desde la BD. Las fechas de cierre de apuestas y de inicio son absolutas; si alguna venció durante el corte, se aplica al arrancar. Los eventos de una pelea `Live` siguen saliendo según su tiempo, y los que vencieron durante el corte se entregan como ya ocurridos.
   - **Migraciones**: `sqlx::migrate!` corre al arrancar, antes de abrir el puerto. Son **compatibles hacia atrás** (expand/contract): un release solo agrega; renombrar o borrar columnas va en un release posterior, cuando el código ya no las usa. Ninguna migración modifica ni borra filas de `ledger_entries` (ADR-0005).
+  - **Rollback tras una migración (TA-43)**: la imagen anterior arranca aunque la base tenga migraciones que no conoce (`set_ignore_missing`), y lo avisa con `db.migrations_ahead` (`warn`; las versiones se leen en `_sqlx_migrations`). No arranca si una migración que conoce tiene otro checksum. La protección contra una base más nueva de lo esperado no es ese aviso, sino el tag aprobado y la comparación de `version` en `verify` (D6).
+    - **Regla de las migraciones.** Compatible hacia atrás significa que la imagen anterior (la última desplegada, que puede no ser el tag anterior si se saltó uno) sigue funcionando con el esquema nuevo: una columna nueva es anulable o tiene `DEFAULT`, y un constraint o un trigger nuevo aceptan lo que escribe esa imagen. Una migración de contracción solo quita lo que esa imagen ya no usa. Volver más atrás de una contracción arranca, pero falla en las consultas que usan lo que se quitó, y el arranque no lo detecta: se corrige hacia adelante o se restaura el backup previo al release (D9).
+    - **El esquema no es todo.** Volver atrás solo es seguro si, además, la imagen anterior entiende los datos que ya escribió la nueva. Una pelea con un `RULESET_VERSION` que no conoce (spec de 010, RF6 y parada segura) o un estado nuevo en `fights` detienen las peleas, con `/api/health` y `verify` en verde, porque solo miran `SELECT 1` y `version`. Por eso, **antes de desplegar** un rollback (checklist de D6; con `DEPLOY_MODE=manual` el owner despliega antes de aprobar el environment, así que aprobar llega tarde) se revisa el diff de `apps/server/migrations` y de `RULESET_VERSION` entre los dos tags. Después de volver se mira `halted` en `GET /api/fights/current`, porque `verify` no lo ve.
+    - **Migración a medias.** `sqlx` 0.9 no escribe filas con `success = false`: una migración con transacción que falla no deja fila ni cambios. Una `-- no-transaction` que falla a medias deja el esquema cambiado, sin fila ni aviso, y la imagen anterior arrancaría igual. Hoy ninguna migración la usa, y una que la necesite lleva su propio plan de recuperación en el PR.
   - **No se despliega durante un main event** (desde que abren sus apuestas hasta `Settled`). Es un punto del checklist de aprobación de D6; cuando exista el API del scheduler, `deploy` lo verificará automáticamente.
 - La **limpieza de Docker de Coolify** queda activada: diaria y además al pasar el 80 % de disco, con **"Delete Unused Volumes" apagado** (un volumen detenido de otra app o de un recurso parado no debe borrarse). El rollback no depende de imágenes locales, porque GHCR es público (D5).
 
@@ -268,6 +272,11 @@ updated: 2026-10-30
 - **Objetivo de velocidad.** Se mantiene el de D7: un PR con Rust y caché caliente en ≤ 8 min (p50). Plan-d lo mide en su PR, con las palancas en el orden que fija ahí. Si después de aplicarlas sigue por encima, la desviación la firma architect con los números medidos y queda en una nota aparte.
 - **Si la primera corrida en frío de `e2e-server` se acerca a los 20 min,** devops-engineer sube su timeout con la misma regla que `images`, y lo agrega a esta nota.
 - **Estado:** revisada por devops-engineer el 2026-10-30 (APPROVE, ver "Revisión"). Esta nota no cambia el `status` ni las approvals del ADR, ni el texto de D7. El gate del owner no aplica a una nota, y si aplicara lo cubre su delegación del 2026-10-29 (spec de 008, "Revisión → owner").
+
+### 2026-11-02 — backend-engineer: `set_ignore_missing` para el rollback (TA-43)
+- **Qué:** D6 ofrece el rollback a la imagen anterior y D10 da por compatibles las migraciones, pero el server salía con `db.migrate_failed` ante una versión que no conocía, y Docker lo reiniciaba en bucle. Se confirmó ejecutando el binario contra una base con una migración más nueva (`apps/server/tests/migration_rollback.rs`).
+- **Qué cambia:** la viñeta "Rollback tras una migración" de D10 y el checklist del rollback de D6. devops-engineer señaló en la revisión del PR 83 que el esquema no basta: los datos que ya escribió la imagen nueva también pueden detener a la anterior.
+- **Estado:** esta nota no cambia el `status` ni las approvals del ADR. Explicita la regla de expand/contract que D10 ya tenía y suma un punto al checklist.
 
 ## Revisión
 ### devops-engineer — 2026-10-20 — REQUEST_CHANGES
