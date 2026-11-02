@@ -11,6 +11,10 @@ pub struct Coins(pub i64);
 
 /// The single issuance account, created by the migration: the source of every grant.
 pub const ISSUANCE_ACCOUNT: Uuid = Uuid::from_u128(1);
+/// What the open bets hold (012 RF1): only a `bet_stake` credits it (RF2).
+pub const ESCROW_ACCOUNT: Uuid = Uuid::from_u128(2);
+/// Where the rake and the residue go, and never come back from (012 RF1, RF10).
+pub const RAKE_SINK_ACCOUNT: Uuid = Uuid::from_u128(3);
 
 /// The ledger account of a new user, in the transaction of its first login.
 pub async fn create_user_account(tx: &mut PgConnection, user_id: Uuid) -> Result<(), sqlx::Error> {
@@ -77,6 +81,13 @@ mod tests {
     fn the_issuance_account_is_the_one_of_the_migration() {
         let migration = include_str!("../../migrations/20261028000000_auth.sql");
         assert!(migration.contains(&format!("'{ISSUANCE_ACCOUNT}', 'issuance'")));
+    }
+
+    #[test]
+    fn the_accounts_of_the_bets_are_the_ones_of_the_migration() {
+        let migration = include_str!("../../migrations/20261102000000_bets.sql");
+        assert!(migration.contains(&format!("'{ESCROW_ACCOUNT}', 'bet_escrow'")));
+        assert!(migration.contains(&format!("'{RAKE_SINK_ACCOUNT}', 'rake_sink'")));
     }
 
     /// Only this module writes ledger rows (review of #54): elsewhere there is no

@@ -53,6 +53,10 @@ pub fn error_kind(error: &sqlx::Error) -> &'static str {
             "TA005" => return "oauth_identity_immutable",
             // `fights_guard` and `fight_secrets_guard` (010 RF4).
             "TA006" => return "fight_guard",
+            // `bets_open_guard` (012 RF4).
+            "TA007" => return "bet_window_closed",
+            // `ledger_posting_rules` (012 RF2).
+            "TA008" => return "ledger_posting_rule",
             // `SET LOCAL lock_timeout` of the fight transitions (010 RF8).
             "55P03" => return "lock_timeout",
             // A row that a foreign key needs was deleted meanwhile: a login whose identity an

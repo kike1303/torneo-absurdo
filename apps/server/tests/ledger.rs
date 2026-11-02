@@ -293,8 +293,7 @@ async fn an_entry_built_inside_a_savepoint_commits() {
     let db = TestDb::create().await;
     let pool = db.migrated_pool().await;
     let a = user(&pool).await;
-    let b = user(&pool).await;
-    let (account_a, account_b) = (account_of(&pool, a).await, account_of(&pool, b).await);
+    let account_a = account_of(&pool, a).await;
     let mut tx = pool.begin().await.unwrap();
     let entry = Uuid::new_v4();
     {
@@ -318,7 +317,7 @@ async fn an_entry_built_inside_a_savepoint_commits() {
     // The other half after the savepoint, in the same top-level transaction.
     sqlx::query("INSERT INTO ledger_postings (entry_id, account_id, amount) VALUES ($1, $2, -7)")
         .bind(entry)
-        .bind(account_b)
+        .bind(ISSUANCE_ACCOUNT)
         .execute(&mut *tx)
         .await
         .unwrap();
@@ -360,8 +359,7 @@ async fn created_xact_from_the_client_is_overwritten() {
     let db = TestDb::create().await;
     let pool = db.migrated_pool().await;
     let a = user(&pool).await;
-    let b = user(&pool).await;
-    let (account_a, account_b) = (account_of(&pool, a).await, account_of(&pool, b).await);
+    let account_a = account_of(&pool, a).await;
     let mut tx = pool.begin().await.unwrap();
     let entry = Uuid::new_v4();
     sqlx::query(
@@ -381,7 +379,7 @@ async fn created_xact_from_the_client_is_overwritten() {
             .unwrap()
             .get(0);
     assert!(current);
-    for (account, amount) in [(account_a, 3_i64), (account_b, -3)] {
+    for (account, amount) in [(account_a, 3_i64), (ISSUANCE_ACCOUNT, -3)] {
         sqlx::query(
             "INSERT INTO ledger_postings (entry_id, account_id, amount) VALUES ($1, $2, $3)",
         )
