@@ -1,12 +1,17 @@
 import type { FightsCurrent, FightsPage, FightSummary } from '@torneo/protocol';
 import { describe, expect, it, vi } from 'vitest';
-import { match } from '../../src/params/fight_id.js';
+import { params } from '../../src/params.js';
 import { parseFightId } from '../../src/lib/features/replay/fight-id.js';
 
 vi.mock('$app/env/private', () => ({ INTERNAL_API_URL: 'http://127.0.0.1:8080' }));
 const { load } = await import('../../src/routes/fights/+page.server.js');
 
 // 011 RF17, RF18, RF26: the list, without the result, and what reaches a read.
+function match(text: string): boolean {
+  const result = params.fight_id['~standard'].validate(text) as { issues?: unknown };
+  return result.issues === undefined;
+}
+
 const summary = (id: number, final: FightSummary['final']): FightSummary => ({
   id,
   state: 'settled',
