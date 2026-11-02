@@ -1,7 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { formatCoins, formatDate, formatDecimal, formatInteger, formatRelative } from './format.js';
+import {
+  formatCoins,
+  formatDate,
+  formatDateWithZone,
+  formatDecimal,
+  formatInteger,
+  formatRelative,
+} from './format.js';
 
 describe('format', () => {
+  it('a date with the name of its zone, in UTC or in the local one', () => {
+    const date = new Date('2027-01-15T12:30:00Z');
+    expect(formatDateWithZone(date, 'es', 'UTC')).toContain('UTC');
+    expect(formatDateWithZone(date, 'en', 'UTC')).toMatch(/Jan 15, 2027.*12:30.*UTC/);
+    expect(() => formatDateWithZone(date, 'es')).not.toThrow();
+  });
+
   it('formats coins with the locale grouping', () => {
     expect(formatCoins(1234567, 'en')).toBe('1,234,567');
     expect(formatCoins(1234567, 'es')).toBe('1.234.567');

@@ -2,7 +2,7 @@
   // In UTC, with its zone in sight, in the SSR and the first render, and local from `onMount`: both
   // sides render the same text at first, so there is no hydration mismatch (011 RF17).
   import { onMount } from 'svelte';
-  import { formatDate } from '#lib/i18n/format.js';
+  import { formatDateWithZone } from '#lib/i18n/format.js';
   import type { Locale } from '#lib/i18n/locale.js';
 
   let { ms, locale }: { ms: string; locale: Locale } = $props();
@@ -13,14 +13,7 @@
   });
 
   const date = $derived(new Date(Number(ms)));
-  const text = $derived(
-    formatDate(date, locale, {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-      timeZoneName: 'short',
-      ...(local ? {} : { timeZone: 'UTC' }),
-    }),
-  );
+  const text = $derived(formatDateWithZone(date, locale, local ? undefined : 'UTC'));
 </script>
 
 <time datetime={date.toISOString()} data-testid="fight-date" data-local={local ? '' : undefined}>

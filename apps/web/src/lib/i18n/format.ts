@@ -39,6 +39,22 @@ const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
 ];
 
 /** "in 5 minutes", "hace 2 días": the largest unit that fits. `now` is injectable for tests. */
+/**
+ * A day and an hour with the name of its zone: in `timeZone`, or in the local one without it.
+ * `dateStyle` and `timeStyle` do not admit `timeZoneName`, so it goes by its parts.
+ */
+export function formatDateWithZone(date: Date, locale: Locale, timeZone?: string): string {
+  return formatDate(date, locale, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+    ...(timeZone === undefined ? {} : { timeZone }),
+  });
+}
+
 export function formatRelative(date: Date, locale: Locale, now: Date = new Date()): string {
   const seconds = Math.round((date.getTime() - now.getTime()) / 1000);
   const format = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
