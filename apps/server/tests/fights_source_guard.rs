@@ -579,6 +579,15 @@ fn a_voided_final_is_only_written_in_one_place() {
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
+        // The one read with a literal (012 RF23), in a file that writes nothing.
+        let sql = if relative(&path) == "fights/void_stats.rs" {
+            let read = "void_reason = 'secret_lost'";
+            assert_eq!(sql.matches(read).count(), 1, "{sql}");
+            assert!(!sql.to_uppercase().contains("UPDATE "), "{sql}");
+            sql.replacen(read, "", 1)
+        } else {
+            sql
+        };
         // As SQL writes it: with a parameter, a literal or a column on its right. A unit test of a
         // `FightRow` assigns a Rust field, which reaches no database.
         for form in ["void_reason = '", "void_reason = EXCLUDED"] {
@@ -648,12 +657,22 @@ fn the_server_settles_with_the_real_hook() {
 #[test]
 fn neither_a_route_nor_a_command_cancels_or_reads_a_seed() {
     use server::http::routes::ROUTES;
+    use server::http::routes::{Effect, RouteMethod};
+    let mut counter = 0;
     for route in ROUTES {
         let path = route.path.to_lowercase();
+        // The public counter of 012 RF23 only reads: the one exact exception.
+        if path == "/api/fights/void-stats" {
+            assert_eq!(route.method, RouteMethod::Get);
+            assert_eq!(route.effect, Effect::Read);
+            counter += 1;
+            continue;
+        }
         for word in ["cancel", "void", "seed", "secret"] {
             assert!(!path.contains(word), "{}", route.path);
         }
     }
+    assert_eq!(counter, 1);
     use server::{Command, parse};
     let args = |list: &[&str]| parse(list.iter().map(std::ffi::OsString::from));
     let admin_id = "0b3f5a6e-1c2d-4e5f-8a9b-0c1d2e3f4a5b";

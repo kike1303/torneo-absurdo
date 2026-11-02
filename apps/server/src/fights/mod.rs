@@ -22,6 +22,7 @@ pub mod sealed;
 pub mod snapshot;
 pub mod state;
 pub mod store;
+pub mod void_stats;
 
 use std::fmt;
 use std::future::Future;

@@ -192,6 +192,15 @@ pub struct FightDetail {
     pub log: Option<String>,
 }
 
+/// `GET /api/fights/void-stats` (012 RF23): how many fights were voided, `secret_lost` included, and
+/// how many of them stayed unverified. What it detects, it does not prevent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct VoidStats {
+    pub voided: u32,
+    pub secret_lost: u32,
+}
+
 /// `GET /api/fights/current` (RF35). `halted` is `null` while the server does not know.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -290,6 +299,17 @@ mod tests {
         );
         assert_eq!(serde_json::to_string(&value).unwrap(), json);
         assert_eq!(serde_json::from_str::<FightDetail>(&json).unwrap(), value);
+    }
+
+    #[test]
+    fn the_void_stats_have_the_exact_shape() {
+        let value = VoidStats {
+            voided: 3,
+            secret_lost: 1,
+        };
+        let json = r#"{"voided":3,"secret_lost":1}"#;
+        assert_eq!(serde_json::to_string(&value).unwrap(), json);
+        assert_eq!(serde_json::from_str::<VoidStats>(json).unwrap(), value);
     }
 
     #[test]
