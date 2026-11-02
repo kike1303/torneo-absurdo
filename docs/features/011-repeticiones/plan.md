@@ -349,6 +349,7 @@ Se proponen aquí para que architect las apruebe con el plan.
 - **Paso 5, `summary_columns!`.** No repite la lista de `columns!`: las dos salen de una macro `columns_with!`, que solo cambia las posiciones de los specs y de la revelación. Así el orden no puede divergir, y `nothing_writes_a_voided_final`, que cuenta dos `void_reason` en `store.rs`, sigue igual. La prueba de fuente revisa `summary_columns!` y `columns_with!`.
 - **Paso 5, `settled_page`.** Devuelve `PageRow { id, row }`, con el `id` aparte, para que `next_before` salga de las filas leídas aunque la fila 20 no decodifique. `page_of` arma la página sobre `summaries_of`.
 - **Paso 5, prueba nueva.** `tests/fights_list_logs.rs` comprueba el evento `fights.list_row_invalid` con la capa real de logs. Va en su propio binario, por la regla de `tests/test_layout.rs`.
+- **Paso 6, forma de los vectores.** Cada línea suma dos campos a los del plan: `expected_id`, el `id` de la URL que recibe `verifyFight`, porque un `detail` sin forma no lo tiene, y `exception`, la marca de RF14, que es `true` solo con `cannot_check`. Un `fight.id` distinto del de la URL no va en el archivo: el verificador nativo no conoce la URL, así que sería una tercera diferencia. Lo prueba `replay-verify.test.ts`.
 
 ## Revisión
 ### frontend-engineer — 2026-11-02 — autor
