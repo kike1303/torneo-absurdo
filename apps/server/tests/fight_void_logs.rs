@@ -213,6 +213,20 @@ async fn the_binary_voids_a_lost_secret() {
         );
         assert_event(&done, "fight.void_applied", None, level);
         assert_clean(&done, &vector, admin, level);
+
+        // A deadline in the `COMMIT` loses those lines: a second run gives the warning again.
+        let done = run(
+            &["fight", "void", &id, "--by", &by, "--backup-checked"],
+            &envs,
+        )
+        .await;
+        assert_eq!(done.status.code(), Some(1), "{level}");
+        assert_eq!(
+            output(&done),
+            ["void.bad_state", server::admin::REOPEN_ACCEPTANCE],
+            "{level}"
+        );
+        assert_event(&done, "fight.void_refused", Some("void.bad_state"), level);
     }
 }
 

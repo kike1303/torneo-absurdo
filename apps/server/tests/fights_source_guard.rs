@@ -569,18 +569,34 @@ fn a_cancel_only_comes_from_next_action() {
     assert_eq!(code.matches("sealed::cancel_fight").count(), 1);
 }
 
-/// What each assignment to `void_reason` in `text` gives it, without spaces and in lowercase, so
-/// `void_reason=$2` and `VOID_REASON  =  $2` are the same to this. A comparison (`==`) is not one, and
-/// neither is a unit test that assigns a Rust field of a `FightRow`, which reaches no database.
+/// What each write of `void_reason` in `text` gives it, without spaces, quotes or line continuations and
+/// in lowercase, so `void_reason=$2`, `"VOID_REASON"  =  $2` and `SET (state, void_reason) = …` are the
+/// same to this. A comparison (`==`) is not one, and neither is a unit test that assigns a Rust field
+/// of a `FightRow`, which reaches no database.
 fn void_reason_writes(text: &str) -> Vec<String> {
-    let code = compact(text).to_lowercase();
-    code.match_indices("void_reason=")
-        .map(|(at, found)| &code[at + found.len()..])
+    let code = compact(text).replace(['"', '\\'], "").to_lowercase();
+    let mut found: Vec<String> = code
+        .match_indices("void_reason=")
+        .map(|(at, matched)| &code[at + matched.len()..])
         .filter(|value| {
             !value.starts_with('=') && !value.starts_with("some(") && !value.starts_with("none")
         })
         .map(|value| value.chars().take(14).collect())
-        .collect()
+        .collect();
+    // A list of columns: of an `UPDATE`, with its `=`, or of an `INSERT` of the table.
+    for (marker, needs_equals) in [("set(", true), ("intofights(", false)] {
+        for (at, matched) in code.match_indices(marker) {
+            let rest = &code[at + matched.len()..];
+            let Some(end) = rest.find(')') else {
+                continue;
+            };
+            let assigned = !needs_equals || rest[end + 1..].starts_with('=');
+            if assigned && rest[..end].contains("void_reason") {
+                found.push("a list of columns".to_owned());
+            }
+        }
+    }
+    found
 }
 
 #[test]
@@ -593,6 +609,11 @@ fn the_search_for_a_write_of_void_reason_sees_every_form() {
         "SET void_reason='engine_error'",
         "DO UPDATE SET void_reason = EXCLUDED.void_reason",
         "SET void_reason=COALESCE($2, 'x')",
+        "SET \"void_reason\" = $2",
+        "UPDATE fights SET (state, void_reason) = ('settled', $2)",
+        "update fights set(void_reason)=row($2)",
+        "UPDATE fights SET (state, void_reason) = (SELECT 'settled', $2)",
+        "INSERT INTO fights (id, void_reason) VALUES ($1, $2)",
     ] {
         assert_eq!(void_reason_writes(text).len(), 1, "{text}");
     }
@@ -603,6 +624,9 @@ fn the_search_for_a_write_of_void_reason_sees_every_form() {
         "void_reason: row.try_get(25)?,",
         "// void_reason = $2",
         "SELECT void_reason FROM fights WHERE void_reason IS NOT NULL",
+        "SELECT (void_reason) FROM fights",
+        "UPDATE fights SET (state, settled_at) = ($1, $2) RETURNING void_reason",
+        "INSERT INTO fights (id, state) VALUES ($1, $2) RETURNING void_reason",
     ] {
         assert!(void_reason_writes(text).is_empty(), "{text}");
     }

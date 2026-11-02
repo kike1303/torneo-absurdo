@@ -309,6 +309,15 @@ async fn a_lost_secret_waits_for_the_deadline_and_the_backup() {
     assert_eq!(payload["backup_checked"], true);
     assert_eq!(payload["bets_refunded"], 3);
     assert_eq!(payload["coins_refunded"], 21);
+
+    // A second run writes nothing, and says it again: a deadline in the `COMMIT` loses the first line.
+    let before = written(&w.pool).await;
+    assert_eq!(
+        w.void_with(&void_with_backup(gone), real(), &BetsHook)
+            .await,
+        Err(VoidFailure::RefusedAfterSecretLost("void.bad_state"))
+    );
+    assert_eq!(written(&w.pool).await, before);
 }
 
 /// Only after the refusals: the version wins, and a secret that differs is never lost, past the

@@ -34,7 +34,7 @@ use uuid::Uuid;
 use crate::bets::settle::refund_totals;
 use crate::config::{self, ConfigError};
 use crate::fights::hook::SettlementHook;
-use crate::fights::sealed::{self, VoidCompute, VoidError, VoidRequest};
+use crate::fights::sealed::{self, VoidCompute, VoidError, VoidRefusal, VoidRequest};
 use crate::fights::store;
 use crate::sessions::{self, RevokeFilter};
 use crate::version_rule::is_valid_app_version;
@@ -439,6 +439,9 @@ impl VoidCommand {
 pub enum VoidFailure {
     #[error("the fight was not voided")]
     Refused(&'static str),
+    /// A refusal on a fight already voided with its secret lost: it repeats the warning of RF24.
+    #[error("the fight was already voided")]
+    RefusedAfterSecretLost(&'static str),
     #[error("the command failed")]
     Failed(&'static str),
 }
@@ -452,6 +455,9 @@ impl From<sqlx::Error> for VoidFailure {
 impl From<VoidError> for VoidFailure {
     fn from(error: VoidError) -> Self {
         match error {
+            VoidError::Refused(refusal @ VoidRefusal::AlreadySecretLost) => {
+                Self::RefusedAfterSecretLost(refusal.code())
+            }
             VoidError::Refused(refusal) => Self::Refused(refusal.code()),
             VoidError::Settlement(error) => Self::Failed(error.kind),
             VoidError::Db(error) => error.into(),
@@ -477,7 +483,8 @@ pub async fn run_fight_void(
 
 /// [`run_fight_void`] with another deadline, for the tests. Past it, the transaction goes with the
 /// connection and the failure is `timeout`. If the deadline falls during the `COMMIT`, the void may have
-/// applied: running the command again says so, with `void.bad_state`, and refunds nothing twice.
+/// applied: running the command again refunds nothing twice, and `void_reason` and `admin_audit` say
+/// what happened (`apps/server/README.md`). `void.bad_state` alone only says that it is settled.
 ///
 /// # Errors
 /// [`VoidFailure`].
@@ -503,6 +510,11 @@ pub async fn run_fight_void_within(
         }
         Err(VoidFailure::Refused(code)) => {
             let _ = writeln!(stdout, "{code}");
+            tracing::error!(event = "fight.void_refused", error_kind = *code);
+        }
+        Err(VoidFailure::RefusedAfterSecretLost(code)) => {
+            let _ = writeln!(stdout, "{code}");
+            let _ = writeln!(stdout, "{REOPEN_ACCEPTANCE}");
             tracing::error!(event = "fight.void_refused", error_kind = *code);
         }
         Err(VoidFailure::Failed(kind)) => {
@@ -842,9 +854,18 @@ mod source_rules {
 
     /// The database barriers of 009 RF1 and RF3 (`TA005` and `TA004`), with the version of the
     /// migration that creates each one.
-    const GUARD_TRIGGERS: [(&str, i64); 10] = [
+    const GUARD_TRIGGERS: [(&str, i64); 18] = [
         ("users_privileged_guard", 20261029100000),
         ("oauth_accounts_identity_guard", 20261030000000),
+        // The ledger only grows, every entry balances, and a closed one takes nothing more (008).
+        ("ledger_entries_immutable", 20261028000000),
+        ("ledger_entries_no_truncate", 20261028000000),
+        ("ledger_postings_immutable", 20261028000000),
+        ("ledger_postings_no_truncate", 20261028000000),
+        ("ledger_entries_balanced", 20261028000000),
+        ("ledger_postings_balanced", 20261028000000),
+        ("ledger_postings_open_entry", 20261029000000),
+        ("ledger_accounts_immutable", 20261029000000),
         // What only the bets may move, and that they only grow (012 RF2, RF4, RF6).
         ("ledger_postings_rules", 20261102000000),
         ("bets_open_guard", 20261102000000),
@@ -858,7 +879,41 @@ mod source_rules {
 
     /// The bodies of those triggers, when the function has another name: a `CREATE OR REPLACE` of one
     /// with a `RETURN NEW` switches its trigger off without naming it.
-    const GUARD_FUNCTIONS: [&str; 2] = ["ledger_posting_rules", "ledger_immutable"];
+    const GUARD_FUNCTIONS: [&str; 4] = [
+        "ledger_posting_rules",
+        "ledger_immutable",
+        "ledger_entry_balanced",
+        "ledger_posting_open_entry",
+    ];
+
+    /// What ties a movement of coins to its fact (012 RF1, RF3, RF6). A `DROP CONSTRAINT` or a
+    /// `DROP INDEX` of one takes the barrier away without touching a trigger. Replacing one, as the
+    /// migration of 012 does with the two that 008 created, needs its line in
+    /// `GUARD_CHANGES_ALLOWED`.
+    const GUARD_CONSTRAINTS: [&str; 15] = [
+        "ledger_entries_kind_ck",
+        "ledger_entries_user_ck",
+        "ledger_entries_bet_refs_ck",
+        "ledger_entries_bet_kind_ck",
+        "ledger_entries_rake_fight_ck",
+        "ledger_entries_bet_owner_fk",
+        "ledger_postings_amount_ck",
+        "bets_owner_uq",
+        "bets_client_key_uq",
+        "bets_stake_ck",
+        "bet_settlements_owner_fk",
+        "bet_settlements_ranked_ck",
+        "bet_settlements_refunded_ck",
+        "bet_settlements_lost_ck",
+        "pool_settlements_refund_ck",
+    ];
+    const GUARD_INDEXES: [&str; 5] = [
+        "ledger_entries_grant_day_uq",
+        "ledger_entries_bailout_day_uq",
+        "ledger_entries_bet_stake_uq",
+        "ledger_entries_bet_settled_uq",
+        "ledger_entries_rake_uq",
+    ];
 
     /// What takes a guard away when its statement names it.
     const WEAKENS_A_NAMED_GUARD: [&str; 8] = [
@@ -951,6 +1006,18 @@ mod source_rules {
                     }
                 }
             }
+            for constraint in GUARD_CONSTRAINTS {
+                if text.contains(&format!("drop constraint {constraint} "))
+                    || text.contains(&format!("drop constraint if exists {constraint} "))
+                {
+                    found.push(("drop constraint", constraint));
+                }
+            }
+            for index in GUARD_INDEXES {
+                if text.contains("drop index") && text.contains(index) {
+                    found.push(("drop index", index));
+                }
+            }
             for form in WEAKENS_EVERY_GUARD {
                 if text.contains(form) {
                     found.push((form.trim_end(), "every trigger"));
@@ -964,13 +1031,16 @@ mod source_rules {
     /// Only 009: the guard also had to refuse `admin_account_cutoff`, which took a new body and,
     /// as `UPDATE OF` can not be altered, a drop and a create in the same migration, which runs in
     /// one transaction. A later migration needs its own line here, and a review.
-    const GUARD_CHANGES_ALLOWED: [(i64, &str, &str); 2] = [
+    const GUARD_CHANGES_ALLOWED: [(i64, &str, &str); 4] = [
         (
             20261030000000,
             "or replace function",
             "users_privileged_guard",
         ),
         (20261030000000, "drop trigger", "users_privileged_guard"),
+        // 012 RF1 widens the two, in the same statement that adds them back.
+        (20261102000000, "drop constraint", "ledger_entries_kind_ck"),
+        (20261102000000, "drop constraint", "ledger_entries_user_ck"),
     ];
 
     /// `(version, file name, text)` of every migration.
@@ -1307,7 +1377,8 @@ mod source_rules {
         };
         for (guard, created) in GUARD_TRIGGERS {
             assert!(
-                normalized(created).contains(&format!("create trigger {guard}")),
+                normalized(created).contains(&format!("create trigger {guard}"))
+                    || normalized(created).contains(&format!("create constraint trigger {guard}")),
                 "{guard} is not created in {created}"
             );
         }
@@ -1326,6 +1397,41 @@ mod source_rules {
     fn the_rule_of_the_guards_sees_every_form() {
         let (users, oauth) = ("users_privileged_guard", "oauth_accounts_identity_guard");
         for (sql, form, target) in [
+            (
+                "DROP TRIGGER ledger_postings_immutable ON ledger_postings;",
+                "drop trigger",
+                "ledger_postings_immutable",
+            ),
+            (
+                "ALTER TABLE ledger_entries DISABLE TRIGGER ledger_entries_immutable",
+                "disable trigger",
+                "ledger_entries_immutable",
+            ),
+            (
+                "ALTER TABLE ledger_entries DROP CONSTRAINT ledger_entries_bet_owner_fk",
+                "drop constraint",
+                "ledger_entries_bet_owner_fk",
+            ),
+            (
+                "alter table ledger_entries drop constraint if exists \"ledger_entries_bet_kind_ck\"",
+                "drop constraint",
+                "ledger_entries_bet_kind_ck",
+            ),
+            (
+                "ALTER TABLE ledger_entries ADD COLUMN x int, DROP CONSTRAINT ledger_entries_user_ck;",
+                "drop constraint",
+                "ledger_entries_user_ck",
+            ),
+            (
+                "ALTER TABLE bet_settlements DROP CONSTRAINT bet_settlements_owner_fk CASCADE",
+                "drop constraint",
+                "bet_settlements_owner_fk",
+            ),
+            (
+                "DROP INDEX public.ledger_entries_bet_settled_uq",
+                "drop index",
+                "ledger_entries_bet_settled_uq",
+            ),
             (
                 "DROP TRIGGER ledger_postings_rules ON ledger_postings;",
                 "drop trigger",

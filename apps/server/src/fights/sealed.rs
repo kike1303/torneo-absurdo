@@ -499,6 +499,9 @@ pub struct VoidRequest {
 pub enum VoidRefusal {
     NotFound,
     BadState,
+    /// [`Self::BadState`] on a fight already voided with its secret lost: the output repeats the
+    /// warning of RF24, which a `COMMIT` lost to the deadline never printed.
+    AlreadySecretLost,
     VersionMissing,
     SecretMismatch,
     EmissionPossible,
@@ -514,7 +517,7 @@ impl VoidRefusal {
     pub const fn code(self) -> &'static str {
         match self {
             Self::NotFound => "void.not_found",
-            Self::BadState => "void.bad_state",
+            Self::BadState | Self::AlreadySecretLost => "void.bad_state",
             Self::VersionMissing => "void.version_missing",
             Self::SecretMismatch => "void.secret_mismatch",
             Self::EmissionPossible => "void.emission_possible",
@@ -597,7 +600,13 @@ pub async fn void_fight(
         return Err(VoidRefusal::NotFound.into());
     };
     let Some(window) = window else {
-        return Err(VoidRefusal::BadState.into());
+        let lost = row.void_reason.as_deref() == Some(VoidReason::SecretLost.as_str());
+        return Err(if lost {
+            VoidRefusal::AlreadySecretLost
+        } else {
+            VoidRefusal::BadState
+        }
+        .into());
     };
     if !snapshot::version_available(&row) {
         return Err(VoidRefusal::VersionMissing.into());
