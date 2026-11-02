@@ -43,8 +43,198 @@ const RUN_STEP = '      - run: echo rust\n';
 const DEPLOY_ENV = '    environment: production\n';
 const DEPLOY_PERMS = '    environment: production\n    permissions: {}\n';
 
+const WASM_STEP =
+  "      - name: The committed wasm\n        if: github.event_name == 'push'\n        run: just _check-wasm-artifact\n";
+const WASM_JOB = '  wasm-artifact:\n    runs-on: ubuntu-24.04\n';
+const WASM_PERMS = '    timeout-minutes: 20\n    permissions:\n      contents: read\n';
+const WASM_CHECKOUT =
+  "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        if: github.event_name == 'push'\n        with:\n          persist-credentials: false\n";
+const BUILD_NEEDS = '  build:\n    runs-on: ubuntu-24.04\n    needs: wasm-artifact\n';
+const RUST_FILTER = '              - apps/web/src/lib/features/replay/engine-wasm/**\n';
+const WEB_FILTER = "web: ['apps/web/**', 'apps/server/tests/golden/fight-verify-vectors.json']";
+
 /** @type {[string, Record<string, [string, string][]>, RegExp][]} */
 const CASES = [
+  // 011 RF2: the wasm of a tag is checked in a job that cannot publish, and a rollback passes.
+  [
+    'wasm-artifact missing',
+    {
+      [REL]: [
+        [WASM_JOB, '  other-artifact:\n    runs-on: ubuntu-24.04\n'],
+        [BUILD_NEEDS, '  build:\n    runs-on: ubuntu-24.04\n'],
+      ],
+    },
+    /permissions-job: job wasm-artifact is missing/,
+  ],
+  [
+    'wasm-artifact with more permissions',
+    { [REL]: [[WASM_PERMS, `${WASM_PERMS}      packages: write\n`]] },
+    /permissions-job: jobs\.wasm-artifact must be exactly \{"contents":"read"\}/,
+  ],
+  [
+    'an if on wasm-artifact, which would leave a rollback skipped',
+    { [REL]: [[WASM_JOB, `${WASM_JOB}    if: github.event_name == 'push'\n`]] },
+    /wasm-artifact: jobs\.wasm-artifact must not have an if:/,
+  ],
+  [
+    'an if on build',
+    { [REL]: [[BUILD_NEEDS, `${BUILD_NEEDS}    if: always()\n`]] },
+    /wasm-artifact: jobs\.build must not have an if:/,
+  ],
+  [
+    'build without needs',
+    { [REL]: [[BUILD_NEEDS, '  build:\n    runs-on: ubuntu-24.04\n']] },
+    /wasm-artifact: jobs\.build must need wasm-artifact/,
+  ],
+  [
+    'build that needs another job',
+    { [REL]: [[BUILD_NEEDS, '  build:\n    runs-on: ubuntu-24.04\n    needs: deploy\n']] },
+    /wasm-artifact: jobs\.build must need wasm-artifact/,
+  ],
+  [
+    'without the check',
+    { [REL]: [[WASM_STEP, '']] },
+    /wasm-artifact: exactly one step of jobs\.wasm-artifact must run just _check-wasm-artifact, found 0/,
+  ],
+  [
+    'the check with another command',
+    {
+      [REL]: [
+        ['run: just _check-wasm-artifact\n', 'run: just _check-wasm-artifact || echo stale\n'],
+      ],
+    },
+    /wasm-artifact: .*\(The committed wasm\) must run exactly just _check-wasm-artifact/,
+  ],
+  [
+    'the check under another condition',
+    {
+      [REL]: [
+        [
+          "      - name: The committed wasm\n        if: github.event_name == 'push'\n",
+          "      - name: The committed wasm\n        if: github.event_name == 'workflow_dispatch'\n",
+        ],
+      ],
+    },
+    /wasm-artifact: .*\(The committed wasm\) must have if: github\.event_name == 'push'/,
+  ],
+  [
+    'the check without a condition',
+    {
+      [REL]: [
+        [
+          "      - name: The committed wasm\n        if: github.event_name == 'push'\n",
+          '      - name: The committed wasm\n',
+        ],
+      ],
+    },
+    /wasm-artifact: .*\(The committed wasm\) must have if: github\.event_name == 'push'/,
+  ],
+  [
+    'another step without the condition, which would run in a rollback',
+    {
+      [REL]: [
+        [
+          "      - name: The toolchain\n        if: github.event_name == 'push'\n",
+          '      - name: The toolchain\n',
+        ],
+      ],
+    },
+    /wasm-artifact: .*\(The toolchain\) must have if: github\.event_name == 'push'/,
+  ],
+  [
+    'the check with continue-on-error',
+    {
+      [REL]: [[WASM_STEP, `${WASM_STEP}        continue-on-error: true\n`]],
+    },
+    /wasm-artifact: .*must not declare continue-on-error/,
+  ],
+  [
+    'a rust-cache in the job',
+    {
+      [REL]: [
+        [
+          WASM_STEP,
+          "      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0\n        if: github.event_name == 'push'\n" +
+            WASM_STEP,
+        ],
+      ],
+    },
+    /wasm-artifact: .*must not use Swatinem\/rust-cache@/,
+  ],
+  [
+    'another cache in the job',
+    {
+      [REL]: [
+        [
+          WASM_STEP,
+          "      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830\n        if: github.event_name == 'push'\n" +
+            WASM_STEP,
+        ],
+      ],
+    },
+    /wasm-artifact: .*must not use actions\/cache@/,
+  ],
+  [
+    'a login in the job',
+    {
+      [REL]: [
+        [
+          WASM_STEP,
+          "      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6\n        if: github.event_name == 'push'\n" +
+            WASM_STEP,
+        ],
+      ],
+    },
+    /wasm-artifact: .*must not use docker\/login-action@/,
+  ],
+  [
+    'a login by hand in the job',
+    {
+      [REL]: [
+        [
+          WASM_STEP,
+          "      - name: Login\n        if: github.event_name == 'push'\n        run: docker login ghcr.io\n" +
+            WASM_STEP,
+        ],
+      ],
+    },
+    /wasm-artifact: .*\(Login\) must not log in/,
+  ],
+  [
+    'the job token in the job',
+    {
+      [REL]: [
+        [
+          WASM_STEP,
+          "      - name: Token\n        if: github.event_name == 'push'\n        env:\n          TOKEN: ${{ github.token }}\n        run: echo no\n" +
+            WASM_STEP,
+        ],
+      ],
+    },
+    /wasm-artifact: .*\(Token\) must not read the token/,
+  ],
+  [
+    'a checkout of another ref',
+    {
+      [REL]: [[WASM_CHECKOUT, `${WASM_CHECKOUT}          ref: main\n`]],
+    },
+    /wasm-artifact: .*must check out the commit of the run, without ref:/,
+  ],
+  [
+    'the filter of rust loses the wasm',
+    { [CI]: [[RUST_FILTER, '']] },
+    /wasm-artifact: the filter rust of jobs\.changes must have apps\/web\/src\/lib\/features\/replay\/engine-wasm\/\*\*/,
+  ],
+  [
+    'the filter of rust loses the justfile',
+    { [CI]: [['              - *common\n', '']] },
+    /wasm-artifact: the filter rust of jobs\.changes must have justfile/,
+  ],
+  [
+    'the filter of web loses the vectors',
+    { [CI]: [[WEB_FILTER, "web: ['apps/web/**']"]] },
+    /wasm-artifact: the filter web of jobs\.changes must have apps\/server\/tests\/golden\/fight-verify-vectors\.json/,
+  ],
   // Triggers
   [
     'pull_request_target',

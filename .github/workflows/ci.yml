@@ -70,6 +70,9 @@ jobs:
               # Run by _check-engine and _check-wasm inside check-rust (003).
               - scripts/check-engine.mjs
               - scripts/wasi-runner.mjs
+              # Compared byte by byte with what _check-wasm-artifact generates (011 RF2). A PR that
+              # only changes the binary has to run that check; check-workflows requires this line.
+              - apps/web/src/lib/features/replay/engine-wasm/**
               # Embedded by apps/server/src/config.rs with include_str! (008 RF-B18).
               - scripts/__fixtures__/loopback-origins.json
               # Run on the musl binary (008 RF-D9).
@@ -83,6 +86,8 @@ jobs:
               - content/sprites/**
               - content/characters/**
               - crates/content/tests/golden/**
+              # The verifier of the browser reads them (011 RF14).
+              - apps/server/tests/golden/fight-verify-vectors.json
               - docs/guides/**
               - crates/protocol/**
               - crates/engine/**
@@ -166,7 +171,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # 011 D6: a run of main took 14 min 10 s, before installing wasm-bindgen-cli and building the wasm.
+    timeout-minutes: 25
     permissions:
       contents: read
     steps:
