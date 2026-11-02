@@ -214,8 +214,9 @@ pub fn error_of(response: &Response) -> String {
     assert_eq!(response.status, 303, "{}", response.text());
     let location = response.header("location").unwrap();
     let code = location
-        .trim_start_matches("/es")
-        .trim_start_matches("/en")
+        .strip_prefix("/es")
+        .or_else(|| location.strip_prefix("/en"))
+        .unwrap_or(location)
         .strip_prefix("/login?error=")
         .unwrap_or_else(|| panic!("not an error redirect: {location}"));
     assert!(

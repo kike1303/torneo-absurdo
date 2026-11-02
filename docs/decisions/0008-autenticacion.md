@@ -23,6 +23,8 @@ approvals:
     date: 2026-10-28
   - by: security-reviewer
     date: 2026-10-30
+  - by: security-reviewer
+    date: 2026-11-02
 supersedes: null
 linear: TA-5
 depends_on: ["0002", "0003", "0005", "0006", "0007"]
@@ -332,7 +334,7 @@ Aprobada por el owner el 2026-10-28 (transmitida por la sesión coordinadora). R
 - **Lista cerrada de códigos.** `error` solo puede valer `auth.invalid_state`, `auth.banned`, `auth.provider_error`, `auth.try_again`, `auth.already_linked` o `auth.provider_already_linked`. Es un enum de `crates/protocol`, y el server nunca copia al `Location` nada que venga de la petición ni del proveedor.
   - *Ver la "Enmienda 2026-10-30: reautenticación para vincular, desvincular y admin" (security-reviewer firmó el 2026-10-30, ver "Revisión"): la lista suma `auth.reauth_required` y `auth.reauth_mismatch`, y son ocho códigos.*
 - **En la web.** `/login` resuelve `error` a una llave i18n solo si está en la lista. Un valor desconocido se muestra con un texto genérico, y **nunca se refleja** en la página, en un atributo ni en un log.
-- **T4 adaptado.** Un callback sin `state`, con `state` reusado, expirado o de otra cookie responde 303 a `/login?error=auth.invalid_state`, sin `Set-Cookie` de sesión y con la cookie del flujo expirada. Un flujo `link` de otra sesión no vincula. T4 suma un caso nuevo: con un `error` ajeno a la lista en la query de `/login`, la página no contiene ese valor.
+- **T4 adaptado.** *(Con un flujo cuyo `next` tiene idioma, con su prefijo: ver la Enmienda 2026-11-02.)* Un callback sin `state`, con `state` reusado, expirado o de otra cookie responde 303 a `/login?error=auth.invalid_state`, sin `Set-Cookie` de sesión y con la cookie del flujo expirada. Un flujo `link` de otra sesión no vincula. T4 suma un caso nuevo: con un `error` ajeno a la lista en la query de `/login`, la página no contiene ese valor.
 
 ## Enmienda 2026-10-29: caracteres invisibles y comparación de reservados
 **Firmas:** security-reviewer firmó el 2026-10-29 (https://github.com/kike1303/torneo-absurdo/pull/54#issuecomment-6502944943). architect firmó el 2026-10-29 (https://github.com/kike1303/torneo-absurdo/pull/54#issuecomment-6504044430). security-reviewer revalidó el texto con el invariante de dos formas el 2026-10-29 (https://github.com/kike1303/torneo-absurdo/pull/54#issuecomment-6504090300).
@@ -372,13 +374,14 @@ Viene del hallazgo de security-reviewer en la revisión de 008 (TA-29). Con la l
 - **Riesgo residual (el owner lo aceptó el 2026-10-30, ver "Decisiones" del intent de 009; no lo crea esta enmienda).** Un atacante que vinculó X sigue entrando con X, con acceso de usuario y nunca de admin, hasta que la víctima lo vea en `/account` y lo quite. Con esta enmienda, vincular X exige una sesión de los 10 min posteriores a un login real o a una reautenticación. Con esa sola sesión hace una de dos cosas: quitar una identidad de la víctima (nunca la última) o vincular X, porque un `unlink` exitoso consume la confirmación. Si además consigue otra sesión reciente de la víctima (un segundo robo), puede quitar el proveedor de la víctima: es el mismo riesgo de convivencia, y lo cierra lo mismo. Aparte, el proveedor más antiguo es la raíz de la cuenta: quien pierde el control de él no lo puede quitar, y quien lo controla puede quitar los demás. Antes de esta enmienda era peor, y no lo resuelve ninguna regla. Esta feature tampoco cierra el navegador desatendido con el proveedor V abierto: quien lo use consigue, sin segundo robo, la toma de cuenta completa de TA-29 (reautenticarse con V, vincular X, reautenticarse con V y quitar V), y la víctima queda fuera para siempre. "Nunca de admin" vale con solo X: las excepciones están en el Área 12 de la spec de 009. Lo detalla la spec de 009 ("Áreas de preocupación", 2 a 4, 12 y 13).
 
 ## Enmienda 2026-11-02: idioma del error del callback (TA-35)
-**Firmas:** escrita por backend-engineer en TA-35. Firma de security-reviewer: ver el PR de TA-35. El gate del owner lo cubre su delegación del 2026-10-29 mientras no haya nada desplegado, y el owner lo pidió en el alcance de TA-35.
+**Firmas:** escrita por backend-engineer en TA-35. security-reviewer firmó el 2026-11-02 (https://github.com/kike1303/torneo-absurdo/pull/85#issuecomment-6583374827, y "Revisión"). El gate del owner lo cubre su delegación del 2026-10-29 mientras no haya nada desplegado, y el owner lo pidió en el alcance de TA-35.
 
 Cambia una regla de la "Enmienda 2026-10-28: errores del callback OAuth": el `Location` ya no es siempre `/login?error=<code>`.
 
 - **Por qué.** En `/es/`, sin cookie `locale` y con el navegador en inglés, un error de callback terminaba en `/en/login` y seguía en inglés. Ni el perfil, ni la cookie, ni `Accept-Language` saben de dónde venía la persona, y el `Referer` viene del proveedor. Escribir la cookie rompería "solo por elección explícita", y una cookie nueva habría que declararla en el aviso de privacidad.
 - **Regla.** Con un flujo en `oauth_flows`, un error **después de consumirlo** responde 303 a `/es/login?error=<code>` o `/en/login?error=<code>`, según el primer segmento de su `next`, comparado exacto. Si ese segmento no es `es` ni `en`, va sin prefijo.
 - **Sin flujo, como hoy.** Sin cookie del flujo, con un flujo que no existe o si falla la base al buscarlo, y en la capa de cuota: `/login?error=<code>`, y la web elige.
+- **Una distinción nueva, sin explotar.** Con `state` malo, un flujo existente da `/es/login` y uno inexistente da `/login`, y antes daban lo mismo. Solo lo ve quien ya presenta el valor de la cookie del flujo (128 bits, `HttpOnly`), y probarlo quema la fila. No se puede leer desde otro origen.
 - **Lo que no cambia.** `next` nunca se copia: el `Location` solo lleva uno de dos prefijos fijos, así que no hay redirección abierta, y quien controle `next` solo elige entre `es` y `en`. No se crea ni rota ninguna sesión, y la cookie del flujo se expira, con `no-store` y la lista cerrada de códigos. El prefijo se usa también si el `state` no coincide o el flujo venció: la fila es del servidor y está atada a la cookie del flujo de ese navegador.
 - → UT de `next::locale_of`, IT en `tests/auth_flow.rs` (en rojo primero) y e2e en `e2e/auth/errors.spec.ts`.
 
@@ -789,3 +792,9 @@ Cambia una regla de la "Enmienda 2026-10-28: errores del callback OAuth": el `Lo
 
 - Verifiqué el texto revisado de la enmienda. "Desvincular (D1)" ahora dice que un `unlink` exitoso consume la confirmación de su sesión, y el test 34 lo cubre. El "Riesgo residual" describe bien la ventana: se hace una de dos cosas, nunca las dos. También describe el doble robo y la raíz de la cuenta. "Admin (D9)" suma la salida por stdout de `grant`. El orden por `id`, el corte del `grant`, el flujo `reauth` atado al usuario y la comprobación dentro de la transacción no cambiaron desde mi primera revisión, y siguen correctos. Los tests 29 a 34 cubren todas las variantes del criterio 1 del intent, más admin y la carrera, sin relajar ninguno.
 - Firmo la enmienda. Entra en vigor con el PR de 009, como dice su "Estado". El riesgo residual sigue siendo del owner.
+
+### security-reviewer — 2026-11-02 — APPROVE (Enmienda 2026-11-02, TA-35)
+Firmó la enmienda sobre `799f255`, sin hallazgos Important: https://github.com/kike1303/torneo-absurdo/pull/85#issuecomment-6583374827. Transcrito por backend-engineer.
+
+### security-reviewer — 2026-11-02 — APPROVE (nota de la lista cerrada, TA-37)
+Aprobó el código `auth.sessions_not_closed` sobre `0bc5344`: https://github.com/kike1303/torneo-absurdo/pull/84#issuecomment-6582445183. Transcrito por backend-engineer.

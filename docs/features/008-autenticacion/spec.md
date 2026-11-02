@@ -15,6 +15,8 @@ approvals:
     date: 2026-10-28
   - by: owner
     date: 2026-10-28
+  - by: security-reviewer
+    date: 2026-11-02
 linear: TA-26
 depends_on: ["001"]
 created: 2026-10-28
@@ -94,7 +96,7 @@ Cada RF dice cómo se verifica (→). "T<n>" es el test mínimo número n de ADR
   - `POST /api/auth/{provider}/start`: un formulario con `next` opcional y, solo para `dev`, `dev_identity`.
   - Crea la fila en `oauth_flows`, pone la cookie del flujo (RF-B9) y responde 303 a la URL de autorización.
   - `GET /api/auth/{provider}/callback`: consume el flujo con `DELETE … RETURNING`, compara `state` en tiempo constante, canjea el `code` con PKCE `S256`, lee `userinfo`, descarta los tokens del proveedor y responde 303 a `next`. La respuesta lleva `Cache-Control: no-store` y la cookie del flujo siempre se expira.
-  - **Errores del callback** (Enmienda 2026-10-28 de ADR-0008): 303 a `/login?error=<code>`. No se crea ni rota una sesión, la cookie del flujo se expira, la respuesta lleva `Cache-Control: no-store` y `next` nunca se usa. `<code>` sale de un enum cerrado de `crates/protocol` (`CallbackErrorCode`), y el server no copia al `Location` nada de la petición ni del proveedor. Los códigos son `auth.invalid_state`, `auth.banned`, `auth.provider_error` (el proveedor falló o devolvió algo inválido), `auth.try_again`, `auth.already_linked` y `auth.provider_already_linked` (estos dos, en la fase C).
+  - **Errores del callback** (Enmienda 2026-10-28 de ADR-0008; con un flujo cuyo `next` tiene idioma, con su prefijo, por la Enmienda 2026-11-02 de ese ADR): 303 a `/login?error=<code>`. No se crea ni rota una sesión, la cookie del flujo se expira, la respuesta lleva `Cache-Control: no-store` y `next` nunca se usa. `<code>` sale de un enum cerrado de `crates/protocol` (`CallbackErrorCode`), y el server no copia al `Location` nada de la petición ni del proveedor. Los códigos son `auth.invalid_state`, `auth.banned`, `auth.provider_error` (el proveedor falló o devolvió algo inválido), `auth.try_again`, `auth.already_linked` y `auth.provider_already_linked` (estos dos, en la fase C).
   - `next` se valida con el regex de D2.
   - El proveedor `{provider}` que no existe o no está habilitado da 404.
   - **Enmienda 2026-10-30: respuestas de navegación sin JSON (pregunta abierta 2 de plan-d).** Escrita por architect como autor de la spec, tras su revisión de plan-d. Firmada por security-reviewer el 2026-10-30 (ver "Revisión → security-reviewer — 2026-10-30 — APPROVE (ronda 5)"). La aprobación del owner la cubre su delegación del 2026-10-29 (ver "Revisión → owner"). La misma enmienda toca RF-A4, RF-B11, RF-C2, la tabla de API y el Área 13.
@@ -630,3 +632,6 @@ Mobile-first a 375 px, con los tokens y las primitivas de ADR-0009 y sin colores
   2. **El 429 del callback sale de la capa `AUTH_IP`, no del handler.** Esa capa ahora expira la cookie del flujo. *Cambio:* que use la misma función que el handler para el nombre de la cookie (`__Host-` o la política de loopback de RF-B9) y sus atributos, y una IT que compare el `Set-Cookie` de expiración de la capa con el del handler. Además, que la capa no registre la URI ni la query (ADR-0008 D3, ADR-0012 A). Hoy no lo hace ningún log, pero es código nuevo en el camino de `?code=&state=`.
      - *Escenario:* un nombre de cookie distinto deja viva la cookie del flujo; un log de la URI escribe `code` y `state` en el log.
   3. **El e2e que agota la cuota de `start` desde loopback** comparte el bucket `AUTH_IP` con el resto del e2e. No es de seguridad, pero un orden distinto de los specs puede dar falsos rojos. Que corra aislado (`test.describe.configure({ mode: 'serial' })` al final, o un server propio).
+
+### security-reviewer — 2026-11-02 — APPROVE (Enmienda 2026-11-02 (TA-37) de RF-B5, y Enmienda 2026-11-02 de ADR-0008 (TA-35))
+TA-37, sobre `0bc5344`: https://github.com/kike1303/torneo-absurdo/pull/84#issuecomment-6582445183. TA-35, sobre `799f255`: https://github.com/kike1303/torneo-absurdo/pull/85#issuecomment-6583374827. Transcrito por backend-engineer.

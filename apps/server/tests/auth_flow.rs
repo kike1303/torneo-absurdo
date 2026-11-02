@@ -367,7 +367,7 @@ async fn a_provider_error_in_the_query_is_a_provider_error() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_callback_error_keeps_the_language_of_the_flow() {
     let db = TestDb::create().await;
-    let (app, _pool) = app(&db).await;
+    let (app, pool) = app(&db).await;
     for (next, expected) in [
         (
             "/es/welcome?next=%2Fes%2F",
@@ -406,6 +406,20 @@ async fn a_callback_error_keeps_the_language_of_the_flow() {
     assert_eq!(
         done.header("location"),
         Some("/es/login?error=auth.provider_error")
+    );
+
+    // A flow that expired is still a flow.
+    let started = flow::start(&app, &fields, None).await;
+    let id = started.cookie(FLOW).unwrap().to_owned();
+    let path = flow::authorize(&app, &started).await.location_path();
+    sqlx::query("UPDATE oauth_flows SET expires_at = now() - interval '1 second'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let done = flow::callback(&app, &path, &[format!("{FLOW}={id}")]).await;
+    assert_eq!(
+        done.header("location"),
+        Some("/es/login?error=auth.invalid_state")
     );
 
     // With no flow there is nothing to read: as before, and the web chooses.
