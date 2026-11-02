@@ -335,7 +335,11 @@ test('8b. "sign out everywhere" from a tab with no session does not look like su
   // An /account tab open from before: its cookie is gone, the page is still there (TA-30).
   await page.context().clearCookies({ name: /session/ });
   await press(page.getByTestId('account-logout-all'));
-  await expect(page).toHaveURL(/\/en\/login$/);
+  await expect(page).toHaveURL(/\/en\/login\?error=auth\.sessions_not_closed$/);
+  await expect(page.getByTestId('login-error')).toHaveText(
+    text('en', 'error_auth_sessions_not_closed'),
+  );
+  await expect(page.getByRole('alert')).toContainText(text('en', 'login_signed_in_error_title'));
 
   // Nothing was closed: the other session is alive.
   await second.reload();

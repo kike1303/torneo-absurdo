@@ -532,7 +532,10 @@ async fn logout_and_logout_all() {
     for token in [None, Some(a.as_str())] {
         for (path, landing) in [
             ("/api/auth/logout", "/"),
-            ("/api/auth/logout-all", "/login"),
+            (
+                "/api/auth/logout-all",
+                "/login?error=auth.sessions_not_closed",
+            ),
         ] {
             let out = logout(&app, path, token).await;
             assert_eq!(out.status, 303, "{path} {token:?}");

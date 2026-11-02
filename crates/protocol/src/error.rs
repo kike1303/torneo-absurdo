@@ -136,6 +136,9 @@ pub enum AuthErrorCode {
     /// another user's, the same code (009 RF11, RF12).
     #[serde(rename = "auth.reauth_mismatch")]
     ReauthMismatch,
+    /// `logout-all` without a valid session closed no other session (TA-37).
+    #[serde(rename = "auth.sessions_not_closed")]
+    SessionsNotClosed,
 }
 
 impl AuthErrorCode {
@@ -152,6 +155,7 @@ impl AuthErrorCode {
         Self::LastProvider,
         Self::ReauthRequired,
         Self::ReauthMismatch,
+        Self::SessionsNotClosed,
     ];
     /// The only domain prefix this enum may use.
     pub const PREFIX: &'static str = "auth.";
@@ -170,6 +174,7 @@ impl AuthErrorCode {
             Self::LastProvider => "auth.last_provider",
             Self::ReauthRequired => "auth.reauth_required",
             Self::ReauthMismatch => "auth.reauth_mismatch",
+            Self::SessionsNotClosed => "auth.sessions_not_closed",
         }
     }
 }
@@ -200,6 +205,9 @@ pub enum CallbackErrorCode {
     /// 009 RF11, RF12.
     #[serde(rename = "auth.reauth_mismatch")]
     ReauthMismatch,
+    /// `logout-all` without a valid session closed no other session (TA-37).
+    #[serde(rename = "auth.sessions_not_closed")]
+    SessionsNotClosed,
 }
 
 impl CallbackErrorCode {
@@ -213,6 +221,7 @@ impl CallbackErrorCode {
         Self::ProviderAlreadyLinked,
         Self::ReauthRequired,
         Self::ReauthMismatch,
+        Self::SessionsNotClosed,
     ];
 
     /// The serialized code, equal to the [`AuthErrorCode`] it maps to.
@@ -232,6 +241,7 @@ impl AuthErrorCode {
             CallbackErrorCode::ProviderAlreadyLinked => Self::ProviderAlreadyLinked,
             CallbackErrorCode::ReauthRequired => Self::ReauthRequired,
             CallbackErrorCode::ReauthMismatch => Self::ReauthMismatch,
+            CallbackErrorCode::SessionsNotClosed => Self::SessionsNotClosed,
         }
     }
 }
@@ -417,6 +427,7 @@ mod tests {
             AuthErrorCode::LastProvider => 8,
             AuthErrorCode::ReauthRequired => 9,
             AuthErrorCode::ReauthMismatch => 10,
+            AuthErrorCode::SessionsNotClosed => 11,
         }
     }
 
@@ -430,6 +441,7 @@ mod tests {
             CallbackErrorCode::ProviderAlreadyLinked => 5,
             CallbackErrorCode::ReauthRequired => 6,
             CallbackErrorCode::ReauthMismatch => 7,
+            CallbackErrorCode::SessionsNotClosed => 8,
         }
     }
 
@@ -450,8 +462,8 @@ mod tests {
 
     const API_COUNT: usize = 4;
     const WS_COUNT: usize = 11;
-    const AUTH_COUNT: usize = 11;
-    const CALLBACK_COUNT: usize = 8;
+    const AUTH_COUNT: usize = 12;
+    const CALLBACK_COUNT: usize = 9;
     const PROFILE_COUNT: usize = 3;
     const FIGHT_COUNT: usize = 2;
 
@@ -501,6 +513,11 @@ mod tests {
             // 009 RF19: the closed list grows from six to eight.
             (CallbackErrorCode::ReauthRequired, "auth.reauth_required"),
             (CallbackErrorCode::ReauthMismatch, "auth.reauth_mismatch"),
+            // TA-37: the ninth.
+            (
+                CallbackErrorCode::SessionsNotClosed,
+                "auth.sessions_not_closed",
+            ),
         ];
         assert_eq!(expected.len(), CALLBACK_COUNT);
         for (code, text) in expected {
@@ -587,6 +604,7 @@ mod tests {
             (AuthErrorCode::LastProvider, "auth.last_provider"),
             (AuthErrorCode::ReauthRequired, "auth.reauth_required"),
             (AuthErrorCode::ReauthMismatch, "auth.reauth_mismatch"),
+            (AuthErrorCode::SessionsNotClosed, "auth.sessions_not_closed"),
         ];
         assert_eq!(expected.len(), AUTH_COUNT);
         for (code, text) in expected {
