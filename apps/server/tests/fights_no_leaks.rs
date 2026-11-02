@@ -19,7 +19,7 @@ use axum::routing::get;
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use engine::FightEvent;
-use protocol::{FightState, ServerMessage};
+use protocol::{FightState, FightsPage, ServerMessage};
 use server::admin::{AdminAction, AdminCommand};
 use server::app::{AppState, Settings};
 use server::fights::{FightClock, hex};
@@ -104,6 +104,7 @@ fn request_of(route: &RouteSpec, id: i32) -> (String, Vec<(&'static str, &'stati
         | Handler::AuthProviders
         | Handler::AuthReauthStatus
         | Handler::Me
+        | Handler::FightsList
         | Handler::FightsCurrent
         | Handler::FightDetail => (vec![], String::new()),
         Handler::AuthCallback => (vec![], String::new()),
@@ -196,14 +197,71 @@ fn assert_clean(what: &str, response: &Response, canaries: &[String]) {
 }
 
 /// The status of the routes whose answer does not depend on a flow: the proof that the request
-/// reached its handler, so a clean body is not just the body of a rejection.
+/// reached its handler, so a clean body is not just the body of a rejection. Without a wildcard: a
+/// new route says what it answers, or this does not compile (011 RF9).
 fn expected_status(handler: Handler, identity: &str) -> Option<u16> {
-    match (handler, identity) {
-        (Handler::Health | Handler::FightsCurrent | Handler::FightDetail, _) => Some(200),
-        (Handler::AuthProviders, _) => Some(200),
-        (Handler::Me, "anonymous") => Some(401),
-        (Handler::Me, _) => Some(200),
-        _ => None,
+    match handler {
+        Handler::Health
+        | Handler::FightsList
+        | Handler::FightsCurrent
+        | Handler::FightDetail
+        | Handler::AuthProviders => Some(200),
+        Handler::Me if identity == "anonymous" => Some(401),
+        Handler::Me => Some(200),
+        Handler::Ws
+        | Handler::AuthStart
+        | Handler::AuthLink
+        | Handler::AuthReauth
+        | Handler::AuthUnlink
+        | Handler::AuthCallback
+        | Handler::AuthReauthStatus
+        | Handler::Logout
+        | Handler::LogoutAll
+        | Handler::MeDisplayName
+        | Handler::MePreferences => None,
+        #[cfg(feature = "dev-auth")]
+        Handler::DevAuthorize | Handler::DevToken | Handler::DevUserinfo => None,
+    }
+}
+
+/// `GET /api/fights`, also with `before`, with each identity (011 RF9). An empty list proves nothing,
+/// so the fight has to be there exactly from `Settled` on: otherwise the search for canaries would
+/// pass in vacuum.
+async fn sweep_list(
+    addr: SocketAddr,
+    pool: &PgPool,
+    who: &Identities,
+    cookie_name: &str,
+    id: i32,
+    state: FightState,
+    canaries: &[String],
+) {
+    let session = |token: String| format!("{cookie_name}={token}");
+    let fight = u32::try_from(id).unwrap();
+    for path in [
+        "/api/fights".to_owned(),
+        format!("/api/fights?before={}", id + 1),
+    ] {
+        for identity in ["anonymous", "user", "admin"] {
+            let cookie = match identity {
+                "anonymous" => None,
+                "user" => Some(session(session_for(pool, who.user).await)),
+                _ => Some(session(admin_session(pool, who).await)),
+            };
+            let ip = next_ip();
+            let mut headers: Vec<(&str, &str)> =
+                vec![("origin", ORIGIN), ("x-forwarded-for", ip.as_str())];
+            if let Some(cookie) = &cookie {
+                headers.push(("cookie", cookie.as_str()));
+            }
+            let response = http::send(addr, "GET", &path, &headers).await;
+            let what = format!("{state:?} {identity} GET {path}");
+            assert_eq!(response.status.as_u16(), 200, "{what}");
+            assert_clean(&what, &response, canaries);
+            let page: FightsPage = serde_json::from_slice(&response.body).unwrap();
+            let listed = page.fights.iter().any(|summary| summary.id == fight);
+            assert_eq!(listed, state == FightState::Settled, "{what}");
+        }
     }
 }
 
@@ -246,6 +304,7 @@ async fn sweep(
             assert_clean(&what, &response, canaries);
         }
     }
+    sweep_list(addr, pool, who, cookie_name, id, state, canaries).await;
     // What each identity is, proved against a route protected by `RecentAdmin`.
     let admin_cookie = session(admin_session(pool, who).await);
     assert_eq!(
