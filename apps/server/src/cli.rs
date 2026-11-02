@@ -281,7 +281,7 @@ mod tests {
         assert_eq!(plain.fight, 12);
         assert_eq!(plain.by, user);
         assert_eq!(plain.previous_binary, None);
-        for tag in ["v1.2.3", "sha-abc1234"] {
+        for tag in ["v1.2.3", "v0.10.0", "sha-abc1234"] {
             for list in [
                 vec![
                     "fight",
@@ -318,11 +318,37 @@ mod tests {
 
     #[test]
     fn anything_else_about_fight_void_is_invalid() {
+        let urn = format!("urn:uuid:{USER}");
+        let upper = USER.to_uppercase();
+        let simple = USER.replace('-', "");
+        let braced = format!("{{{USER}}}");
         for list in [
             vec!["fight"],
             vec!["fight", "void"],
             vec!["fight", "void", "1"],
             vec!["fight", "void", "--by", USER],
+            vec!["fight", "void", "1", "--by", &urn],
+            vec!["fight", "void", "1", "--by", &upper],
+            vec!["fight", "void", "1", "--by", &simple],
+            vec!["fight", "void", "1", "--by", &braced],
+            vec![
+                "fight",
+                "void",
+                "1",
+                "--by",
+                USER,
+                "--previous-binary",
+                "v01.002.3",
+            ],
+            vec![
+                "fight",
+                "void",
+                "1",
+                "--by",
+                USER,
+                "--previous-binary",
+                "v1.2.03",
+            ],
             vec!["fight", "void", "1", "--by"],
             vec!["fight", "void", "1", "--by", "not-a-uuid"],
             vec!["fight", "void", "0", "--by", USER],

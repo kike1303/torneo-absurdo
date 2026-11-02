@@ -5,9 +5,12 @@
 mod support;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use protocol::{FightFinal, FightState, VoidReason};
-use server::admin::{BinaryTag, VoidCommand, VoidFailure, run_fight_void};
+use server::admin::{
+    BinaryTag, VOID_DEADLINE, VoidCommand, VoidFailure, run_fight_void, run_fight_void_within,
+};
 use server::bets::BetsHook;
 use server::fights::hook::{SettleFuture, SettlementError, SettlementHook, SettlingFight};
 use server::fights::sealed::{ClosedWindow, ComputeError, RealCompute, SealedSeed, VoidCompute};
@@ -17,6 +20,7 @@ use sqlx::{PgConnection, PgPool, Row};
 use support::bets::{self, written};
 use support::db::{TestDb, privileged};
 use support::fights::{self as f, DRAW, KO, T0, Vector, row, wait_for};
+use support::pg_proxy::PgProxy;
 use uuid::Uuid;
 
 struct World {
@@ -138,7 +142,8 @@ fn real() -> Arc<dyn VoidCompute> {
     Arc::new(RealCompute)
 }
 
-/// Row 1: `--by` that does not exist, or is not an admin. A banned or an unknown id never gets a say.
+/// Row 1: `--by` that does not exist, or is not an admin. It looks at the role and nothing else, as
+/// RF17 says: an attribution, not an authorization, so a banned admin can still be named.
 #[tokio::test]
 async fn only_an_admin_can_be_named() {
     let w = world().await;
@@ -692,4 +697,130 @@ async fn the_runner_sees_a_void_and_goes_on() {
         })
     })
     .await;
+}
+
+/// Hangs the network of the command and then asks the database for something.
+struct HangsTheNetwork(Arc<PgProxy>);
+
+impl SettlementHook for HangsTheNetwork {
+    fn settle<'a>(
+        &'a self,
+        tx: &'a mut PgConnection,
+        fight: &'a SettlingFight,
+    ) -> SettleFuture<'a> {
+        Box::pin(async move {
+            self.0.hang();
+            BetsHook.settle(&mut *tx, fight).await
+        })
+    }
+}
+
+/// RF16: a database that stops answering, in the middle of the transaction or before it starts, is a
+/// failure with its deadline, not a process that hangs. Nothing stays, and it can be tried again.
+#[tokio::test]
+async fn a_database_that_stops_answering_is_a_failure() {
+    let w = world().await;
+    let vector = Vector::of(KO);
+    let id = w
+        .closed_with(0, &vector, |raw| raw.snapshot_sha256 = vec![0; 32])
+        .await;
+    let before = written(&w.pool).await;
+    let deadline = Duration::from_millis(1500);
+
+    let proxy = Arc::new(PgProxy::start(w.db.server_addr()).await);
+    let started = std::time::Instant::now();
+    let outcome = run_fight_void_within(
+        &w.db.options_via(proxy.addr()),
+        &command(id, w.admin, false),
+        real(),
+        &HangsTheNetwork(proxy.clone()),
+        deadline,
+    )
+    .await;
+    assert_eq!(outcome, Err(VoidFailure::Failed("timeout")));
+    assert!(started.elapsed() < Duration::from_secs(30));
+    assert_eq!(written(&w.pool).await, before);
+
+    // Hung before it even connects.
+    let outcome = run_fight_void_within(
+        &w.db.options_via(proxy.addr()),
+        &command(id, w.admin, false),
+        real(),
+        &BetsHook,
+        deadline,
+    )
+    .await;
+    assert_eq!(outcome, Err(VoidFailure::Failed("timeout")));
+
+    // The connection goes, and with it the lock: the command can run again.
+    proxy.cut();
+    w.void(id, real(), false).await.unwrap();
+    assert_eq!(
+        row(&w.pool, id).await.void_reason.as_deref(),
+        Some("snapshot_invalid")
+    );
+}
+
+/// `bets` bets of 2000 users, by SQL and without their stakes: a void only refunds what `bets` says.
+async fn a_fight_with_many_bets(w: &World, bets: i64) -> i32 {
+    let id = f::open_vector(&w.pool, T0, &Vector::of(KO)).await;
+    let users: Vec<uuid::Uuid> = sqlx::query_scalar(
+        "INSERT INTO users (id, display_name, display_name_key) \
+         SELECT gen_random_uuid(), 'Many' || g, 'many' || g FROM generate_series(1, 2000) g \
+         RETURNING id",
+    )
+    .fetch_all(&w.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO ledger_accounts (id, kind, user_id) \
+         SELECT gen_random_uuid(), 'user', u FROM UNNEST($1::uuid[]) AS t(u)",
+    )
+    .bind(&users)
+    .execute(&w.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO bets (id, fight_id, user_id, side, stake, ranked_stake, client_key) \
+         SELECT gen_random_uuid(), $1, ($2::uuid[])[1 + g % 2000], 'a', 25, true, gen_random_uuid() \
+         FROM generate_series(1, $3::bigint) g",
+    )
+    .bind(id)
+    .bind(&users)
+    .bind(bets)
+    .execute(&w.pool)
+    .await
+    .unwrap();
+    f::close_by_sql(&w.pool, id, T0 + f::WINDOW).await;
+    id
+}
+
+#[allow(clippy::print_stdout)]
+async fn a_long_void_ends_within_its_deadline(bets: i64) {
+    let w = world().await;
+    let id = a_fight_with_many_bets(&w, bets).await;
+    let started = std::time::Instant::now();
+    w.void(id, Arc::new(Fails(EVENT_LIMIT)), true)
+        .await
+        .unwrap();
+    let took = started.elapsed();
+    assert!(took < VOID_DEADLINE, "{took:?}");
+    let (_, _, _, payload) = audit(&w.pool, id).await;
+    assert_eq!(payload["bets_refunded"], bets);
+    assert_eq!(payload["coins_refunded"], bets * 25);
+    assert_eq!(bets::total(&w.pool).await, 0);
+    // A measurement to read with `--nocapture`, not a code nor a value of any row.
+    println!("a void of {bets} bets took {took:?}");
+}
+
+#[tokio::test]
+async fn a_void_of_many_bets_ends_within_its_deadline() {
+    a_long_void_ends_within_its_deadline(2000).await;
+}
+
+/// The limit of RF15, against the deadline of the command: `cargo test -- --ignored --nocapture`.
+#[tokio::test]
+#[ignore = "a measurement: 20 000 bets"]
+async fn a_void_at_the_limit_of_bets_ends_within_its_deadline() {
+    a_long_void_ends_within_its_deadline(20_000).await;
 }

@@ -337,6 +337,10 @@ pub const REOPEN_ACCEPTANCE: &str = "void.reopen_acceptance this fight stays unv
 
 /// How long `server fight void` waits for the row of a fight (012 RF16).
 pub const VOID_LOCK_TIMEOUT_MS: u64 = 5000;
+/// The longest the whole of `server fight void` can take: a database that stops answering in the
+/// middle of the transaction must end in a failure, not in a process that hangs. Twelve times the 10 s
+/// that RF15 gives to a settlement of 20 000 bets, and four times the `attempt_timeout` of the runner.
+pub const VOID_DEADLINE: Duration = Duration::from_secs(120);
 
 /// The tag of `--previous-binary` (012 RF24): `vX.Y.Z` or `sha-<7>`. A declaration, and it stays in
 /// `admin_audit`.
@@ -344,8 +348,15 @@ pub const VOID_LOCK_TIMEOUT_MS: u64 = 5000;
 pub struct BinaryTag(String);
 
 impl BinaryTag {
+    /// In canonical form, so the audit has one way to say each tag: no `dev`, and no number with a
+    /// leading zero (`v01.002.3`).
     pub fn parse(text: &str) -> Option<Self> {
-        (text != "dev" && is_valid_app_version(text)).then(|| Self(text.to_owned()))
+        let canonical = text.strip_prefix('v').is_none_or(|numbers| {
+            numbers
+                .split('.')
+                .all(|part| part == "0" || !part.starts_with('0'))
+        });
+        (text != "dev" && canonical && is_valid_app_version(text)).then(|| Self(text.to_owned()))
     }
 
     pub fn as_str(&self) -> &str {
@@ -378,6 +389,14 @@ fn parse_fight_id(text: &str) -> Option<i32> {
     canonical.then(|| text.parse().ok()).flatten()
 }
 
+/// Only the form `users.id` is written in: `Uuid::parse_str` also takes `urn:uuid:…`, braces, no
+/// hyphens and capitals, and what the operator typed should be what the audit says.
+fn parse_canonical_uuid(text: &str) -> Option<Uuid> {
+    Uuid::parse_str(text)
+        .ok()
+        .filter(|uuid| uuid.to_string() == text)
+}
+
 impl VoidCommand {
     /// The arguments after `fight void`: the id, then the flags in any order and none repeated. Any
     /// other flag is invalid: the reason is deduced, never chosen.
@@ -390,7 +409,7 @@ impl VoidCommand {
             match *flag {
                 "--by" if by.is_none() => {
                     let (value, tail) = tail.split_first()?;
-                    by = Some(Uuid::parse_str(value).ok()?);
+                    by = Some(parse_canonical_uuid(value)?);
                     rest = tail;
                 }
                 "--previous-binary" if previous_binary.is_none() => {
@@ -453,7 +472,25 @@ pub async fn run_fight_void(
     compute: Arc<dyn VoidCompute>,
     hook: &dyn SettlementHook,
 ) -> Result<(), VoidFailure> {
-    let outcome = apply_void(options, command, compute, hook).await;
+    run_fight_void_within(options, command, compute, hook, VOID_DEADLINE).await
+}
+
+/// [`run_fight_void`] with another deadline, for the tests. Past it, the transaction goes with the
+/// connection and the failure is `timeout`. If the deadline falls during the `COMMIT`, the void may have
+/// applied: running the command again says so, with `void.bad_state`, and refunds nothing twice.
+///
+/// # Errors
+/// [`VoidFailure`].
+pub async fn run_fight_void_within(
+    options: &PgConnectOptions,
+    command: &VoidCommand,
+    compute: Arc<dyn VoidCompute>,
+    hook: &dyn SettlementHook,
+    deadline: Duration,
+) -> Result<(), VoidFailure> {
+    let outcome = tokio::time::timeout(deadline, apply_void(options, command, compute, hook))
+        .await
+        .unwrap_or(Err(VoidFailure::Failed("timeout")));
     let mut stdout = std::io::stdout().lock();
     match &outcome {
         // Not `tracing`: as the line of a `grant`. The commit is done, so a failed write changes nothing.
@@ -805,10 +842,23 @@ mod source_rules {
 
     /// The database barriers of 009 RF1 and RF3 (`TA005` and `TA004`), with the version of the
     /// migration that creates each one.
-    const GUARD_TRIGGERS: [(&str, i64); 2] = [
+    const GUARD_TRIGGERS: [(&str, i64); 10] = [
         ("users_privileged_guard", 20261029100000),
         ("oauth_accounts_identity_guard", 20261030000000),
+        // What only the bets may move, and that they only grow (012 RF2, RF4, RF6).
+        ("ledger_postings_rules", 20261102000000),
+        ("bets_open_guard", 20261102000000),
+        ("bets_immutable", 20261102000000),
+        ("bets_no_truncate", 20261102000000),
+        ("bet_settlements_immutable", 20261102000000),
+        ("bet_settlements_no_truncate", 20261102000000),
+        ("pool_settlements_immutable", 20261102000000),
+        ("pool_settlements_no_truncate", 20261102000000),
     ];
+
+    /// The bodies of those triggers, when the function has another name: a `CREATE OR REPLACE` of one
+    /// with a `RETURN NEW` switches its trigger off without naming it.
+    const GUARD_FUNCTIONS: [&str; 2] = ["ledger_posting_rules", "ledger_immutable"];
 
     /// What takes a guard away when its statement names it.
     const WEAKENS_A_NAMED_GUARD: [&str; 8] = [
@@ -888,7 +938,11 @@ mod source_rules {
         let mut found = Vec::new();
         for statement in migration_sql(sql).split(';') {
             let text = tokens(statement).join(" ") + " ";
-            for (guard, _) in GUARD_TRIGGERS {
+            let watched = GUARD_TRIGGERS
+                .iter()
+                .map(|(guard, _)| *guard)
+                .chain(GUARD_FUNCTIONS);
+            for guard in watched {
                 if text.contains(guard) {
                     for form in WEAKENS_A_NAMED_GUARD {
                         if text.contains(form) {
@@ -1272,6 +1326,36 @@ mod source_rules {
     fn the_rule_of_the_guards_sees_every_form() {
         let (users, oauth) = ("users_privileged_guard", "oauth_accounts_identity_guard");
         for (sql, form, target) in [
+            (
+                "DROP TRIGGER ledger_postings_rules ON ledger_postings;",
+                "drop trigger",
+                "ledger_postings_rules",
+            ),
+            (
+                "ALTER TABLE bets DISABLE TRIGGER bets_open_guard",
+                "disable trigger",
+                "bets_open_guard",
+            ),
+            (
+                "DROP TRIGGER IF EXISTS pool_settlements_no_truncate ON pool_settlements",
+                "drop trigger",
+                "pool_settlements_no_truncate",
+            ),
+            (
+                "ALTER TABLE bet_settlements DISABLE TRIGGER bet_settlements_immutable",
+                "disable trigger",
+                "bet_settlements_immutable",
+            ),
+            (
+                "CREATE OR REPLACE FUNCTION ledger_posting_rules() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$;",
+                "or replace function",
+                "ledger_posting_rules",
+            ),
+            (
+                "CREATE OR REPLACE FUNCTION ledger_immutable() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$;",
+                "or replace function",
+                "ledger_immutable",
+            ),
             (
                 "DROP TRIGGER users_privileged_guard ON users;",
                 "drop trigger",

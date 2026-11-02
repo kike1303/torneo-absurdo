@@ -221,7 +221,11 @@ mod tests {
         assert_eq!(PoolResult::of(KO_B, 5, 0), PoolResult::RefundOneSided);
         assert_eq!(PoolResult::of(DRAW, 5, 5), PoolResult::RefundDraw);
         assert_eq!(PoolResult::of(DRAW, 5, 0), PoolResult::RefundDraw);
-        for reason in [VoidReason::SnapshotInvalid, VoidReason::EngineError] {
+        for reason in [
+            VoidReason::SnapshotInvalid,
+            VoidReason::EngineError,
+            VoidReason::SecretLost,
+        ] {
             let voided = FightFinal::Voided { reason };
             assert_eq!(PoolResult::of(voided, 5, 5), PoolResult::RefundVoided);
         }

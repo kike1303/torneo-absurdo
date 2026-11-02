@@ -569,35 +569,67 @@ fn a_cancel_only_comes_from_next_action() {
     assert_eq!(code.matches("sealed::cancel_fight").count(), 1);
 }
 
+/// What each assignment to `void_reason` in `text` gives it, without spaces and in lowercase, so
+/// `void_reason=$2` and `VOID_REASON  =  $2` are the same to this. A comparison (`==`) is not one, and
+/// neither is a unit test that assigns a Rust field of a `FightRow`, which reaches no database.
+fn void_reason_writes(text: &str) -> Vec<String> {
+    let code = compact(text).to_lowercase();
+    code.match_indices("void_reason=")
+        .map(|(at, found)| &code[at + found.len()..])
+        .filter(|value| {
+            !value.starts_with('=') && !value.starts_with("some(") && !value.starts_with("none")
+        })
+        .map(|value| value.chars().take(14).collect())
+        .collect()
+}
+
+#[test]
+fn the_search_for_a_write_of_void_reason_sees_every_form() {
+    for text in [
+        "UPDATE fights SET void_reason = $2",
+        "UPDATE fights SET void_reason=$2",
+        "update fights set VOID_REASON\n  =  $2",
+        "SET void_reason = 'engine_error'",
+        "SET void_reason='engine_error'",
+        "DO UPDATE SET void_reason = EXCLUDED.void_reason",
+        "SET void_reason=COALESCE($2, 'x')",
+    ] {
+        assert_eq!(void_reason_writes(text).len(), 1, "{text}");
+    }
+    for text in [
+        "if row.void_reason == other {}",
+        "voided.void_reason = Some(reason);",
+        "row.void_reason = None;",
+        "void_reason: row.try_get(25)?,",
+        "// void_reason = $2",
+        "SELECT void_reason FROM fights WHERE void_reason IS NOT NULL",
+    ] {
+        assert!(void_reason_writes(text).is_empty(), "{text}");
+    }
+}
+
 /// RF16 and RF59: a `voided` final is written in one place, and the runner does not even name it (012
-/// RF18). What is forbidden stays forbidden for every other line of `src`.
+/// RF18). The one read with a literal is in a file that writes nothing (012 RF23). Anything else fails.
 #[test]
 fn a_voided_final_is_only_written_in_one_place() {
-    let mut writes = Vec::new();
+    let mut found = Vec::new();
     for (path, text) in sources() {
-        let sql: String = strip_comments(&text)
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        // The one read with a literal (012 RF23), in a file that writes nothing.
-        let sql = if relative(&path) == "fights/void_stats.rs" {
-            let read = "void_reason = 'secret_lost'";
-            assert_eq!(sql.matches(read).count(), 1, "{sql}");
-            assert!(!sql.to_uppercase().contains("UPDATE "), "{sql}");
-            sql.replacen(read, "", 1)
-        } else {
-            sql
-        };
-        // As SQL writes it: with a parameter, a literal or a column on its right. A unit test of a
-        // `FightRow` assigns a Rust field, which reaches no database.
-        for form in ["void_reason = '", "void_reason = EXCLUDED"] {
-            assert!(!sql.contains(form), "{}", path.display());
-        }
-        for _ in sql.matches("void_reason = $") {
-            writes.push(relative(&path));
+        for value in void_reason_writes(&text) {
+            found.push((relative(&path), value));
         }
     }
-    assert_eq!(writes, ["fights/store.rs"]);
+    found.sort();
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(found[0].0, "fights/store.rs", "{found:?}");
+    assert!(found[0].1.starts_with('$'), "{found:?}");
+    assert_eq!(found[1].0, "fights/void_stats.rs", "{found:?}");
+    assert!(found[1].1.starts_with("'secret_lost'"), "{found:?}");
+    let stats = std::fs::read_to_string(src().join("fights/void_stats.rs")).unwrap();
+    assert!(
+        !tokens(&stats)
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case("update"))
+    );
     let store = compact(&std::fs::read_to_string(src().join("fights/store.rs")).unwrap());
     let inside = store
         .split("asyncfnwrite_voided(")
@@ -620,6 +652,10 @@ fn a_void_only_comes_from_the_command_line() {
     only_in("lock_for_void", &["fights/store.rs", "fights/sealed.rs"]);
     only_in("void_fight", &["fights/sealed.rs", "admin.rs"]);
     only_in("run_fight_void", &["admin.rs", "cli.rs"]);
+    // 012 RF16: only the tests choose another deadline.
+    only_in("run_fight_void_within", &["admin.rs"]);
+    let admin = compact(&std::fs::read_to_string(src().join("admin.rs")).unwrap());
+    assert!(admin.contains("run_fight_void_within(options,command,compute,hook,VOID_DEADLINE)"));
     only_in("RealCompute", &["fights/sealed.rs", "cli.rs"]);
     let cli = strip_comments(&std::fs::read_to_string(src().join("cli.rs")).unwrap());
     let code = cli.split("#[cfg(test)]").next().unwrap();
