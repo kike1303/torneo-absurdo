@@ -13,7 +13,7 @@ supersedes: null
 linear: TA-5
 depends_on: ["0002", "0003", "0005"]
 created: 2026-10-20
-updated: 2026-10-30
+updated: 2026-11-02
 ---
 
 # ADR-0006: Despliegue en Coolify y CI con presupuesto cero
@@ -163,6 +163,7 @@ updated: 2026-10-30
   - **Cliente**: reconexión automática con backoff exponencial (1, 2, 4… hasta 30 s, con jitter). Al reconectar se resincroniza: recibe `server_time`, el estado de la pelea y los eventos **ya ocurridos**, nunca futuros (ADR-0002).
   - **Server al arrancar**: retoma las peleas no liquidadas desde la BD. Las fechas de cierre de apuestas y de inicio son absolutas; si alguna venció durante el corte, se aplica al arrancar. Los eventos de una pelea `Live` siguen saliendo según su tiempo, y los que vencieron durante el corte se entregan como ya ocurridos.
   - **Migraciones**: `sqlx::migrate!` corre al arrancar, antes de abrir el puerto. Son **compatibles hacia atrás** (expand/contract): un release solo agrega; renombrar o borrar columnas va en un release posterior, cuando el código ya no las usa. Ninguna migración modifica ni borra filas de `ledger_entries` (ADR-0005).
+  - **Rollback tras una migración (TA-43)**: la imagen anterior arranca aunque la base tenga migraciones que no conoce (`set_ignore_missing`), y lo avisa con `db.migrations_ahead` (`warn`; las versiones se leen en `_sqlx_migrations`). Sigue sin arrancar con una migración a medias (`success = false`) o con otro checksum en una que conoce. Compatible hacia atrás significa que **la imagen anterior sigue funcionando con el esquema nuevo**: una columna nueva es anulable o tiene `DEFAULT`, y un constraint o un trigger nuevo aceptan lo que escribe esa imagen. Una migración de contracción solo quita lo que la imagen anterior ya no usa, así que volver una versión siempre es seguro. Volver más atrás de una contracción arranca, pero falla en las consultas que usan lo que se quitó. El arranque no lo detecta, y ese caso no se resuelve con otra imagen: se corrige hacia adelante o se restaura el backup previo al release (D9).
   - **No se despliega durante un main event** (desde que abren sus apuestas hasta `Settled`). Es un punto del checklist de aprobación de D6; cuando exista el API del scheduler, `deploy` lo verificará automáticamente.
 - La **limpieza de Docker de Coolify** queda activada: diaria y además al pasar el 80 % de disco, con **"Delete Unused Volumes" apagado** (un volumen detenido de otra app o de un recurso parado no debe borrarse). El rollback no depende de imágenes locales, porque GHCR es público (D5).
 
@@ -268,6 +269,11 @@ updated: 2026-10-30
 - **Objetivo de velocidad.** Se mantiene el de D7: un PR con Rust y caché caliente en ≤ 8 min (p50). Plan-d lo mide en su PR, con las palancas en el orden que fija ahí. Si después de aplicarlas sigue por encima, la desviación la firma architect con los números medidos y queda en una nota aparte.
 - **Si la primera corrida en frío de `e2e-server` se acerca a los 20 min,** devops-engineer sube su timeout con la misma regla que `images`, y lo agrega a esta nota.
 - **Estado:** revisada por devops-engineer el 2026-10-30 (APPROVE, ver "Revisión"). Esta nota no cambia el `status` ni las approvals del ADR, ni el texto de D7. El gate del owner no aplica a una nota, y si aplicara lo cubre su delegación del 2026-10-29 (spec de 008, "Revisión → owner").
+
+### 2026-11-02 — backend-engineer: `set_ignore_missing` para el rollback (TA-43)
+- **Qué:** D6 ofrece el rollback a la imagen anterior y D10 da por compatibles las migraciones, pero el server salía con `db.migrate_failed` ante una versión que no conocía, y Docker lo reiniciaba en bucle. Se confirmó ejecutando el binario contra una base con una migración más nueva (`apps/server/tests/migration_rollback.rs`).
+- **Qué cambia:** la viñeta "Rollback tras una migración" de D10. El riesgo de ocultar una base más nueva de lo esperado se cubre con el `warn` de cada arranque, y las comprobaciones de migración a medias y de checksum siguen activas.
+- **Estado:** esta nota no cambia el `status` ni las approvals del ADR. La regla que explicita es la de expand/contract que D10 ya tenía.
 
 ## Revisión
 ### devops-engineer — 2026-10-20 — REQUEST_CHANGES
