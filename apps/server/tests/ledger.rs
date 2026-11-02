@@ -4,9 +4,11 @@
 
 mod support;
 
-use server::ledger::{self, Coins, ISSUANCE_ACCOUNT};
+use server::ledger::{self, Coins, ISSUANCE_ACCOUNT, SettleEntry, SettleKind};
 use sqlx::{PgPool, Row};
+use support::bets;
 use support::db::TestDb;
+use support::fights as f;
 use uuid::Uuid;
 
 /// A user row with its ledger account, as the first login creates them.
@@ -391,4 +393,109 @@ async fn created_xact_from_the_client_is_overwritten() {
         .unwrap();
     }
     tx.commit().await.unwrap();
+}
+
+/// 012 RF2: the stake moves from the user to the escrow, and a bailout from the issuance, once a day.
+#[tokio::test]
+async fn a_stake_and_a_bailout_are_real_flows_of_the_rules() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let a = bets::user(&pool).await;
+    let mut tx = pool.begin().await.unwrap();
+    let first = ledger::bailout(&mut tx, a, Coins(250)).await.unwrap();
+    assert!(first.is_some());
+    assert_eq!(ledger::bailout(&mut tx, a, Coins(250)).await.unwrap(), None);
+    tx.commit().await.unwrap();
+    let vector = f::Vector::of(f::KO);
+    let fight = f::open_vector(&pool, f::T0, &vector).await;
+    bets::seed_bet(&pool, fight, a, "a", 100).await;
+    assert_eq!(ledger::balance(&pool, a).await.unwrap(), Coins(150));
+    assert_eq!(bets::escrow(&pool).await, 100);
+    assert_eq!(total(&pool).await, 0);
+}
+
+/// 012 RF2: more rows than a batch, with every entry and its two postings, and nothing twice.
+#[tokio::test]
+async fn a_settlement_goes_by_batches() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let (a, b) = (bets::user(&pool).await, bets::user(&pool).await);
+    let vector = f::Vector::of(f::KO);
+    let fight = f::open_vector(&pool, f::T0, &vector).await;
+    let count = ledger::SETTLE_BATCH_ROWS + 500;
+    let bet_ids: Vec<Uuid> = (0..count).map(|_| Uuid::new_v4()).collect();
+    sqlx::query(
+        "INSERT INTO bets (id, fight_id, user_id, side, stake, ranked_stake, client_key) \
+         SELECT id, $1, CASE WHEN n % 2 = 0 THEN $2::uuid ELSE $3::uuid END, 'a', 10, true, \
+         gen_random_uuid() FROM UNNEST($4::uuid[]) WITH ORDINALITY AS t(id, n)",
+    )
+    .bind(fight)
+    .bind(a)
+    .bind(b)
+    .bind(&bet_ids)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let entries: Vec<SettleEntry> = bet_ids
+        .iter()
+        .enumerate()
+        .map(|(i, bet_id)| SettleEntry {
+            kind: SettleKind::Refund,
+            bet_id: *bet_id,
+            user_id: if i % 2 == 1 { a } else { b },
+            amount: Coins(10),
+        })
+        .collect();
+    let mut tx = pool.begin().await.unwrap();
+    ledger::settle_batch(&mut tx, fight, &entries)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM ledger_postings")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, i64::try_from(count * 2).unwrap());
+    assert_eq!(total(&pool).await, 0);
+    assert_eq!(ledger::balance(&pool, a).await.unwrap(), Coins(7500));
+    assert_eq!(ledger::balance(&pool, b).await.unwrap(), Coins(7500));
+    // RF3: the same bet does not settle twice, and it says so by its index.
+    let mut tx = pool.begin().await.unwrap();
+    let error = ledger::settle_batch(&mut tx, fight, &entries[..1])
+        .await
+        .unwrap_err();
+    assert!(server::db::is_unique_violation(
+        &error,
+        "ledger_entries_bet_settled_uq"
+    ));
+}
+
+/// 012 RF2: a user without an account does not lose its half in silence: the entry does not commit.
+#[tokio::test]
+async fn a_settlement_of_a_user_without_an_account_never_commits() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let a = bets::user(&pool).await;
+    let vector = f::Vector::of(f::KO);
+    let fight = f::open_vector(&pool, f::T0, &vector).await;
+    let bet = bets::seed_bet(&pool, fight, a, "a", 10).await;
+    let stranger = Uuid::new_v4();
+    let mut tx = pool.begin().await.unwrap();
+    let written = ledger::settle_batch(
+        &mut tx,
+        fight,
+        &[SettleEntry {
+            kind: SettleKind::Refund,
+            bet_id: bet,
+            user_id: stranger,
+            amount: Coins(10),
+        }],
+    )
+    .await;
+    let failed = match written {
+        Ok(()) => tx.commit().await.unwrap_err(),
+        Err(error) => error,
+    };
+    assert!(failed.as_database_error().is_some());
+    assert_eq!(bets::escrow(&pool).await, 10);
 }
