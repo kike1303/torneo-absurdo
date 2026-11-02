@@ -113,7 +113,7 @@ server fight void <fight_id> --by <admin_user_id> [--previous-binary <vX.Y.Z|sha
 - En local: `cargo run -p server -- fight void 12 --by <admin_user_id>`. En la imagen: `docker exec <contenedor> /server fight void …`. Lee solo `DATABASE_URL` y `RUST_LOG`.
 - **La razón se deduce, nunca se elige.** `--by` tiene que ser un `admin`, pero solo atribuye: quien corre el comando ya tiene la credencial de la base.
 - Corre en una transacción, con el final, el reembolso y una fila de `admin_audit` (`action = 'fight_void'`), y bloquea la fila de la pelea con `lock_timeout` de 5 s.
-- Todo el comando tiene un plazo de 120 s: una base que deja de responder termina en `fight.void_failed` con `error_kind = timeout`, no en un proceso colgado. Una anulación de 20 000 apuestas tardó unos 4 s en local. Si el plazo cae durante el `COMMIT`, la anulación pudo aplicarse: vuelve a correr el comando, y `void.bad_state` lo confirma sin reembolsar dos veces.
+- Todo el comando tiene un plazo de 120 s: una base que deja de responder termina en `fight.void_failed` con `error_kind = timeout`, no en un proceso colgado. Una anulación de 20 000 apuestas tardó unos 4 s en local. Si el plazo cae durante el `COMMIT`, la anulación pudo aplicarse: sigue "Tras un `fight.void_failed`". Volver a correr el comando nunca reembolsa dos veces.
 
 **Salidas.** Una línea de texto fijo en stdout, sin semilla ni datos del log, y el evento con su código.
 
@@ -146,6 +146,18 @@ server fight void <fight_id> --by <admin_user_id> [--previous-binary <vX.Y.Z|sha
 
 - `--previous-binary <tag>`: declara que el binario anterior también falla. Lo hace refutable que la semilla sale publicada y cualquiera puede resimular.
 - `--backup-checked`: declara que se intentó restaurar el secreto desde un backup. **No lo restaures mientras corres el comando:** un `INSERT` en `fight_secrets` en paralelo podría confirmar después, y dejar un secreto en una pelea anulada.
+
+### Tras un `fight.void_failed`
+
+El comando no sabe si su `COMMIT` llegó, y `void.bad_state` no lo responde: solo dice que la pelea ya está `settled`, también si la liquidó el runner. Lo que pasó está en la fila de la pelea y en su auditoría:
+
+```
+psql "$DATABASE_URL" -c "SELECT state, void_reason FROM fights WHERE id = <fight_id>" \
+  -c "SELECT action, payload FROM admin_audit WHERE target = '<fight_id>' AND action = 'fight_void'"
+```
+
+- Sin fila en `admin_audit` y sin `settled`: no aplicó. Vuelve a correr el comando.
+- Con fila en `admin_audit`: aplicó. Si `void_reason` es `secret_lost`, **sigue el apartado de abajo**: el aviso pudo no imprimirse nunca. Volver a correr el comando también lo repite.
 
 ### Tras un `secret_lost`
 
