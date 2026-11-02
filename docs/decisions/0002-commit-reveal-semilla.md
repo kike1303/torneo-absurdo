@@ -32,7 +32,7 @@ Con apuestas de por medio, el resultado no puede conocerse antes de que cierren 
 - La semilla se guarda en la base de datos (necesaria si el servidor se reinicia a mitad de una pelea), en una columna que el API nunca serializa mientras la pelea no esté liquidada.
 
 ## Enmienda propuesta 2026-11-02: pelea anulada con el secreto perdido
-**Estado: `proposed`. No está en vigor.** La decisión de arriba rige sin cambios hasta que esta enmienda pase por el gate de ADRs de [`docs/process.md`](../process.md): revisión de security-reviewer y OK explícito del owner. Viene de la preocupación 13 de la [spec de 010](../features/010-scheduler-de-peleas/spec.md) y la implementa la fase A de la [spec de 011](../features/011-apuestas/spec.md).
+**Estado: `proposed`. No está en vigor.** La decisión de arriba rige sin cambios hasta que esta enmienda pase por el gate de ADRs de [`docs/process.md`](../process.md): revisión de security-reviewer y OK explícito del owner. Viene de la preocupación 13 de la [spec de 010](../features/010-scheduler-de-peleas/spec.md) y la implementa la fase A de la [spec de 012](../features/012-apuestas/spec.md).
 
 **Qué cambia.** Solo el punto 4, al que se le suma esta frase:
 

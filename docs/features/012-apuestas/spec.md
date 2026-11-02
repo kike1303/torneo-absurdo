@@ -1,5 +1,5 @@
 ---
-id: "011"
+id: "012"
 title: Apuestas parimutuel, bono diario y rescate
 type: spec
 status: approved
@@ -44,9 +44,10 @@ Cada fase es un PR con su plan. Ninguna empieza hasta aprobar esta spec. `voided
   - `rake_sink` nunca se debita;
   - `issuance` solo se debita en `grant` y `bailout`;
   - solo `bet_stake` acredita `bet_escrow`;
+  - `bet_escrow` solo se debita en `bet_payout`, `refund` y `rake`;
   - una cuenta de usuario pertenece a `entry.user_id`.
 
-  Su costo entra en la medición de RF15. → `only_the_ledger_module_inserts_ledger_rows` y `no_source_updates_or_deletes_the_ledger` siguen pasando; integración con SQL directo, un caso rechazado por regla y los flujos reales aceptados.
+  Su costo entra en la medición de RF15. → `only_the_ledger_module_inserts_ledger_rows` y `no_source_updates_or_deletes_the_ledger` siguen pasando; integración con SQL directo, un caso rechazado por regla y los flujos reales aceptados. La última regla exige cambiar dos tests de `tests/ledger.rs`, `created_xact_from_the_client_is_overwritten` y `an_entry_built_inside_a_savepoint_commits`, que mueven monedas entre dos usuarios dentro de un `grant`: pasan a `issuance` y al usuario del asiento, y siguen probando lo mismo.
 - **RF3. Un asiento por hecho, exigido por la base.** Índices únicos parciales: `(user_id, grant_day) WHERE kind = 'bailout'`, `(bet_id) WHERE kind = 'bet_stake'`, `(bet_id) WHERE kind IN ('bet_payout', 'refund')` y `(fight_id) WHERE kind = 'rake'`. → integración: un segundo asiento de cada clase falla.
 - **RF4. `bets`, solo inserción.** Tabla de abajo. `ledger_immutable` rechaza `UPDATE`, `DELETE` y `TRUNCATE` (`TA001`). Un trigger rechaza con `TA007` un `INSERT` si la pelea no está en `betting_open`, segunda barrera de RF29 de 010. → integración con SQL directo.
 - **RF5. `ranked_stake` es una foto.** Se escribe al crear la apuesta con `NOT carencia`, leída bajo el bloqueo del usuario, y no cambia nunca (RF4). → integración: una apuesta de una cuenta en carencia guarda `false`, y una de una fuera de carencia, `true`. Una cuenta que sale de la carencia entre su apuesta y la liquidación conserva `false` (test 25(c)).
@@ -89,7 +90,7 @@ Cada fase es un PR con su plan. Ninguna empieza hasta aprobar esta spec. `voided
 
   → integración en CI con 2000 apuestas y `#[ignore]` con 20 000. La apuesta 20 001 da `bet.pool_full`.
 ### Salida `voided` (A)
-- **RF16. Comando.** `server fight void <fight_id> --by <admin_user_id> [--previous-binary <tag>] [--backup-checked]`, en `cli.rs` y `admin.rs`. Corre una transacción con `lock_timeout` de 5 s que bloquea la fila de la pelea con `FOR UPDATE`. El runner nunca lo llama (prueba de RF16 de 010), y no hay endpoint. La razón se deduce, nunca se elige. La salida es una línea de texto fijo con el código y sin semilla ni datos del log. Lee solo `DATABASE_URL` y `RUST_LOG`: un reembolso guarda `rake_bp = 0` (RF10). Exit 0 al aplicar, 1 ante una negativa y 2 con una línea de comandos inválida. Una negativa registra `fight.void_refused` con `error_kind` igual a su código, sin campos nuevos en `ALLOWED_FIELDS`. → unitarias de `cli::parse`; RF16 de 010 sigue recorriendo `cli::parse` y `admin --help`, que documenta el comando.
+- **RF16. Comando.** `server fight void <fight_id> --by <admin_user_id> [--previous-binary <tag>] [--backup-checked]`, en `cli.rs` y `admin.rs`. Corre una transacción con `lock_timeout` de 5 s que bloquea la fila de la pelea con `FOR UPDATE`. El runner nunca lo llama (prueba de RF16 de 010), y no hay endpoint. La razón se deduce, nunca se elige. La salida es una línea de texto fijo con el código y sin semilla ni datos del log. Lee solo `DATABASE_URL` y `RUST_LOG`: un reembolso guarda `rake_bp = 0` (RF10). Exit 0 al aplicar, 1 ante una negativa y 2 con una línea de comandos inválida. Una negativa registra `fight.void_refused` con `error_kind` igual a su código, sin campos nuevos en `ALLOWED_FIELDS`. → unitarias de `cli::parse`; RF16 de 010 sigue recorriendo `cli::parse` y `admin --help`, que documenta el comando. **Esta spec obliga a estrechar las barreras de `fights_source_guard.rs`, sin borrar ninguna:** el comando y `GET /api/fights/void-stats` (RF23) son excepciones exactas, una sola función escribe `void_reason`, y fuera de la entrada de `cli.rs` nada llama a la anulación. El detalle está en el plan de la fase A.
 - **RF17. Negativas, en este orden.** Cada una no escribe nada. El orden extiende RF59 de 010 y pone `secret_lost` donde pide la preocupación 13:
 
   | # | Condición | Resultado |
@@ -109,12 +110,14 @@ Cada fase es un PR con su plan. Ninguna empieza hasta aprobar esta spec. `voided
   | 13 | `compute` falla por `EventLimit`, `encode_failed` o un pánico, y falta `--previous-binary` | `void.previous_binary_not_tried` |
   | 14 | Igual que la 13, con `--previous-binary` | Procede con `engine_error` |
 
+  Cualquier otro `ComputeError::Engine(_)`, sin fila en esta tabla, da `void.binary_problem`: con `validate` ya superado no debería ocurrir, y la negativa por defecto de RF59 de 010 no deja que un código desconocido publique ni anule nada.
+
   Un `decided` que no puede liquidar (RF7 en fase A, o RF15) da `void.fight_healthy`, porque el log se reconstruye: `void` no es su salida. → integración, un caso por fila, comprobando que no se escribió nada: ni en `fights`, ni en `fight_secrets`, ni en el ledger, ni en `admin_audit`.
-- **RF18. Al aplicar.** En una sola transacción, por una sola entrada, `sealed::void_fight`: escribe `void_reason` y `settled_at`, escribe `revealed_seed` y borra el secreto salvo en `secret_lost`, llama al gancho (RF9) e inserta en `admin_audit` con `action = 'fight_void'`, `actor = 'cli_attributed'`, `admin_id = --by`, `target` igual al id y `payload` con `reason`, `previous_binary` si aplica, `backup_checked`, `bets_refunded` y `coins_refunded`. Una migración reemplaza `admin_audit_action_ck` y `admin_audit_actor_ck`, y `admin_audit_cli_ck` queda igual. → integración: cada razón con apuestas sembradas de varios usuarios: reembolso exacto, una fila de auditoría y la semilla publicada salvo en `secret_lost`. Con `RUST_LOG=trace`, ni los logs ni stdout contienen la semilla con los canarios de RF27 de 010. Un gancho que falla revierte todo.
+- **RF18. Al aplicar.** En una sola transacción, por una sola entrada, `admin::run_fight_void`. Primero `sealed::void_fight`, cuyo único llamador es esa función: escribe `void_reason` y `settled_at`, escribe `revealed_seed` y borra el secreto salvo en `secret_lost`, y llama al gancho (RF9). Después, en la misma transacción, `admin.rs`, donde vive todo el SQL de auditoría, inserta en `admin_audit` con `action = 'fight_void'`, `actor = 'cli_attributed'`, `admin_id = --by`, `target` igual al id y `payload` con `reason`, `previous_binary` si aplica, `backup_checked`, `bets_refunded` y `coins_refunded`. Una migración reemplaza `admin_audit_action_ck` y `admin_audit_actor_ck`, y `admin_audit_cli_ck` queda igual. → integración: cada razón con apuestas sembradas de varios usuarios: reembolso exacto, una fila de auditoría y la semilla publicada salvo en `secret_lost`. Con `RUST_LOG=trace`, ni los logs ni stdout contienen la semilla con los canarios de RF27 de 010. Un gancho que falla revierte todo.
 - **RF19. Plazo de `secret_lost`.** `plazo = COALESCE(live_started_at, live_at) + max_duration_ms + SETTLE_DELAY_MS + SECRET_LOST_MARGIN_MS`, con el margen en 120 s: 60 s de relectura del runner y 60 s de la detención por liquidación fallida. Son 215 s con los valores por defecto. **En `betting_closed`, sin `live_started_at`, rige `live_at`:** una pelea así con el plazo vencido no pudo emitir nada, porque pasar a `live` cambiaría la fila que el comando tiene bloqueada. La hora es la de la base, `now()`, nunca la del proceso. → integración con horas en la fila: `live` y `betting_closed`, un milisegundo antes y después.
 - **RF20. Barreras en la base para `secret_lost`.** Una migración suma el valor a `fights_void_reason_ck`, relaja `fights_reveal_ck` (`void_reason = 'secret_lost' AND revealed_seed IS NULL` es la única forma sin semilla) y reemplaza `fights_guard`: con `secret_lost` exige `revealed_seed` nulo, `NOT EXISTS` en `fight_secrets` y el plazo de RF19. Con cualquier otra razón, todo sigue como en RF9 de 010. → integración con SQL directo: `secret_lost` con la fila del secreto presente falla; antes del plazo falla; `secret_lost` con `revealed_seed` falla; `engine_error` sin semilla sigue fallando; y un `UPDATE` directo no reabre nada en una fila `settled`. Un test ata las constantes de la migración a las de Rust.
 - **RF21. Verificación pública (RF7 de 010).** Un helper de test con cuatro resultados: `verified`, `cancelled_unverifiable` (lo que ya hay para una cancelada), **`unverifiable_secret_lost`** e `invalid`. Una `voided(secret_lost)` da `unverifiable_secret_lost` solo si `seed` y `log` son nulos y el commit existe. **Una semilla nula nunca pasa como una comprobación omitida:** una `voided` de otra razón, o una `decided`, sin semilla da `invalid`. Una `secret_lost` con semilla también da `invalid`. RF2 se sigue comprobando. → `fights_public_verify.rs`, sin importar `server`, un caso por combinación.
-- **RF22. Vista.** `VoidReason::SecretLost` llega a la vista como un resultado propio, `voided_unverifiable`, con su texto, distinto del de `voided` (en y es): dice que la pelea se anuló, que se devolvió lo apostado y que **no se puede verificar**. Muestra el contador de RF23. No enseña ni el bloque de comprobación ni la semilla. → Vitest de `view-state` y e2e con un mensaje simulado.
+- **RF22. Vista.** `VoidReason::SecretLost` llega a la vista como un resultado propio, `voided_unverifiable`, con su texto, distinto del de `voided` (en y es): dice que la pelea se anuló, que se devolvió lo apostado y que **no se puede verificar**. Muestra el contador de RF23, que el SSR de la home lee solo si `last` es `secret_lost`, y el cliente una vez si el final llega por socket; si la lectura falla, no hay línea de contador y el resto del texto sigue. No enseña ni el bloque de comprobación ni la semilla. → Vitest de `view-state` y e2e con un mensaje simulado.
 - **RF23. Contador público.** `GET /api/fights/void-stats`, sin sesión, da `VoidStats { voided, secret_lost }`, donde `voided` es el total e incluye a `secret_lost`, con el límite `FIGHT_READ_IP` y `no-store`, en un archivo propio (`fights/void_stats.rs`), con un índice parcial. → integración: sube con cada anulación.
 - **RF24. Pasos humanos, con rastro.**
   - **Binario anterior** (preocupación 3 de 010): `--previous-binary <tag>` acepta solo `vX.Y.Z` o `sha-<7>` y queda en `admin_audit`. Es una declaración, no una prueba. Lo que la hace refutable es que la semilla sale publicada y cualquiera puede resimular.
@@ -251,17 +254,17 @@ Cada fase es un PR con su plan. Ninguna empieza hasta aprobar esta spec. `voided
 ### Componentes afectados
 | Componente | Cambio | Fase |
 |---|---|---|
-| `apps/server/migrations/` | Dos migraciones: `…_void_secret_lost` y `…_bets` (ver "Datos"). Solo aditivas (ADR-0006 D10) | A |
+| `apps/server/migrations/` | Dos migraciones, en este orden: `…_bets` y `…_void_secret_lost`, para que rechazar la enmienda solo quite la segunda (ver "Datos"). Solo aditivas (ADR-0006 D10) | A |
 | `apps/server/src/ledger/mod.rs` | RF2 | A, B |
 | `apps/server/src/bets/` (nuevo) | `parimutuel` (puro), `settle` (gancho), `api`, `pool` (tarea y caché), `probation` | A, B |
-| `apps/server/src/fights/sealed.rs`, `store.rs`, `state.rs` | `void_fight`, escritura de `rake_bp`, `VoidReason::parse`. RF24 de 010 sigue: el secreto solo se toca en `sealed.rs` | A, B |
+| `apps/server/src/fights/sealed.rs`, `store.rs` | `void_fight`, escritura de `rake_bp`. RF24 de 010 sigue: el secreto solo se toca en `sealed.rs` | A, B |
 | `apps/server/src/fights/void_stats.rs` (nuevo) | RF23 | A |
 | `apps/server/src/fights/hub.rs`, `ws/session.rs` | Último `pool_update`, por `schedule` | B |
 | `apps/server/src/{cli.rs,admin.rs}` | RF16 | A |
 | `apps/server/src/ws/handshake.rs`, `ws/mod.rs` | RF39 | B |
 | `apps/server/src/{app.rs,config.rs,http/routes.rs,rate/quotas.rs}` | Cableado, RF40, rutas, cuotas | A, B |
 | `apps/server/src/fights/api.rs` | **Sin cambios** (preocupación 11) | |
-| `crates/protocol` | `VoidReason::SecretLost` y `VoidStats` (A); el resto de tipos (B). `just gen` | A, B |
+| `crates/protocol` | `VoidReason::SecretLost`, su `parse` y `VoidStats` (A); el resto de tipos (B). `just gen` | A, B |
 | `apps/web` | `view-state`, resultado no verificable (A); solo los códigos nuevos y que el socket ignore `pool_update` (B); panel, lecturas, acciones, mensajes, e2e (C) | A, B, C |
 | `crates/engine`, `crates/content`, `crates/sim` | Sin cambios | |
 
@@ -311,7 +314,7 @@ CREATE TABLE pool_settlements (
 );
 -- `auth_events`: `auth_events_kind_ck` suma 'bailout' y 'bet', y una columna `bet_id` nula.
 ```
-Las tres tablas son solo inserción (`ledger_immutable`). Códigos nuevos: `TA007` y `TA008` en `db::error_kind`. **`settled` implica liquidada** (RF31 de 010), así que "abierta" se lee del estado de la pelea, sin columna ni fila de pendiente.
+Las tres tablas son solo inserción (`ledger_immutable`). En la migración, cada `CHECK` y `UNIQUE` que puede fallar lleva nombre fijo (ADR-0012 A9). Códigos nuevos: `TA007` y `TA008` en `db::error_kind`. **`settled` implica liquidada** (RF31 de 010), así que "abierta" se lee del estado de la pelea, sin columna ni fila de pendiente.
 
 ### Tipos (`crates/protocol`)
 ```rust
@@ -565,3 +568,8 @@ Quien coordina transmitió estos puntos juntos. Solo atribuyó el 1, a security-
 
 ### security-reviewer — 2026-11-02 — APPROVE
 - Verifiqué: RF10 y su mapeo, la enmienda de ADR-0002, la preocupación 6, RF47 y RF15. Es una revisión del texto, sin ejecutar nada, y no acepta riesgos ni pone en vigor la enmienda o las notas.
+
+### architect — 2026-11-02 — Cambios tras revisar `plan-a.md`
+Las aprobaciones de arriba son anteriores a estos cambios. Ninguno relaja un requisito.
+- **Regla nueva, a la vista de security-reviewer en el PR de A:** RF2 suma "`bet_escrow` solo se debita en `bet_payout`, `refund` y `rake`". El plan lo había dejado abierto: sin ella, un asiento `grant` con SQL directo podía sacar monedas de la custodia.
+- **Alineación con el código:** RF2 nombra los dos tests de `ledger.rs` que su última regla rompe. RF16 dice que hay que estrechar `fights_source_guard.rs`. RF17 da `void.binary_problem` a un `Engine(_)` sin fila. RF18 deja la auditoría en `admin.rs`, en la misma transacción. RF22 dice de dónde sale el contador. "Componentes" corrige el orden de las migraciones y el sitio de `VoidReason::parse`. "Datos" pide nombres fijos.
