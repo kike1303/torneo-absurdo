@@ -39,7 +39,7 @@ Cada fase es un PR con su plan. Ninguna empieza hasta aprobar esta spec. `voided
 ## Requisitos funcionales
 
 ### Ledger y datos (A)
-- **RF1. Cuentas y tipos de asiento.** Una migración aditiva reemplaza `ledger_accounts_kind_ck` (suma `bet_escrow` y `rake_sink`), crea esas dos cuentas con id fijo (`ESCROW_ACCOUNT`, `RAKE_SINK_ACCOUNT`), reemplaza `ledger_entries_kind_ck` (`grant`, `bailout`, `bet_stake`, `bet_payout`, `refund`, `rake`) y `ledger_entries_user_ck` (`kind = 'rake' OR user_id IS NOT NULL`), y suma `fight_id` y `bet_id` nulos a `ledger_entries`, con `CHECK (kind NOT IN ('bet_stake', 'bet_payout', 'refund') OR (bet_id IS NOT NULL AND fight_id IS NOT NULL))` y `CHECK (kind <> 'rake' OR fight_id IS NOT NULL)`: con esas columnas nulas, los índices de RF3 no verían el asiento. → integración con SQL directo: cada tipo se acepta, uno desconocido falla, un asiento de apuesta sin `bet_id` o sin `fight_id` falla, un `rake` sin `fight_id` falla, y un test ata los ids a la migración como ya hace `ISSUANCE_ACCOUNT`.
+- **RF1. Cuentas y tipos de asiento.** Una migración aditiva reemplaza `ledger_accounts_kind_ck` (suma `bet_escrow` y `rake_sink`), crea esas dos cuentas con id fijo (`ESCROW_ACCOUNT`, `RAKE_SINK_ACCOUNT`), reemplaza `ledger_entries_kind_ck` (`grant`, `bailout`, `bet_stake`, `bet_payout`, `refund`, `rake`) y `ledger_entries_user_ck` (`(kind = 'rake') = (user_id IS NULL)`: un `rake` es de la pelea y de nadie, porque con usuario podría pagarle desde la custodia), y suma `fight_id` y `bet_id` nulos a `ledger_entries`, con `CHECK (kind NOT IN ('bet_stake', 'bet_payout', 'refund') OR (bet_id IS NOT NULL AND fight_id IS NOT NULL))` y `CHECK (kind <> 'rake' OR fight_id IS NOT NULL)`: con esas columnas nulas, los índices de RF3 no verían el asiento. Un asiento de apuesta mueve las monedas de su apuesta: solo `bet_stake`, `bet_payout` y `refund` llevan `bet_id` (`ledger_entries_bet_kind_ck`), y una FK compuesta (`ledger_entries_bet_owner_fk`, de `(bet_id, user_id, fight_id)` a `bets_owner_uq`) lo ata a su dueño y a su pelea. El importe no se ata: ver preocupación 21. → integración con SQL directo: cada tipo se acepta, uno desconocido falla, un asiento de apuesta sin `bet_id` o sin `fight_id` falla, un `rake` sin `fight_id` o con usuario falla, otro tipo con `bet_id` falla, un asiento con el usuario o la pelea de otra apuesta falla, y un test ata los ids a la migración como ya hace `ISSUANCE_ACCOUNT`.
 - **RF2. Solo `ledger/` inserta asientos, y la base limita qué mueve cada uno.** `ledger/` suma `bet_stake`, `bailout` y un `settle_batch` que inserta por lotes de 1000 filas con `UNNEST`. Un trigger sobre `ledger_postings` (se amplía `ledger_posting_open_entry` o va uno hermano, con el código `TA008`) exige, al insertar cada movimiento:
   - `rake_sink` nunca se debita;
   - `issuance` solo se debita en `grant` y `bailout`;
@@ -272,7 +272,7 @@ Cada fase es un PR con su plan. Ninguna empieza hasta aprobar esta spec. `voided
 ```sql
 -- A: ledger (RF1, RF3)
 ALTER TABLE ledger_entries ADD COLUMN fight_id int NULL REFERENCES fights,
-                           ADD COLUMN bet_id uuid NULL;  -- FK tras crear bets; CHECK de RF1
+                           ADD COLUMN bet_id uuid NULL;  -- FK compuesta tras crear bets; CHECK de RF1
 -- A: el rake de la pelea (RF10). Inmutable: entra en la lista de RF4 de 010. B lo escribe al crear
 -- la fila; hasta entonces y en filas anteriores, 0.
 ALTER TABLE fights ADD COLUMN rake_bp smallint NOT NULL DEFAULT 0
@@ -287,7 +287,8 @@ CREATE TABLE bets (
     ranked_stake boolean NOT NULL,       -- la foto de D8 (RF5)
     client_key uuid NOT NULL,            -- RF25 fila 3
     created_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (user_id, client_key)
+    UNIQUE (user_id, client_key),
+    UNIQUE (id, user_id, fight_id)       -- destino de la FK compuesta de RF1
 );                                       -- índices: (fight_id, user_id), (user_id, fight_id)
 
 CREATE TABLE bet_settlements (
@@ -406,6 +407,12 @@ Una columna a 375 px: escenario o anuncio, y debajo el panel. En escritorio, el 
 18. **Borrado de cuenta, a futuro.** El aviso de privacidad promete conservar movimientos y apuestas seudonimizados. `bets` y `bet_settlements` tienen FK a `users`, y son solo inserción, igual que el ledger, así que esa feature tendrá que anonimizar la fila de `users`, no borrarla.
 19. **Estimación y caché.** `BetQuote` sale de una caché de hasta 2 s, y el pozo cambia hasta el cierre. Por eso va marcada como estimación.
 20. **Riesgo para TA-28: un leaderboard casi vacío.** Con el 77 % de los pozos con un lado vacío y hasta el 79 % de los casuales en carencia en D30 (preocupación 1), casi nadie saldría en el leaderboard con poca población. Consta aquí para que TA-28 lo decida.
+21. **El importe de un asiento de apuesta no se ata en la base. Decidido: un `refund` no exige `importe = stake`, ni en A ni antes de B.** Con SQL directo, el dueño de una apuesta de 1 podría sacar 1000 de `bet_escrow` con un `refund`, a costa de los stakes de otros. No se agrega la regla porque:
+    - **No frena al único que puede hacerlo.** Hace falta `DATABASE_URL`, y esa credencial también apaga triggers o reescribe `bets` (la misma vía de las preocupaciones 5 y 6). Como barrera contra un error tampoco hace falta: el importe sale de una sola ruta, `BetsHook` y `ledger::settle_batch`, y RF9 y RF13 lo prueban exacto.
+    - **Dejaría medio invariante.** `bet_payout` no admite una regla igual, porque su importe depende de todo el pozo y de RF10, y atar solo el `refund` no cierra la custodia: el mismo abuso pasaría por un `bet_payout`.
+    - **Costaría una lectura de `bets` por movimiento** en la transacción del reveal, justo lo que RF15 acota.
+
+    **Lo que queda:** el abuso no se previene, pero se detecta, porque rompe `saldo(bet_escrow) = Σ stakes sin liquidar` (RF13), y esa comprobación hoy solo corre en tests. Quien tenga esa credencial también podría ocultarlo. Riesgo sobre monedas ficticias y el ranking (ADR-0005), que entra en el OK del owner de la preocupación 6, en el gate de B. **Se revisa** si la app pasa a un rol de base sin permiso para apagar triggers, o si aparece otra ruta que escriba estos asientos.
 
 ## Respuestas a preguntas abiertas del intent
 1. **Valores de `B`, `m` y `r`** → RF40: 500, 25, y 0 al inicio con 5 % de objetivo. `R = 250`, tope de 2500 y 500. Decidido por quien coordina a partir de la propuesta de game-designer, **pendiente del OK del owner.**
@@ -573,3 +580,8 @@ Quien coordina transmitió estos puntos juntos. Solo atribuyó el 1, a security-
 Las aprobaciones de arriba son anteriores a estos cambios. Ninguno relaja un requisito.
 - **Regla nueva, a la vista de security-reviewer en el PR de A:** RF2 suma "`bet_escrow` solo se debita en `bet_payout`, `refund` y `rake`". El plan lo había dejado abierto: sin ella, un asiento `grant` con SQL directo podía sacar monedas de la custodia.
 - **Alineación con el código:** RF2 nombra los dos tests de `ledger.rs` que su última regla rompe. RF16 dice que hay que estrechar `fights_source_guard.rs`. RF17 da `void.binary_problem` a un `Engine(_)` sin fila. RF18 deja la auditoría en `admin.rs`, en la misma transacción. RF22 dice de dónde sale el contador. "Componentes" corrige el orden de las migraciones y el sitio de `VoidReason::parse`. "Datos" pide nombres fijos.
+
+### architect — 2026-11-02 — Cambios tras el PR #86
+Posteriores a todas las aprobaciones. Ninguno relaja un requisito.
+- **RF1 y "Datos" recogen lo que la migración ya exige, más estricto que la letra anterior:** `ledger_entries_user_ck` da `(kind = 'rake') = (user_id IS NULL)`, y se suman `ledger_entries_bet_kind_ck`, `ledger_entries_bet_owner_fk` y `bets_owner_uq`, con sus casos de prueba.
+- **Decisión nueva, preocupación 21:** un `refund` no ata `importe = stake` en la base. Es de architect, no aceptación de riesgo: security-reviewer la revisa en el PR, y el owner la ve en el gate de B.
