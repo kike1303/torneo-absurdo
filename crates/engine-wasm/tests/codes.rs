@@ -1,7 +1,7 @@
-//! Error codes of the bindings (003 RF19), on the pure `run` (natively: `JsError` needs a JS
-//! host).
+//! Error codes of the bindings (003 RF19) and the bounds of a ruleset (011 RF4), on the pure `run`
+//! and `bounds` (natively: `JsError` needs a JS host).
 use engine::{SpecError, canonical_json};
-use engine_wasm::{MAX_INPUT_BYTES, WasmError, run};
+use engine_wasm::{MAX_INPUT_BYTES, WasmError, bounds, run};
 
 const SEED: &str = "0123456789abcdef0123456789ABCDEF0123456789abcdef0123456789abcdef";
 
@@ -70,6 +70,34 @@ fn seed_must_be_64_hex_characters() {
 fn unknown_ruleset() {
     assert_eq!(code(run(SEED, SPEC, SPEC, 0)), "ruleset.unknown");
     assert_eq!(code(run(SEED, SPEC, SPEC, 2)), "ruleset.unknown");
+}
+
+#[test]
+fn the_bounds_are_exact_json() {
+    assert_eq!(
+        bounds(1).unwrap(),
+        r#"{"time_limit_ms":86000,"max_duration_ms":90000}"#
+    );
+}
+
+#[test]
+fn the_bounds_are_those_of_the_ruleset() {
+    let ruleset = engine::Ruleset::for_version(1).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&bounds(1).unwrap()).unwrap();
+    let keys: Vec<&String> = json.as_object().unwrap().keys().collect();
+    assert_eq!(keys.len(), 2, "{keys:?}");
+    assert_eq!(json["time_limit_ms"], ruleset.time_limit_ms());
+    assert_eq!(
+        json["max_duration_ms"],
+        ruleset.time_limit_ms() + ruleset.end_ms()
+    );
+}
+
+#[test]
+fn the_bounds_of_an_unknown_ruleset() {
+    assert_eq!(code(bounds(0)), "ruleset.unknown");
+    assert_eq!(code(bounds(2)), "ruleset.unknown");
+    assert_eq!(code(bounds(u16::MAX)), "ruleset.unknown");
 }
 
 #[test]
