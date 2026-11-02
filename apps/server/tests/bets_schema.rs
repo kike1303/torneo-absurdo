@@ -131,6 +131,15 @@ async fn world() -> World {
 }
 
 impl World {
+    /// A `grant` or a `bailout`: of a user, with no fight and no bet.
+    fn plain(&self, kind: &'static str, postings: &[(Uuid, i64)]) -> Entry {
+        Entry {
+            fight: None,
+            bet: None,
+            ..self.entry(kind, postings)
+        }
+    }
+
     fn entry(&self, kind: &'static str, postings: &[(Uuid, i64)]) -> Entry {
         Entry {
             kind,
@@ -150,8 +159,8 @@ async fn every_kind_of_entry_is_accepted() {
         [(ISSUANCE_ACCOUNT, -5), (w.account, 5)],
         [(w.account, -5), (ESCROW_ACCOUNT, 5)],
     );
-    insert(&w.pool, &w.entry("grant", &user_up)).await.unwrap();
-    insert(&w.pool, &w.entry("bailout", &user_up))
+    insert(&w.pool, &w.plain("grant", &user_up)).await.unwrap();
+    insert(&w.pool, &w.plain("bailout", &user_up))
         .await
         .unwrap();
     insert(&w.pool, &w.entry("bet_stake", &user_down))
@@ -196,7 +205,7 @@ async fn every_kind_of_entry_is_accepted() {
 async fn an_entry_without_what_it_references_fails() {
     let w = world().await;
     let postings = [(ESCROW_ACCOUNT, -5), (w.account, 5)];
-    let error = insert(&w.pool, &w.entry("other", &postings))
+    let error = insert(&w.pool, &w.plain("other", &postings))
         .await
         .unwrap_err();
     assert_eq!(
@@ -254,6 +263,107 @@ async fn an_entry_without_what_it_references_fails() {
     );
 }
 
+/// The database ties an entry to its bet: with direct SQL, a rake or a refund cannot pay somebody from
+/// the escrow with the bet of another (review of PR #86).
+#[tokio::test]
+async fn an_entry_only_moves_the_coins_of_its_own_bet() {
+    let w = world().await;
+    let attacker = user(&w.pool).await;
+    let attacker_account = account(&w.pool, attacker).await;
+    let down = [(ESCROW_ACCOUNT, -1005), (attacker_account, 1005)];
+    let stake = [(attacker_account, -5), (ESCROW_ACCOUNT, 5)];
+    let own_fight = f::open_vector(&w.pool, T0 + f::CADENCE, &Vector::of(KO)).await;
+    let own_bet = bet(&w.pool, own_fight, attacker).await;
+    for (case, entry, name) in [
+        (
+            "a refund of the bet of another",
+            Entry {
+                user: Some(attacker),
+                ..w.entry("refund", &down)
+            },
+            "ledger_entries_bet_owner_fk",
+        ),
+        (
+            "a payout of the bet of another",
+            Entry {
+                user: Some(attacker),
+                ..w.entry("bet_payout", &down)
+            },
+            "ledger_entries_bet_owner_fk",
+        ),
+        (
+            "a stake on the bet of another",
+            Entry {
+                user: Some(attacker),
+                ..w.entry("bet_stake", &stake)
+            },
+            "ledger_entries_bet_owner_fk",
+        ),
+        (
+            "a refund of its own bet, in another fight",
+            Entry {
+                user: Some(attacker),
+                bet: Some(own_bet),
+                ..w.entry("refund", &down)
+            },
+            "ledger_entries_bet_owner_fk",
+        ),
+        (
+            "a bet that does not exist",
+            Entry {
+                bet: Some(Uuid::new_v4()),
+                ..w.entry("refund", &down)
+            },
+            "ledger_entries_bet_owner_fk",
+        ),
+        (
+            "a rake that pays a user",
+            Entry {
+                user: Some(attacker),
+                bet: None,
+                ..w.entry("rake", &down)
+            },
+            "ledger_entries_user_ck",
+        ),
+        (
+            "a rake with a bet",
+            Entry {
+                user: None,
+                ..w.entry("rake", &[(ESCROW_ACCOUNT, -5), (RAKE_SINK_ACCOUNT, 5)])
+            },
+            "ledger_entries_bet_kind_ck",
+        ),
+        (
+            "a grant with a bet",
+            Entry {
+                user: Some(attacker),
+                ..w.entry("grant", &[(ISSUANCE_ACCOUNT, -5), (attacker_account, 5)])
+            },
+            "ledger_entries_bet_kind_ck",
+        ),
+    ] {
+        let error = insert(&w.pool, &entry).await.expect_err(case);
+        assert_eq!(constraint(&error).as_deref(), Some(name), "{case}");
+    }
+    let moved: i64 = sqlx::query_scalar("SELECT count(*) FROM ledger_postings")
+        .fetch_one(&w.pool)
+        .await
+        .unwrap();
+    assert_eq!(moved, 0);
+    // Its own refund, in its own fight, is what is left.
+    insert(
+        &w.pool,
+        &Entry {
+            user: Some(attacker),
+            fight: Some(own_fight),
+            bet: Some(own_bet),
+            ..w.entry("refund", &[(ESCROW_ACCOUNT, -10), (attacker_account, 10)])
+        },
+    )
+    .await
+    .unwrap();
+}
+
 /// RF2: one refusal per rule, and each with `TA008` before the commit.
 #[tokio::test]
 async fn each_rule_of_the_postings_refuses_with_its_code() {
@@ -283,11 +393,11 @@ async fn each_rule_of_the_postings_refuses_with_its_code() {
         ),
         (
             "the escrow is not debited in a grant",
-            w.entry("grant", &[(ESCROW_ACCOUNT, -5), (w.account, 5)]),
+            w.plain("grant", &[(ESCROW_ACCOUNT, -5), (w.account, 5)]),
         ),
         (
             "the escrow is not debited in a bailout",
-            w.entry("bailout", &[(ESCROW_ACCOUNT, -5), (w.account, 5)]),
+            w.plain("bailout", &[(ESCROW_ACCOUNT, -5), (w.account, 5)]),
         ),
         (
             "a user account belongs to the user of the entry",
@@ -326,8 +436,8 @@ async fn one_entry_per_fact() {
     };
     for (first, second, index) in [
         (
-            w.entry("bailout", &up),
-            w.entry("bailout", &up),
+            w.plain("bailout", &up),
+            w.plain("bailout", &up),
             "ledger_entries_bailout_day_uq",
         ),
         (

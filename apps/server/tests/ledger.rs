@@ -475,13 +475,30 @@ async fn a_settlement_goes_by_batches() {
 async fn a_settlement_of_a_user_without_an_account_never_commits() {
     let db = TestDb::create().await;
     let pool = db.migrated_pool().await;
-    let a = bets::user(&pool).await;
+    let stranger = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, display_name, display_name_key) VALUES ($1, $2, $3)")
+        .bind(stranger)
+        .bind(format!("Test{}", stranger.simple()))
+        .bind(format!("test{}", stranger.simple()))
+        .execute(&pool)
+        .await
+        .unwrap();
     let vector = f::Vector::of(f::KO);
     let fight = f::open_vector(&pool, f::T0, &vector).await;
-    let bet = bets::seed_bet(&pool, fight, a, "a", 10).await;
-    let stranger = Uuid::new_v4();
+    let bet = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO bets (id, fight_id, user_id, side, stake, ranked_stake, client_key) \
+         VALUES ($1, $2, $3, 'a', 10, true, $4)",
+    )
+    .bind(bet)
+    .bind(fight)
+    .bind(stranger)
+    .bind(Uuid::new_v4())
+    .execute(&pool)
+    .await
+    .unwrap();
     let mut tx = pool.begin().await.unwrap();
-    let written = ledger::settle_batch(
+    ledger::settle_batch(
         &mut tx,
         fight,
         &[SettleEntry {
@@ -491,11 +508,61 @@ async fn a_settlement_of_a_user_without_an_account_never_commits() {
             amount: Coins(10),
         }],
     )
-    .await;
-    let failed = match written {
-        Ok(()) => tx.commit().await.unwrap_err(),
-        Err(error) => error,
+    .await
+    .unwrap();
+    let error = tx.commit().await.unwrap_err();
+    assert_eq!(sqlstate(&error).as_deref(), Some("TA002"));
+    assert_eq!(bets::escrow(&pool).await, 0);
+}
+
+/// 012 RF2: the other kind of `settle_batch`: more than the stake can come out of the escrow, as a
+/// `bet_payout`, and it counts as the one settlement of its bet (RF3).
+#[tokio::test]
+async fn a_payout_goes_by_the_same_batches() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let (winner, loser) = (
+        bets::funded_user(&pool, 100).await,
+        bets::funded_user(&pool, 100).await,
+    );
+    let vector = f::Vector::of(f::KO);
+    let fight = f::open_vector(&pool, f::T0, &vector).await;
+    let won = bets::seed_bet(&pool, fight, winner, "a", 40).await;
+    bets::seed_bet(&pool, fight, loser, "b", 60).await;
+    let payout = SettleEntry {
+        kind: SettleKind::Payout,
+        bet_id: won,
+        user_id: winner,
+        amount: Coins(100),
     };
-    assert!(failed.as_database_error().is_some());
-    assert_eq!(bets::escrow(&pool).await, 10);
+    let mut tx = pool.begin().await.unwrap();
+    ledger::settle_batch(&mut tx, fight, &[payout])
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(ledger::balance(&pool, winner).await.unwrap(), Coins(160));
+    assert_eq!(ledger::balance(&pool, loser).await.unwrap(), Coins(40));
+    assert_eq!(bets::escrow(&pool).await, 0);
+    assert_eq!(total(&pool).await, 0);
+    let row = sqlx::query(
+        "SELECT kind, fight_id FROM ledger_entries WHERE bet_id = $1 AND kind <> 'bet_stake'",
+    )
+    .bind(won)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row.get::<String, _>(0), "bet_payout");
+    assert_eq!(row.get::<i32, _>(1), fight);
+    let refund = SettleEntry {
+        kind: SettleKind::Refund,
+        ..payout
+    };
+    let mut tx = pool.begin().await.unwrap();
+    let error = ledger::settle_batch(&mut tx, fight, &[refund])
+        .await
+        .unwrap_err();
+    assert!(server::db::is_unique_violation(
+        &error,
+        "ledger_entries_bet_settled_uq"
+    ));
 }

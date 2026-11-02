@@ -27,7 +27,9 @@ CREATE TABLE bets (
     ranked_stake boolean NOT NULL,
     client_key uuid NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT bets_client_key_uq UNIQUE (user_id, client_key)
+    CONSTRAINT bets_client_key_uq UNIQUE (user_id, client_key),
+    -- What `ledger_entries_bet_owner_fk` points to: an entry of a bet is of its owner and its fight.
+    CONSTRAINT bets_owner_uq UNIQUE (id, user_id, fight_id)
 );
 CREATE INDEX bets_fight_user_idx ON bets (fight_id, user_id);
 CREATE INDEX bets_user_fight_idx ON bets (user_id, fight_id);
@@ -95,16 +97,23 @@ CREATE TRIGGER bets_open_guard BEFORE INSERT ON bets
 -- RF1: the kinds of entry, what they must reference, and the columns RF3 looks at.
 ALTER TABLE ledger_entries
     ADD COLUMN fight_id int NULL REFERENCES fights,
-    ADD COLUMN bet_id uuid NULL REFERENCES bets,
+    ADD COLUMN bet_id uuid NULL,
     DROP CONSTRAINT ledger_entries_kind_ck,
     ADD CONSTRAINT ledger_entries_kind_ck
         CHECK (kind IN ('grant', 'bailout', 'bet_stake', 'bet_payout', 'refund', 'rake')),
     DROP CONSTRAINT ledger_entries_user_ck,
-    ADD CONSTRAINT ledger_entries_user_ck CHECK (kind = 'rake' OR user_id IS NOT NULL),
+    -- A rake is of the fight, and of nobody: with a user, it could pay that user from the escrow.
+    ADD CONSTRAINT ledger_entries_user_ck CHECK ((kind = 'rake') = (user_id IS NULL)),
     ADD CONSTRAINT ledger_entries_bet_refs_ck
         CHECK (kind NOT IN ('bet_stake', 'bet_payout', 'refund')
                OR (bet_id IS NOT NULL AND fight_id IS NOT NULL)),
-    ADD CONSTRAINT ledger_entries_rake_fight_ck CHECK (kind <> 'rake' OR fight_id IS NOT NULL);
+    -- Only those three have a bet, so the key below always applies: a NULL would skip it.
+    ADD CONSTRAINT ledger_entries_bet_kind_ck
+        CHECK (bet_id IS NULL OR kind IN ('bet_stake', 'bet_payout', 'refund')),
+    ADD CONSTRAINT ledger_entries_rake_fight_ck CHECK (kind <> 'rake' OR fight_id IS NOT NULL),
+    -- A stake, a payout or a refund moves the coins of its own bet: of that user, in that fight.
+    ADD CONSTRAINT ledger_entries_bet_owner_fk FOREIGN KEY (bet_id, user_id, fight_id)
+        REFERENCES bets (id, user_id, fight_id);
 
 -- RF3: one entry per fact, whatever the application does.
 CREATE UNIQUE INDEX ledger_entries_bailout_day_uq ON ledger_entries (user_id, grant_day)
