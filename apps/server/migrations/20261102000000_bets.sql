@@ -36,14 +36,17 @@ CREATE INDEX bets_user_fight_idx ON bets (user_id, fight_id);
 
 -- RF6: the result of each bet. `season_stats` is of TA-28, which sums from `ranked_profit`.
 CREATE TABLE bet_settlements (
-    bet_id uuid PRIMARY KEY REFERENCES bets,
-    fight_id int NOT NULL REFERENCES fights,
-    user_id uuid NOT NULL REFERENCES users,
+    bet_id uuid PRIMARY KEY,
+    fight_id int NOT NULL,
+    user_id uuid NOT NULL,
     outcome text NOT NULL CONSTRAINT bet_settlements_outcome_ck
         CHECK (outcome IN ('won', 'lost', 'refunded')),
     payout bigint NOT NULL CONSTRAINT bet_settlements_payout_ck CHECK (payout >= 0),
     net bigint NOT NULL,
     ranked_profit bigint NOT NULL,
+    -- The result of a bet is of its owner and its fight: TA-28 sums from here, and RF27 reads it.
+    CONSTRAINT bet_settlements_owner_fk FOREIGN KEY (bet_id, user_id, fight_id)
+        REFERENCES bets (id, user_id, fight_id),
     CONSTRAINT bet_settlements_ranked_ck CHECK (ranked_profit <= net),
     CONSTRAINT bet_settlements_refunded_ck
         CHECK (outcome <> 'refunded' OR (net = 0 AND ranked_profit = 0)),

@@ -364,6 +364,35 @@ async fn an_entry_only_moves_the_coins_of_its_own_bet() {
     .unwrap();
 }
 
+/// RF6: the result of a bet is of its owner and its fight: TA-28 sums from it, and RF27 reads it.
+#[tokio::test]
+async fn a_result_only_belongs_to_the_owner_and_the_fight_of_its_bet() {
+    let w = world().await;
+    let attacker = user(&w.pool).await;
+    let other_fight = f::open_vector(&w.pool, T0 + f::CADENCE, &Vector::of(KO)).await;
+    for (case, who, fight) in [
+        ("another user", attacker, w.fight),
+        ("another fight", w.user, other_fight),
+    ] {
+        let error = sqlx::query(
+            "INSERT INTO bet_settlements \
+             (bet_id, fight_id, user_id, outcome, payout, net, ranked_profit) \
+             VALUES ($1, $2, $3, 'won', 500, 490, 490)",
+        )
+        .bind(w.bet)
+        .bind(fight)
+        .bind(who)
+        .execute(&w.pool)
+        .await
+        .unwrap_err();
+        assert_eq!(
+            constraint(&error).as_deref(),
+            Some("bet_settlements_owner_fk"),
+            "{case}"
+        );
+    }
+}
+
 /// RF2: one refusal per rule, and each with `TA008` before the commit.
 #[tokio::test]
 async fn each_rule_of_the_postings_refuses_with_its_code() {
