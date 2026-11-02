@@ -96,6 +96,13 @@ const postgresRestriction = (_relative) => [
   { regex: '^postgres(?:/.*)?$', message: POSTGRES_MESSAGE },
 ];
 
+const ENGINE_WASM_MESSAGE =
+  'Only `lib/features/replay/engine-loader.ts` imports the generated engine, and only with `import()` (011 RF5).';
+/** @param {boolean} _relative */
+const engineWasmRestriction = (_relative) => [
+  { regex: '(?:^|/)engine-wasm(?:/|$)', message: ENGINE_WASM_MESSAGE },
+];
+
 const UI_MESSAGE =
   'Primitives in `ui/` import nothing from features, domain components or Paraglide messages, not even types (ADR-0009 D4).';
 /**
@@ -262,6 +269,7 @@ export function createConfig({ relativePatterns = true } = {}) {
   const UI = 'src/lib/components/ui/**/*.{js,ts,svelte}';
   const A11Y = 'src/lib/components/ui/_a11y-messages.ts';
   const FIGHT_STAGE = 'src/lib/components/fight/FightStage.svelte';
+  const ENGINE_LOADER = 'src/lib/features/replay/engine-loader.ts';
   // The only importers of `api/mutations` (008 plan-d decision 8); the use inside `actions` is
   // checked by tests/no-mutation-in-load.test.ts.
   const MUTATION_IMPORTERS = ['src/routes/**/+page.server.ts', 'src/lib/server/api/**/*.ts'];
@@ -301,11 +309,24 @@ export function createConfig({ relativePatterns = true } = {}) {
     {
       files: [SRC],
       ignores: [COMPONENTS],
-      rules: restrictedImports(r, [rendererRestriction, mutationsRestriction, postgresRestriction]),
+      rules: restrictedImports(r, [
+        rendererRestriction,
+        mutationsRestriction,
+        postgresRestriction,
+        engineWasmRestriction,
+      ]),
     },
     {
       files: MUTATION_IMPORTERS,
-      rules: restrictedImports(r, [rendererRestriction, postgresRestriction]),
+      rules: restrictedImports(r, [
+        rendererRestriction,
+        postgresRestriction,
+        engineWasmRestriction,
+      ]),
+    },
+    {
+      files: [ENGINE_LOADER],
+      rules: restrictedImports(r, [rendererRestriction, mutationsRestriction, postgresRestriction]),
     },
     {
       files: [COMPONENTS],
@@ -315,6 +336,7 @@ export function createConfig({ relativePatterns = true } = {}) {
         featuresValueRestriction,
         mutationsRestriction,
         postgresRestriction,
+        engineWasmRestriction,
       ]),
     },
     {
@@ -323,6 +345,7 @@ export function createConfig({ relativePatterns = true } = {}) {
         featuresValueRestriction,
         mutationsRestriction,
         postgresRestriction,
+        engineWasmRestriction,
       ]),
     },
     ...Array.from({ length: UI_MAX_DEPTH + 1 }, (_, depth) => ({
@@ -332,6 +355,7 @@ export function createConfig({ relativePatterns = true } = {}) {
         rendererRestriction,
         mutationsRestriction,
         postgresRestriction,
+        engineWasmRestriction,
         /** @param {boolean} rel */ (rel) => uiRestriction(rel, false, depth),
       ]),
     })),
@@ -341,6 +365,7 @@ export function createConfig({ relativePatterns = true } = {}) {
         rendererRestriction,
         mutationsRestriction,
         postgresRestriction,
+        engineWasmRestriction,
         /** @param {boolean} rel */ (rel) => uiRestriction(rel, true, 0),
       ]),
     },
