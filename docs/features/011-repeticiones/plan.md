@@ -345,7 +345,7 @@ Se proponen aquí para que architect las apruebe con el plan.
 - `http.request` lleva `route`, así que RF18 se puede comprobar en el log.
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+- **Paso 2, `check-tokens`.** El directorio generado entra en `SKIP_DIRS`, junto a `paraglide`, y no en `EXEMPT`: esa lista compara el final de la ruta de un archivo, y un directorio no le sirve.
 
 ## Revisión
 ### frontend-engineer — 2026-11-02 — autor

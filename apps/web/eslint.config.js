@@ -271,6 +271,8 @@ export function createConfig({ relativePatterns = true } = {}) {
       'build/',
       '.svelte-kit/',
       'src/lib/paraglide/',
+      // Written by `just gen-wasm` (011 RF1).
+      'src/lib/features/replay/engine-wasm/',
       'node_modules/',
       'test-results/',
       'playwright-report/',

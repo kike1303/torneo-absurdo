@@ -3,6 +3,8 @@
 // copies packages/protocol-ts/src to a temporary directory, runs `just gen` in place and
 // compares both trees with this script. A file present on one side only (for example the .ts
 // of a type deleted in Rust) or with different contents means the committed tree was stale.
+// 011 RF2: `--name` and `--command` say which tree and how to fix it. `_check-wasm-artifact`
+// generates in a temporary directory, so there the committed tree stays as it was.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,11 +44,15 @@ export function compareTrees(before, after) {
   return { removed, added, changed, equal: removed.length + added.length + changed.length === 0 };
 }
 
-/** @param {ReturnType<typeof compareTrees>} result @returns {string[]} */
-export function describeDifferences(result) {
+/**
+ * @param {ReturnType<typeof compareTrees>} result
+ * @param {{ name: string, command: string }} [tree] without it, the tree of `just gen`
+ * @returns {string[]}
+ */
+export function describeDifferences(result, tree) {
   if (result.equal) return [];
   return [
-    STALE_MESSAGE,
+    tree ? `${tree.name} is out of date: run ${tree.command}, review and commit` : STALE_MESSAGE,
     ...result.removed.map((f) => `  removed by gen (stale file): ${f}`),
     ...result.added.map((f) => `  missing before gen: ${f}`),
     ...result.changed.map((f) => `  changed by gen: ${f}`),
@@ -58,15 +64,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.error(GEN_FAILED_MESSAGE);
     process.exit(1);
   }
-  const [before, after] = process.argv.slice(2);
-  if (!before || !after) {
-    console.error('usage: compare-trees.mjs <before> <after> | --gen-failed');
+  const [before, after, ...flags] = process.argv.slice(2);
+  // Both or neither: a name alone would still print the command of another tree.
+  const named = flags.length === 4 && flags[0] === '--name' && flags[2] === '--command';
+  if (!before || !after || (flags.length > 0 && !named)) {
+    console.error(
+      'usage: compare-trees.mjs <before> <after> [--name <name> --command <command>] | --gen-failed',
+    );
     process.exit(2);
   }
-  const lines = describeDifferences(compareTrees(path.resolve(before), path.resolve(after)));
+  const tree = named ? { name: flags[1], command: flags[3] } : undefined;
+  const lines = describeDifferences(compareTrees(path.resolve(before), path.resolve(after)), tree);
   if (lines.length > 0) {
     for (const line of lines) console.error(line);
     process.exit(1);
   }
-  console.log('compare-trees: protocol-ts is up to date');
+  console.log(`compare-trees: ${tree ? tree.name : 'protocol-ts'} is up to date`);
 }

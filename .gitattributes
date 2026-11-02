@@ -4,3 +4,7 @@ crates/engine/tests/golden/* -text
 apps/web/src/lib/features/fight/fixtures/* -text
 # The content goldens too (007 phase B): the sprite guide reads them byte by byte.
 crates/content/tests/golden/* -text
+# The generated wasm and its glue are compared byte by byte (011 RF2), and so are the vectors both
+# verifiers read (011 RF14).
+apps/web/src/lib/features/replay/engine-wasm/* -text
+apps/server/tests/golden/fight-verify-vectors.json -text
