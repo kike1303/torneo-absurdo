@@ -362,6 +362,75 @@ async fn a_provider_error_in_the_query_is_a_provider_error() {
     assert!(!done.header("location").unwrap().contains("access_denied"));
 }
 
+/// TA-35: with a flow, the error lands in the language of its `next`, which nothing else knows
+/// on the way back from the provider. Only a fixed prefix leaves the flow: never `next` itself.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_callback_error_keeps_the_language_of_the_flow() {
+    let db = TestDb::create().await;
+    let (app, pool) = app(&db).await;
+    for (next, expected) in [
+        (
+            "/es/welcome?next=%2Fes%2F",
+            "/es/login?error=auth.invalid_state",
+        ),
+        ("/en/account", "/en/login?error=auth.invalid_state"),
+        ("/es", "/es/login?error=auth.invalid_state"),
+        ("/cuenta", "/login?error=auth.invalid_state"),
+        ("/esp/welcome", "/login?error=auth.invalid_state"),
+        ("/ES/welcome", "/login?error=auth.invalid_state"),
+        ("/es%2Fwelcome", "/login?error=auth.invalid_state"),
+        ("/es\\evil.example", "/login?error=auth.invalid_state"),
+        ("//evil.example/es/", "/login?error=auth.invalid_state"),
+    ] {
+        let fields = [("dev_identity", "ana"), ("next", next)];
+        let started = flow::start(&app, &fields, None).await;
+        let id = started.cookie(FLOW).unwrap().to_owned();
+        let path = flow::authorize(&app, &started).await.location_path();
+        let wrong_state = format!("{path}x");
+        let done = flow::callback(&app, &wrong_state, &[format!("{FLOW}={id}")]).await;
+        assert_eq!(done.status, 303, "{next}: {}", done.text());
+        assert_eq!(done.header("location"), Some(expected), "{next}");
+        assert_eq!(done.cookie(FLOW), Some(""), "{next}");
+        assert!(done.cookie(SESSION).is_none(), "{next}");
+        assert_eq!(done.header("cache-control"), Some("no-store"), "{next}");
+    }
+
+    // Any error of the flow, not only the state: the provider's refusal too.
+    let fields = [("dev_identity", "ana"), ("next", "/es/welcome")];
+    let started = flow::start(&app, &fields, None).await;
+    let id = started.cookie(FLOW).unwrap().to_owned();
+    let path = flow::authorize(&app, &started).await.location_path();
+    let state = path.split("&state=").nth(1).unwrap();
+    let denied = format!("/api/auth/dev/callback?error=access_denied&state={state}");
+    let done = flow::callback(&app, &denied, &[format!("{FLOW}={id}")]).await;
+    assert_eq!(
+        done.header("location"),
+        Some("/es/login?error=auth.provider_error")
+    );
+
+    // A flow that expired is still a flow.
+    let started = flow::start(&app, &fields, None).await;
+    let id = started.cookie(FLOW).unwrap().to_owned();
+    let path = flow::authorize(&app, &started).await.location_path();
+    sqlx::query("UPDATE oauth_flows SET expires_at = now() - interval '1 second'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let done = flow::callback(&app, &path, &[format!("{FLOW}={id}")]).await;
+    assert_eq!(
+        done.header("location"),
+        Some("/es/login?error=auth.invalid_state")
+    );
+
+    // With no flow there is nothing to read: as before, and the web chooses.
+    let started = flow::start(&app, &fields, None).await;
+    let path = flow::authorize(&app, &started).await.location_path();
+    assert_callback_error(
+        &flow::callback(&app, &path, &[]).await,
+        "auth.invalid_state",
+    );
+}
+
 /// An alias source that hands out a fixed list, then repeats the last one.
 struct Fixed(Mutex<VecDeque<String>>);
 
@@ -532,7 +601,10 @@ async fn logout_and_logout_all() {
     for token in [None, Some(a.as_str())] {
         for (path, landing) in [
             ("/api/auth/logout", "/"),
-            ("/api/auth/logout-all", "/login"),
+            (
+                "/api/auth/logout-all",
+                "/login?error=auth.sessions_not_closed",
+            ),
         ] {
             let out = logout(&app, path, token).await;
             assert_eq!(out.status, 303, "{path} {token:?}");

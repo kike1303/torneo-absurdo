@@ -2,8 +2,8 @@
 //! revoke (one session, or every session of the user), expire the cookie and answer 303 to
 //! `/`. `logout` does so with or without a session: logging out is idempotent. `logout-all`
 //! without a valid session closes at most the row of its own cookie, so it answers 303 to the
-//! login page instead, and never looks like the closing it did not do (008 "Enmienda 2026-10-30
-//! (TA-30)" of RF-B5). If the revoke fails, a 303 to the login page with `auth.try_again` and the
+//! login page with `auth.sessions_not_closed` instead, and never looks like the closing it did
+//! not do (008 "Enmienda 2026-10-30 (TA-30)" of RF-B5 and TA-37). If the revoke fails, a 303 to the login page with `auth.try_again` and the
 //! cookie kept; over the "other mutations" quota of D7, the same 303 (008 "Enmienda 2026-10-30"
 //! of RF-B5).
 
@@ -13,8 +13,9 @@ use axum::Extension;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use protocol::CallbackErrorCode;
 
-use super::callback::{login_location, try_again_redirect};
+use super::callback::{error_location, try_again_redirect};
 
 use crate::app::AppState;
 use crate::http::session::{self, PRIVATE_NO_STORE};
@@ -103,7 +104,7 @@ async fn run(
     };
     let location = match landing {
         Landing::Home => HeaderValue::from_static("/"),
-        Landing::Login => login_location(),
+        Landing::Login => error_location(CallbackErrorCode::SessionsNotClosed),
     };
     (
         StatusCode::SEE_OTHER,
@@ -121,7 +122,8 @@ async fn run(
 enum Landing {
     /// All that was asked for is closed.
     Home,
-    /// A `logout-all` that proved no session: the others, if any, are still alive.
+    /// A `logout-all` that proved no session: the others, if any, are still alive, and the login
+    /// page says so.
     Login,
 }
 

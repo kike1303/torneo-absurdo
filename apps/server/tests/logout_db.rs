@@ -17,6 +17,9 @@ use support::db::TestDb;
 use support::http;
 use support::pg_proxy::PgProxy;
 
+/// `logout-all` without a valid session: the login page says that the others are open (TA-37).
+const NOT_CLOSED: &str = "/login?error=auth.sessions_not_closed";
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_logout_without_the_database_does_not_claim_success() {
     let db = TestDb::create().await;
@@ -282,7 +285,7 @@ async fn logout_all_with_a_dead_session_does_not_look_like_success() {
         let out = http::send(app.addr, "POST", "/api/auth/logout-all", &headers).await;
 
         assert_eq!(out.status, 303, "{sql}: {}", out.text());
-        assert_eq!(out.header("location"), Some("/login"), "{sql}");
+        assert_eq!(out.header("location"), Some(NOT_CLOSED), "{sql}");
         assert_eq!(out.cookie(name), Some(""), "{sql}");
         assert_eq!(out.header("cache-control"), Some("private, no-store"));
         assert!(out.body.is_empty(), "{sql}");
@@ -314,7 +317,7 @@ async fn logout_all_without_a_valid_cookie_goes_to_the_login_page() {
     for headers in [&without[..], &forged[..]] {
         let all = http::send(app.addr, "POST", "/api/auth/logout-all", headers).await;
         assert_eq!(all.status, 303, "{}", all.text());
-        assert_eq!(all.header("location"), Some("/login"));
+        assert_eq!(all.header("location"), Some(NOT_CLOSED));
         assert_eq!(all.cookie(name), Some(""));
         assert_eq!(all.header("cache-control"), Some("private, no-store"));
         let one = http::send(app.addr, "POST", "/api/auth/logout", headers).await;
@@ -361,6 +364,6 @@ async fn logout_all_with_a_dead_session_does_not_take_the_lock_of_the_user() {
     .await
     .expect("a dead cookie must not wait for the lock of the user");
     hold.rollback().await.unwrap();
-    assert_eq!(out.header("location"), Some("/login"));
+    assert_eq!(out.header("location"), Some(NOT_CLOSED));
     assert_eq!(sessions_of(&pool, user).await, 0);
 }
