@@ -307,6 +307,9 @@ mod tests {
                 assert_eq!(command.by, user);
             }
         }
+        assert!(!plain.backup_checked);
+        let backup = void(&["fight", "void", "12", "--backup-checked", "--by", USER]);
+        assert!(backup.backup_checked);
         assert_eq!(
             void(&["fight", "void", "2147483647", "--by", USER]).fight,
             i32::MAX
@@ -328,6 +331,24 @@ mod tests {
             vec!["fight", "void", "-1", "--by", USER],
             vec!["fight", "void", "2147483648", "--by", USER],
             vec!["fight", "void", "1", "--by", USER, "--by", USER],
+            vec![
+                "fight",
+                "void",
+                "1",
+                "--by",
+                USER,
+                "--backup-checked",
+                "--backup-checked",
+            ],
+            vec![
+                "fight",
+                "void",
+                "1",
+                "--by",
+                USER,
+                "--backup-checked",
+                "yes",
+            ],
             vec!["fight", "void", "1", "--by", USER, "--reason", "x"],
             vec!["fight", "void", "1", "--by", USER, "extra"],
             vec!["fight", "void", "1", "--by", USER, "--previous-binary"],

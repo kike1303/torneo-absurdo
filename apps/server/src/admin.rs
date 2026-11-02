@@ -15,8 +15,8 @@
 //! `grant`, one line of fixed text on stdout names the providers within the cutoff (RF17): not a
 //! log, and never an id.
 //!
-//! `server fight void <fight_id> --by <admin_user_id> [--previous-binary <tag>]` (012 RF16) lives
-//! here too: the same configuration, the same sort of connection and the only SQL of `admin_audit`.
+//! `server fight void <fight_id> --by <admin_user_id> [--previous-binary <tag>] [--backup-checked]`
+//! (012 RF16) lives here too: the same configuration, the same sort of connection and the only SQL of `admin_audit`.
 //! It does not revoke anything nor write any privileged column, and the decision is of
 //! `fights::sealed::void_fight`. The only caller of this is `cli.rs`: there is no endpoint.
 
@@ -26,6 +26,7 @@ use std::io::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 
+use protocol::VoidReason;
 use sqlx::postgres::PgConnectOptions;
 use sqlx::{Connection, PgConnection, Row};
 use uuid::Uuid;
@@ -64,11 +65,12 @@ Before running `grant`, review the linked providers in /account: everything link
 moment starts giving admin. `grant` prints the providers within the cutoff. If it shows one you
 do not recognize, run `revoke`, remove it from /account and run `grant` again.
 
-server fight void <fight_id> --by <admin_user_id> [--previous-binary <tag>]
+server fight void <fight_id> --by <admin_user_id> [--previous-binary <tag>] [--backup-checked]
   voids a fight that cannot end and refunds its bets. It reads only DATABASE_URL and RUST_LOG. The
   reason is deduced, never chosen. It refuses a healthy fight, and every refusal writes nothing and
   prints its code. --by is an attribution, it authorizes nothing. --previous-binary <vX.Y.Z|sha-abc1234>
-  declares that the previous binary fails too, and stays in the audit.
+  declares that the previous binary fails too. --backup-checked declares that restoring from a backup
+  was tried. Both stay in the audit.
 ";
 
 /// Whether the arguments after `admin` ask for [`HELP`]: `--help` or `<action> --help`.
@@ -328,6 +330,11 @@ async fn execute(options: &PgConnectOptions, command: &AdminCommand) -> Result<(
     Ok(())
 }
 
+/// The warning after a `secret_lost` (012 RF24). The command cannot check that it was done: the
+/// procedure is in `apps/server/README.md`.
+pub const REOPEN_ACCEPTANCE: &str = "void.reopen_acceptance this fight stays unverified: open an issue \
+     with its id and ask the owner to decide again on worry 1 of spec 010";
+
 /// How long `server fight void` waits for the row of a fight (012 RF16).
 pub const VOID_LOCK_TIMEOUT_MS: u64 = 5000;
 
@@ -352,6 +359,7 @@ pub struct VoidCommand {
     pub fight: i32,
     pub by: Uuid,
     pub previous_binary: Option<BinaryTag>,
+    pub backup_checked: bool,
 }
 
 impl fmt::Debug for VoidCommand {
@@ -377,7 +385,7 @@ impl VoidCommand {
         let words: Vec<&str> = args.iter().map(|a| a.to_str()).collect::<Option<_>>()?;
         let (id, mut rest) = words.split_first()?;
         let fight = parse_fight_id(id)?;
-        let (mut by, mut previous_binary) = (None, None);
+        let (mut by, mut previous_binary, mut backup_checked) = (None, None, false);
         while let Some((flag, tail)) = rest.split_first() {
             match *flag {
                 "--by" if by.is_none() => {
@@ -390,6 +398,10 @@ impl VoidCommand {
                     previous_binary = Some(BinaryTag::parse(value)?);
                     rest = tail;
                 }
+                "--backup-checked" if !backup_checked => {
+                    backup_checked = true;
+                    rest = tail;
+                }
                 _ => return None,
             }
         }
@@ -397,6 +409,7 @@ impl VoidCommand {
             fight,
             by: by?,
             previous_binary,
+            backup_checked,
         })
     }
 }
@@ -446,6 +459,9 @@ pub async fn run_fight_void(
         // Not `tracing`: as the line of a `grant`. The commit is done, so a failed write changes nothing.
         Ok(reason) => {
             let _ = writeln!(stdout, "void.applied {reason}");
+            if *reason == VoidReason::SecretLost.as_str() {
+                let _ = writeln!(stdout, "{REOPEN_ACCEPTANCE}");
+            }
             tracing::info!(event = "fight.void_applied");
         }
         Err(VoidFailure::Refused(code)) => {
@@ -503,6 +519,7 @@ async fn write_void(
     let request = VoidRequest {
         id: command.fight,
         previous_binary: command.previous_binary.is_some(),
+        backup_checked: command.backup_checked,
     };
     let reason = sealed::void_fight(&mut *tx, &request, compute, hook).await?;
     let (bets_refunded, coins_refunded) = refund_totals(&mut *tx, command.fight).await?;
@@ -510,6 +527,7 @@ async fn write_void(
         "reason": reason.as_str(),
         "bets_refunded": bets_refunded,
         "coins_refunded": coins_refunded,
+        "backup_checked": command.backup_checked,
     });
     if let Some(tag) = &command.previous_binary {
         payload["previous_binary"] = serde_json::json!(tag.as_str());

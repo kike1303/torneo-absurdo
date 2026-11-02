@@ -297,7 +297,11 @@ Comprobé su spec en esa rama, que todavía solo tiene documentos.
 Sin cambios en workflows. El job `rust` suma unas decenas de tests de integración con base propia, sin esperas largas. El tiempo real se reporta en el PR. `e2e` suma un caso de `home.spec.ts`. `check-workflows` no cambia.
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+- **El `CASE` del guard va entre paréntesis (paso 5).** El SQL aprobado no compila: PL/pgSQL termina la condición de un `IF` en el primer `THEN` fuera de paréntesis, y el `THEN` del `CASE` cerraba el `IF` (`syntax error at end of input`). La lógica es la misma.
+- **`fights_reveal_ck` usa `IS NOT DISTINCT FROM` (paso 5).** El plan decía `void_reason = 'secret_lost' AND revealed_seed IS NULL`. Con `void_reason` nulo y sin semilla, esa expresión da `NULL`, y un `CHECK` deja pasar un `NULL`: una `decided` sin semilla habría pasado la segunda barrera. `the_checks_are_the_second_barrier` lo fija con el guard apagado.
+- **El enum de `public_verifier` se llama `Verification`,** no `Verified`, porque `Verified::Verified` no dice nada. La forma `Result<_, String>` es la del plan.
+- **`VoidReason::as_str` entra en el paso 4,** no en el 5: `write_voided` lo necesita. No cambia los tipos generados.
+- **RF19 y RF20 van en `tests/secret_lost.rs`,** un archivo nuevo, y no en `fight_void.rs` y `fights_schema.rs`, porque comparten el fixture de una sola transacción.
 
 ## Revisión
 ### architect — 2026-11-02 — REQUEST_CHANGES

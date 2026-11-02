@@ -74,6 +74,7 @@ fn command(id: i32, by: Uuid, previous: bool) -> VoidCommand {
         fight: id,
         by,
         previous_binary: previous.then(|| BinaryTag::parse("v1.2.3").unwrap()),
+        backup_checked: false,
     }
 }
 
@@ -209,13 +210,177 @@ async fn a_secret_that_differs_is_refused() {
     w.refused(bad, real(), true, "void.secret_mismatch").await;
 }
 
-/// Until `secret_lost`, a secret that is gone is one more refusal.
+/// The hour of the database: `T0` is ahead of it, and the deadline of RF19 reads it.
+async fn db_now(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("SELECT (extract(epoch FROM now()) * 1000)::bigint")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// Rows 6 to 8, by a separate connection as the CLI has: a lost secret with an emission possible, in
+/// both states; past the deadline, without the flag and with it. RF19 to the millisecond is in
+/// `secret_lost.rs`, where `now()` holds still.
 #[tokio::test]
-async fn a_secret_that_is_gone_is_refused() {
+async fn a_lost_secret_waits_for_the_deadline_and_the_backup() {
     let w = world().await;
-    let id = w.closed(0, &Vector::of(KO)).await;
+    let vector = Vector::of(KO);
+    let now = db_now(&w.pool).await;
+    let void_with_backup = |id: i32| VoidCommand {
+        backup_checked: true,
+        ..command(id, w.admin, false)
+    };
+    let refused_with_backup = |id: i32, code: &'static str| {
+        let w = &w;
+        let command = void_with_backup(id);
+        async move {
+            let before = written(&w.pool).await;
+            assert_eq!(
+                w.void_with(&command, real(), &BetsHook).await,
+                Err(VoidFailure::Refused(code)),
+                "{code}"
+            );
+            assert_eq!(written(&w.pool).await, before, "{code}");
+        }
+    };
+    // In `betting_closed`, `live_at` rules, and it is ahead.
+    let opens = now - f::WINDOW;
+    let closed = f::announce(&w.pool, opens, &vector.a, &vector.b).await;
+    f::open_with(&w.pool, closed, &vector.seed, opens).await;
+    f::close_by_sql(&w.pool, closed, opens + f::WINDOW).await;
+    f::lose_secret(&w.pool, closed).await;
+    w.refused(closed, real(), true, "void.emission_possible")
+        .await;
+    refused_with_backup(closed, "void.emission_possible").await;
+
+    // In `live`, it counts from `live_started_at`, which is what the row says, not `live_at`.
+    let opens = now - 100 * f::CADENCE;
+    let live = f::announce(&w.pool, opens, &vector.a, &vector.b).await;
+    f::open_with(&w.pool, live, &vector.seed, opens).await;
+    f::close_by_sql(&w.pool, live, opens + f::WINDOW).await;
+    f::live_by_sql(&w.pool, live, now - 1000).await;
+    f::lose_secret(&w.pool, live).await;
+    refused_with_backup(live, "void.emission_possible").await;
+
+    // Past it, the flag is what is left.
+    let opens = now - 200 * f::CADENCE;
+    let gone = f::announce(&w.pool, opens, &vector.a, &vector.b).await;
+    f::open_with(&w.pool, gone, &vector.seed, opens).await;
+    let (a, b) = (
+        bets::funded_user(&w.pool, 1000).await,
+        bets::funded_user(&w.pool, 1000).await,
+    );
+    for (user, side, stake) in [(a, "a", 7), (a, "a", 5), (b, "b", 9)] {
+        bets::seed_bet(&w.pool, gone, user, side, stake).await;
+    }
+    f::close_by_sql(&w.pool, gone, opens + f::WINDOW).await;
+    f::lose_secret(&w.pool, gone).await;
+    w.refused(gone, real(), true, "void.backup_not_checked")
+        .await;
+
+    // RF18: the refund and the audit of `secret_lost`, and the only final without a seed.
+    w.void_with(&void_with_backup(gone), real(), &BetsHook)
+        .await
+        .unwrap();
+    let fight = row(&w.pool, gone).await;
+    assert_eq!(
+        fight.final_result(),
+        Some(FightFinal::Voided {
+            reason: VoidReason::SecretLost
+        })
+    );
+    assert_eq!(fight.revealed_seed, None);
+    assert_eq!(fight.log, None);
+    assert_eq!(ledger::balance(&w.pool, a).await.unwrap(), Coins(1000));
+    assert_eq!(ledger::balance(&w.pool, b).await.unwrap(), Coins(1000));
+    assert_eq!(bets::escrow(&w.pool).await, 0);
+    let (actor, admin, action, payload) = audit(&w.pool, gone).await;
+    assert_eq!(
+        (actor.as_str(), action.as_str()),
+        ("cli_attributed", "fight_void")
+    );
+    assert_eq!(admin, Some(w.admin));
+    assert_eq!(payload["reason"], "secret_lost");
+    assert_eq!(payload["backup_checked"], true);
+    assert_eq!(payload["bets_refunded"], 3);
+    assert_eq!(payload["coins_refunded"], 21);
+}
+
+/// Only after the refusals: the version wins, and a secret that differs is never lost, past the
+/// deadline and with the flag.
+#[tokio::test]
+async fn secret_lost_comes_after_the_other_refusals() {
+    let w = world().await;
+    let vector = Vector::of(KO);
+    let now = db_now(&w.pool).await;
+    let flagged = |id: i32| VoidCommand {
+        backup_checked: true,
+        ..command(id, w.admin, true)
+    };
+    let opens = now - 100 * f::CADENCE;
+    let version = f::announce_with(&w.pool, opens, &vector.a, &vector.b, |raw| {
+        raw.ruleset_version = 999;
+    })
+    .await;
+    f::open_with(&w.pool, version, &vector.seed, opens).await;
+    f::close_by_sql(&w.pool, version, opens + f::WINDOW).await;
+    f::lose_secret(&w.pool, version).await;
+    assert_eq!(
+        w.void_with(&flagged(version), real(), &BetsHook).await,
+        Err(VoidFailure::Refused("void.version_missing"))
+    );
+    let opens = now - 200 * f::CADENCE;
+    let other = f::announce(&w.pool, opens, &vector.a, &vector.b).await;
+    f::open_with(&w.pool, other, &vector.seed, opens).await;
+    f::close_by_sql(&w.pool, other, opens + f::WINDOW).await;
+    f::replace_secret(&w.pool, other, &[9; 32]).await;
+    assert_eq!(
+        w.void_with(&flagged(other), real(), &BetsHook).await,
+        Err(VoidFailure::Refused("void.secret_mismatch"))
+    );
+    assert_eq!(row(&w.pool, other).await.void_reason, None);
+}
+
+/// 010 RF59 with `secret_lost`: the runner is in a safe stop, for good without this exit. The halt
+/// goes, and the final reaches the board, which only happens if the protocol can read it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_runner_sees_a_lost_secret_voided() {
+    let w = world().await;
+    let vector = Vector::of(KO);
+    let now = db_now(&w.pool).await;
+    let opens = now - 100 * f::CADENCE;
+    let id = f::announce(&w.pool, opens, &vector.a, &vector.b).await;
+    f::open_with(&w.pool, id, &vector.seed, opens).await;
+    f::close_by_sql(&w.pool, id, opens + f::WINDOW).await;
     f::lose_secret(&w.pool, id).await;
-    w.refused(id, real(), true, "void.secret_missing").await;
+    let (settings, clock) = f::settings_at(now);
+    let (shared, _runner) = f::start(&w.pool, &settings);
+    wait_for("the halt", || async {
+        shared.current().halted == Some(true)
+    })
+    .await;
+    w.void_with(
+        &VoidCommand {
+            backup_checked: true,
+            ..command(id, w.admin, false)
+        },
+        real(),
+        &BetsHook,
+    )
+    .await
+    .unwrap();
+    wait_for("the end of the halt and the final", || async {
+        clock.advance(2000);
+        let board = shared.current();
+        board.halted == Some(false)
+            && board.last.is_some_and(|last| {
+                last.final_result
+                    == Some(FightFinal::Voided {
+                        reason: VoidReason::SecretLost,
+                    })
+            })
+    })
+    .await;
 }
 
 /// Row 9: a hash or a slug that differ, on the bytes and without the engine. Bytes that do not even

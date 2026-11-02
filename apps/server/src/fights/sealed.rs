@@ -490,6 +490,8 @@ pub struct VoidRequest {
     pub id: i32,
     /// `--previous-binary` was declared (RF24).
     pub previous_binary: bool,
+    /// `--backup-checked` was declared (RF24).
+    pub backup_checked: bool,
 }
 
 /// Why a fight is not voided: the rows of 012 RF17 after the first one, which is of `admin.rs`.
@@ -499,7 +501,8 @@ pub enum VoidRefusal {
     BadState,
     VersionMissing,
     SecretMismatch,
-    SecretMissing,
+    EmissionPossible,
+    BackupNotChecked,
     BinaryProblem,
     FightHealthy,
     NoEnd,
@@ -514,7 +517,8 @@ impl VoidRefusal {
             Self::BadState => "void.bad_state",
             Self::VersionMissing => "void.version_missing",
             Self::SecretMismatch => "void.secret_mismatch",
-            Self::SecretMissing => "void.secret_missing",
+            Self::EmissionPossible => "void.emission_possible",
+            Self::BackupNotChecked => "void.backup_not_checked",
             Self::BinaryProblem => "void.binary_problem",
             Self::FightHealthy => "void.fight_healthy",
             Self::NoEnd => "void.no_end",
@@ -577,8 +581,8 @@ async fn engine_verdict(
 
 /// The exit of an unrecoverable fight (012 RF16 to RF18, 010 RF59), in the caller's transaction, which
 /// must have a `lock_timeout` and must revert on any error. Evaluates in the order of RF17 and deduces
-/// the reason, which nobody chooses. If one applies, it writes the final, publishes the seed, removes
-/// its row and calls the hook, which refunds.
+/// the reason, which nobody chooses. If one applies, it writes the final, publishes the seed and
+/// removes its row, unless the row is what was lost, and calls the hook, which refunds.
 ///
 /// # Errors
 /// [`VoidError`].
@@ -603,27 +607,39 @@ pub async fn void_fight(
         .seed_commit
         .as_deref()
         .ok_or(VoidRefusal::SecretMismatch)?;
-    let seed = match SealedSeed::load(&mut *conn, id, commit).await {
-        Ok(seed) => seed,
-        Err(SecretError::Missing) => return Err(VoidRefusal::SecretMissing.into()),
+    let (reason, seed) = match SealedSeed::load(&mut *conn, id, commit).await {
+        Ok(seed) if snapshot::stored_bytes_error(&row).is_some() => {
+            (VoidReason::SnapshotInvalid, Some(seed))
+        }
+        Ok(seed) => {
+            let snapshot = FightSnapshot::from_row(&row).map_err(|_| VoidRefusal::BinaryProblem)?;
+            let seed = engine_verdict(&mut *conn, request, commit, seed, snapshot, window, compute)
+                .await?;
+            (VoidReason::EngineError, Some(seed))
+        }
+        // A secret that does not match its commit is never `secret_lost`.
         Err(SecretError::Mismatch) => return Err(VoidRefusal::SecretMismatch.into()),
         Err(SecretError::Db(error)) => return Err(error.into()),
+        Err(SecretError::Missing) => {
+            if !store::secret_lost_due(&mut *conn, id).await? {
+                return Err(VoidRefusal::EmissionPossible.into());
+            }
+            if !request.backup_checked {
+                return Err(VoidRefusal::BackupNotChecked.into());
+            }
+            (VoidReason::SecretLost, None)
+        }
     };
-    let (reason, seed) = if snapshot::stored_bytes_error(&row).is_some() {
-        (VoidReason::SnapshotInvalid, seed)
-    } else {
-        let snapshot = FightSnapshot::from_row(&row).map_err(|_| VoidRefusal::BinaryProblem)?;
-        let seed =
-            engine_verdict(&mut *conn, request, commit, seed, snapshot, window, compute).await?;
-        (VoidReason::EngineError, seed)
-    };
-    if !store::write_voided(&mut *conn, id, reason, Some(seed.bytes.as_slice())).await? {
+    let bytes = seed.as_ref().map(|seed| seed.bytes.as_slice());
+    if !store::write_voided(&mut *conn, id, reason, bytes).await? {
         return Err(VoidRefusal::BadState.into());
     }
-    sqlx::query("DELETE FROM fight_secrets WHERE fight_id = $1")
-        .bind(id)
-        .execute(&mut *conn)
-        .await?;
+    if seed.is_some() {
+        sqlx::query("DELETE FROM fight_secrets WHERE fight_id = $1")
+            .bind(id)
+            .execute(&mut *conn)
+            .await?;
+    }
     let fight = SettlingFight {
         id,
         final_result: FightFinal::Voided { reason },

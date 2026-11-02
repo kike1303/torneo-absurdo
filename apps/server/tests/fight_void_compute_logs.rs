@@ -53,6 +53,7 @@ fn an_engine_error_does_not_log_its_seed() {
             fight: id,
             by: admin,
             previous_binary: Some(BinaryTag::parse("v1.2.3").unwrap()),
+            backup_checked: false,
         };
         run_fight_void(&db.options(), &command, Arc::new(EventLimit), &BetsHook)
             .await

@@ -168,6 +168,54 @@ async fn the_binary_applies_and_refuses_with_clean_logs() {
     }
 }
 
+/// RF18 and RF24: a `secret_lost` by the binary: its two lines, the flag it asks for first, and no
+/// id nor seed in the logs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_binary_voids_a_lost_secret() {
+    bin::warm_up().await;
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let url = db.url();
+    let vector = Vector::of(KO);
+    let admin = admin_of(&pool).await;
+    let by = admin.to_string();
+    let now: i64 = sqlx::query_scalar("SELECT (extract(epoch FROM now()) * 1000)::bigint")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    for (slot, level) in (1_i64..).zip(LEVELS) {
+        let opens = now - slot * 10 * f::CADENCE;
+        let id = f::announce(&pool, opens, &vector.a, &vector.b).await;
+        f::open_with(&pool, id, &vector.seed, opens).await;
+        f::close_by_sql(&pool, id, opens + f::WINDOW).await;
+        f::lose_secret(&pool, id).await;
+        let id = id.to_string();
+        let envs = [("DATABASE_URL", url.as_str()), ("RUST_LOG", level)];
+        let done = run(&["fight", "void", &id, "--by", &by], &envs).await;
+        assert_eq!(done.status.code(), Some(1), "{level}");
+        assert_eq!(output(&done), ["void.backup_not_checked"], "{level}");
+        assert_event(
+            &done,
+            "fight.void_refused",
+            Some("void.backup_not_checked"),
+            level,
+        );
+        let done = run(
+            &["fight", "void", &id, "--by", &by, "--backup-checked"],
+            &envs,
+        )
+        .await;
+        assert_eq!(done.status.code(), Some(0), "{level}: {:?}", done.stdout);
+        assert_eq!(
+            output(&done),
+            ["void.applied secret_lost", server::admin::REOPEN_ACCEPTANCE],
+            "{level}"
+        );
+        assert_event(&done, "fight.void_applied", None, level);
+        assert_clean(&done, &vector, admin, level);
+    }
+}
+
 /// RF16: only `DATABASE_URL` and `RUST_LOG`, and a failure that is not a refusal says so: exit 1, its
 /// own event with its kind, no line of output, and nothing written.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -231,7 +279,13 @@ async fn the_help_documents_the_command() {
     let done = run(&["admin", "--help"], &[]).await;
     assert_eq!(done.status.code(), Some(0));
     let text = done.stdout.join("\n");
-    for words in ["server fight void", "--by", "--previous-binary", "deduced"] {
+    for words in [
+        "server fight void",
+        "--by",
+        "--previous-binary",
+        "--backup-checked",
+        "deduced",
+    ] {
         assert!(text.contains(words), "{words}");
     }
 }

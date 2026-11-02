@@ -101,6 +101,9 @@ impl CancelReason {
 pub enum VoidReason {
     SnapshotInvalid,
     EngineError,
+    /// The row of the secret is gone: there is no seed to publish, and the fight stays unverified (012
+    /// RF19, amendment of ADR-0002).
+    SecretLost,
 }
 
 impl VoidReason {
@@ -110,6 +113,7 @@ impl VoidReason {
         match self {
             Self::SnapshotInvalid => "snapshot_invalid",
             Self::EngineError => "engine_error",
+            Self::SecretLost => "secret_lost",
         }
     }
 
@@ -119,6 +123,7 @@ impl VoidReason {
         match text {
             "snapshot_invalid" => Some(Self::SnapshotInvalid),
             "engine_error" => Some(Self::EngineError),
+            "secret_lost" => Some(Self::SecretLost),
             _ => None,
         }
     }
@@ -328,6 +333,12 @@ mod tests {
                 },
                 r#"{"kind":"voided","reason":"engine_error"}"#,
             ),
+            (
+                FightFinal::Voided {
+                    reason: VoidReason::SecretLost,
+                },
+                r#"{"kind":"voided","reason":"secret_lost"}"#,
+            ),
         ];
         for (value, json) in cases {
             assert_eq!(serde_json::to_string(&value).unwrap(), json);
@@ -368,7 +379,11 @@ mod tests {
             Some(VoidReason::EngineError)
         );
         assert_eq!(VoidReason::parse("other"), None);
-        for reason in [VoidReason::SnapshotInvalid, VoidReason::EngineError] {
+        for reason in [
+            VoidReason::SnapshotInvalid,
+            VoidReason::EngineError,
+            VoidReason::SecretLost,
+        ] {
             assert_eq!(VoidReason::parse(reason.as_str()), Some(reason));
             assert_eq!(
                 serde_json::to_string(&reason).unwrap(),

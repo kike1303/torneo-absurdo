@@ -4,4 +4,4 @@
 /**
  * Why a fight was voided (RF59). Only the CLI of TA-27 writes it; the server only reads it.
  */
-export type VoidReason = 'snapshot_invalid' | 'engine_error';
+export type VoidReason = 'snapshot_invalid' | 'engine_error' | 'secret_lost';

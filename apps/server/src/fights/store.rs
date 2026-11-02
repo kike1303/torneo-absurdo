@@ -418,6 +418,19 @@ pub(super) async fn lock_for_void(
     Ok(Some((row, window)))
 }
 
+/// Whether the deadline of `secret_lost` went by (012 RF19), with the function and the `now()` of the
+/// guard: the command and the database read the same hour and cannot disagree. `now()` is the start
+/// of the transaction, so waiting for a lock makes this refuse more, never less.
+pub(super) async fn secret_lost_due(conn: &mut PgConnection, id: i32) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT now() >= fight_secret_lost_deadline(live_started_at, live_at, max_duration_ms) \
+         FROM fights WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_one(conn)
+    .await
+}
+
 /// `betting_closed` or `live` → `settled` with `voided`, in the transaction of `sealed::void_fight`,
 /// with the hour of the database: the CLI has no clock of the fights. `false` if the row is in another
 /// state.
