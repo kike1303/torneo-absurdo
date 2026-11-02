@@ -167,7 +167,7 @@ Se entrega en dos fases, con un PR y un plan cada una:
   - `check-rust` corre también `cargo test -p engine --test golden --target wasm32-wasip1 --locked`, con `CARGO_TARGET_WASM32_WASIP1_RUNNER` apuntando a `scripts/wasi-runner.mjs`. El runner usa `node:wasi`, sin wasmtime ni crates nuevos, sin `preopens` y con `env: {}`. Así, los **mismos** dorados de RF16 pasan en nativo y en WASM, y la igualdad byte a byte queda demostrada contra los mismos archivos (con `include_bytes!` no hace falta sistema de archivos).
 
   El runner convierte un trap (`panic = abort`) en el código de salida 101.
-- **RF19.** `crates/engine-wasm` (mínimo) es un `cdylib` con `wasm-bindgen` (`=0.2.129`, ya en el lock). Exporta una sola función:
+- **RF19.** *(Enmienda de la spec de 011, RF3 y RF4: exporta dos funciones. La segunda es `ruleset_bounds(ruleset_version: u16) -> Result<String, JsError>`, para comprobar las cotas sin copiar datos del motor, y un Vitest fija esa superficie con `WebAssembly.Module.exports`.)* `crates/engine-wasm` (mínimo) es un `cdylib` con `wasm-bindgen` (`=0.2.129`, ya en el lock). Exporta una sola función:
   ```rust
   simulate(seed_hex: &str, a_json: &str, b_json: &str, ruleset_version: u16) -> Result<String, JsError>
   ```
