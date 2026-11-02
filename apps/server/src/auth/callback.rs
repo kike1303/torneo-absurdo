@@ -33,15 +33,15 @@ use crate::net::{ClientContext, IpKey, LocalAddr};
 use crate::sessions::{self, Issued, TokenHash, UaFamily};
 
 /// The login page with an error code from the closed list: the only place that builds this
-/// `Location` (the callback errors and a logout that could not revoke).
+/// `Location` (the callback errors and a logout that could not revoke or proved no session).
 pub fn error_location(code: CallbackErrorCode) -> HeaderValue {
     let location = format!("/login?error={}", code.as_str());
     HeaderValue::from_str(&location).unwrap_or(HeaderValue::from_static("/"))
 }
 
 /// The login page with no query: where `link` without a session (008 "Enmienda 2026-10-30" of
-/// RF-C2) and `logout-all` without one (TA-30) send the browser. Built here, beside
-/// [`error_location`], so every `Location` to the login page has one home.
+/// RF-C2) sends the browser. Built here, beside [`error_location`], so every `Location` to the
+/// login page has one home.
 pub fn login_location() -> HeaderValue {
     HeaderValue::from_static("/login")
 }

@@ -5,6 +5,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use sqlx::PgPool;
+use sqlx::migrate::Migrator;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use tokio::time::Instant;
 
@@ -129,12 +130,34 @@ where
     }
 }
 
-/// Runs the embedded migrations (`apps/server/migrations`).
+/// Runs the embedded migrations (`apps/server/migrations`). A version this image does not know
+/// is what a rollback leaves behind, so it does not stop the start (ADR-0006 D10, TA-43): it is
+/// logged at every start. Another checksum in a known version, or a row marked as failed, still
+/// stop it.
 pub async fn migrate(pool: &PgPool) -> Result<(), StartupError> {
-    sqlx::migrate!("./migrations").run(pool).await.map_err(|_| {
+    let mut migrator = sqlx::migrate!("./migrations");
+    migrator.set_ignore_missing(true);
+    let migrated = migrator.run(pool).await.is_ok() && warn_if_ahead(pool, &migrator).await.is_ok();
+    if !migrated {
         tracing::error!(event = "db.migrate_failed");
-        StartupError::Migrate
-    })
+        return Err(StartupError::Migrate);
+    }
+    Ok(())
+}
+
+/// Logs `db.migrations_ahead` if the database has versions that `migrator` does not know.
+async fn warn_if_ahead(pool: &PgPool, migrator: &Migrator) -> Result<(), sqlx::Error> {
+    let known: Vec<i64> = migrator.iter().map(|m| m.version).collect();
+    let ahead: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM _sqlx_migrations WHERE version <> ALL($1))",
+    )
+    .bind(&known)
+    .fetch_one(pool)
+    .await?;
+    if ahead {
+        tracing::warn!(event = "db.migrations_ahead");
+    }
+    Ok(())
 }
 
 /// Boxed future returned by [`DbProbe::ping`].
