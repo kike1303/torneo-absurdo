@@ -3,6 +3,7 @@
   import * as Card from '#lib/components/ui/card/index.js';
   import type { FighterDisplay } from '#lib/features/fight/live/fighter-names.js';
   import type { FightResult } from '#lib/features/fight/live/view-state.js';
+  import type { VoidStats } from '#lib/features/fight/live/void-stats.js';
   import type { Locale } from '#lib/i18n/locale.js';
   import { m } from '#lib/paraglide/messages.js';
 
@@ -12,9 +13,11 @@
     previous: boolean;
     display: (slug: string, locale: Locale) => FighterDisplay;
     locale: Locale;
+    /** The public counter (012 RF23), with a fight that cannot be verified. */
+    voidStats?: VoidStats | null;
   }
 
-  let { result, previous, display, locale }: Props = $props();
+  let { result, previous, display, locale, voidStats = null }: Props = $props();
 
   const nameA = $derived(display(result.fight.a.slug, locale).name);
   const nameB = $derived(display(result.fight.b.slug, locale).name);
@@ -33,6 +36,8 @@
         return m.fight_result_cancelled();
       case 'voided':
         return m.fight_result_voided();
+      case 'voided_unverifiable':
+        return m.fight_result_voided_unverifiable();
     }
   });
 </script>
@@ -44,5 +49,13 @@
     {/if}
     <p class="text-sm text-muted-foreground">{nameA} {m.fight_view_versus()} {nameB}</p>
     <p class="font-display text-lg font-semibold" data-testid="fight-result-text">{text}</p>
+    {#if result.kind === 'voided_unverifiable' && voidStats !== null}
+      <p class="text-sm text-muted-foreground" data-testid="fight-result-void-count">
+        {m.fight_result_void_count({
+          voided: voidStats.voided,
+          secret_lost: voidStats.secret_lost,
+        })}
+      </p>
+    {/if}
   </Card.Content>
 </Card.Root>

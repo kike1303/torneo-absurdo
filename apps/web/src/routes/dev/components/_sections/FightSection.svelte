@@ -95,6 +95,13 @@
     display={fighterDisplay}
     {locale}
   />
+  <FightResultCard
+    result={{ fight, kind: 'voided_unverifiable', winner: null }}
+    previous={true}
+    display={fighterDisplay}
+    {locale}
+    voidStats={{ voided: 4, secret_lost: 1 }}
+  />
 </Section>
 
 <Section title="Fight notices" id="fight-notices">

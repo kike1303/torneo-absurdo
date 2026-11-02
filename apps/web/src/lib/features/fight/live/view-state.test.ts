@@ -43,6 +43,7 @@ const settled = (id: number, final: FightFinal, t = 0) =>
 const KO: FightFinal = { kind: 'decided', winner: 'a', reason: 'ko' };
 const DRAW: FightFinal = { kind: 'decided', winner: null, reason: 'draw' };
 const VOIDED: FightFinal = { kind: 'voided', reason: 'engine_error' };
+const SECRET_LOST: FightFinal = { kind: 'voided', reason: 'secret_lost' };
 const CANCELLED: FightFinal = { kind: 'cancelled', reason: 'missed_window' };
 
 function board(over: Partial<FightsCurrent> = {}): FightsCurrent {
@@ -379,6 +380,24 @@ describe('viewState: the cases of the review', () => {
       stage: 'none',
       result: { kind: 'voided' },
     });
+  });
+
+  it('a fight voided with its secret lost has its own result, at once', () => {
+    const summary = settled(2, SECRET_LOST, 5000);
+    const w = watched(summary, 5000);
+    expect(view({ board: board({ last: summary }), watched: w })).toMatchObject({
+      kind: 'result',
+      stage: 'none',
+      result: { kind: 'voided_unverifiable', winner: null },
+    });
+    expect(view({ board: board({ last: summary }) }).result?.kind).toBe('voided_unverifiable');
+  });
+
+  it('a voided fight of any other reason stays voided', () => {
+    for (const reason of ['engine_error', 'snapshot_invalid'] as const) {
+      const summary = settled(2, { kind: 'voided', reason });
+      expect(view({ board: board({ last: summary }) }).result?.kind).toBe('voided');
+    }
   });
 
   it('a watched fight left without events by ws.forbidden_channel: same rule', () => {

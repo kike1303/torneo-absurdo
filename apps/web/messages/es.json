@@ -193,6 +193,8 @@
   "fight_result_draw": "Empate",
   "fight_result_cancelled": "No se disputó",
   "fight_result_voided": "Anulada por un problema técnico",
+  "fight_result_voided_unverifiable": "Anulada: se devolvió lo apostado y no se puede verificar",
+  "fight_result_void_count": "Peleas anuladas: {voided}. Sin poder verificar: {secret_lost}",
   "fight_notice_degraded": "No pudimos conectarte en vivo; seguimos intentando. El resultado aparecerá aquí.",
   "fight_notice_playback_error": "No pudimos mostrar la animación. El resultado aparecerá aquí.",
   "fight_notice_no_animation": "Este navegador no puede mostrar la animación.",

@@ -301,6 +301,9 @@ Sin cambios en workflows. El job `rust` suma unas decenas de tests de integraci�
 - **`fights_reveal_ck` usa `IS NOT DISTINCT FROM` (paso 5).** El plan decía `void_reason = 'secret_lost' AND revealed_seed IS NULL`. Con `void_reason` nulo y sin semilla, esa expresión da `NULL`, y un `CHECK` deja pasar un `NULL`: una `decided` sin semilla habría pasado la segunda barrera. `the_checks_are_the_second_barrier` lo fija con el guard apagado.
 - **El enum de `public_verifier` se llama `Verification`,** no `Verified`, porque `Verified::Verified` no dice nada. La forma `Result<_, String>` es la del plan.
 - **`VoidReason::as_str` entra en el paso 4,** no en el 5: `write_voided` lo necesita. No cambia los tipos generados.
+- **`apps/web/tests/routes/home.test.ts` cambia (paso 7),** y el plan no lo lista: compara la forma exacta de `load`, que ahora suma `voidStats`. Los tres casos existentes suman ese campo en `null`, y hay dos casos nuevos: solo una `secret_lost` lee el contador, y si falla no se lleva el tablero.
+- **`FightHome` y `FightResultCard` importan `VoidStats` de `void-stats.ts`,** no de `@torneo/protocol`: `tests/fight-boundary.test.ts` no deja que un archivo importe a la vez del protocolo y del renderer.
+- **`apps/server/tests/startup.rs` suma las dos migraciones (pasos 1 y 5),** y el plan no lo lista: fija la lista exacta de versiones aplicadas, y cada feature con migración la amplía. Cada versión entra en el commit de su migración.
 - **RF19 y RF20 van en `tests/secret_lost.rs`,** un archivo nuevo, y no en `fight_void.rs` y `fights_schema.rs`, porque comparten el fixture de una sola transacción.
 
 ## Revisión
