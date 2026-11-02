@@ -103,7 +103,7 @@ export function adoptsCurrent(current: FightSummary | null, watched: Watched | n
   );
 }
 
-function resultOfFinal(fight: FightSummary, final: FightFinal): FightResult {
+export function resultOfFinal(fight: FightSummary, final: FightFinal): FightResult {
   if (final.kind === 'cancelled') return { fight, kind: 'cancelled', winner: null };
   if (final.kind === 'voided') return { fight, kind: 'voided', winner: null };
   return { fight, kind: final.reason, winner: final.winner };

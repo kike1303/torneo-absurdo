@@ -57,7 +57,11 @@
     displayNames?: Readonly<Record<Side, string>>;
     /** Shows the result, "replay" and the status under the stage (the arena). */
     showResult?: boolean;
-    /** With `live`, every 250 ms: the way the host learns the result (010 plan-d decision 9). */
+    /**
+     * Every 250 ms: the way the host learns the result (010 plan-d decision 9). Without `live` too,
+     * until it is destroyed: a replay goes back after `finished`, and it survives a lost context
+     * (011 RF19, RF21). `/dev/arena` does not pass it, so nothing of that changes for it.
+     */
     onsnapshot?: (snapshot: RendererSnapshot | null) => void;
     /** With `live`: the first frame is on screen. */
     onpainted?: () => void;
@@ -123,6 +127,8 @@
   let contextLosses: number[] = [];
   /** How long each `extend` took, in ms, for the stats JSON (010 plan-c decision 13). */
   let extendSamples: number[] = [];
+  /** Where a replay stood when its context was lost: it comes back there, paused (011 RF21). */
+  let resumeT: number | null = null;
 
   function isPlaceholder(id: ArenaFighterId): id is PlaceholderFighterId {
     return Object.hasOwn(MANIFESTS, id);
@@ -195,7 +201,8 @@
     const read = (): void => {
       refresh();
       onsnapshot?.(snapshot);
-      if (snapshot?.phase === 'finished') {
+      // Only live has nothing after this; a replay can still go back (011 RF19).
+      if (live !== undefined && snapshot?.phase === 'finished') {
         clearInterval(snapshotTimer);
         snapshotTimer = undefined;
       }
@@ -215,6 +222,7 @@
         if (contextLosses.length >= MAX_CONTEXT_LOSSES) {
           fail(Object.assign(new Error('webgl_unavailable'), { code: 'webgl_unavailable' }));
         } else {
+          resumeT = live === undefined ? (snapshot?.t ?? null) : null;
           void start();
         }
       },
@@ -353,8 +361,13 @@
       }
       if (debug) handle.onCue(refresh);
       // Paused at `initialT` (TA-20): a load, or a change of fighters, never starts playback.
-      handle.seek(initialT);
+      handle.seek(resumeT ?? initialT);
+      resumeT = null;
       refresh();
+      if (onsnapshot !== undefined) {
+        watchSnapshots();
+        watchContext(container);
+      }
     } catch (error) {
       if (id !== run) return;
       fail(error);
@@ -378,6 +391,28 @@
     renderer.seek(0);
     renderer.play();
     refresh();
+  }
+
+  /**
+   * A jump from where the playback stands, keeping whether it plays (011 RF19). From `finished` it
+   * stays paused at that point: the end does not stop the playback by itself, so without the pause
+   * it would go on from there.
+   */
+  export function seekBy(ms: number): void {
+    if (renderer === null || live !== undefined) return;
+    const t = renderer.snapshot()?.t ?? 0;
+    if (phase === 'finished') renderer.pause();
+    renderer.seek(t + ms);
+    refresh();
+    onsnapshot?.(snapshot);
+  }
+
+  /** Straight to `finished` (011 RF19). */
+  export function seekToEnd(): void {
+    if (renderer === null || live !== undefined || loadedTimeline === null) return;
+    renderer.seek(loadedTimeline.duration_ms);
+    refresh();
+    onsnapshot?.(snapshot);
   }
 
   export function getFrameStats(): FrameStats | null {
