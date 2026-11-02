@@ -113,6 +113,7 @@ server fight void <fight_id> --by <admin_user_id> [--previous-binary <vX.Y.Z|sha
 - En local: `cargo run -p server -- fight void 12 --by <admin_user_id>`. En la imagen: `docker exec <contenedor> /server fight void …`. Lee solo `DATABASE_URL` y `RUST_LOG`.
 - **La razón se deduce, nunca se elige.** `--by` tiene que ser un `admin`, pero solo atribuye: quien corre el comando ya tiene la credencial de la base.
 - Corre en una transacción, con el final, el reembolso y una fila de `admin_audit` (`action = 'fight_void'`), y bloquea la fila de la pelea con `lock_timeout` de 5 s.
+- Todo el comando tiene un plazo de 120 s: una base que deja de responder termina en `fight.void_failed` con `error_kind = timeout`, no en un proceso colgado. Una anulación de 20 000 apuestas tardó unos 4 s en local. Si el plazo cae durante el `COMMIT`, la anulación pudo aplicarse: vuelve a correr el comando, y `void.bad_state` lo confirma sin reembolsar dos veces.
 
 **Salidas.** Una línea de texto fijo en stdout, sin semilla ni datos del log, y el evento con su código.
 
@@ -120,7 +121,7 @@ server fight void <fight_id> --by <admin_user_id> [--previous-binary <vX.Y.Z|sha
 |---|---|---|---|
 | 0 | `void.applied <razón>` | `fight.void_applied` | Aplicó. Tras un `secret_lost`, además `void.reopen_acceptance …` |
 | 1 | El código de abajo | `fight.void_refused` | Decidió que no. No escribió nada |
-| 1 | Ninguna | `fight.void_failed`, con `error_kind` | No decidió nada: la base no respondió, otra transacción retiene la fila, o falló el reembolso. Revirtió todo y se puede reintentar |
+| 1 | Ninguna | `fight.void_failed`, con `error_kind` | No decidió nada: la base no respondió o se pasó el plazo (`timeout`), otra transacción retiene la fila (`lock_timeout`), o falló el reembolso. Se puede reintentar |
 | 2 | Ninguna | `cli.invalid` | La línea de comandos no se entiende |
 
 **Negativas, en este orden:**
@@ -154,6 +155,16 @@ Esa anulación no se puede refutar nunca. El comando imprime un aviso, pero no p
 2. Pídele al owner que vuelva a decidir sobre la preocupación 1 de la spec de 010.
 
 La pelea sale en el contador público `GET /api/fights/void-stats`, y la vista la muestra como "no se puede verificar".
+
+### Antes de volver a una imagen anterior
+
+La migración es compatible hacia atrás, pero **los datos no** (ADR-0006 D10, "El esquema no es todo"). Una imagen anterior a esta fase no entiende una fila con `void_reason = 'secret_lost'`: esa pelea deja de tener resumen, así que `GET /api/fights/{id}` responde 503, y si es la última liquidada, `last` del tablero queda en `null`, con `/api/health` y `verify` en verde. Antes de un rollback, compruébalo:
+
+```
+psql "$DATABASE_URL" -c "SELECT id FROM fights WHERE void_reason = 'secret_lost'"
+```
+
+Con alguna fila, no vuelvas a esa imagen sin decidir antes qué hacer con esas peleas: no se reescriben, porque una fila `settled` no admite `UPDATE`.
 
 ### Nunca volver a un binario sin liquidación de apuestas
 
