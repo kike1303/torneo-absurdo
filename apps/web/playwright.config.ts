@@ -75,7 +75,7 @@ export default defineConfig({
     },
     {
       name: 'webkit-mobile',
-      use: { ...devices['iPhone 13 mini'] },
+      use: { ...devices['iPhone 13 Mini'] },
       testMatch: [AUTH],
     },
   ],

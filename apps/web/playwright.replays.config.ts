@@ -37,7 +37,8 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'], launchOptions: CHROMIUM_FLAGS },
       testMatch: [...DESKTOP, 'replays.spec.ts'],
-      grep: /(?:what it looks like|(?:csp|a11y|hydration)\.spec).*@replays/,
+      // Playwright joins the tag of a `describe` right after its title.
+      grep: /@replays.*what it looks like|(?:csp|a11y|hydration)\.spec.*@replays/,
     },
     {
       name: 'webkit',
@@ -58,7 +59,7 @@ export default defineConfig({
     },
     {
       name: 'webkit-mobile',
-      use: { ...devices['iPhone 13 mini'] },
+      use: { ...devices['iPhone 13 Mini'] },
       testMatch: ['replays.spec.ts'],
     },
   ],

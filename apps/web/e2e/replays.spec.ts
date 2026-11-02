@@ -579,6 +579,19 @@ test.describe('the replays', { tag: '@replays' }, () => {
       }
     }
 
+    test('screenshot at the end, on a phone with WebKit', async ({ page }, info) => {
+      test.skip(info.project.name !== 'webkit-mobile', 'the other engine has its own');
+      await page.goto(`/es/fights/${ID.ko}`);
+      await waitForHydration(page);
+      await expect(verdict(page)).toHaveAttribute('data-status', 'match', { timeout: 30_000 });
+      if (await stageUp(page)) {
+        await page.getByTestId('replay-end').click();
+        await expect(result(page)).toBeVisible();
+      }
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: `${SHOTS}/replay-webkit-finished-375.png`, fullPage: true });
+    });
+
     test('axe with the check open and the result shown', async ({ page }) => {
       await page.goto(`/es/fights/${ID.ko}`);
       await expect(verdict(page)).toHaveAttribute('data-status', 'match', { timeout: 30_000 });
