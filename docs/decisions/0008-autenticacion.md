@@ -27,7 +27,7 @@ supersedes: null
 linear: TA-5
 depends_on: ["0002", "0003", "0005", "0006", "0007"]
 created: 2026-10-20
-updated: 2026-10-30
+updated: 2026-11-02
 ---
 
 # ADR-0008: Autenticación y sesiones
@@ -331,6 +331,7 @@ Aprobada por el owner el 2026-10-28 (transmitida por la sesión coordinadora). R
   - nunca usa `next`.
 - **Lista cerrada de códigos.** `error` solo puede valer `auth.invalid_state`, `auth.banned`, `auth.provider_error`, `auth.try_again`, `auth.already_linked` o `auth.provider_already_linked`. Es un enum de `crates/protocol`, y el server nunca copia al `Location` nada que venga de la petición ni del proveedor.
   - *Ver la "Enmienda 2026-10-30: reautenticación para vincular, desvincular y admin" (security-reviewer firmó el 2026-10-30, ver "Revisión"): la lista suma `auth.reauth_required` y `auth.reauth_mismatch`, y son ocho códigos.*
+  - *Ver la Enmienda 2026-11-02 (TA-37) de RF-B5 en la spec de 008: suma `auth.sessions_not_closed`, de `logout-all` sin sesión válida, y son nueve.*
 - **En la web.** `/login` resuelve `error` a una llave i18n solo si está en la lista. Un valor desconocido se muestra con un texto genérico, y **nunca se refleja** en la página, en un atributo ni en un log.
 - **T4 adaptado.** Un callback sin `state`, con `state` reusado, expirado o de otra cookie responde 303 a `/login?error=auth.invalid_state`, sin `Set-Cookie` de sesión y con la cookie del flujo expirada. Un flujo `link` de otra sesión no vincula. T4 suma un caso nuevo: con un `error` ajeno a la lista en la query de `/login`, la página no contiene ese valor.
 

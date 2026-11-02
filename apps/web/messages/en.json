@@ -114,6 +114,7 @@
   "error_auth_last_provider": "You cannot unlink your only way to sign in.",
   "error_auth_reauth_required": "Confirm it is you to do this.",
   "error_auth_reauth_mismatch": "That is not the account you linked. Try again and choose the same account of that provider.",
+  "error_auth_sessions_not_closed": "Your session had already ended, so your other sessions are still open. Sign in and use “Sign out everywhere” in your account.",
   "error_profile_display_name_invalid": "Use 3 to 24 characters, without invisible or control characters.",
   "error_profile_display_name_reserved": "That name is reserved. Choose another one.",
   "error_profile_display_name_taken": "That name is taken. Choose another one.",
