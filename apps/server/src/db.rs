@@ -128,7 +128,8 @@ where
 
 /// Runs the embedded migrations (`apps/server/migrations`). A version this image does not know
 /// is what a rollback leaves behind, so it does not stop the start (ADR-0006 D10, TA-43): it is
-/// logged at every start. A failed migration or another checksum in a known one still stop it.
+/// logged at every start. Another checksum in a known version, or a row marked as failed, still
+/// stop it.
 pub async fn migrate(pool: &PgPool) -> Result<(), StartupError> {
     let mut migrator = sqlx::migrate!("./migrations");
     migrator.set_ignore_missing(true);

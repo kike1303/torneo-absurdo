@@ -1,6 +1,6 @@
 //! TA-43 (ADR-0006 D6 and D10): going back to the previous image after a migration. That image
-//! finds a version it does not know in `_sqlx_migrations` and must start, while the checks that
-//! protect the versions it does know still stop it.
+//! finds a version it does not know in `_sqlx_migrations` and must start, while another checksum
+//! in a version it does know still stops it.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod support;
@@ -14,6 +14,7 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 use support::bin;
 use support::db::TestDb;
+use support::http;
 
 /// Above every real migration, like the one a newer image brings.
 const NEWER: i64 = 99_990_101_000_000;
@@ -100,6 +101,9 @@ async fn the_previous_image_starts_after_a_newer_migration() {
         .expect("the start must say that the database is ahead");
     let log: serde_json::Value = serde_json::from_str(&line).unwrap();
     assert_eq!(log["level"], "warn", "{line}");
+    // What Coolify's healthcheck and `verify` look at, not only the port.
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    assert_eq!(http::get(addr, "/api/health").await.status, 200);
     process.kill().await;
 
     newer.migrate(&pool).await;
@@ -133,8 +137,9 @@ async fn the_normal_start_says_nothing_about_migrations() {
     process.kill().await;
 }
 
-/// A newer migration that failed halfway leaves the schema in an unknown state: not a rollback
-/// to tolerate, so the start stops.
+/// A row marked as failed is not a rollback to tolerate. sqlx 0.9 never writes one itself, so the
+/// test marks it by hand: this pins what the start does with it, not a failure it can detect
+/// (ADR-0006 D10, "Migración a medias").
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_newer_migration_still_stops_the_start() {
     let db = TestDb::create().await;
