@@ -21,7 +21,8 @@ function expectSecurityHeaders(res: RawResponse, label: string): void {
 // A B4 extension changes this table in its own PR (B4.6 below).
 const CSP_B1: Record<string, string[]> = {
   'default-src': ["'self'"],
-  'script-src': ["'self'", "'nonce-*'"],
+  // B4.1: the verification of a fight compiles engine-wasm (011 RF6).
+  'script-src': ["'self'", "'nonce-*'", "'wasm-unsafe-eval'"],
   'style-src': ["'self'", "'unsafe-inline'"],
   'img-src': ["'self'", 'data:', 'blob:'],
   'font-src': ["'self'"],
