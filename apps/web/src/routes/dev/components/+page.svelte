@@ -7,6 +7,7 @@
   import FormSection from './_sections/FormSection.svelte';
   import LayoutSection from './_sections/LayoutSection.svelte';
   import OverlaySection from './_sections/OverlaySection.svelte';
+  import ReplaySection from './_sections/ReplaySection.svelte';
 
   let { data } = $props();
 </script>
@@ -22,6 +23,7 @@
   <ButtonSection />
   <FormSection />
   <FightSection />
+  <ReplaySection />
   <DisplaySection />
   <OverlaySection />
   <ArenaSection />

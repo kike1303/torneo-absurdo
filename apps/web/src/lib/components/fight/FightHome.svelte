@@ -3,6 +3,7 @@
   // its decisions live in lib/features/fight/live (ADR-0009 D4).
   import type { RendererErrorCode, RendererSnapshot, Side } from '@torneo/renderer';
   import { Badge } from '#lib/components/ui/badge/index.js';
+  import { Button } from '#lib/components/ui/button/index.js';
   import type { FightDebug } from '#lib/features/fight/live/live-store.svelte.js';
   import type { FighterDisplay } from '#lib/features/fight/live/fighter-names.js';
   import type { TextScene } from '#lib/features/fight/live/text-scene.js';
@@ -94,7 +95,15 @@
   </h1>
 
   {#if degraded}
-    <FightNotice text={m.fight_notice_degraded()} testid="fight-notice-degraded" />
+    <FightNotice
+      text={m.fight_notice_degraded()}
+      testid="fight-notice-degraded"
+      link={{
+        href: `/${locale}/fights`,
+        text: m.replay_degraded_link(),
+        testid: 'fight-notice-degraded-link',
+      }}
+    />
   {/if}
   {#if view.kind === 'halted'}
     <FightNotice text={m.fight_view_halted()} testid="fight-halted" />
@@ -190,12 +199,20 @@
             previous={view.kind !== 'live'}
             {display}
             {locale}
+            replayHref={view.result.fight.state === 'settled'
+              ? `/${locale}/fights/${view.result.fight.id}`
+              : undefined}
           />
         {/if}
       </div>
       {#if view.kind !== 'live'}
         <p class="max-w-prose text-muted-foreground">{m.home_lead()}</p>
       {/if}
+      <div>
+        <Button variant="outline" href={`/${locale}/fights`} data-testid="fight-home-replays">
+          {m.replay_home_link()}
+        </Button>
+      </div>
     </div>
   </div>
 </section>
