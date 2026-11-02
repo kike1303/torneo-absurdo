@@ -104,6 +104,15 @@ pub enum VoidReason {
 }
 
 impl VoidReason {
+    /// The value of the `void_reason` column, the same string serde writes.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SnapshotInvalid => "snapshot_invalid",
+            Self::EngineError => "engine_error",
+        }
+    }
+
     /// The value with exactly this name.
     #[must_use]
     pub fn parse(text: &str) -> Option<Self> {
@@ -359,6 +368,13 @@ mod tests {
             Some(VoidReason::EngineError)
         );
         assert_eq!(VoidReason::parse("other"), None);
+        for reason in [VoidReason::SnapshotInvalid, VoidReason::EngineError] {
+            assert_eq!(VoidReason::parse(reason.as_str()), Some(reason));
+            assert_eq!(
+                serde_json::to_string(&reason).unwrap(),
+                format!("\"{}\"", reason.as_str())
+            );
+        }
     }
 
     #[test]

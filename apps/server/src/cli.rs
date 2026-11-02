@@ -1,6 +1,7 @@
 //! Subcommands (plan-b decision 2, plan-c decision 10): `server` / `server serve`,
 //! `server healthcheck`, `server admin grant|revoke|ban|unban <user_id>` and `server admin
-//! [<action>] --help` (009 RF17, the only text that is not a log or a code).
+//! [<action>] --help` (009 RF17, the only text that is not a log or a code), and `server fight void`
+//! (012 RF16).
 //! No error is ever formatted to stdout or stderr: failures become exit codes and, for `serve`
 //! and `admin`, a log line with a code (never an argument).
 
@@ -8,9 +9,13 @@ use std::ffi::OsString;
 use std::io::Write as _;
 use std::process::ExitCode;
 
-use crate::admin::{self, AdminCommand, AdminConfig};
+use std::sync::Arc;
+
+use crate::admin::{self, AdminCommand, AdminConfig, VoidCommand};
 use crate::app::{self, Settings, StartupError};
+use crate::bets::BetsHook;
 use crate::config::{Config, ConfigError};
+use crate::fights::sealed::RealCompute;
 use crate::shutdown;
 use crate::telemetry;
 
@@ -21,6 +26,7 @@ pub enum Command {
     Admin(AdminCommand),
     /// `admin --help` and `admin <action> --help`: no config and no connection.
     AdminHelp,
+    FightVoid(VoidCommand),
     Invalid,
 }
 
@@ -34,6 +40,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Command {
         [first, rest @ ..] if first == "admin" && admin::is_help(rest) => Command::AdminHelp,
         [first, rest @ ..] if first == "admin" => {
             AdminCommand::parse(rest).map_or(Command::Invalid, Command::Admin)
+        }
+        [first, second, rest @ ..] if first == "fight" && second == "void" => {
+            VoidCommand::parse(rest).map_or(Command::Invalid, Command::FightVoid)
         }
         _ => Command::Invalid,
     }
@@ -56,6 +65,9 @@ pub enum CliError {
     /// The admin command did not apply (a missing user or the database).
     #[error("the admin command failed")]
     Admin,
+    /// `fight void` refused, or failed before deciding (012 RF16).
+    #[error("the fight was not voided")]
+    FightVoid,
 }
 
 /// Exit code of each failure: 2 for a bad command line, 1 for everything else.
@@ -73,6 +85,7 @@ pub fn run_cli(command: Command) -> Result<(), CliError> {
             crate::healthcheck::run_from_env().map_err(|_| CliError::Healthcheck)
         }
         Command::Admin(command) => run_admin(&command),
+        Command::FightVoid(command) => run_fight_void(&command),
         Command::AdminHelp => {
             // A closed stdout changes nothing: the help has no effect to report.
             let _ = std::io::stdout().lock().write_all(admin::HELP.as_bytes());
@@ -89,7 +102,7 @@ pub fn run_cli(command: Command) -> Result<(), CliError> {
 }
 
 /// Only `DATABASE_URL` and `RUST_LOG`: an error in the config of `serve` never stops a ban.
-fn run_admin(command: &AdminCommand) -> Result<(), CliError> {
+fn admin_runtime() -> Result<(AdminConfig, tokio::runtime::Runtime), CliError> {
     let config = match AdminConfig::from_env() {
         Ok(config) => config,
         Err(error) => {
@@ -104,9 +117,27 @@ fn run_admin(command: &AdminCommand) -> Result<(), CliError> {
         .enable_all()
         .build()
         .map_err(|_| CliError::Runtime)?;
+    Ok((config, runtime))
+}
+
+fn run_admin(command: &AdminCommand) -> Result<(), CliError> {
+    let (config, runtime) = admin_runtime()?;
     runtime
         .block_on(admin::run(&config.database, command))
         .map_err(|_| CliError::Admin)
+}
+
+/// The real engine and the real hook, always: the only caller of `run_fight_void`.
+fn run_fight_void(command: &VoidCommand) -> Result<(), CliError> {
+    let (config, runtime) = admin_runtime()?;
+    runtime
+        .block_on(admin::run_fight_void(
+            &config.database,
+            command,
+            Arc::new(RealCompute),
+            &BetsHook,
+        ))
+        .map_err(|_| CliError::FightVoid)
 }
 
 fn run_serve() -> Result<(), CliError> {
@@ -232,6 +263,138 @@ mod tests {
             vec!["admin", "-h"],
         ] {
             assert_eq!(parse(args(&list)), Command::Invalid, "{list:?}");
+        }
+    }
+
+    fn void(list: &[&str]) -> VoidCommand {
+        match parse(args(list)) {
+            Command::FightVoid(command) => command,
+            other => panic!("{list:?} gave {other:?}"),
+        }
+    }
+
+    /// 012 RF16: the flags in any order, and the tags of RF24.
+    #[test]
+    fn the_forms_of_fight_void() {
+        let user = Uuid::parse_str(USER).unwrap();
+        let plain = void(&["fight", "void", "12", "--by", USER]);
+        assert_eq!(plain.fight, 12);
+        assert_eq!(plain.by, user);
+        assert_eq!(plain.previous_binary, None);
+        for tag in ["v1.2.3", "sha-abc1234"] {
+            for list in [
+                vec![
+                    "fight",
+                    "void",
+                    "12",
+                    "--by",
+                    USER,
+                    "--previous-binary",
+                    tag,
+                ],
+                vec![
+                    "fight",
+                    "void",
+                    "12",
+                    "--previous-binary",
+                    tag,
+                    "--by",
+                    USER,
+                ],
+            ] {
+                let command = void(&list);
+                assert_eq!(command.previous_binary.unwrap().as_str(), tag);
+                assert_eq!(command.by, user);
+            }
+        }
+        assert_eq!(
+            void(&["fight", "void", "2147483647", "--by", USER]).fight,
+            i32::MAX
+        );
+    }
+
+    #[test]
+    fn anything_else_about_fight_void_is_invalid() {
+        for list in [
+            vec!["fight"],
+            vec!["fight", "void"],
+            vec!["fight", "void", "1"],
+            vec!["fight", "void", "--by", USER],
+            vec!["fight", "void", "1", "--by"],
+            vec!["fight", "void", "1", "--by", "not-a-uuid"],
+            vec!["fight", "void", "0", "--by", USER],
+            vec!["fight", "void", "01", "--by", USER],
+            vec!["fight", "void", "+1", "--by", USER],
+            vec!["fight", "void", "-1", "--by", USER],
+            vec!["fight", "void", "2147483648", "--by", USER],
+            vec!["fight", "void", "1", "--by", USER, "--by", USER],
+            vec!["fight", "void", "1", "--by", USER, "--reason", "x"],
+            vec!["fight", "void", "1", "--by", USER, "extra"],
+            vec!["fight", "void", "1", "--by", USER, "--previous-binary"],
+            vec![
+                "fight",
+                "void",
+                "1",
+                "--by",
+                USER,
+                "--previous-binary",
+                "dev",
+            ],
+            vec![
+                "fight",
+                "void",
+                "1",
+                "--by",
+                USER,
+                "--previous-binary",
+                "1.2.3",
+            ],
+            vec![
+                "fight",
+                "void",
+                "1",
+                "--by",
+                USER,
+                "--previous-binary",
+                "sha-ABC1234",
+            ],
+            vec![
+                "fight",
+                "void",
+                "1",
+                "--by",
+                USER,
+                "--previous-binary",
+                "sha-abc123",
+            ],
+            vec!["fight", "cancel", "1", "--by", USER],
+            vec!["fight", "seed", "1", "--by", USER],
+            vec!["fight", "VOID", "1", "--by", USER],
+        ] {
+            assert_eq!(parse(args(&list)), Command::Invalid, "{list:?}");
+        }
+    }
+
+    /// ADR-0012 A8: its `Debug` shows neither the fight nor the admin.
+    #[test]
+    fn the_debug_of_fight_void_shows_nothing_of_it() {
+        let command = void(&[
+            "fight",
+            "void",
+            "987654",
+            "--by",
+            USER,
+            "--previous-binary",
+            "v9.8.7",
+        ]);
+        for shown in [
+            format!("{command:?}"),
+            format!("{:?}", Command::FightVoid(command)),
+        ] {
+            assert!(!shown.contains(USER), "{shown}");
+            assert!(!shown.contains(&USER.replace('-', "")), "{shown}");
+            assert!(!shown.contains("987654"), "{shown}");
+            assert!(!shown.contains("v9.8.7"), "{shown}");
         }
     }
 

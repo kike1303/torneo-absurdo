@@ -171,6 +171,8 @@ pub struct RawFight {
     pub max_hp_b: i32,
     pub matchup_round: i32,
     pub roster_sha256: Vec<u8>,
+    pub time_limit_ms: i32,
+    pub max_duration_ms: i32,
 }
 
 /// Like [`announce`], with `change` applied to the fields.
@@ -195,6 +197,8 @@ pub async fn announce_with(
         max_hp_b: i32::from(max_hp(&ruleset, b).unwrap()),
         matchup_round: 1,
         roster_sha256: vec![1; 32],
+        time_limit_ms: i32::try_from(ruleset.time_limit_ms()).unwrap(),
+        max_duration_ms: i32::try_from(max_duration_ms(&ruleset).unwrap()).unwrap(),
     };
     change(&mut raw);
     let (closes_at, live_at) = hours(opens_at);
@@ -212,8 +216,8 @@ pub async fn announce_with(
             slug_b: &raw.slug_b,
             max_hp_a: raw.max_hp_a,
             max_hp_b: raw.max_hp_b,
-            time_limit_ms: i32::try_from(ruleset.time_limit_ms()).unwrap(),
-            max_duration_ms: i32::try_from(max_duration_ms(&ruleset).unwrap()).unwrap(),
+            time_limit_ms: raw.time_limit_ms,
+            max_duration_ms: raw.max_duration_ms,
             matchup_round: raw.matchup_round,
             roster_sha256: &raw.roster_sha256,
         },

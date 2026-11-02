@@ -14,18 +14,29 @@
 //! `admin_account_cutoff` is in this file**, checked by the source test at the end. After a
 //! `grant`, one line of fixed text on stdout names the providers within the cutoff (RF17): not a
 //! log, and never an id.
+//!
+//! `server fight void <fight_id> --by <admin_user_id> [--previous-binary <tag>]` (012 RF16) lives
+//! here too: the same configuration, the same sort of connection and the only SQL of `admin_audit`.
+//! It does not revoke anything nor write any privileged column, and the decision is of
+//! `fights::sealed::void_fight`. The only caller of this is `cli.rs`: there is no endpoint.
 
 use std::ffi::OsString;
 use std::fmt;
 use std::io::Write as _;
+use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::postgres::PgConnectOptions;
 use sqlx::{Connection, PgConnection, Row};
 use uuid::Uuid;
 
+use crate::bets::settle::refund_totals;
 use crate::config::{self, ConfigError};
+use crate::fights::hook::SettlementHook;
+use crate::fights::sealed::{self, VoidCompute, VoidError, VoidRequest};
+use crate::fights::store;
 use crate::sessions::{self, RevokeFilter};
+use crate::version_rule::is_valid_app_version;
 
 /// Longest `--reason`, in characters.
 pub const MAX_REASON_CHARS: usize = 500;
@@ -52,6 +63,12 @@ When to run `grant` again:
 Before running `grant`, review the linked providers in /account: everything linked until that
 moment starts giving admin. `grant` prints the providers within the cutoff. If it shows one you
 do not recognize, run `revoke`, remove it from /account and run `grant` again.
+
+server fight void <fight_id> --by <admin_user_id> [--previous-binary <tag>]
+  voids a fight that cannot end and refunds its bets. It reads only DATABASE_URL and RUST_LOG. The
+  reason is deduced, never chosen. It refuses a healthy fight, and every refusal writes nothing and
+  prints its code. --by is an attribution, it authorizes nothing. --previous-binary <vX.Y.Z|sha-abc1234>
+  declares that the previous binary fails too, and stays in the audit.
 ";
 
 /// Whether the arguments after `admin` ask for [`HELP`]: `--help` or `<action> --help`.
@@ -309,6 +326,204 @@ async fn execute(options: &PgConnectOptions, command: &AdminCommand) -> Result<(
         let _ = writeln!(std::io::stdout().lock(), "{}", providers_line(&providers));
     }
     Ok(())
+}
+
+/// How long `server fight void` waits for the row of a fight (012 RF16).
+pub const VOID_LOCK_TIMEOUT_MS: u64 = 5000;
+
+/// The tag of `--previous-binary` (012 RF24): `vX.Y.Z` or `sha-<7>`. A declaration, and it stays in
+/// `admin_audit`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinaryTag(String);
+
+impl BinaryTag {
+    pub fn parse(text: &str) -> Option<Self> {
+        (text != "dev" && is_valid_app_version(text)).then(|| Self(text.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// `server fight void`. `Debug` shows neither the fight nor the admin (ADR-0012 A8).
+#[derive(Clone, PartialEq, Eq)]
+pub struct VoidCommand {
+    pub fight: i32,
+    pub by: Uuid,
+    pub previous_binary: Option<BinaryTag>,
+}
+
+impl fmt::Debug for VoidCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VoidCommand").finish_non_exhaustive()
+    }
+}
+
+/// A canonical decimal from 1 to `i32::MAX`: no sign, no leading zeros, no spaces.
+fn parse_fight_id(text: &str) -> Option<i32> {
+    let canonical = text
+        .bytes()
+        .next()
+        .is_some_and(|b| b.is_ascii_digit() && b != b'0')
+        && text.bytes().all(|b| b.is_ascii_digit());
+    canonical.then(|| text.parse().ok()).flatten()
+}
+
+impl VoidCommand {
+    /// The arguments after `fight void`: the id, then the flags in any order and none repeated. Any
+    /// other flag is invalid: the reason is deduced, never chosen.
+    pub fn parse(args: &[OsString]) -> Option<Self> {
+        let words: Vec<&str> = args.iter().map(|a| a.to_str()).collect::<Option<_>>()?;
+        let (id, mut rest) = words.split_first()?;
+        let fight = parse_fight_id(id)?;
+        let (mut by, mut previous_binary) = (None, None);
+        while let Some((flag, tail)) = rest.split_first() {
+            match *flag {
+                "--by" if by.is_none() => {
+                    let (value, tail) = tail.split_first()?;
+                    by = Some(Uuid::parse_str(value).ok()?);
+                    rest = tail;
+                }
+                "--previous-binary" if previous_binary.is_none() => {
+                    let (value, tail) = tail.split_first()?;
+                    previous_binary = Some(BinaryTag::parse(value)?);
+                    rest = tail;
+                }
+                _ => return None,
+            }
+        }
+        Some(Self {
+            fight,
+            by: by?,
+            previous_binary,
+        })
+    }
+}
+
+/// Why `server fight void` did not apply: a refusal, with its code, decided something; a failure of
+/// the database, of the connection or of the settlement decided nothing, and can be tried again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum VoidFailure {
+    #[error("the fight was not voided")]
+    Refused(&'static str),
+    #[error("the command failed")]
+    Failed(&'static str),
+}
+
+impl From<sqlx::Error> for VoidFailure {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Failed(crate::db::error_kind(&error))
+    }
+}
+
+impl From<VoidError> for VoidFailure {
+    fn from(error: VoidError) -> Self {
+        match error {
+            VoidError::Refused(refusal) => Self::Refused(refusal.code()),
+            VoidError::Settlement(error) => Self::Failed(error.kind),
+            VoidError::Db(error) => error.into(),
+        }
+    }
+}
+
+/// `server fight void` (012 RF16 to RF18): the final, the refund and the audit, in one transaction.
+/// One line of fixed text on stdout says what happened, with no seed and no data of the log, and the
+/// log only has its event and its code. `compute` and `hook` are parameters for the tests: `cli.rs`
+/// is the only caller, and always gives the real ones.
+///
+/// # Errors
+/// [`VoidFailure`].
+pub async fn run_fight_void(
+    options: &PgConnectOptions,
+    command: &VoidCommand,
+    compute: Arc<dyn VoidCompute>,
+    hook: &dyn SettlementHook,
+) -> Result<(), VoidFailure> {
+    let outcome = apply_void(options, command, compute, hook).await;
+    let mut stdout = std::io::stdout().lock();
+    match &outcome {
+        // Not `tracing`: as the line of a `grant`. The commit is done, so a failed write changes nothing.
+        Ok(reason) => {
+            let _ = writeln!(stdout, "void.applied {reason}");
+            tracing::info!(event = "fight.void_applied");
+        }
+        Err(VoidFailure::Refused(code)) => {
+            let _ = writeln!(stdout, "{code}");
+            tracing::error!(event = "fight.void_refused", error_kind = *code);
+        }
+        Err(VoidFailure::Failed(kind)) => {
+            tracing::error!(event = "fight.void_failed", error_kind = *kind);
+        }
+    }
+    outcome.map(|_| ())
+}
+
+async fn apply_void(
+    options: &PgConnectOptions,
+    command: &VoidCommand,
+    compute: Arc<dyn VoidCompute>,
+    hook: &dyn SettlementHook,
+) -> Result<&'static str, VoidFailure> {
+    let mut connection = tokio::time::timeout(CONNECT_TIMEOUT, PgConnection::connect_with(options))
+        .await
+        .map_err(|_| VoidFailure::Failed("timeout"))??;
+    let mut tx = connection.begin().await?;
+    let written = write_void(&mut tx, command, compute, hook).await;
+    let reason = match written {
+        Ok(reason) => {
+            tx.commit().await?;
+            reason
+        }
+        Err(failure) => {
+            // Without a `ROLLBACK` that arrives, the end of the connection reverts it too.
+            let _ = tx.rollback().await;
+            let _ = connection.close().await;
+            return Err(failure);
+        }
+    };
+    let _ = connection.close().await;
+    Ok(reason)
+}
+
+async fn write_void(
+    tx: &mut PgConnection,
+    command: &VoidCommand,
+    compute: Arc<dyn VoidCompute>,
+    hook: &dyn SettlementHook,
+) -> Result<&'static str, VoidFailure> {
+    store::set_lock_timeout(&mut *tx, VOID_LOCK_TIMEOUT_MS).await?;
+    let admin = sqlx::query("SELECT 1 FROM users WHERE id = $1 AND role = 'admin'")
+        .bind(command.by)
+        .fetch_optional(&mut *tx)
+        .await?;
+    if admin.is_none() {
+        return Err(VoidFailure::Refused("void.not_admin"));
+    }
+    let request = VoidRequest {
+        id: command.fight,
+        previous_binary: command.previous_binary.is_some(),
+    };
+    let reason = sealed::void_fight(&mut *tx, &request, compute, hook).await?;
+    let (bets_refunded, coins_refunded) = refund_totals(&mut *tx, command.fight).await?;
+    let mut payload = serde_json::json!({
+        "reason": reason.as_str(),
+        "bets_refunded": bets_refunded,
+        "coins_refunded": coins_refunded,
+    });
+    if let Some(tag) = &command.previous_binary {
+        payload["previous_binary"] = serde_json::json!(tag.as_str());
+    }
+    sqlx::query(
+        "INSERT INTO admin_audit (actor, admin_id, action, target, payload) \
+         VALUES ('cli_attributed', $1, 'fight_void', $2, $3::jsonb)",
+    )
+    .bind(command.by)
+    .bind(command.fight.to_string())
+    .bind(payload.to_string())
+    .execute(&mut *tx)
+    .await?;
+    Ok(reason.as_str())
 }
 
 #[cfg(test)]

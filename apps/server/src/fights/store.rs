@@ -3,7 +3,7 @@
 //! is `UPDATE … WHERE id = $1 AND state = $previous`: with no row, someone else already did it, and
 //! nothing happens (RF8).
 
-use protocol::{CancelReason, EndReason, FightState, Side};
+use protocol::{CancelReason, EndReason, FightState, Side, VoidReason};
 use sqlx::postgres::PgRow;
 use sqlx::{PgConnection, PgPool, Row};
 
@@ -388,6 +388,52 @@ pub(super) async fn write_decided(
     .bind(seed)
     .bind(log)
     .bind(at_ms)
+    .execute(conn)
+    .await?
+    .rows_affected();
+    Ok(done == 1)
+}
+
+/// Locks the row of a fight for `server fight void` (012 RF16), in the caller's transaction, with the
+/// proof that its window is closed if it is in `betting_closed` or `live`. `None` if it does not exist.
+/// `FOR UPDATE`: while this transaction lives, the runner can neither move it nor settle it, and a
+/// foreign key that points to it, such as a restored secret, waits too.
+pub(super) async fn lock_for_void(
+    conn: &mut PgConnection,
+    id: i32,
+) -> Result<Option<(FightRow, Option<ClosedWindow>)>, sqlx::Error> {
+    let row = sqlx::query(concat!(
+        "SELECT ",
+        columns!(),
+        " FROM fights WHERE id = $1 FOR UPDATE"
+    ))
+    .bind(id)
+    .fetch_optional(conn)
+    .await?;
+    let Some(row) = row.as_ref().map(decode).transpose()? else {
+        return Ok(None);
+    };
+    let closed = matches!(row.state, FightState::BettingClosed | FightState::Live);
+    let window = closed.then(|| ClosedWindow::confirmed(id));
+    Ok(Some((row, window)))
+}
+
+/// `betting_closed` or `live` → `settled` with `voided`, in the transaction of `sealed::void_fight`,
+/// with the hour of the database: the CLI has no clock of the fights. `false` if the row is in another
+/// state.
+pub(super) async fn write_voided(
+    conn: &mut PgConnection,
+    id: i32,
+    reason: VoidReason,
+    seed: Option<&[u8]>,
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE fights SET state = 'settled', void_reason = $2, revealed_seed = $3, \
+         settled_at = now() WHERE id = $1 AND state IN ('betting_closed', 'live')",
+    )
+    .bind(id)
+    .bind(reason.as_str())
+    .bind(seed)
     .execute(conn)
     .await?
     .rows_affected();

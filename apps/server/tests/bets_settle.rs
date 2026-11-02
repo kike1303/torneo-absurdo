@@ -281,6 +281,38 @@ async fn the_runner_halts_on_a_decided_fight_with_both_sides() {
     assert_eq!(pools, 0);
 }
 
+/// RF7: `app::serve` builds the real hook, with no hook of a test, whatever its settings say: a
+/// one-sided pool ends refunded, which `NoBets` would not do.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn serve_settles_with_the_real_hook() {
+    let (db, pool) = database().await;
+    let vector = Vector::of(KO);
+    let id = f::open_vector(&pool, T0, &vector).await;
+    let (_, _, placed) = sow(&pool, id, ["a", "a", "a"]).await;
+    let (fights, clock) = f::settings_at(T0);
+    let url = db.url();
+    let config = support::config::config(&[
+        ("DATABASE_URL", url.as_str()),
+        ("PORT", "0"),
+        ("CONTENT_DIR", "/nonexistent/content/characters"),
+    ]);
+    let settings = server::app::Settings {
+        fights,
+        ..server::app::Settings::default()
+    };
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let serving = tokio::spawn(async move {
+        server::app::serve(&config, settings, async move {
+            let _ = stopped.await;
+        })
+        .await
+    });
+    f::drive_to_settled(&pool, &clock, id).await;
+    assert_refunded(&pool, id, &placed, "refund_one_sided").await;
+    stop.send(()).unwrap();
+    serving.await.unwrap().unwrap();
+}
+
 /// The real hook, and then a failure before the `COMMIT`, until the test says so.
 struct DiesAfterWriting {
     dying: AtomicBool,
