@@ -118,6 +118,8 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
   let observer: ResizeObserver | null = null;
   let destroyed = false;
   let aspect = 16 / 9;
+  /** Software WebGL (see `softwareOnly`): cheapest settings and diffuse-only botargas. */
+  let lite = false;
   /** Something changed since the last render: a still scene (paused, hidden) costs nothing. */
   let dirty = true;
   let formatNumber: (n: number) => string = String;
@@ -203,6 +205,7 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
       theme = setup.theme;
       formatNumber = setup.formatNumber;
       const software = softwareOnly();
+      lite = software;
       let renderer: WebGLRenderer;
       try {
         // At 2× and above the pixels are small enough without MSAA, which is the costly part.
@@ -310,8 +313,8 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
       botarga = next;
       disposeFighters();
       const created = {
-        a: createFighter(next, 'a', model.tints?.a),
-        b: createFighter(next, 'b', model.tints?.b),
+        a: createFighter(next, 'a', model.tints?.a, lite),
+        b: createFighter(next, 'b', model.tints?.b, lite),
       };
       for (const side of SIDES) world?.scene.add(created[side].root);
       fighters = created;

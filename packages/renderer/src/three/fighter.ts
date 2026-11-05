@@ -5,6 +5,7 @@ import {
   AnimationMixer,
   Color,
   LoopOnce,
+  MeshLambertMaterial,
   Vector3,
   type AnimationAction,
   type Material,
@@ -27,6 +28,9 @@ export const FADE_MS = 200;
 const FLASH_STRENGTH = 0.6;
 /** Keeps a held clip off its exact end, where `LoopOnce` would stop sampling it. */
 const END_EPSILON = 1e-4;
+
+/** PBR as exported, or diffuse only (`lite`): a far smaller shader, for software WebGL. */
+type BotargaMaterial = MeshStandardMaterial | MeshLambertMaterial;
 
 const SHORTS = 'Botarga_Short';
 const FACE = 'Botarga_Cara';
@@ -53,11 +57,7 @@ function parseFaceRect(value: unknown): FaceRect | null {
  * Mixes a second texture inside the face rect of the atlas, by its alpha. The rect is in Blender UV
  * space (v up) and glTF flips v, hence `1 − v`.
  */
-function addFaceSlot(
-  material: MeshStandardMaterial,
-  rect: FaceRect,
-  face: { value: Texture | null },
-) {
+function addFaceSlot(material: BotargaMaterial, rect: FaceRect, face: { value: Texture | null }) {
   const uniforms = { faceMap: face, faceRect: { value: new Vector3(rect.u0, rect.v0, rect.size) } };
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
@@ -94,9 +94,10 @@ export function createFighter(
   botarga: Botarga,
   side: Side,
   tint: BotargaTint | undefined,
+  lite = false,
 ): Fighter3d {
   const root = cloneSkinned(botarga.gltf.scene);
-  const materials: MeshStandardMaterial[] = [];
+  const materials: BotargaMaterial[] = [];
   const face = { value: (botarga.faces.get('neutral') ?? null) as Texture | null };
   let currentFace: string | null = null;
 
@@ -106,7 +107,9 @@ export function createFighter(
     // Skinned bounds come from the rest pose; a clip can leave them.
     mesh.frustumCulled = false;
     const source = mesh.material as MeshStandardMaterial;
-    const material = source.clone();
+    const material: BotargaMaterial = lite
+      ? new MeshLambertMaterial({ name: source.name, color: source.color, map: source.map })
+      : source.clone();
     const extras = (source.userData ?? {}) as { tint_default?: unknown; face_uv_rect?: unknown };
     const custom = source.name === SHORTS ? tint?.shorts : tint?.body;
     const color = custom ?? extras.tint_default;
