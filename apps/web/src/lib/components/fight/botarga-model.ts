@@ -55,7 +55,8 @@ export function preloadBotargaModel(): void {
     el.rel = 'preload';
     el.as = as;
     el.href = href;
-    if (as === 'fetch') el.crossOrigin = 'anonymous';
+    // Three loads both in CORS mode (`anonymous`); a preload in another mode would not be reused.
+    el.crossOrigin = 'anonymous';
     document.head.appendChild(el);
   };
   void loadBotargaModel()
