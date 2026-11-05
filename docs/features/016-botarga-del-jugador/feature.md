@@ -2,7 +2,7 @@
 id: "016"
 title: Botarga del jugador con varios especiales y animaciones
 type: feature
-status: draft
+status: approved
 risk: medium
 author: claude
 linear: TA-55
@@ -16,7 +16,7 @@ updated: 2026-11-05
 ## Qué y por qué
 En el flujo de la botarga propia (PvP asíncrono del [backlog](../../backlog.md), no el torneo), el jugador arma su luchador con lo que tiene desbloqueado: varios ataques especiales y golpes pesados, accesorios que ajustan sus stats y una animación de victoria y otra de idle. Los KO salen al azar. Al subir de nivel gana ataques nuevos (al azar, en niveles fijos) y otras recompensas. Todo tiene que nacer sin una build dominante, y las builds abiertas rompen el supuesto de hoy: `just sim` solo mide un roster fijo de personajes diseñados a mano.
 
-Diseño previo con el `game-designer` y respuestas del owner (2026-11-05). Quedan preguntas abiertas al final; no se implementa hasta cerrarlas.
+Diseño previo con el `game-designer` y respuestas del owner (2026-11-05), aprobado por el owner el mismo día.
 
 ## Alcance
 - Entra: las reglas del motor para builds de jugador (ruleset v2), el catálogo de habilidades y el de accesorios con su efecto en stats, la tabla de recompensas por nivel, el modo de builds abiertas de `just sim` y las animaciones cosméticas (victoria e idle elegidas, KO al azar).
@@ -101,6 +101,4 @@ Además, win rate por banda de nivel contra la misma banda (que ningún nivel te
 - Sorteo: elegir 1 de 3, siempre ataques que todavía no tiene.
 - Estilo de pelea de una lista fija: sí.
 - Debilidades según los ataques elementales equipados: sí.
-
-## Preguntas abiertas al owner
-1. **Regla de elementos:** ¿de acuerdo con dejarla como hoy (solo ×5/4 contra una debilidad, sin bonus por mismo elemento ni resistencias)?
+- La regla de daño elemental queda como hoy (×5/4 contra una debilidad).
