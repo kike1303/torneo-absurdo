@@ -82,6 +82,8 @@ jobs:
               # Read by the sprite importer check inside check-web (007 plan-b decision 27).
               - content/sprites/**
               - content/characters/**
+              # The 3D botarga the web bundles (013).
+              - content/models/**
               - crates/content/tests/golden/**
               - docs/guides/**
               - crates/protocol/**
@@ -126,6 +128,8 @@ jobs:
               - .dockerignore
               # The final stage of the server copies it (010 RNF "Imagen").
               - content/characters/**
+              # The web build bundles it (013).
+              - content/models/**
               - scripts/check-compose.mjs
               - scripts/check-dockerignore.sh
               - scripts/check-release-binary.mjs

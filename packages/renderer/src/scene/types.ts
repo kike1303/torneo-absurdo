@@ -33,6 +33,11 @@ export interface FighterScene {
   readonly step: number;
   /** Index into the manifest's `frames`. */
   readonly frame: number;
+  /** ms since the animation started (a global phase for idle at the mark); never negative. */
+  readonly elapsed: number;
+  /** ms from the animation start to its impact (0 if it has none), and its whole length. */
+  readonly windup: number;
+  readonly total: number;
   readonly x: number;
   readonly y: number;
   readonly mirror: boolean;

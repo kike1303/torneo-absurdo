@@ -9,7 +9,7 @@ import type { ManifestsById } from '../timeline/validate.ts';
 import { otherSide, type Ending, type Side, type Timeline } from '../timeline/types.ts';
 import { bannersAt } from './banners.ts';
 import { cameraFrom } from './camera.ts';
-import { frameAt, xAt, type Segment } from './choreography.ts';
+import { frameAt, xAt, type AnimationTiming, type Segment } from './choreography.ts';
 import { hudFighterAt } from './hud.ts';
 import {
   cueWindow,
@@ -36,6 +36,17 @@ import {
 const IMPACT_HEIGHT = 56;
 const NUMBER_HEIGHT = 104;
 
+function animationAt(timing: AnimationTiming, elapsed: number) {
+  const e = Math.max(0, elapsed);
+  return {
+    animation: timing.code,
+    ...frameAt(timing, e),
+    elapsed: e,
+    windup: timing.windup,
+    total: timing.total,
+  };
+}
+
 function fighterAt(
   prepared: PreparedScene,
   window: readonly PreparedCue[],
@@ -53,7 +64,7 @@ function fighterAt(
   const hold = fighter.hold;
   if (hold !== null && t >= hold.start) {
     const timing = fighter.timing[hold.animation];
-    return { ...base, animation: timing.code, ...frameAt(timing, t - hold.start), x: hold.x };
+    return { ...base, ...animationAt(timing, t - hold.start), x: hold.x };
   }
   let active: Segment | undefined;
   for (const pc of window) {
@@ -65,15 +76,10 @@ function fighterAt(
   if (active === undefined) {
     // Idle at the mark, with a global phase so idle never depends on history.
     const timing = fighter.timing.idle;
-    return { ...base, animation: timing.code, ...frameAt(timing, t), x: MARK_X[side] };
+    return { ...base, ...animationAt(timing, t), x: MARK_X[side] };
   }
   const timing = fighter.timing[active.animation];
-  return {
-    ...base,
-    animation: timing.code,
-    ...frameAt(timing, t - active.animStart),
-    x: xAt(active, t),
-  };
+  return { ...base, ...animationAt(timing, t - active.animStart), x: xAt(active, t) };
 }
 
 function phaseAt(prepared: PreparedScene, t: number): Phase {
