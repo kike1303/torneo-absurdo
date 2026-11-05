@@ -14,61 +14,79 @@ updated: 2026-11-05
 # Botarga del jugador con varios especiales y animaciones
 
 ## Qué y por qué
-En el flujo de la botarga propia (PvP asíncrono del [backlog](../../backlog.md), no el torneo), el jugador arma su luchador: elige varios ataques especiales y golpes pesados, una animación de victoria y una de idle. Los KO salen al azar. Es la base de la progresión ("al subir se eligen ataques especiales y animaciones de victoria") y tiene que nacer sin una build dominante, porque las builds abiertas rompen el supuesto de hoy: `just sim` solo mide un roster fijo de personajes diseñados a mano.
+En el flujo de la botarga propia (PvP asíncrono del [backlog](../../backlog.md), no el torneo), el jugador arma su luchador con lo que tiene desbloqueado: varios ataques especiales y golpes pesados, accesorios que ajustan sus stats y una animación de victoria y otra de idle. Los KO salen al azar. Al subir de nivel gana ataques nuevos (al azar, en niveles fijos) y otras recompensas. Todo tiene que nacer sin una build dominante, y las builds abiertas rompen el supuesto de hoy: `just sim` solo mide un roster fijo de personajes diseñados a mano.
 
-Este documento es **diseño previo** (consulta al `game-designer`, 2026-11-05). Las decisiones de producto quedan abiertas al final; no se implementa hasta que el owner las conteste.
+Diseño previo con el `game-designer` y respuestas del owner (2026-11-05). Quedan preguntas abiertas al final; no se implementa hasta cerrarlas.
 
 ## Alcance
-- Entra: las reglas del motor para builds de jugador (ruleset v2), un catálogo cerrado de habilidades, el modo de builds abiertas de `just sim` y las animaciones cosméticas elegidas (victoria e idle) y al azar (KO).
-- No entra: la persistencia de la botarga, la cuenta, el PvP, la experiencia ni los niveles (van en la feature de botarga propia y PvP, que aún no existe), la tienda, las skins y las caras, y clips nuevos (se usan los de 015: 4 especiales, 2 pesados, 2 KO, 3 victorias y 5 idles).
+- Entra: las reglas del motor para builds de jugador (ruleset v2), el catálogo de habilidades y el de accesorios con su efecto en stats, la tabla de recompensas por nivel, el modo de builds abiertas de `just sim` y las animaciones cosméticas (victoria e idle elegidas, KO al azar).
+- No entra: la persistencia de la botarga, la cuenta, el PvP, el cálculo de experiencia y el ranking (van en la feature de botarga propia y PvP, que aún no existe), las caras, los clips nuevos (se usan los de 015) y **la tienda**: en esta primera versión nada se compra, todo sale de subir de nivel (decisión del owner).
 
 ## Diseño
 
-**Ranuras.** Hasta 2 especiales y 2 pesados, con un total de 1 a 4. Cabe en `abilities_max = 4`. El tope por tipo es una regla nueva del ruleset (`specials_max`, `heavies_max`), no de la UI. Sin tope por tipo, 4 especiales con cooldown 2 dan un especial en casi cada acción, a unas 3,7 veces el daño por ms del strike. El roster actual cumple (el fontanero va 2+2).
+**Dos flujos, dos rulesets.** El torneo y las peleas del jugador son flujos separados que comparten el motor. Cada `FightLog` lleva su `ruleset_version`, así que el torneo sigue en v1 sin cambios y el PvP nace en v2. Migrar el torneo a v2 después es opcional; el owner está de acuerdo si hace falta.
 
-**Cómo elige el motor (ruleset v2).** Hoy el peso es por habilidad, así que cada ranura de más sube la frecuencia total de habilidades, y la build óptima sería llenar todo. En v2 el peso de un tipo se **reparte** entre las habilidades disponibles de ese tipo: `w_kind / n_disponibles`, división entera, y el resto va a la primera en orden de archivo (determinista). Así una ranura de más da variedad, no frecuencia: "más ataques no te hacen atacar más, te hacen menos predecible". Los cooldowns siguen siendo por habilidad. Descartado: un cooldown compartido por tipo, que cambia más la sensación de los personajes del torneo con varias habilidades.
+**Ranuras de ataque.** Además del strike básico, que tienen todos, hay **4 ranuras de ataque: hasta 2 especiales y 2 pesados**. Cabe en `abilities_max = 4`. El tope por tipo es una regla nueva del ruleset (`specials_max`, `heavies_max`), no de la UI. Sin él, 4 especiales con cooldown 2 dan un especial en casi cada acción, con unas 3,7 veces el daño por ms del strike. Las ranuras se abren con el nivel (tabla de abajo).
 
-v2 cambia los goldens, así que es una versión nueva y v1 queda intacta para re-simular peleas viejas (ADR-0001). El torneo y el PvP pasan juntos a v2 para no mantener dos reglas vivas; antes se corre `just sim`, porque el fontanero y el guerrero pierden frecuencia de habilidades.
+**Cómo elige el motor (v2).** En v1 el peso es por habilidad: cada ranura de más sube la frecuencia total de habilidades, y la build óptima sería llenar todo. En v2 el peso de un tipo se **reparte** entre las habilidades disponibles de ese tipo: `w_kind / n_disponibles`, con división entera y el resto a la primera en orden de archivo (determinista). Una ranura de más da variedad, no frecuencia. Los cooldowns siguen por habilidad. Se descartó un cooldown compartido por tipo.
 
-**Catálogo cerrado.** `content/abilities/<id>.json` (id, `kind`, `power`, `cooldown`, `element`, `min_level`) y nombres en `es` y `en`. El jugador elige ids, nunca números: con números libres el óptimo es trivial (poder máximo, cooldown mínimo) y el espacio no se puede simular. Poder y cooldown se pagan entre sí; por ejemplo, especiales 100/8, 70/4 y 50/2, y pesados 55/2, 40/1 y 28/0. Los valores finales los ajusta el `game-designer` con `just sim`. `crates/content` carga el catálogo y el motor lo valida igual que una habilidad de personaje; la botarga se resuelve a un `CharacterSpec` normal antes de pelear, así que `simulate` no cambia de firma.
+**Catálogo de habilidades.** `content/abilities/<id>.json` (`kind`, `power`, `cooldown`, `element`, `tier`) con nombres en `es` y `en`. El jugador elige ids de las que tiene desbloqueadas, nunca números: con números libres el óptimo es trivial y el espacio no se puede simular. Poder y cooldown se pagan entre sí; por ejemplo, especiales 100/8, 70/4 y 50/2, y pesados 55/2, 40/1 y 28/0. Cada habilidad trae su clip; mientras no haya uno propio, sale del hash de su id (015).
 
-**Animaciones.** Victoria e idle son cosméticas: **no van en `CharacterSpec`** ni en el hash canónico, porque no afectan el resultado y cambiarlas no debe re-simular. Van en un tipo nuevo de `crates/protocol`, `FighterCosmetics { idle, victory }` (códigos de clip), junto a `FighterInfo` y fuera de lo que verifica el WASM. Sin cosméticos (torneo, logs viejos), el renderer hace lo de hoy. El clip de cada habilidad sigue saliendo del hash de su id (015); elegirlo a mano queda como pregunta abierta. El KO al azar lo elige el **renderer** con un hash de la pelea y el lado, nunca con el PRNG del motor: todos los espectadores ven el mismo y no se consumen tiradas.
+**Accesorios con stats.** Cada ranura de prenda (gorro, guantes, chaleco, pantalón y botas) puede traer un ajuste de stats, por ejemplo guantes con +8 de ataque y −8 de velocidad. Son **intercambios de suma cero**: un accesorio mueve puntos y no da puntos nuevos, y el total sigue bajo el presupuesto del nivel. Así cambian el estilo de pelea sin volverse poder que se compra el día que haya tienda (backlog: "nunca se venden stats"). Hay tope por stat (por ejemplo ±10 por accesorio y ±20 en total), y el mínimo de stats de v2 se aplica después de sumar los accesorios. El server resuelve la botarga con habilidades y accesorios a un `CharacterSpec` normal antes de pelear, así que `simulate` no cambia de firma.
 
-**`just sim` con builds abiertas.** Un modo `--builds N` genera N builds válidas al azar desde el catálogo con un PRNG propio de semilla fija (nunca la de una pelea, ADR-0002) y las empareja al azar. Criterios nuevos en `Criteria`:
-- Win rate de las builds que incluyen cada habilidad del catálogo: 45 % a 55 %.
-- Win rate por número de ranuras (1 a 4) y por mezcla de tipos: 45 % a 55 %. Una sola ranura debe ser una elección legítima, no una trampa.
+**Niveles y recompensas.** Sin tope de nivel, pero con **tope de poder**: el presupuesto de stats sube de 250 a 300 hasta el nivel 10 (+5 por nivel) y ahí se queda. Desde ese nivel se sube por cosméticos y ranking, no por fuerza. Así los veteranos no aplastan a los nuevos, y el emparejamiento por rating basta. Boceto, a ajustar con `just sim`:
+
+| Nivel | Recompensa |
+|---|---|
+| 1 | Botarga genérica, strike y 1 pesado inicial, 1 ranura abierta |
+| 2, 4, 6, 8, 10 | Un ataque nuevo al azar del catálogo (del tier de ese nivel) |
+| 3 / 5 / 7 | Se abre la 2.ª / 3.ª / 4.ª ranura |
+| 9, 12, 15… | Accesorio, animación de victoria o de idle, o skin |
+
+El sorteo del ataque lo hace el **server** (no el motor), entre las del tier que el jugador aún no tiene, y se guarda en el mismo paso que sube el nivel: reintentar no vuelve a sortear.
+
+**Animaciones cosméticas.** Victoria e idle **no van en `CharacterSpec`** ni en el hash canónico: no afectan el resultado y cambiarlas no re-simula. Van en un tipo nuevo de `crates/protocol`, `FighterCosmetics { idle, victory }` (códigos de clip), junto a `FighterInfo` y fuera de lo que verifica el WASM. Sin cosméticos (torneo, logs viejos), el renderer hace lo de hoy. El KO al azar lo elige el **renderer** con un hash de la pelea y el lado, nunca con el PRNG del motor: todos los espectadores ven el mismo.
+
+**`just sim` con builds abiertas.** Un modo `--builds N` genera N builds válidas al azar (habilidades, accesorios y stats dentro del presupuesto) con un PRNG propio de semilla fija (nunca la de una pelea, ADR-0002), corre en v2 y las empareja al azar. Criterios nuevos en `Criteria`:
+- Win rate de las builds que incluyen cada habilidad y cada accesorio: 45 % a 55 %.
+- Win rate por número de ranuras (1 a 4) y por mezcla de tipos: 45 % a 55 %.
 - Builds dominantes: hill-climb desde 200 builds al azar, 30 pasos cambiando una pieza. Falla si alguna supera el 65 % contra la población.
-- Personajes del torneo contra builds de nivel máximo: 40 % a 60 %.
 - Duración, momentos y `time_up` dentro de los criterios RF17 de hoy.
 
-`--check` corre una versión chica en `just check` (`crates/sim/tests/balance.rs`); el informe completo, a mano.
+`--check` corre una versión chica en `just check`; el informe completo, a mano.
 
-**Huecos de una build libre** (para v2, a medir con `just sim`): con `stat_min = 1` se puede volcar todo en pocos stats, y conviene un mínimo de 20 por stat para jugadores (el roster va de 30 a 95). La personalidad y las debilidades libres también tienen óptimos triviales (showmanship 100 con aggression 0; cero debilidades); ver las preguntas al owner.
+**Huecos de una build libre** (para v2, a medir): con `stat_min = 1` se puede volcar todo en pocos stats; conviene un mínimo de 20 por stat (el roster va de 30 a 95). La personalidad y las debilidades libres también tienen óptimos triviales: ver las preguntas abiertas.
 
 ## Fases
-1. Motor: ruleset v2 (tope por tipo, reparto del peso, mínimo de stats), goldens v2 y paso del torneo a v2 con `just sim` en verde.
-2. Catálogo de habilidades en `content/abilities/` y su carga en `crates/content`.
+1. Motor: ruleset v2 (tope por tipo, reparto del peso, mínimo de stats) y sus goldens. El torneo no cambia.
+2. Catálogos de habilidades y de accesorios en `content/` y su carga en `crates/content`.
 3. `just sim --builds` con los criterios nuevos.
-4. `FighterCosmetics` en `protocol` (`just gen`), KO al azar por hash y victoria e idle elegidos en el renderer (cuando termine TA-52/TA-53).
-5. Server y UI para elegir la build: depende de la feature de botarga propia y PvP.
+4. `FighterCosmetics` en `protocol` (`just gen`), KO al azar por hash y victoria e idle elegidos en el renderer.
+5. Server y UI (niveles, sorteo, inventario y armado de la build): depende de la feature de botarga propia y PvP.
 
 ## Riesgos
-- **Balance:** una habilidad o un combo dominante en PvP. Se evita con el catálogo cerrado y los criterios de `--builds` en `just check`.
-- **Determinismo:** el reparto del peso con división entera tiene que ser estable; tests de golden en v2 y re-simulación de logs v1 sin cambios.
-- **Entrada del usuario:** la build llega del cliente. El server la valida en el borde contra el catálogo, el nivel y los desbloqueos, además de `validate`. Si el owner decide que algo se desbloquea con monedas, la feature pasa a `risk: high` y necesita el pase del `security-reviewer`.
-- **El torneo cambia de sensación** al pasar a v2; se mide con `just sim` antes de mergear la fase 1.
+- **Balance:** una habilidad, un accesorio o un combo dominante. Se evita con catálogos cerrados, accesorios de suma cero y `--builds` en `just check`.
+- **Determinismo:** el reparto con división entera tiene que ser estable; goldens de v2 y re-simulación de logs v1 idéntica.
+- **Entrada del usuario:** la build llega del cliente. El server la valida en el borde contra lo que el jugador tiene desbloqueado, además de `validate`. El sorteo de recompensas no se puede repetir.
+- **Tienda futura:** cuando se compren accesorios o animaciones con monedas, esa feature es `risk: high` y pasa por el `security-reviewer`. Los accesorios en venta tienen que seguir siendo de suma cero.
 
 ## Pruebas
 - [ ] `just check` en verde.
-- [ ] Motor: v2 rechaza 3 especiales o 3 pesados; el reparto da la misma frecuencia por tipo con 1 o 2 habilidades (test estadístico sobre semillas fijas); los logs v1 se re-simulan idénticos.
-- [ ] `just sim --check` (roster en v2) y `just sim --builds N --check` pasan.
-- [ ] Renderer: con `FighterCosmetics` sale la victoria y el idle elegidos; sin ellos, lo de hoy; el KO es el mismo en dos cargas de la misma pelea.
+- [ ] Motor: v2 rechaza 3 especiales o 3 pesados; con 1 o 2 habilidades de un tipo, ese tipo sale con la misma frecuencia (semillas fijas); los logs v1 se re-simulan idénticos.
+- [ ] Un accesorio que suma puntos netos o pasa el tope por stat se rechaza.
+- [ ] `just sim --check` (torneo, v1) y `just sim --builds N --check` (v2) pasan.
+- [ ] Renderer: con `FighterCosmetics` salen la victoria y el idle elegidos; sin ellos, lo de hoy; el KO es el mismo en dos cargas de la misma pelea.
+
+## Respuestas del owner (2026-11-05)
+- Animaciones de victoria e idle: se desbloquean como los accesorios (en el futuro también se compran). Los ataques se ganan al subir de nivel, uno al azar en niveles fijos. Otros niveles dan otras recompensas.
+- Tienda: fuera de esta versión.
+- El jugador equipa lo que tiene disponible: accesorios, skins y ataques.
+- Los accesorios afectan los stats.
+- Torneo y PvP son flujos separados; de acuerdo con v2.
 
 ## Preguntas abiertas al owner
-1. **Ranuras:** ¿2 especiales y 2 pesados (máximo 4) como recomienda el game-designer, u otro número? ¿Se desbloquean por nivel (nivel 1 con un pesado, el máximo con todo)?
-2. **Progresión de stats:** (A) el presupuesto sube con el nivel, por ejemplo de 250 a 300, que se siente pero obliga a emparejar también por nivel; o (B) queda fijo en 300 y solo se desbloquean opciones, más justo en PvP. ¿Hay tope de nivel?
-3. **Animaciones:** ¿la victoria y el idle se eligen libres entre los clips que hay, o se desbloquean (por nivel, por logros)? ¿El jugador elige también el clip de cada especial o sigue el hash del id (015)?
-4. **Desbloqueo:** ¿todo sale de subir de nivel, o algo (animaciones) se compra con monedas en la tienda? Lo segundo hace la feature sensible.
-5. **Personalidad:** ¿libre con presupuesto (por ejemplo suma 150), por presets ligados a la cara o un arquetipo, o fija?
-6. **Elementos y debilidades:** ¿los jugadores tienen elemento? Si sí, ¿cada habilidad elemental trae una debilidad fija (fuego trae agua) o la asigna el sistema?
-7. **Ruleset v2 en el torneo:** ¿de acuerdo con pasar el torneo a v2 a la vez que el PvP, aunque cambie un poco cómo pelean el fontanero y el guerrero?
+1. **Accesorios de suma cero:** ¿de acuerdo con que muevan stats sin sumar (por ejemplo +8 ataque y −8 velocidad)? Si suman puntos, la tienda vendería poder.
+2. **Tope de poder:** ¿presupuesto de 250 a 300 hasta el nivel 10 y después solo cosméticos, sin tope de nivel?
+3. **Sorteo de ataques:** ¿uno al azar sin elegir, o elegir 1 de 3 al azar (evita quedarse con algo que no le sirve)?
+4. **Personalidad:** ¿libre con presupuesto, por presets ligados a la cara, o fija?
+5. **Elementos y debilidades:** ¿cada habilidad elemental trae una debilidad fija (fuego trae agua), o la asigna el sistema?
