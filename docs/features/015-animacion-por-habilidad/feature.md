@@ -34,7 +34,7 @@ Decisión del owner (2026-11-05): por ahora se usan los clips que ya hay (4 espe
 - Dos habilidades del mismo personaje pueden caer en el mismo clip (4 especiales): se acepta por ahora; TA-55 permite elegirlo.
 
 ## Pruebas
-- [ ] `just check` en verde.
-- [ ] Unit: v3 acepta `ability` válido y rechaza uno inválido; v1 y v2 lo rechazan.
-- [ ] Unit: el adaptador copia la habilidad; la misma habilidad da el mismo clip en distintos momentos.
-- [ ] e2e general y `e2e-fights` en local; revisión visual del owner.
+- [x] `just check` en verde.
+- [x] Unit: v3 acepta `ability` válido y rechaza uno inválido; v1 y v2 lo rechazan.
+- [x] Unit: el adaptador copia la habilidad; la misma habilidad da el mismo clip en distintos momentos y en una pelea real, solo en quien golpea.
+- [x] e2e general (496 pasan) y `e2e-fights` (4 proyectos) en local; pelea en vivo en `just dev` sin avisos.
