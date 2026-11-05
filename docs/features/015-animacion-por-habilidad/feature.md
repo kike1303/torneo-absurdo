@@ -29,6 +29,8 @@ Decisión del owner (2026-11-05): por ahora se usan los clips que ya hay (4 espe
 
 **Pose.** Con `ability`, la variante de `special` y de `attack_heavy` es `hash(ability) mod n`. Sin ella (timelines viejos, `/dev/arena`), sigue el hash del lado y del momento. KO y victoria siguen variando por pelea.
 
+**Corrección de CI (2026-11-05).** El `e2e-fights` falló en el runner porque el espectador que llega tarde no veía la pelea en 30 s. Un diagnóstico en el runner (#94, cerrado sin fusionar) mostró pausas de 4 a 8 s entre cuadros sin tareas largas: sin GPU, varias páginas dibujando 3D a 60 fps saturan el rasterizador por software, y el navegador retiene cada `requestAnimationFrame` hasta mostrar el cuadro anterior. `src/three/pacer.ts` (puro) regula cuánto dibuja la arena: primero baja el pixel ratio y después los cuadros dibujados (50, 100 y 200 ms entre cuadros). Con WebGL por software arranca a 10 cuadros por segundo. Un cuadro que no se dibuja no carga la GPU, así que la página sigue al día. Antes las pausas de más de 250 ms se ignoraban; ahora solo se ignoran las de una página oculta.
+
 ## Riesgos
 - Un timeline v3 en un cliente viejo: los productores y el renderer salen en el mismo deploy de la web.
 - Dos habilidades del mismo personaje pueden caer en el mismo clip (4 especiales): se acepta por ahora; TA-55 permite elegirlo.
