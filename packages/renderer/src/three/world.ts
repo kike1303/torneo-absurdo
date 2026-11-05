@@ -34,7 +34,11 @@ export function placeCamera(camera: PerspectiveCamera, aspect: number, scene: Ca
   const half = Math.tan(((FOV_DEG / 2) * Math.PI) / 180);
   const base = Math.max(VIEW_HEIGHT / 2 / half, VIEW_WIDTH / 2 / (half * Math.max(0.1, aspect)));
   const distance = base / Math.max(0.1, scene.zoom);
-  const x = (scene.zoom === 1 ? 0 : worldX(scene.centerX)) + scene.offsetX * METERS_PER_PX;
+  // What the center of the screen shows under the 2D transform (center + zoom × (p − center)):
+  // continuous in the zoom, so the camera never jumps when a punch zoom starts or ends.
+  const zoom = Math.max(0.1, scene.zoom);
+  const focus = scene.centerX + (STAGE_WIDTH / 2 - scene.centerX) / zoom;
+  const x = worldX(focus) + scene.offsetX * METERS_PER_PX;
   const y = TARGET_HEIGHT - scene.offsetY * HEIGHT_PER_PX;
   camera.position.set(x, y + CAMERA_LIFT, distance);
   camera.lookAt(x, y, 0);

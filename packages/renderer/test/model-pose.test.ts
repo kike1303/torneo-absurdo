@@ -37,25 +37,26 @@ describe('clipTime', () => {
   it('lands the impact of the clip on the impact of the sprite', () => {
     const f = { animation: 'attack_light' as const, windup: 300, total: 700 };
     const impact = (CLIP_IMPACT.attack_light ?? 0) * 2;
-    expect(clipTime({ ...f, elapsed: 0 }, 'attack_light', 2)).toBe(0);
-    expect(clipTime({ ...f, elapsed: 300 }, 'attack_light', 2)).toBeCloseTo(impact);
-    expect(clipTime({ ...f, elapsed: 700 }, 'attack_light', 2)).toBeCloseTo(2);
-    expect(clipTime({ ...f, elapsed: 5000 }, 'attack_light', 2)).toBeCloseTo(2);
+    expect(clipTime({ ...f, elapsed: 0 }, 'attack_light', 2, 0)).toBe(0);
+    expect(clipTime({ ...f, elapsed: 300 }, 'attack_light', 2, 0)).toBeCloseTo(impact);
+    expect(clipTime({ ...f, elapsed: 700 }, 'attack_light', 2, 0)).toBeCloseTo(2);
+    expect(clipTime({ ...f, elapsed: 5000 }, 'attack_light', 2, 0)).toBeCloseTo(2);
   });
 
   it('stretches a reaction to the sprite length', () => {
     const f = { animation: 'hit' as const, windup: 0, total: 400 };
-    expect(clipTime({ ...f, elapsed: 200 }, 'hit', 1.5)).toBeCloseTo(0.75);
-    expect(clipTime({ ...f, elapsed: 900 }, 'hit', 1.5)).toBeCloseTo(1.5);
+    expect(clipTime({ ...f, elapsed: 200 }, 'hit', 1.5, 0)).toBeCloseTo(0.75);
+    expect(clipTime({ ...f, elapsed: 900 }, 'hit', 1.5, 0)).toBeCloseTo(1.5);
   });
 
   it('loops idle and holds ko and win at their own speed', () => {
-    expect(clipTime({ animation: 'idle', elapsed: 2500, windup: 0, total: 800 }, 'idle', 2)).toBe(
-      0.5,
-    );
+    // Idle follows the global phase of t, whatever its own start.
+    expect(
+      clipTime({ animation: 'idle', elapsed: 40, windup: 0, total: 800 }, 'idle', 2, 2500),
+    ).toBe(0.5);
     const ko = { animation: 'ko' as const, windup: 0, total: 800 };
-    expect(clipTime({ ...ko, elapsed: 1000 }, 'ko_1', 5)).toBe(1);
-    expect(clipTime({ ...ko, elapsed: 60_000 }, 'ko_1', 5)).toBe(5);
+    expect(clipTime({ ...ko, elapsed: 1000 }, 'ko_1', 5, 0)).toBe(1);
+    expect(clipTime({ ...ko, elapsed: 60_000 }, 'ko_1', 5, 0)).toBe(5);
   });
 });
 
@@ -114,18 +115,25 @@ describe('faceFor', () => {
 });
 
 describe('poseFor over a real timeline', () => {
-  it.each(['spike', ...GOLDEN_NAMES] as const)('%s: a function of t', (name) => {
-    const prepared = name === 'spike' ? spikeScene() : goldenScene(name);
-    for (let t = 0; t < prepared.durationMs; t += 137) {
-      const one = sceneAt(prepared, t, { reducedMotion: false });
-      const two = sceneAt(prepared, t, { reducedMotion: false });
-      for (const side of ['a', 'b'] as const) {
-        const pose = poseFor(one.fighters[side], t, DURATIONS, CONTEXT);
-        expect(pose).toEqual(poseFor(two.fighters[side], t, DURATIONS, CONTEXT));
-        expect(pose.time).toBeGreaterThanOrEqual(0);
-        expect(pose.time).toBeLessThanOrEqual(2);
-        expect(one.fighters[side].elapsed).toBeGreaterThanOrEqual(0);
+  it.each(['spike', ...GOLDEN_NAMES] as const)(
+    '%s: one variant per animation, clip time in range',
+    (name) => {
+      const prepared = name === 'spike' ? spikeScene() : goldenScene(name);
+      const last = { a: '', b: '' };
+      for (let t = 0; t < prepared.durationMs; t += 16) {
+        const scene = sceneAt(prepared, t, { reducedMotion: false });
+        for (const side of ['a', 'b'] as const) {
+          const f = scene.fighters[side];
+          const pose = poseFor(f, t, DURATIONS, CONTEXT);
+          expect(pose.time).toBeGreaterThanOrEqual(0);
+          expect(pose.time).toBeLessThanOrEqual(2);
+          expect(f.elapsed).toBeGreaterThanOrEqual(0);
+          // The same animation started at the same instant keeps its clip from frame to frame.
+          const key = `${f.animation}@${Math.round(t - f.elapsed)}`;
+          if (last[side].startsWith(`${key}=`)) expect(last[side]).toBe(`${key}=${pose.clip}`);
+          last[side] = `${key}=${pose.clip}`;
+        }
       }
-    }
-  });
+    },
+  );
 });

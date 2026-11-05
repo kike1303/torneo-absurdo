@@ -120,16 +120,18 @@ export function clipFor(
 /**
  * Seconds into `clip` for `elapsed` ms of the sprite animation. Attacks are retimed piecewise so
  * the clip's impact lands on the sprite's impact (`windup`); reactions stretch to the sprite's
- * length; idle loops; `ko` and `win` run at their own speed and hold.
+ * length; `ko` and `win` run at their own speed and hold. Idle loops on the global phase of `t`,
+ * so it never jumps when a fighter goes from contact or a walk back to its mark.
  */
 export function clipTime(
   fighter: Pick<FighterScene, 'animation' | 'elapsed' | 'windup' | 'total'>,
   clip: ClipName,
   duration: number,
+  t: number,
 ): number {
   const ms = Math.max(0, fighter.elapsed);
   if (fighter.animation === 'idle' || fighter.animation === 'intro' || fighter.animation === 'walk')
-    return duration > 0 ? (ms / 1000) % duration : 0;
+    return duration > 0 ? (Math.max(0, t) / 1000) % duration : 0;
   if (HELD.has(fighter.animation)) return Math.min(duration, ms / 1000);
   const total = Math.max(1, fighter.total);
   const impact = CLIP_IMPACT[clip];
@@ -185,7 +187,7 @@ export function poseFor(
   const clip = clipFor(fighter, t);
   return {
     clip,
-    time: clipTime(fighter, clip, durations[clip]),
+    time: clipTime(fighter, clip, durations[clip], t),
     face: faceFor(fighter, context),
   };
 }

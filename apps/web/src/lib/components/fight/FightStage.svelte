@@ -20,7 +20,7 @@
   import type { ArenaFighterId, PlaceholderFighterId } from '#lib/features/arena/fighters.js';
   import type { LiveSession } from '#lib/features/fight/live-session.js';
   import type { LocalAssets } from '#lib/features/arena/local-fighters.js';
-  import { loadBotargaModel } from './botarga-model.js';
+  import { loadBotargaModel, preloadBotargaModel } from './botarga-model.js';
   import { formatInteger } from '#lib/i18n/format.js';
   import { m } from '#lib/paraglide/messages.js';
   import { getLocale } from '#lib/paraglide/runtime.js';
@@ -286,7 +286,10 @@
       const opening = live?.(side);
       // The events only come at the start, so the sheets are in the cache before them: with a slow
       // network the first frame would not arrive in time (010 plan-d decision 14).
-      if (opening !== undefined && view === '2d') preloadSheets(ids);
+      if (opening !== undefined) {
+        if (view === '2d') preloadSheets(ids);
+        else preloadBotargaModel();
+      }
       const [rendererModule, cast, ...manifestModules] = await Promise.all([
         loadRenderer(),
         opening === undefined

@@ -42,3 +42,26 @@ export async function loadBotargaModel(): Promise<BotargaModel> {
     tints: tintsModule.default,
   };
 }
+
+/**
+ * Puts the GLB and the faces in the HTTP cache while the events of a live fight come, as the
+ * sheets do in 2D (010 plan-d decision 14). `<link rel="preload">`: the loaders then fetch them
+ * from the cache. A failure here is not one: the load asks for them again and reports it.
+ */
+export function preloadBotargaModel(): void {
+  const link = (href: string, as: 'fetch' | 'image'): void => {
+    if (document.head.querySelector(`link[rel="preload"][href="${CSS.escape(href)}"]`)) return;
+    const el = document.createElement('link');
+    el.rel = 'preload';
+    el.as = as;
+    el.href = href;
+    if (as === 'fetch') el.crossOrigin = 'anonymous';
+    document.head.appendChild(el);
+  };
+  void loadBotargaModel()
+    .then((model) => {
+      link(model.glb, 'fetch');
+      for (const url of Object.values(model.faces)) if (url !== undefined) link(url, 'image');
+    })
+    .catch(() => undefined);
+}
