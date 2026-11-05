@@ -150,6 +150,7 @@ fn every_spec_error_has_its_code() {
         assert_eq!(code(run(SEED, spec, SPEC, 1)), expected);
         assert_eq!(code(run(SEED, SPEC, spec, 1)), expected);
     }
+    let mut covered: Vec<SpecError> = cases.iter().map(|(e, _)| *e).collect();
     // The kind caps only bind in v2 (016).
     let three_heavies = with(
         r#"[{"id":"thunder_squeak","kind":"special","power":70,"cooldown":3,"element":"electric"}]"#,
@@ -157,16 +158,14 @@ fn every_spec_error_has_its_code() {
     );
     assert_eq!(code(run(SEED, SPEC, SPEC, 2)), "ok");
     assert_eq!(code(run(SEED, &three_heavies, SPEC, 1)), "ok");
-    assert_eq!(
-        code(run(SEED, &three_heavies, SPEC, 2)),
-        "spec.ability_kind_count"
-    );
-    // Every SpecError is produced above except the EventLimit guard, unreachable with v1.
+    let expected = format!("spec.{}", SpecError::AbilityKindCount.code());
+    assert_eq!(code(run(SEED, &three_heavies, SPEC, 2)), expected);
+    assert_eq!(code(run(SEED, SPEC, &three_heavies, 2)), expected);
+    covered.push(SpecError::AbilityKindCount);
+    // Every SpecError is produced above except the EventLimit guard, unreachable with v1 and v2.
     for error in SpecError::ALL {
         assert!(
-            cases.iter().any(|(e, _)| *e == error)
-                || error == SpecError::EventLimit
-                || error == SpecError::AbilityKindCount,
+            covered.contains(&error) || error == SpecError::EventLimit,
             "{error:?}"
         );
     }
