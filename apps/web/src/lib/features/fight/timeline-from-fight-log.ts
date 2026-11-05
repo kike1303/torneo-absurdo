@@ -47,7 +47,7 @@ export const WIN_DELAY_MS = 1500;
  */
 export const CLOSING_DELAY_MS = 1500;
 /** Equal to `TIMELINE_VERSION` (checked by a test): only types may be imported here. */
-const VERSION = 2;
+const VERSION = 3;
 const MAX_ERRORS = 100;
 
 const MOVE_BY_KIND: Readonly<Record<AbilityKind, Move>> = {
@@ -207,6 +207,7 @@ function adaptEvents(
           type: 'strike',
           actor: event.attacker,
           move: attack.move,
+          ability: attack.ability,
           result,
           damage,
           target_hp: after,

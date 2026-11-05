@@ -28,6 +28,7 @@ function fighter(overrides: Partial<FighterScene>): FighterScene {
     total: 600,
     x: 0,
     travel: 0,
+    ability: null,
     y: 0,
     mirror: false,
     scale: 1,
@@ -188,5 +189,43 @@ describe('idle variants (014)', () => {
     for (let t = 0; t < 80_000; t += 8000) {
       expect(poseFor(fighter({ animation: 'idle' }), t, DURATIONS, CONTEXT).clip).toBe('idle');
     }
+  });
+});
+
+describe('one clip per ability (015)', () => {
+  it('gives the same clip to an ability whenever it is used', () => {
+    for (const animation of ['special', 'attack_heavy'] as const) {
+      const at = (ability: string, t: number) =>
+        clipFor(fighter({ animation, ability, elapsed: 100 }), t);
+      for (const ability of ['pipe_geyser', 'lunch_beam', 'boot_stomp'])
+        for (const t of [1000, 23_456, 77_000]) expect(at(ability, t)).toBe(at(ability, 1000));
+    }
+  });
+
+  it('keeps one clip per ability through a real fight, and only on the striker', () => {
+    const prepared = goldenScene('draw');
+    const clips = new Map<string, string>();
+    let carried = 0;
+    let reactions = 0;
+    for (let t = 0; t < prepared.durationMs; t += 16) {
+      for (const f of Object.values(sceneAt(prepared, t, { reducedMotion: false }).fighters)) {
+        // The rival's reaction to a strike, a walk and the closing hold never carry it.
+        if (
+          ['hit', 'block', 'dodge', 'knockdown', 'walk', 'ko', 'win', 'idle'].includes(f.animation)
+        ) {
+          expect(f.ability, `${f.side} ${f.animation} at ${t}`).toBeNull();
+          if (f.animation !== 'walk' && f.animation !== 'idle') reactions++;
+        }
+        if (f.ability === null) continue;
+        expect(['attack_light', 'attack_heavy', 'special']).toContain(f.animation);
+        carried++;
+        const clip = clipFor(f, t);
+        const key = `${f.ability}:${f.animation}`;
+        expect(clips.get(key) ?? clip, key).toBe(clip);
+        clips.set(key, clip);
+      }
+    }
+    expect(carried).toBeGreaterThan(0);
+    expect(reactions).toBeGreaterThan(0);
   });
 });

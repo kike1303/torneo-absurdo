@@ -125,9 +125,19 @@ function variantIndex(side: Side, start: number, count: number): number {
   return h % count;
 }
 
+/** FNV-1a over an ability id (015): the same ability always gets the same variant. */
+function abilityIndex(ability: string, count: number): number {
+  let h = 2166136261;
+  for (let i = 0; i < ability.length; i++) {
+    h ^= ability.charCodeAt(i) & 255;
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h % count;
+}
+
 /** The clip of `fighter` at scene time `t`; the variant depends only on when it started. */
 export function clipFor(
-  fighter: Pick<FighterScene, 'side' | 'animation' | 'elapsed' | 'travel'>,
+  fighter: Pick<FighterScene, 'side' | 'animation' | 'elapsed' | 'travel' | 'ability'>,
   t: number,
 ): ClipName {
   if (fighter.animation === 'walk') return fighter.travel < 0 ? 'walk_back' : 'walk_forward';
@@ -137,6 +147,9 @@ export function clipFor(
   }
   const variants = VARIANTS[fighter.animation];
   if (variants.length === 1) return variants[0] as ClipName;
+  // A special or a heavy blow looks the same every time its ability is used (015).
+  if (fighter.ability !== null)
+    return variants[abilityIndex(fighter.ability, variants.length)] as ClipName;
   return variants[variantIndex(fighter.side, t - fighter.elapsed, variants.length)] as ClipName;
 }
 

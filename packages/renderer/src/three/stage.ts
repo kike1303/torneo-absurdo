@@ -29,23 +29,12 @@ import { SIDES, type Side } from '../timeline/types.ts';
 import { createFighter, type Fighter3d } from './fighter.ts';
 import { loadBotarga, type Botarga } from './load.ts';
 import { createOverlay, type Overlay } from './overlay.ts';
+import { createPacer } from './pacer.ts';
 import type { BotargaModel } from './types.ts';
 import { METERS_PER_PX, createCamera, placeCamera, worldX, worldY } from './world.ts';
 
 /** Device pixels per CSS px, capped: a phone at 3× costs more than it shows. */
 const MAX_PIXEL_RATIO = 2;
-/**
- * A device that cannot keep up draws fewer pixels: when the smoothed frame interval passes
- * `SLOW_FRAME_MS`, the pixel ratio steps down by `RATIO_STEP` (at most once per
- * `RATIO_COOLDOWN_MS`), never under `MIN_PIXEL_RATIO`. Gaps over `IGNORED_GAP_MS` (a hidden tab)
- * do not count.
- */
-const SLOW_FRAME_MS = 40;
-const RATIO_STEP = 0.75;
-const MIN_PIXEL_RATIO = 0.5;
-const RATIO_COOLDOWN_MS = 1000;
-const IGNORED_GAP_MS = 250;
-const FRAME_SMOOTHING = 0.1;
 /**
  * A soft disc under each fighter instead of a shadow map: no shadow pass and simpler shaders, which
  * a weak GPU (or the software WebGL of the e2e) feels most on the first frame.
@@ -222,10 +211,11 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
         renderer.forceContextLoss();
         return;
       }
-      let pixelRatio = software
-        ? MIN_PIXEL_RATIO
-        : Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
-      renderer.setPixelRatio(pixelRatio);
+      const pacer = createPacer({
+        pixelRatio: Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO),
+        software,
+      });
+      renderer.setPixelRatio(pacer.pixelRatio);
       renderer.outputColorSpace = SRGBColorSpace;
       renderer.toneMapping = NeutralToneMapping;
 
@@ -277,34 +267,22 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
       observer = new ResizeObserver(resize);
       observer.observe(container);
       let last: number | null = null;
-      let smoothed = 0;
-      let sinceStep = 0;
       renderer.setAnimationLoop((time: number) => {
         const w = world;
         if (w === null) return;
         const elapsed = last === null ? 0 : time - last;
         last = time;
         if (elapsed > 0) setup.onFrame(elapsed);
+        if (pacer.observe(elapsed, document.hidden)) {
+          w.renderer.setPixelRatio(pacer.pixelRatio);
+          resize();
+        }
         if (!dirty) return;
         // A canvas the page does not show: WebKit keeps what is drawn in it and pays it all on the
         // first frame that shows (seconds, with the stage hidden through pre_live). It stays dirty.
         if (container.checkVisibility?.({ visibilityProperty: true }) === false) return;
+        if (!pacer.draw(time)) return;
         dirty = false;
-        if (elapsed > 0 && elapsed < IGNORED_GAP_MS) {
-          smoothed += (elapsed - smoothed) * FRAME_SMOOTHING;
-          sinceStep += elapsed;
-          if (
-            smoothed > SLOW_FRAME_MS &&
-            sinceStep > RATIO_COOLDOWN_MS &&
-            pixelRatio > MIN_PIXEL_RATIO
-          ) {
-            pixelRatio = Math.max(MIN_PIXEL_RATIO, pixelRatio * RATIO_STEP);
-            w.renderer.setPixelRatio(pixelRatio);
-            sinceStep = 0;
-            smoothed = 0;
-            resize();
-          }
-        }
         w.renderer.render(w.scene, w.camera);
       });
     },

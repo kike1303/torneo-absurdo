@@ -64,23 +64,45 @@ function fighterAt(
   const hold = fighter.hold;
   if (hold !== null && t >= hold.start) {
     const timing = fighter.timing[hold.animation];
-    return { ...base, ...animationAt(timing, t - hold.start), x: hold.x, travel: 0 };
+    return {
+      ...base,
+      ...animationAt(timing, t - hold.start),
+      x: hold.x,
+      travel: 0,
+      ability: null,
+    };
   }
   let active: Segment | undefined;
+  let owner: PreparedCue | undefined;
   for (const pc of window) {
     for (const segment of pc.segments) {
       if (segment.side !== side || segment.start > t || t >= segment.end) continue;
-      if (active === undefined || segment.start > active.start) active = segment;
+      if (active === undefined || segment.start > active.start) {
+        active = segment;
+        owner = pc;
+      }
     }
   }
   if (active === undefined) {
     // Idle at the mark, with a global phase so idle never depends on history.
     const timing = fighter.timing.idle;
-    return { ...base, ...animationAt(timing, t), x: MARK_X[side], travel: 0 };
+    return { ...base, ...animationAt(timing, t), x: MARK_X[side], travel: 0, ability: null };
   }
   const timing = fighter.timing[active.animation];
   const travel = Math.sign((active.x1 - active.x0) * FACING[side]) as -1 | 0 | 1;
-  return { ...base, ...animationAt(timing, t - active.animStart), x: xAt(active, t), travel };
+  // Only the striker's own move carries the ability, not the rival's reaction to it.
+  const cue = owner?.cue;
+  const ability =
+    cue?.type === 'strike' && cue.actor === side && active.animation === cue.move
+      ? (cue.ability ?? null)
+      : null;
+  return {
+    ...base,
+    ...animationAt(timing, t - active.animStart),
+    x: xAt(active, t),
+    travel,
+    ability,
+  };
 }
 
 function phaseAt(prepared: PreparedScene, t: number): Phase {

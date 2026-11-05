@@ -44,6 +44,8 @@ export interface FighterScene {
    * picks its clip from it.
    */
   readonly travel: -1 | 0 | 1;
+  /** The ability of its own strike while it plays that move (timeline v3, 015); null otherwise. */
+  readonly ability: string | null;
   readonly y: number;
   readonly mirror: boolean;
   readonly scale: number;

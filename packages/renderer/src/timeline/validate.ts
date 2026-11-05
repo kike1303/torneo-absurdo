@@ -11,6 +11,7 @@ import {
 import { LIMITS as MANIFEST_LIMITS, type SpriteManifest } from '../manifest/types.ts';
 import { TIMELINE_CODES as C } from './codes.ts';
 import {
+  ABILITY_PATTERN,
   CUE_TYPES,
   CUE_TYPES_V1,
   MOVES,
@@ -138,7 +139,9 @@ function parseCue(
     sink.add(C.unknownCueType, at('type'));
     return undefined;
   }
-  unknownFields(sink, value, CUE_FIELDS[type], 'cues', i);
+  const allowed =
+    type === 'strike' && version >= 3 ? [...CUE_FIELDS.strike, 'ability'] : CUE_FIELDS[type];
+  unknownFields(sink, value, allowed, 'cues', i);
   const start = sink.count;
   for (const key of CUE_FIELDS[type]) {
     if (!Object.hasOwn(value, key)) sink.add(C.missingField, at(key));
@@ -156,12 +159,17 @@ function parseCue(
     if (!oneOf(STRIKE_RESULTS, result)) sink.add(C.invalidValue, at('result'));
     if (!isInt(damage) || damage < 0) sink.add(C.badDamage, at('damage'));
     if (!isInt(targetHp)) sink.add(C.invalidType, at('target_hp'));
+    const ability = value.ability;
+    const hasAbility = Object.hasOwn(value, 'ability') && version >= 3;
+    if (hasAbility && (typeof ability !== 'string' || !ABILITY_PATTERN.test(ability)))
+      sink.add(C.invalidValue, at('ability'));
     if (sink.count !== start) return undefined;
     return {
       at_ms: atMs as number,
       type,
       actor: actor as Side,
       move: move as StrikeCue['move'],
+      ...(hasAbility ? { ability: ability as string } : {}),
       result: result as StrikeCue['result'],
       damage: damage as number,
       target_hp: targetHp as number,
