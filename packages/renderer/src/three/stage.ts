@@ -74,6 +74,24 @@ interface World {
   readonly overlay: Overlay;
 }
 
+/** Software rasterizers by the name they report (Chrome without a GPU, Mesa, Windows). */
+const SOFTWARE_RENDERERS = /swiftshader|llvmpipe|softpipe|basic render driver/i;
+
+/**
+ * Whether WebGL runs here on the CPU (a software rasterizer, as on a machine without a usable GPU):
+ * then it starts at the cheapest settings instead of finding them one slow frame at a time.
+ */
+function softwareOnly(): boolean {
+  const gl = document
+    .createElement('canvas')
+    .getContext('webgl2', { failIfMajorPerformanceCaveat: true });
+  if (gl === null) return true;
+  const info = gl.getExtension('WEBGL_debug_renderer_info');
+  const name: unknown = info === null ? '' : gl.getParameter(info.UNMASKED_RENDERER_WEBGL);
+  gl.getExtension('WEBGL_lose_context')?.loseContext();
+  return typeof name === 'string' && SOFTWARE_RENDERERS.test(name);
+}
+
 /** Alpha falls from the center to the rim (a smoothstep), so the blob has no edge. */
 function blobAlpha(): DataTexture {
   const data = new Uint8Array(BLOB_TEXELS * BLOB_TEXELS * 4);
@@ -184,11 +202,12 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
     async init(setup: StageSetup) {
       theme = setup.theme;
       formatNumber = setup.formatNumber;
+      const software = softwareOnly();
       let renderer: WebGLRenderer;
       try {
         // At 2× and above the pixels are small enough without MSAA, which is the costly part.
         renderer = new WebGLRenderer({
-          antialias: (window.devicePixelRatio || 1) < MAX_PIXEL_RATIO,
+          antialias: !software && (window.devicePixelRatio || 1) < MAX_PIXEL_RATIO,
           powerPreference: 'high-performance',
         });
       } catch (cause) {
@@ -199,7 +218,9 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
         renderer.forceContextLoss();
         return;
       }
-      let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
+      let pixelRatio = software
+        ? MIN_PIXEL_RATIO
+        : Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
       renderer.setPixelRatio(pixelRatio);
       renderer.outputColorSpace = SRGBColorSpace;
       renderer.toneMapping = NeutralToneMapping;
