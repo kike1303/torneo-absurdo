@@ -12,7 +12,7 @@ export { FACE_CODES, type FaceCode } from '../model/pose.ts';
 /**
  * Draws a timeline in `container` with Three.js and the generic botarga. Same handle as
  * `createRenderer`; `load` also rejects with `RendererError('asset_load_failed')` if the GLB or a
- * face cannot be loaded. The manifests get the botarga's own pace (`paceAssets`, 016).
+ * face cannot be loaded. The manifests get the botarga's own pace (`paceAssets`, 017).
  */
 export function createRenderer3d(
   container: HTMLElement,

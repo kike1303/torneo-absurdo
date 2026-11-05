@@ -1,4 +1,4 @@
-// The botarga's own pace (016). The sprite manifests are short, made for a few drawn frames: fit to
+// The botarga's own pace (017). The sprite manifests are short, made for a few drawn frames: fit to
 // them, a Mixamo clip plays 4 to 6 times its natural speed. The 3D layer stretches each action
 // towards its clip, with the windups inside `LIMITS.windupMaxMs` so the choreography guarantee of
 // 002 holds (the reaction to a strike is always seen). Pure: it only rewrites `frame_ms`.

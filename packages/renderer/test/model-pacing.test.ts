@@ -14,7 +14,7 @@ function paced(json: unknown, id: string): SpriteManifest {
 
 const sum = (ms: readonly number[]) => ms.reduce((a, b) => a + b, 0);
 
-describe('paceManifest (016)', () => {
+describe('paceManifest (017)', () => {
   it('stretches each action to its pace and keeps the manifest valid', () => {
     for (const [json, id] of [
       [dummyA, 'dummy_a'],
