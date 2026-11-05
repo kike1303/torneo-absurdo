@@ -32,6 +32,18 @@ import { METERS_PER_PX, createCamera, placeCamera, worldX, worldY } from './worl
 
 /** Device pixels per CSS px, capped: a phone at 3× costs more than it shows. */
 const MAX_PIXEL_RATIO = 2;
+/**
+ * A device that cannot keep up draws fewer pixels: when the smoothed frame interval passes
+ * `SLOW_FRAME_MS`, the pixel ratio steps down by `RATIO_STEP` (at most once per
+ * `RATIO_COOLDOWN_MS`), never under `MIN_PIXEL_RATIO`. Gaps over `IGNORED_GAP_MS` (a hidden tab)
+ * do not count.
+ */
+const SLOW_FRAME_MS = 40;
+const RATIO_STEP = 0.75;
+const MIN_PIXEL_RATIO = 0.5;
+const RATIO_COOLDOWN_MS = 1000;
+const IGNORED_GAP_MS = 250;
+const FRAME_SMOOTHING = 0.1;
 const SHADOW_MAP = 1024;
 /** How much of the text color the floor takes over the background. */
 const FLOOR_MIX = 0.08;
@@ -60,6 +72,8 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
   let observer: ResizeObserver | null = null;
   let destroyed = false;
   let aspect = 16 / 9;
+  /** Something changed since the last render: a still scene (paused, hidden) costs nothing. */
+  let dirty = true;
   let formatNumber: (n: number) => string = String;
   const numbers: DamageNumberEffect[] = [];
   const matrix = new Matrix4();
@@ -81,7 +95,7 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
     aspect = width / height;
     w.overlay.layout({ width, height });
     if (lastScene !== null) draw(w, lastScene);
-    w.renderer.render(w.scene, w.camera);
+    dirty = true;
   };
 
   function drawParticles(w: World, scene: Scene, current: RendererTheme): void {
@@ -141,7 +155,11 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
       formatNumber = setup.formatNumber;
       let renderer: WebGLRenderer;
       try {
-        renderer = new WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+        // At 2× and above the pixels are small enough without MSAA, which is the costly part.
+        renderer = new WebGLRenderer({
+          antialias: (window.devicePixelRatio || 1) < MAX_PIXEL_RATIO,
+          powerPreference: 'high-performance',
+        });
       } catch (cause) {
         throw new RendererError('webgl_unavailable', { cause });
       }
@@ -149,7 +167,8 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
         renderer.dispose();
         return;
       }
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
+      let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
+      renderer.setPixelRatio(pixelRatio);
       renderer.outputColorSpace = SRGBColorSpace;
       renderer.toneMapping = NeutralToneMapping;
       renderer.shadowMap.enabled = true;
@@ -194,12 +213,31 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
       observer = new ResizeObserver(resize);
       observer.observe(container);
       let last: number | null = null;
+      let smoothed = 0;
+      let sinceStep = 0;
       renderer.setAnimationLoop((time: number) => {
         const w = world;
         if (w === null) return;
         const elapsed = last === null ? 0 : time - last;
         last = time;
         if (elapsed > 0) setup.onFrame(elapsed);
+        if (!dirty) return;
+        dirty = false;
+        if (elapsed > 0 && elapsed < IGNORED_GAP_MS) {
+          smoothed += (elapsed - smoothed) * FRAME_SMOOTHING;
+          sinceStep += elapsed;
+          if (
+            smoothed > SLOW_FRAME_MS &&
+            sinceStep > RATIO_COOLDOWN_MS &&
+            pixelRatio > MIN_PIXEL_RATIO
+          ) {
+            pixelRatio = Math.max(MIN_PIXEL_RATIO, pixelRatio * RATIO_STEP);
+            w.renderer.setPixelRatio(pixelRatio);
+            sinceStep = 0;
+            smoothed = 0;
+            resize();
+          }
+        }
         w.renderer.render(w.scene, w.camera);
       });
     },
@@ -215,9 +253,11 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
       for (const side of SIDES) world?.scene.add(created[side].root);
       fighters = created;
       lastScene = null;
+      dirty = true;
     },
     apply(scene) {
       lastScene = scene;
+      dirty = true;
       if (world !== null) draw(world, scene);
     },
     setTheme(next) {
@@ -227,6 +267,7 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
       paint(w, next);
       w.overlay.setTheme(next);
       if (lastScene !== null) draw(w, lastScene);
+      dirty = true;
     },
     destroy() {
       if (destroyed) return;
