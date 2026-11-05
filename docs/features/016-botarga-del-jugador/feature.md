@@ -50,7 +50,9 @@ Tiers del catálogo cada 20 niveles (1-19, 20-39, …, 80-100). Los ataques de t
 
 **Personalidad (estilo de pelea).** En el motor todo luchador tiene tres rasgos de 0 a 100 que deciden cómo pelea: `aggression` (más golpes y pesados), `caution` (bloquea más) y `showmanship` (más especiales). Libres tienen un óptimo trivial, así que la botarga elige un **estilo** de una lista fija (equilibrado, agresivo, defensivo, showman), cada uno con valores ya balanceados. Se cambia libre, como un ataque equipado.
 
-**Elementos y debilidades.** La botarga no tiene elemento propio: lo dan sus ataques. Cada ataque elemental equipado trae una debilidad fija según un ciclo: fuego es débil a agua, agua a eléctrico, eléctrico a tierra, tierra a aire, aire a hielo y hielo a fuego. Se quitan las repetidas, y una build con más de 2 debilidades no es válida (`weaknesses_max = 2`), así que se combinan como mucho 2 elementos. Es un intercambio: el ataque elemental pega más a quien es débil a él, pero te expone. Los ataques sin elemento no traen debilidad.
+**Elementos y debilidades.** La botarga no tiene elemento propio: lo dan sus ataques. Cada ataque elemental equipado trae una debilidad fija según un ciclo: fuego es débil a agua, agua a eléctrico, eléctrico a tierra, tierra a aire, aire a hielo y hielo a fuego. Se quitan las repetidas, y una build con más de 2 debilidades no es válida (`weaknesses_max = 2`), así que se combinan como mucho 2 elementos. Es un intercambio: el ataque elemental pega más a quien es débil a él, pero te expone. Los ataques sin elemento no traen debilidad. El jugador cambia sus debilidades cambiando sus ataques equipados.
+
+La regla de daño es la de hoy y no cambia: si el elemento del ataque está entre las debilidades del rival, el daño se multiplica por 5/4 (`weak_num`/`weak_den`), golpee o sea bloqueado. No hay bonus por mismo elemento (empujaría a builds de un solo elemento) ni resistencias o daño reducido; un ataque contra un elemento que no es debilidad pega normal. Los personajes del torneo no cambian: no tienen elemento propio y sus debilidades están puestas a mano en su `character.json`.
 
 **Animaciones cosméticas.** Victoria e idle **no van en `CharacterSpec`** ni en el hash canónico: no afectan el resultado y cambiarlas no re-simula. Van en un tipo nuevo de `crates/protocol`, `FighterCosmetics { idle, victory }` (códigos de clip), junto a `FighterInfo` y fuera de lo que verifica el WASM. Sin cosméticos (torneo, logs viejos), el renderer hace lo de hoy. El KO al azar lo elige el **renderer** con un hash de la pelea y el lado, nunca con el PRNG del motor: todos los espectadores ven el mismo.
 
@@ -97,7 +99,8 @@ Además, win rate por banda de nivel contra la misma banda (que ningún nivel te
 - Accesorios de suma cero: sí.
 - Tope en el nivel 100, con la progresión (stats, ataques, skins) repartida hasta ahí.
 - Sorteo: elegir 1 de 3, siempre ataques que todavía no tiene.
+- Estilo de pelea de una lista fija: sí.
+- Debilidades según los ataques elementales equipados: sí.
 
 ## Preguntas abiertas al owner
-1. **Estilo de pelea:** ¿de acuerdo con elegir uno de una lista fija (equilibrado, agresivo, defensivo, showman)?
-2. **Elementos:** ¿de acuerdo con que la debilidad venga de los ataques elementales equipados, con máximo 2?
+1. **Regla de elementos:** ¿de acuerdo con dejarla como hoy (solo ×5/4 contra una debilidad, sin bonus por mismo elemento ni resistencias)?
