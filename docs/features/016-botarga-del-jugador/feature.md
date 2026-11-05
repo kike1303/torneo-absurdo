@@ -34,16 +34,23 @@ Diseño previo con el `game-designer` y respuestas del owner (2026-11-05). Queda
 
 **Accesorios con stats.** Cada ranura de prenda (gorro, guantes, chaleco, pantalón y botas) puede traer un ajuste de stats, por ejemplo guantes con +8 de ataque y −8 de velocidad. Son **intercambios de suma cero**: un accesorio mueve puntos y no da puntos nuevos, y el total sigue bajo el presupuesto del nivel. Así cambian el estilo de pelea sin volverse poder que se compra el día que haya tienda (backlog: "nunca se venden stats"). Hay tope por stat (por ejemplo ±10 por accesorio y ±20 en total), y el mínimo de stats de v2 se aplica después de sumar los accesorios. El server resuelve la botarga con habilidades y accesorios a un `CharacterSpec` normal antes de pelear, así que `simulate` no cambia de firma.
 
-**Niveles y recompensas.** Sin tope de nivel, pero con **tope de poder**: el presupuesto de stats sube de 250 a 300 hasta el nivel 10 (+5 por nivel) y ahí se queda. Desde ese nivel se sube por cosméticos y ranking, no por fuerza. Así los veteranos no aplastan a los nuevos, y el emparejamiento por rating basta. Boceto, a ajustar con `just sim`:
+**Niveles y recompensas.** **Tope en el nivel 100** (owner), con la progresión repartida en todo el camino: el presupuesto de stats sube de 200 en el nivel 1 a 300 en el 100 (+1 por nivel, más el nivel 1), así cada nivel se nota y el máximo iguala al roster del torneo. Los ataques, las ranuras y los cosméticos se reparten hasta el 100. Boceto, a ajustar con `just sim`:
 
 | Nivel | Recompensa |
 |---|---|
-| 1 | Botarga genérica, strike y 1 pesado inicial, 1 ranura abierta |
-| 2, 4, 6, 8, 10 | Un ataque nuevo al azar del catálogo (del tier de ese nivel) |
-| 3 / 5 / 7 | Se abre la 2.ª / 3.ª / 4.ª ranura |
-| 9, 12, 15… | Accesorio, animación de victoria o de idle, o skin |
+| 1 | Botarga genérica, strike, 1 pesado inicial y 1 ranura abierta |
+| 5 / 15 / 30 | Se abre la 2.ª / 3.ª / 4.ª ranura |
+| Cada 5 (salvo los de ranura) | Elegir 1 de 3 ataques nuevos al azar del tier del nivel |
+| Cada 10 | Un cosmético: accesorio, victoria, idle o skin |
+| 25, 50, 75, 100 | Hito: un cosmético especial del tier |
 
-El sorteo del ataque lo hace el **server** (no el motor), entre las del tier que el jugador aún no tiene, y se guarda en el mismo paso que sube el nivel: reintentar no vuelve a sortear.
+Tiers del catálogo cada 20 niveles (1-19, 20-39, …, 80-100). Los ataques de tier alto no son más fuertes: tienen efectos más vistosos o combinaciones raras de poder y cooldown, porque la fuerza ya la da el presupuesto. Con unas 17 tiradas hasta el 100, el catálogo necesita al menos 3 ataques que el jugador no tenga en cada tirada, unos 24 a 30 en total.
+
+**Sorteo de ataques.** Lo hace el **server** (no el motor): saca 3 ataques **que el jugador no tiene**, del tier de su nivel o de uno inferior; el jugador elige 1. Si quedan menos de 3 sin tener, se ofrecen los que queden; si no queda ninguno, la tirada da un cosmético. Las 3 opciones se guardan en el mismo paso que sube el nivel y quedan pendientes hasta que elija: recargar o reintentar no vuelve a sortear.
+
+**Personalidad (estilo de pelea).** En el motor todo luchador tiene tres rasgos de 0 a 100 que deciden cómo pelea: `aggression` (más golpes y pesados), `caution` (bloquea más) y `showmanship` (más especiales). Libres tienen un óptimo trivial, así que la botarga elige un **estilo** de una lista fija (equilibrado, agresivo, defensivo, showman), cada uno con valores ya balanceados. Se cambia libre, como un ataque equipado.
+
+**Elementos y debilidades.** La botarga no tiene elemento propio: lo dan sus ataques. Cada ataque elemental equipado trae una debilidad fija según un ciclo: fuego es débil a agua, agua a eléctrico, eléctrico a tierra, tierra a aire, aire a hielo y hielo a fuego. Se quitan las repetidas, y una build con más de 2 debilidades no es válida (`weaknesses_max = 2`), así que se combinan como mucho 2 elementos. Es un intercambio: el ataque elemental pega más a quien es débil a él, pero te expone. Los ataques sin elemento no traen debilidad.
 
 **Animaciones cosméticas.** Victoria e idle **no van en `CharacterSpec`** ni en el hash canónico: no afectan el resultado y cambiarlas no re-simula. Van en un tipo nuevo de `crates/protocol`, `FighterCosmetics { idle, victory }` (códigos de clip), junto a `FighterInfo` y fuera de lo que verifica el WASM. Sin cosméticos (torneo, logs viejos), el renderer hace lo de hoy. El KO al azar lo elige el **renderer** con un hash de la pelea y el lado, nunca con el PRNG del motor: todos los espectadores ven el mismo.
 
@@ -55,7 +62,9 @@ El sorteo del ataque lo hace el **server** (no el motor), entre las del tier que
 
 `--check` corre una versión chica en `just check`; el informe completo, a mano.
 
-**Huecos de una build libre** (para v2, a medir): con `stat_min = 1` se puede volcar todo en pocos stats; conviene un mínimo de 20 por stat (el roster va de 30 a 95). La personalidad y las debilidades libres también tienen óptimos triviales: ver las preguntas abiertas.
+Además, win rate por banda de nivel contra la misma banda (que ningún nivel tenga una build rota) y la ventaja de 10 niveles de diferencia, para fijar cuánta distancia de nivel tolera el emparejamiento.
+
+**Mínimo de stats** (v2, a medir): con `stat_min = 1` se puede volcar todo en pocos stats; conviene un mínimo de 20 por stat (el roster va de 30 a 95). Con 200 de presupuesto en el nivel 1 cabe.
 
 ## Fases
 1. Motor: ruleset v2 (tope por tipo, reparto del peso, mínimo de stats) y sus goldens. El torneo no cambia.
@@ -67,13 +76,15 @@ El sorteo del ataque lo hace el **server** (no el motor), entre las del tier que
 ## Riesgos
 - **Balance:** una habilidad, un accesorio o un combo dominante. Se evita con catálogos cerrados, accesorios de suma cero y `--builds` en `just check`.
 - **Determinismo:** el reparto con división entera tiene que ser estable; goldens de v2 y re-simulación de logs v1 idéntica.
+- **Distancia de nivel:** entre el nivel 1 (200) y el 100 (300) hay 100 puntos de stats. El emparejamiento por rating lo cubre en parte; la feature de PvP tiene que limitar la diferencia de nivel con el dato de `--builds`.
 - **Entrada del usuario:** la build llega del cliente. El server la valida en el borde contra lo que el jugador tiene desbloqueado, además de `validate`. El sorteo de recompensas no se puede repetir.
 - **Tienda futura:** cuando se compren accesorios o animaciones con monedas, esa feature es `risk: high` y pasa por el `security-reviewer`. Los accesorios en venta tienen que seguir siendo de suma cero.
 
 ## Pruebas
 - [ ] `just check` en verde.
 - [ ] Motor: v2 rechaza 3 especiales o 3 pesados; con 1 o 2 habilidades de un tipo, ese tipo sale con la misma frecuencia (semillas fijas); los logs v1 se re-simulan idénticos.
-- [ ] Un accesorio que suma puntos netos o pasa el tope por stat se rechaza.
+- [ ] Un accesorio que suma puntos netos o pasa el tope por stat se rechaza; una build con más de 2 debilidades también.
+- [ ] Sorteo: las 3 opciones nunca incluyen un ataque que el jugador ya tiene, y reintentar devuelve las mismas.
 - [ ] `just sim --check` (torneo, v1) y `just sim --builds N --check` (v2) pasan.
 - [ ] Renderer: con `FighterCosmetics` salen la victoria y el idle elegidos; sin ellos, lo de hoy; el KO es el mismo en dos cargas de la misma pelea.
 
@@ -83,10 +94,10 @@ El sorteo del ataque lo hace el **server** (no el motor), entre las del tier que
 - El jugador equipa lo que tiene disponible: accesorios, skins y ataques.
 - Los accesorios afectan los stats.
 - Torneo y PvP son flujos separados; de acuerdo con v2.
+- Accesorios de suma cero: sí.
+- Tope en el nivel 100, con la progresión (stats, ataques, skins) repartida hasta ahí.
+- Sorteo: elegir 1 de 3, siempre ataques que todavía no tiene.
 
 ## Preguntas abiertas al owner
-1. **Accesorios de suma cero:** ¿de acuerdo con que muevan stats sin sumar (por ejemplo +8 ataque y −8 velocidad)? Si suman puntos, la tienda vendería poder.
-2. **Tope de poder:** ¿presupuesto de 250 a 300 hasta el nivel 10 y después solo cosméticos, sin tope de nivel?
-3. **Sorteo de ataques:** ¿uno al azar sin elegir, o elegir 1 de 3 al azar (evita quedarse con algo que no le sirve)?
-4. **Personalidad:** ¿libre con presupuesto, por presets ligados a la cara, o fija?
-5. **Elementos y debilidades:** ¿cada habilidad elemental trae una debilidad fija (fuego trae agua), o la asigna el sistema?
+1. **Estilo de pelea:** ¿de acuerdo con elegir uno de una lista fija (equilibrado, agresivo, defensivo, showman)?
+2. **Elementos:** ¿de acuerdo con que la debilidad venga de los ataques elementales equipados, con máximo 2?
