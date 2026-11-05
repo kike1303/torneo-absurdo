@@ -41,6 +41,6 @@ Los windups quedan en `LIMITS.windupMaxMs` (400 ms) o menos: así se mantiene la
 - Los clips siguen siendo más largos que el tiempo disponible (un `attack_light` de 1,8 s en 800 ms): van a ~2× en vez de 4–6×. Ir más lento ya necesita peleas más largas (motor).
 
 ## Pruebas
-- [ ] `just check` en verde.
+- [x] `just check` en verde.
 - [x] Unit: cada acción suma su ritmo y su windup, los windups ≤ 400 ms, los manifests siguen válidos, es más lento que el sprite, lo demás pasa igual y los timelines golden y el spike siguen válidos.
-- [ ] e2e general y `e2e-fights` en local; revisión visual en `just dev`.
+- [x] e2e general (496 pasan) y `e2e-fights` (4 proyectos) en local; la pelea de prueba de `/dev/arena` se reproduce sin errores.
