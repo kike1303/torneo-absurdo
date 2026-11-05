@@ -25,14 +25,31 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 const isDurations = (v: unknown): v is number[] =>
   Array.isArray(v) && v.length > 0 && v.every((n) => typeof n === 'number' && n > 0);
 
-/** `frames` scaled to sum `target`, in whole ms inside the manifest limits; the last one absorbs
- * the rounding so the sum is exact. */
-function stretch(frames: readonly number[], target: number): number[] {
-  const sum = frames.reduce((a, b) => a + b, 0);
-  const clamp = (n: number) => Math.min(LIMITS.frameMsMax, Math.max(LIMITS.frameMsMin, n));
-  const out = frames.map((ms) => clamp(Math.round((ms * target) / sum)));
-  const rest = target - out.slice(0, -1).reduce((a, b) => a + b, 0);
-  out[out.length - 1] = clamp(rest);
+const sum = (ms: readonly number[]) => ms.reduce((a, b) => a + b, 0);
+
+/**
+ * `frames` scaled to sum exactly `target`, every frame inside the manifest limits; null when no
+ * such split exists (too many frames for the target). After rounding, the difference goes 1 ms at
+ * a time to the longest frames that can still take it (review of #99: clamping the last frame to
+ * the minimum used to overshoot the target).
+ */
+export function stretch(frames: readonly number[], target: number): number[] | null {
+  const { frameMsMin: min, frameMsMax: max } = LIMITS;
+  if (target < frames.length * min || target > frames.length * max) return null;
+  const total = sum(frames);
+  const out = frames.map((ms) => Math.min(max, Math.max(min, Math.round((ms * target) / total))));
+  let diff = target - sum(out);
+  while (diff !== 0) {
+    const step = Math.sign(diff);
+    let pick = -1;
+    for (let i = 0; i < out.length; i++) {
+      const room = step > 0 ? (out[i] as number) < max : (out[i] as number) > min;
+      if (room && (pick === -1 || (out[i] as number) > (out[pick] as number))) pick = i;
+    }
+    if (pick === -1) return null;
+    out[pick] = (out[pick] as number) + step;
+    diff -= step;
+  }
   return out;
 }
 
@@ -40,6 +57,7 @@ function paceAnimation(animation: unknown, pace: ActionPace): unknown {
   if (!isRecord(animation) || !isDurations(animation.frame_ms)) return animation;
   const frames = animation.frame_ms;
   const impact = animation.impact_frame;
+  let paced: number[] | null;
   if (
     pace.windup !== undefined &&
     typeof impact === 'number' &&
@@ -47,15 +65,15 @@ function paceAnimation(animation: unknown, pace: ActionPace): unknown {
     impact > 0 &&
     impact < frames.length
   ) {
-    return {
-      ...animation,
-      frame_ms: [
-        ...stretch(frames.slice(0, impact), pace.windup),
-        ...stretch(frames.slice(impact), pace.total - pace.windup),
-      ],
-    };
+    const windup = stretch(frames.slice(0, impact), pace.windup);
+    const rest = stretch(frames.slice(impact), pace.total - pace.windup);
+    paced = windup === null || rest === null ? null : [...windup, ...rest];
+    // The choreography guarantee (002) caps every windup: a manifest it would break stays as is.
+    if (paced !== null && sum(paced.slice(0, impact)) > LIMITS.windupMaxMs) paced = null;
+  } else {
+    paced = stretch(frames, pace.total);
   }
-  return { ...animation, frame_ms: stretch(frames, pace.total) };
+  return paced === null ? animation : { ...animation, frame_ms: paced };
 }
 
 /**

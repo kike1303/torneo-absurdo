@@ -23,7 +23,7 @@ Decisión del owner (2026-11-05): solo ajustar las animaciones, sin tocar el mot
 - No entra: el motor, el ruleset, la duración de las peleas, el renderer 2D y los manifests de `placeholders/`.
 
 ## Diseño
-**`src/model/pacing.ts` (puro).** `paceManifest` reescribe solo `frame_ms` de las acciones de `BOTARGA_PACE`: la parte antes del impacto suma el `windup` y la de después, `total − windup`. Las demás animaciones, y lo que no reconoce, pasan igual, y `validateAssets` sigue revisando todo.
+**`src/model/pacing.ts` (puro).** `paceManifest` reescribe solo `frame_ms` de las acciones de `BOTARGA_PACE`: la parte antes del impacto suma el `windup` y la de después, `total − windup`. Cada parte suma exactamente su objetivo, con cada cuadro entre 16 y 2000 ms: el redondeo se reparte de a 1 ms en los cuadros más largos. Si la animación con ritmo no cabe en los límites (demasiados cuadros cortos, o un windup que pasaría de 400 ms), queda la original (revisión de #99: un `special` con cuadros de 17 y 33 ms quedaba en 401 ms). Las demás animaciones, y lo que no reconoce, pasan igual, y `validateAssets` sigue revisando todo.
 
 | Acción | Sprite (antes) | Botarga |
 |---|---|---|
@@ -42,5 +42,5 @@ Los windups quedan en `LIMITS.windupMaxMs` (400 ms) o menos: así se mantiene la
 
 ## Pruebas
 - [x] `just check` en verde.
-- [x] Unit: cada acción suma su ritmo y su windup, los windups ≤ 400 ms, los manifests siguen válidos, es más lento que el sprite, lo demás pasa igual y los timelines golden y el spike siguen válidos.
+- [x] Unit: cada acción suma su ritmo y su windup, los windups ≤ 400 ms, los manifests siguen válidos, es más lento que el sprite y lo demás pasa igual; `stretch` exacto y dentro de los límites, el `special` de cuadros cortos sigue válido y lo imposible queda original; en el spike y las peleas golden, cada golpe cae en su cue (`elapsed === windup`).
 - [x] e2e general (496 pasan) y `e2e-fights` (4 proyectos) en local; la pelea de prueba de `/dev/arena` se reproduce sin errores.

@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import dummyA from '../placeholders/dummy_a/manifest.json' with { type: 'json' };
 import dummyB from '../placeholders/dummy_b/manifest.json' with { type: 'json' };
 import { LIMITS, validateManifest, type SpriteManifest } from '../src/manifest/index.ts';
-import { BOTARGA_PACE, paceAssets, paceManifest } from '../src/model/pacing.ts';
-import { validateTimeline } from '../src/timeline/validate.ts';
+import { BOTARGA_PACE, paceAssets, paceManifest, stretch } from '../src/model/pacing.ts';
+import { prepareScene } from '../src/scene/prepare.ts';
+import { sceneAt } from '../src/scene/scene-at.ts';
 import { GOLDEN_NAMES, goldenTimeline, spikeTimeline } from './support/scenes.ts';
 
 function paced(json: unknown, id: string): SpriteManifest {
@@ -53,18 +54,96 @@ describe('paceManifest (017)', () => {
     for (const junk of [null, 7, 'x', [], { animations: 3 }]) expect(paceManifest(junk)).toBe(junk);
   });
 
-  it('keeps every golden timeline and the spike valid', () => {
+  it('lands every strike on its cue with the paced manifests (review of #99)', () => {
     const manifests = new Map([
       ['dummy_a', paced(dummyA, 'dummy_a')],
       ['dummy_b', paced(dummyB, 'dummy_b')],
     ]);
+    let strikes = 0;
     for (const timeline of [spikeTimeline(), ...GOLDEN_NAMES.map((n) => goldenTimeline(n))]) {
-      expect(validateTimeline(timeline, manifests).ok).toBe(true);
+      const prepared = prepareScene(timeline, manifests);
+      for (const cue of timeline.cues) {
+        if (cue.type !== 'strike') continue;
+        const f = sceneAt(prepared, cue.at_ms, { reducedMotion: false }).fighters[cue.actor];
+        if (f.animation !== cue.move) continue;
+        expect(f.elapsed, `${cue.actor} ${cue.move} at ${cue.at_ms}`).toBe(f.windup);
+        strikes++;
+      }
     }
+    expect(strikes).toBeGreaterThan(50);
   });
 
   it('paces every asset of a map', () => {
     const out = paceAssets(new Map([['dummy_a', dummyA]]));
     expect(out.get('dummy_a')).toEqual(paceManifest(dummyA));
+  });
+});
+
+/** The `special` of `manifest` with these frame lengths, reusing its drawn frames in turn. */
+function withFrames(manifest: typeof dummyA, frameMs: number[]) {
+  const special = manifest.animations.special as {
+    frames: number[];
+    frame_ms: number[];
+    impact_frame: number;
+  };
+  const drawn = special.frames;
+  special.frames = frameMs.map((_, i) => drawn[i % drawn.length] as number);
+  special.frame_ms = frameMs;
+  return special;
+}
+
+describe('stretch (review of #99)', () => {
+  it('sums exactly the target with every frame inside the limits', () => {
+    for (const frames of [
+      [60, 60],
+      [133, 33, 33, 33, 33, 33, 33, 33, 17],
+      [17, 17, 17, 17],
+      [500],
+    ]) {
+      for (const target of [100, 260, 399, 400, 1300]) {
+        const out = stretch(frames, target);
+        if (out === null) {
+          expect(target < frames.length * LIMITS.frameMsMin).toBe(true);
+          continue;
+        }
+        expect(sum(out), `${frames} → ${target}`).toBe(target);
+        for (const ms of out) {
+          expect(ms).toBeGreaterThanOrEqual(LIMITS.frameMsMin);
+          expect(ms).toBeLessThanOrEqual(LIMITS.frameMsMax);
+        }
+      }
+    }
+  });
+
+  it('gives null when the frames cannot fit the target', () => {
+    expect(
+      stretch(
+        Array.from({ length: 30 }, () => 33),
+        400,
+      ),
+    ).toBeNull();
+  });
+
+  it('keeps a valid special valid when its windup has many short frames', () => {
+    // A MUGEN set in ticks of 17 and 33 ms: before the fix its windup went to 401 ms.
+    const manifest = structuredClone(dummyA) as typeof dummyA;
+    const special = withFrames(manifest, [133, 33, 33, 33, 33, 33, 33, 33, 17, 50, 50]);
+    special.impact_frame = 9;
+    expect(validateManifest(manifest, { expectedId: 'dummy_a' }).ok).toBe(true);
+    const result = validateManifest(paceManifest(manifest), { expectedId: 'dummy_a' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const out = result.manifest.animations.special;
+    expect(sum(out?.frame_ms.slice(0, 9) ?? [])).toBeLessThanOrEqual(LIMITS.windupMaxMs);
+  });
+
+  it('keeps the original animation when the paced one cannot be valid', () => {
+    const manifest = structuredClone(dummyA) as typeof dummyA;
+    // After the impact, 57 frames of 16 ms cannot shrink to the 900 ms the pace asks for.
+    const special = withFrames(manifest, [40, ...Array.from({ length: 57 }, () => 16)]);
+    special.impact_frame = 1;
+    expect(validateManifest(manifest, { expectedId: 'dummy_a' }).ok).toBe(true);
+    const paced = paceManifest(manifest) as typeof dummyA;
+    expect(paced.animations.special).toEqual(manifest.animations.special);
   });
 });
