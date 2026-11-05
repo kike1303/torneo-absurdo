@@ -33,8 +33,8 @@ function inputs(): [string, unknown, boolean][] {
     ['missing version', { duration_ms: 1 }, false],
   ];
   for (const rule of rules) {
-    // `unsupported_version` moved from 2 to 3 when v2 became valid (spec concern 4); its result
-    // does not change.
+    // `unsupported_version` moved from 2 to 3 when v2 became valid (spec concern 4), and to 4 when
+    // v3 did (015); its result does not change.
     out.push([rule.name, applyOps(valid, rule.ops), rule.manifests === true]);
   }
   return out.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));

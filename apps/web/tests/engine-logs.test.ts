@@ -58,7 +58,7 @@ describe('loadEngineLogTimeline', () => {
 
   it('gives the draw: time_up and draw, no win', async () => {
     const timeline = await loadEngineLogTimeline('draw', { a: 'dummy_a', b: 'dummy_b' });
-    expect(timeline.timeline_version).toBe(2);
+    expect(timeline.timeline_version).toBe(3);
     expect(timeline.cues.slice(-2)).toEqual([
       { at_ms: 86000, type: 'time_up' },
       { at_ms: 87500, type: 'draw' },
