@@ -2,6 +2,7 @@
 // botarga, at which clip time, and which face. Pure: the Three layer only applies it, so `seek`
 // shows the same as playing up to there and every spectator sees the same variant.
 import type { AnimationCode } from '../manifest/types.ts';
+import { RETURN_MS } from '../scene/choreography.ts';
 import type { FighterScene } from '../scene/types.ts';
 import type { Side } from '../timeline/types.ts';
 
@@ -24,8 +25,15 @@ export const CLIP_NAMES = [
   'win_2',
   'win_3',
 ] as const;
-/** Clips a GLB may still lack (014): a walk falls back to `idle` until they are exported. */
-export const OPTIONAL_CLIP_NAMES = ['walk_forward', 'walk_back'] as const;
+/** Clips a GLB may lack (014): each falls back to `idle`. */
+export const OPTIONAL_CLIP_NAMES = [
+  'walk_forward',
+  'walk_back',
+  'idle_2',
+  'idle_3',
+  'idle_4',
+  'idle_5',
+] as const;
 type RequiredClip = (typeof CLIP_NAMES)[number];
 type OptionalClip = (typeof OPTIONAL_CLIP_NAMES)[number];
 export type ClipName = RequiredClip | OptionalClip;
@@ -44,8 +52,13 @@ export const CLIP_IMPACT: Readonly<Partial<Record<ClipName, number>>> = Object.f
   special_4: 0.2,
 });
 
+/** Idle changes variant every spell, per side (014): long waits do not loop one clip. */
+const IDLE_SPELL_MS = 8000;
+const IDLE_VARIANTS: readonly ClipName[] = ['idle', 'idle_2', 'idle_3', 'idle_4', 'idle_5'];
+
 const VARIANTS: Readonly<Record<AnimationCode, readonly ClipName[]>> = Object.freeze({
-  idle: ['idle'],
+  // Chosen by spell in `clipFor`.
+  idle: IDLE_VARIANTS,
   intro: ['idle'],
   // Chosen by `travel` in `clipFor`.
   walk: ['walk_forward'],
@@ -119,6 +132,10 @@ export function clipFor(
   t: number,
 ): ClipName {
   if (fighter.animation === 'walk') return fighter.travel < 0 ? 'walk_back' : 'walk_forward';
+  if (fighter.animation === 'idle') {
+    const spell = Math.floor(Math.max(0, t) / IDLE_SPELL_MS);
+    return IDLE_VARIANTS[variantIndex(fighter.side, spell, IDLE_VARIANTS.length)] as ClipName;
+  }
   const variants = VARIANTS[fighter.animation];
   if (variants.length === 1) return variants[0] as ClipName;
   return variants[variantIndex(fighter.side, t - fighter.elapsed, variants.length)] as ClipName;
@@ -137,9 +154,9 @@ export function clipTime(
   t: number,
 ): number {
   const ms = Math.max(0, fighter.elapsed);
-  // A walk clip steps at its own pace from the start of the walk.
+  // A walk (the return to the mark, `RETURN_MS`) takes one step: half the clip's cycle.
   if (clip === 'walk_forward' || clip === 'walk_back')
-    return duration > 0 ? (ms / 1000) % duration : 0;
+    return Math.min(1, ms / RETURN_MS) * (duration / 2);
   if (fighter.animation === 'idle' || fighter.animation === 'intro' || fighter.animation === 'walk')
     return duration > 0 ? (Math.max(0, t) / 1000) % duration : 0;
   if (HELD.has(fighter.animation)) return Math.min(duration, ms / 1000);

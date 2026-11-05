@@ -146,9 +146,13 @@ describe('walks (014)', () => {
     expect(clipFor(fighter({ animation: 'walk', travel: -1 }), 0)).toBe('walk_back');
   });
 
-  it('steps at the clip pace from the start of the walk', () => {
-    const walk = fighter({ animation: 'walk', travel: -1, elapsed: 2500 });
-    expect(clipTime(walk, 'walk_back', 2, 99_000)).toBeCloseTo(0.5);
+  it('takes one step (half the cycle) over the return to the mark', () => {
+    const at = (elapsed: number) =>
+      clipTime(fighter({ animation: 'walk', travel: -1, elapsed }), 'walk_back', 2, 99_000);
+    expect(at(0)).toBe(0);
+    expect(at(150)).toBeCloseTo(0.5);
+    expect(at(300)).toBeCloseTo(1);
+    expect(at(5000)).toBeCloseTo(1);
   });
 
   it('plays idle while the GLB lacks the walk clips', () => {
@@ -167,5 +171,22 @@ describe('walks (014)', () => {
     }
     expect(walks.length).toBeGreaterThan(0);
     expect(walks).toContain(-1);
+  });
+});
+
+describe('idle variants (014)', () => {
+  it('changes idle every spell, the same for every viewer', () => {
+    const seen = new Set<string>();
+    for (let t = 0; t < 200_000; t += 8000) seen.add(clipFor(fighter({ animation: 'idle' }), t));
+    expect(seen.size).toBeGreaterThan(2);
+    expect(clipFor(fighter({ animation: 'idle' }), 12_345)).toBe(
+      clipFor(fighter({ animation: 'idle' }), 15_999),
+    );
+  });
+
+  it('falls back to the first idle when the GLB lacks a variant', () => {
+    for (let t = 0; t < 80_000; t += 8000) {
+      expect(poseFor(fighter({ animation: 'idle' }), t, DURATIONS, CONTEXT).clip).toBe('idle');
+    }
   });
 });
