@@ -2,7 +2,7 @@
 id: "015"
 title: Animación propia por habilidad
 type: feature
-status: draft
+status: done
 risk: low
 author: claude
 linear: TA-52

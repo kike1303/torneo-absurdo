@@ -206,8 +206,16 @@ describe('one clip per ability (015)', () => {
     const prepared = goldenScene('draw');
     const clips = new Map<string, string>();
     let carried = 0;
+    let reactions = 0;
     for (let t = 0; t < prepared.durationMs; t += 16) {
       for (const f of Object.values(sceneAt(prepared, t, { reducedMotion: false }).fighters)) {
+        // The rival's reaction to a strike, a walk and the closing hold never carry it.
+        if (
+          ['hit', 'block', 'dodge', 'knockdown', 'walk', 'ko', 'win', 'idle'].includes(f.animation)
+        ) {
+          expect(f.ability, `${f.side} ${f.animation} at ${t}`).toBeNull();
+          if (f.animation !== 'walk' && f.animation !== 'idle') reactions++;
+        }
         if (f.ability === null) continue;
         expect(['attack_light', 'attack_heavy', 'special']).toContain(f.animation);
         carried++;
@@ -218,5 +226,6 @@ describe('one clip per ability (015)', () => {
       }
     }
     expect(carried).toBeGreaterThan(0);
+    expect(reactions).toBeGreaterThan(0);
   });
 });

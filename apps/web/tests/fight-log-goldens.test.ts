@@ -65,8 +65,9 @@ describe('engine goldens through the adapter', () => {
     },
   );
 
-  it.each(TIME_LOGS)('%s gives a v2 timeline with time_up and the right closing', (name) => {
+  it.each(TIME_LOGS)('%s gives a v3 timeline with time_up and the right closing', (name) => {
     const { timeline, end } = adapt(name);
+    expect(timeline.timeline_version).toBe(3);
     const timeUp = timeline.cues.find((c) => c.type === 'time_up');
     expect(timeUp).toEqual({ at_ms: 86000, type: 'time_up' });
     expect(timeline.cues.some((c) => c.type === 'ko')).toBe(false);
