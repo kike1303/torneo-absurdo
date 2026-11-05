@@ -8,6 +8,8 @@ Reproductor de peleas de Torneo Absurdo. Agnóstico de framework: no importa Sve
 - `./manifest`: formato de sprites v1, `validateManifest`, `resolveAnimation` y `windupMs`.
 - `./timeline`: `Timeline` v1 y v2, y `validateTimeline`.
 - `./scene`: `prepareScene`, `prepareSceneFrom` y `sceneAt`, sin Pixi.
+- `./model`: la pose pura de la botarga 3D (`poseFor`: clip, tiempo del clip y cara).
+- `./three`: `createRenderer3d`, la arena 3D con Three.js ([013](../../docs/features/013-arena-3d/feature.md)). No carga Pixi.
 - `./placeholders/*`: `dummy_a` y `dummy_b` (`manifest.json` y `sheet-0.png`).
 - `./fixtures/*`: el guion del spike (`spike.timeline.json`).
 
@@ -55,6 +57,15 @@ handle.play();
 - **Cues:** el primer `play()` deja el cursor en `t` y pinta ese instante, así que quien entra tarde no recibe `onCue` por lo saltado, y `snapshot()` ya muestra el HP y el resultado. Con el reloj negativo, `t = 0` y no sale ningún cue. Un lote atrasado dispara sus cues en el siguiente frame, en ráfaga si son varios.
 
 `/dev/arena?log=<nombre>&live=1` entrega un dorado por lotes según su `t`, sin server. `?t=` es el tiempo del server ya transcurrido al abrir, y sirve para probar una entrada tarde.
+
+## Arena 3D (013)
+
+```ts
+const { createRenderer3d } = await import('@torneo/renderer/three');
+const handle = createRenderer3d(container, { …options, model: { glb, faces, tints } });
+```
+
+Es el mismo `createPlayer` con otra capa (`src/three/`): el reloj, los cues, `seek` y la pelea en vivo no cambian. `load` sigue pidiendo los manifests de sprites, porque dan los tiempos de cada animación, pero sus hojas no se cargan. `poseFor` (`src/model/`, puro) elige el clip, la variante (por hash del lado y del inicio de la animación) y la cara; el impacto de cada clip de ataque cae en el `windup` del sprite. HUD, banners y números de daño van en DOM sobre el canvas. `GLTFLoader` carga las imágenes del GLB con `<img>` y no con `fetch`, porque `connect-src 'self'` bloquea las URL `blob:`. Solo `src/three/` importa `three` (ESLint).
 
 ## Condiciones de CSP (ADR-0012 B4.2)
 

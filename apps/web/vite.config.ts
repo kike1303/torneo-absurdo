@@ -53,8 +53,12 @@ export default defineConfig({
     // Kit narrows `server.fs.allow` to apps/web, so `?url` imports of the placeholder sheets in
     // packages/renderer answered 403 in `vite dev` (found in 002 phase B, which plays them there).
     // Only that folder is added; content/_local/ is served by localSprites(), never through fs.
+    // The 3D botarga (013) is imported with `?url` from content/models/ in the same way.
     fs: {
-      allow: [fileURLToPath(new URL('../../packages/renderer/placeholders/', import.meta.url))],
+      allow: [
+        fileURLToPath(new URL('../../packages/renderer/placeholders/', import.meta.url)),
+        fileURLToPath(new URL('../../content/models/', import.meta.url)),
+      ],
     },
     proxy: {
       '^/api(?:/|$)': { target: 'http://127.0.0.1:8080' },
