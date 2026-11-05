@@ -22,7 +22,7 @@ describe('createPacer', () => {
     for (let t = 0; t < 1000; t += 16.7) expect(pacer.draw(t)).toBe(true);
   });
 
-  it('starts software WebGL at the minimum ratio and about 10 frames per second', () => {
+  it('starts software WebGL at the minimum ratio and 100 ms between drawn frames', () => {
     const pacer = createPacer({ pixelRatio: 3, software: true });
     expect(pacer.pixelRatio).toBe(MIN_PIXEL_RATIO);
     expect(pacer.minFrameMs).toBe(SOFTWARE_FRAME_MS);
@@ -40,10 +40,21 @@ describe('createPacer', () => {
     expect(pacer.minFrameMs).toBe(FRAME_GAPS_MS.at(-1));
   });
 
-  it('counts seconds-long frames, the stall of a starved GPU (review of #93)', () => {
+  it('counts stalls in a row, the frames of a starved GPU (CI of #93)', () => {
     const pacer = createPacer({ pixelRatio: 1, software: false });
-    frames(pacer, 4000, 2);
+    frames(pacer, 4000, 3);
     expect(pacer.pixelRatio).toBeLessThan(1);
+  });
+
+  it('never steps down for a lone stall, as when a tab is shown again (review of #93)', () => {
+    const pacer = createPacer({ pixelRatio: 1, software: false });
+    for (let i = 0; i < 10; i++) {
+      // The first frame after the tab comes back carries all the time away, already visible.
+      frames(pacer, 30_000, 1);
+      frames(pacer, 16.7, 120);
+    }
+    expect(pacer.pixelRatio).toBe(1);
+    expect(pacer.minFrameMs).toBe(0);
   });
 
   it('ignores the gaps of a hidden page', () => {
@@ -55,7 +66,8 @@ describe('createPacer', () => {
 
   it('steps at most once per cooldown', () => {
     const pacer = createPacer({ pixelRatio: 2, software: false });
-    expect(frames(pacer, 1000, 1)).toBe(0);
+    // The first stall is lone (ignored); from the second on they count, one step per cooldown.
+    expect(frames(pacer, 1000, 2)).toBe(0);
     expect(frames(pacer, 1000, 1)).toBe(1);
     expect(frames(pacer, 100, 3)).toBe(0);
   });

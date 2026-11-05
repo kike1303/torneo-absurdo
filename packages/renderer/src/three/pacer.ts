@@ -11,9 +11,15 @@ export const RATIO_STEP = 0.75;
 export const MIN_PIXEL_RATIO = 0.5;
 /** Steps of the shortest time between two drawn frames, once the pixel ratio is at its minimum. */
 export const FRAME_GAPS_MS = [0, 50, 100, 200] as const;
-/** Software WebGL starts here: the minimum pixel ratio and 10 drawn frames per second. */
+/** Software WebGL starts here: the minimum pixel ratio and 100 ms between drawn frames (8 to 10 a
+ * second, with the display's refresh). */
 export const SOFTWARE_FRAME_MS = 100;
-/** A single gap counts at most this much, so one stall does not step twice. */
+/**
+ * A gap this long is a stall. A lone one says nothing about the GPU (a tab shown again, a window
+ * restored, a shader compiled once): only a stall right after another counts (review of #93).
+ */
+export const STALL_MS = 250;
+/** A counted gap weighs at most this much, so one stall does not step twice. */
 const MAX_COUNTED_MS = 1000;
 const SMOOTHING = 0.1;
 
@@ -40,6 +46,7 @@ export function createPacer(start: {
   let smoothed = 0;
   let sinceStep = 0;
   let lastDraw: number | null = null;
+  let stalls = 0;
 
   const stepDown = (): boolean => {
     if (pixelRatio > MIN_PIXEL_RATIO) {
@@ -60,6 +67,8 @@ export function createPacer(start: {
     },
     observe(gap, hidden) {
       if (gap <= 0 || hidden) return false;
+      stalls = gap > STALL_MS ? stalls + 1 : 0;
+      if (stalls === 1) return false;
       const counted = Math.min(gap, MAX_COUNTED_MS);
       smoothed += (counted - smoothed) * SMOOTHING;
       sinceStep += counted;
