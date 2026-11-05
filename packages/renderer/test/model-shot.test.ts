@@ -82,6 +82,29 @@ describe('shotFor', () => {
     expect(shotFor(scene).focusX).toBeCloseTo(scene.fighters.a.x);
   });
 
+  it('never jumps from the KO to the win (review of #92)', () => {
+    const prepared = spikeScene();
+    const ko = prepared.ko;
+    expect(ko).not.toBeNull();
+    let previous = null as ReturnType<typeof shotFor> | null;
+    let fallenSeen = false;
+    for (let t = ko?.at ?? 0; t < prepared.durationMs; t += 16) {
+      const scene = sceneAt(prepared, t, { reducedMotion: false });
+      fallenSeen ||= scene.fighters.a.animation === 'ko' || scene.fighters.b.animation === 'ko';
+      if (!fallenSeen) continue;
+      const shot = shotFor(scene);
+      if (previous !== null) {
+        expect(Math.abs(shot.yaw - previous.yaw), `yaw at ${t}`).toBeLessThan(0.02);
+        expect(Math.abs(shot.distance - previous.distance), `distance at ${t}`).toBeLessThan(0.02);
+        expect(Math.abs((shot.focusX ?? 0) - (previous.focusX ?? 0)), `focus at ${t}`).toBeLessThan(
+          6,
+        );
+      }
+      previous = shot;
+    }
+    expect(fallenSeen).toBe(true);
+  });
+
   it('stays finite and near the framing distance in every golden fight', () => {
     for (const name of GOLDEN_NAMES) {
       const prepared = goldenScene(name);

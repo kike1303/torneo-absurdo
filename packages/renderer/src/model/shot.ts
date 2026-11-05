@@ -77,11 +77,18 @@ export function shotFor(scene: Scene): Shot {
       focusX: null,
     };
   }
+  const fallen = sideWith(scene, 'ko');
   if (scene.phase === 'win' || scene.phase === 'finished') {
     const winner = scene.winner ?? sideWith(scene, 'win');
-    if (winner !== null) return orbit(scene, scene.fighters[winner]);
+    if (winner !== null) {
+      const w = scene.fighters[winner];
+      if (fallen === null) return orbit(scene, w);
+      // After a KO the same orbit goes on, and its focus slides to the winner: no jump.
+      const ko = orbit(scene, scene.fighters[fallen]);
+      const from = ko.focusX ?? w.x;
+      return { ...ko, focusX: from + (w.x - from) * smoothstep(w.elapsed / ORBIT_EASE_MS) };
+    }
   }
-  const fallen = sideWith(scene, 'ko');
   if (fallen !== null) return orbit(scene, scene.fighters[fallen]);
   const attacker = attacking(scene);
   if (attacker !== null) {

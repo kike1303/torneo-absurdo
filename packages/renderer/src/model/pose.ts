@@ -56,12 +56,11 @@ export const CLIP_IMPACT: Readonly<Partial<Record<ClipName, number>>> = Object.f
 const IDLE_SPELL_MS = 8000;
 const IDLE_VARIANTS: readonly ClipName[] = ['idle', 'idle_2', 'idle_3', 'idle_4', 'idle_5'];
 
+// `idle` and `walk` are picked in `clipFor` (by spell and by `travel`); listed here for the record.
 const VARIANTS: Readonly<Record<AnimationCode, readonly ClipName[]>> = Object.freeze({
-  // Chosen by spell in `clipFor`.
   idle: IDLE_VARIANTS,
   intro: ['idle'],
-  // Chosen by `travel` in `clipFor`.
-  walk: ['walk_forward'],
+  walk: ['walk_forward', 'walk_back'],
   attack_light: ['attack_light'],
   attack_heavy: ['attack_heavy_1', 'attack_heavy_2'],
   special: ['special_1', 'special_2', 'special_3', 'special_4'],
