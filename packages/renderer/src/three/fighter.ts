@@ -103,7 +103,6 @@ export function createFighter(
   root.traverse((node) => {
     const mesh = node as Mesh;
     if (!mesh.isMesh) return;
-    mesh.castShadow = true;
     // Skinned bounds come from the rest pose; a clip can leave them.
     mesh.frustumCulled = false;
     const source = mesh.material as MeshStandardMaterial;

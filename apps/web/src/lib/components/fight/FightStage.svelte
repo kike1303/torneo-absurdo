@@ -237,11 +237,15 @@
     snapshotTimer = setInterval(read, SNAPSHOT_MS);
   }
 
-  /** The scene comes from `t`: a new renderer with the same session is all it takes. */
-  function watchContext(container: HTMLElement): void {
+  /**
+   * The scene comes from `t`: a new renderer with the same session is all it takes. A renderer
+   * destroyed on purpose also loses its context (to free it): that loss is not a failure.
+   */
+  function watchContext(container: HTMLElement, handle: RendererHandle): void {
     container.querySelector('canvas')?.addEventListener(
       'webglcontextlost',
       (event) => {
+        if (renderer !== handle) return;
         event.preventDefault();
         const now = performance.now();
         contextLosses = [...contextLosses.filter((at) => now - at < CONTEXT_LOSS_WINDOW_MS), now];
@@ -370,7 +374,7 @@
         }
         if (!playing) return;
         watchSnapshots();
-        watchContext(container);
+        watchContext(container, handle);
         // Two frames: the one already asked for and the one that shows it.
         requestAnimationFrame(() =>
           requestAnimationFrame(() => {

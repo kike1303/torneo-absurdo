@@ -14,6 +14,7 @@ import {
   NeutralToneMapping,
   OctahedronGeometry,
   CircleGeometry,
+  DataTexture,
   SRGBColorSpace,
   Scene as ThreeScene,
   WebGLRenderer,
@@ -44,7 +45,16 @@ const MIN_PIXEL_RATIO = 0.5;
 const RATIO_COOLDOWN_MS = 1000;
 const IGNORED_GAP_MS = 250;
 const FRAME_SMOOTHING = 0.1;
-const SHADOW_MAP = 1024;
+/**
+ * A soft disc under each fighter instead of a shadow map: no shadow pass and simpler shaders, which
+ * a weak GPU (or the software WebGL of the e2e) feels most on the first frame.
+ */
+const BLOB_RADIUS = 0.32;
+const BLOB_TEXELS = 64;
+/** How much darker than the floor the blob is. */
+const BLOB_SHADE = 0.55;
+/** Just above the floor, so they never fight for depth. */
+const BLOB_LIFT = 0.002;
 /** How much of the text color the floor takes over the background. */
 const FLOOR_MIX = 0.08;
 const FLOOR_RADIUS = 3;
@@ -60,7 +70,25 @@ interface World {
   readonly floor: Mesh<CircleGeometry, MeshStandardMaterial>;
   readonly hemisphere: HemisphereLight;
   readonly particles: InstancedMesh<OctahedronGeometry, MeshBasicMaterial>;
+  readonly blobs: Record<Side, Mesh<CircleGeometry, MeshBasicMaterial>>;
   readonly overlay: Overlay;
+}
+
+/** Alpha falls from the center to the rim (a smoothstep), so the blob has no edge. */
+function blobAlpha(): DataTexture {
+  const data = new Uint8Array(BLOB_TEXELS * BLOB_TEXELS * 4);
+  const half = BLOB_TEXELS / 2;
+  for (let y = 0; y < BLOB_TEXELS; y++) {
+    for (let x = 0; x < BLOB_TEXELS; x++) {
+      const r = Math.min(1, Math.hypot(x + 0.5 - half, y + 0.5 - half) / half);
+      const fall = 1 - r * r * (3 - 2 * r);
+      const i = (y * BLOB_TEXELS + x) * 4;
+      data.fill(Math.round(fall * 255), i, i + 4);
+    }
+  }
+  const texture = new DataTexture(data, BLOB_TEXELS, BLOB_TEXELS);
+  texture.needsUpdate = true;
+  return texture;
 }
 
 export function createThreeStage(container: HTMLElement, model: BotargaModel): Stage {
@@ -84,6 +112,8 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
     w.scene.background = bg;
     w.floor.material.color.copy(bg).lerp(new Color(current.colors.text), FLOOR_MIX);
     w.hemisphere.groundColor.copy(bg);
+    for (const side of SIDES)
+      w.blobs[side].material.color.copy(w.floor.material.color).multiplyScalar(BLOB_SHADE);
   };
 
   const resize = (): void => {
@@ -118,6 +148,7 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
     const current = theme;
     if (current === null) return;
     placeCamera(w.camera, aspect, scene.camera);
+    for (const side of SIDES) w.blobs[side].position.x = worldX(scene.fighters[side].x);
     if (fighters !== null && botarga !== null) {
       for (const side of SIDES) {
         const f = scene.fighters[side];
@@ -165,30 +196,38 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
       }
       if (destroyed) {
         renderer.dispose();
+        renderer.forceContextLoss();
         return;
       }
       let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
       renderer.setPixelRatio(pixelRatio);
       renderer.outputColorSpace = SRGBColorSpace;
       renderer.toneMapping = NeutralToneMapping;
-      renderer.shadowMap.enabled = true;
 
       const scene = new ThreeScene();
       const camera = createCamera();
       const hemisphere = new HemisphereLight(undefined, undefined, 1.6);
       const sun = new DirectionalLight(undefined, 2.2);
       sun.position.set(1.5, 3, 2.5);
-      sun.castShadow = true;
-      sun.shadow.mapSize.set(SHADOW_MAP, SHADOW_MAP);
-      Object.assign(sun.shadow.camera, { left: -2, right: 2, top: 2, bottom: -1 });
       scene.add(hemisphere, sun);
       const floor = new Mesh(
         new CircleGeometry(FLOOR_RADIUS, 64),
         new MeshStandardMaterial({ roughness: 1 }),
       );
       floor.rotation.x = -Math.PI / 2;
-      floor.receiveShadow = true;
       scene.add(floor);
+      const alpha = blobAlpha();
+      const blob = (): Mesh<CircleGeometry, MeshBasicMaterial> => {
+        const mesh = new Mesh(
+          new CircleGeometry(BLOB_RADIUS, 32),
+          new MeshBasicMaterial({ alphaMap: alpha, transparent: true, depthWrite: false }),
+        );
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.y = BLOB_LIFT;
+        scene.add(mesh);
+        return mesh;
+      };
+      const blobs = { a: blob(), b: blob() };
       const particles = new InstancedMesh(
         new OctahedronGeometry(1, 0),
         new MeshBasicMaterial(),
@@ -201,7 +240,7 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
       scene.add(particles);
 
       const overlay = createOverlay(container, setup.theme, setup.labels);
-      world = { renderer, scene, camera, floor, hemisphere, particles, overlay };
+      world = { renderer, scene, camera, floor, hemisphere, particles, blobs, overlay };
       paint(world, setup.theme);
 
       const canvas = renderer.domElement;
@@ -222,6 +261,9 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
         last = time;
         if (elapsed > 0) setup.onFrame(elapsed);
         if (!dirty) return;
+        // A canvas the page does not show: WebKit keeps what is drawn in it and pays it all on the
+        // first frame that shows (seconds, with the stage hidden through pre_live). It stays dirty.
+        if (container.checkVisibility?.({ visibilityProperty: true }) === false) return;
         dirty = false;
         if (elapsed > 0 && elapsed < IGNORED_GAP_MS) {
           smoothed += (elapsed - smoothed) * FRAME_SMOOTHING;
@@ -252,6 +294,18 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
       };
       for (const side of SIDES) world?.scene.add(created[side].root);
       fighters = created;
+      // Compiled and uploaded now, while the stage may still be hidden: on the first visible frame
+      // they would block the page (seconds on a weak GPU). Reading a pixel makes the browser do
+      // that work here instead of on the first frame it shows.
+      const w = world;
+      if (w !== null) {
+        await w.renderer.compileAsync(w.scene, w.camera);
+        if (destroyed) return;
+        w.renderer.render(w.scene, w.camera);
+        const gl = w.renderer.getContext();
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+      }
+      if (destroyed) return;
       lastScene = null;
       dirty = true;
     },
@@ -283,9 +337,17 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
         w.particles.geometry.dispose();
         w.particles.material.dispose();
         w.particles.dispose();
+        for (const side of SIDES) {
+          w.blobs[side].geometry.dispose();
+          w.blobs[side].material.dispose();
+        }
+        w.blobs.a.material.alphaMap?.dispose();
         w.overlay.destroy();
         w.renderer.domElement.remove();
         w.renderer.dispose();
+        // As Pixi does: without it the context lives until the GC, and a page that watches fight
+        // after fight piles them up until the browser drops the oldest (or, WebKit, crashes).
+        w.renderer.forceContextLoss();
       }
       if (botarga !== null) {
         for (const texture of botarga.faces.values()) texture.dispose();
