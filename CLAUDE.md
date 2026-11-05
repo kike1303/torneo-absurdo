@@ -11,7 +11,16 @@ Webapp donde personajes "homenaje" (arquetipos inspirados en personajes icónico
 - Todo doc en `docs/` lleva frontmatter según el esquema de [docs/process.md](docs/process.md).
 
 ## Flujo de trabajo
-Todo cambio no trivial pasa por **intent → spec → plan → implementación → PR**, ejecutado por los agentes de [.claude/agents/](.claude/agents/) siguiendo [docs/process.md](docs/process.md). Punto de entrada: skill `feature-pipeline`. Regla de oro: **quien escribe un artefacto nunca lo aprueba.**
+Proceso ligero en tres carriles ([docs/process.md](docs/process.md), ADR-0014). **Directo** (fix, contenido, UI chica): rama y PR, sin documento. **Feature**: un `feature.md` corto (skill `write-feature`), implementación y un pase del agente `reviewer`. **Sensible** (auth, monedas, apuestas, semilla, datos personales, pagos): además el `security-reviewer`. Las decisiones de producto se le preguntan al owner en chat. Las ideas futuras van en [docs/backlog.md](docs/backlog.md).
+
+## Estándares de código
+- **Rust**: `cargo fmt` y clippy con `-D warnings`. Nada de `unwrap()` fuera de tests; errores con `thiserror`, y `anyhow` solo en binarios. Consultas parametrizadas (sqlx) y validación en el borde.
+- **Motor**: puro, sin I/O ni reloj; PRNG ChaCha con semilla; colecciones con orden determinista; aritmética entera o de punto fijo en lo que afecte el resultado. Tests de determinismo.
+- **Ledger**: solo asientos; liquidaciones en una transacción e idempotentes. Tests de que la suma de monedas se conserva (salvo grants y rake).
+- **Protocolo**: los tipos que cruzan al cliente viven en `crates/protocol` y se regeneran con `just gen`.
+- **Web**: cero strings literales (Paraglide `es` y `en`), fechas y números con `Intl`; solo tokens del theme y verificar dark y light; primitivas en `lib/components/ui/`, de dominio en `lib/components/<dominio>/`, estado y API en `lib/features/<dominio>/`; mobile-first (375 px), objetivos táctiles de 44 px o más, accesibilidad AA y `prefers-reduced-motion`. En UI, captura en móvil y desktop antes de dar por terminado.
+- **Renderer**: agnóstico de framework, consume `FightEvent` de `packages/protocol-ts` y apunta a 60 fps en un celular medio.
+- **Infra**: nunca compilar en el VPS; GitHub Actions frugales (solo ubuntu, filtros por ruta, cachés); secretos solo por variables de entorno, documentados en `.env.example`.
 
 ## Arquitectura (qué vive dónde)
 - `apps/web` — SvelteKit (UI, i18n, theme). No contiene lógica de dominio.

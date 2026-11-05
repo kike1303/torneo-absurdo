@@ -4,7 +4,7 @@ type: vision
 status: approved
 author: owner
 created: 2026-10-20
-updated: 2026-10-20
+updated: 2026-11-04
 ---
 
 # Torneo Absurdo — Visión
@@ -13,6 +13,8 @@ updated: 2026-10-20
 Una webapp (mobile-first) donde personajes "homenaje" pelean en batallas **simuladas por IA en el momento**: nadie las controla y nadie sabe el resultado de antemano. Todos los espectadores ven la misma pelea, sincronizada y animada, y apuestan **monedas ficticias** antes de cada combate.
 
 Referente: SaltyBet (peleas de MUGEN con apuestas falsas en Twitch). Nos diferenciamos por el **lore persistente**, por ser una web nativa (sin video) y por el humor absurdo de los cruces.
+
+Desde 2026-11-04 las peleas se dibujan en **3D**, con los personajes como **botargas** graciosas que comparten un mismo cuerpo base y se pueden vestir con prendas combinables. Más adelante, cada usuario tendrá su propia botarga para pelear contra otros jugadores. El detalle de esas ideas está en el [backlog](backlog.md).
 
 ## Pilares
 1. **Incertidumbre real**: el motor corre al momento con una semilla secreta, verificable después (commit-reveal).
@@ -40,15 +42,16 @@ Hispanohablantes primero (marca en español), con la UI bilingüe en/es desde el
 
 ## Fuera de alcance (por ahora)
 - Dinero real de cualquier tipo (ADR-0005).
-- Personajes creados por usuarios.
+- Personajes creados por usuarios en el MVP (la botarga propia llega después del torneo; ver el [backlog](backlog.md)).
 - LLM en runtime: el narrador usa plantillas (ADR-0010).
 - Apps nativas.
 
 ## Roadmap tentativo
 - **Fase 0 — Fundaciones y spikes**: monorepo, renderizado (spike), motor v0, pipeline de assets.
 - **Fase 1 — MVP jugable**: peleas en vivo, apuestas, auth, leaderboards, repeticiones.
+- **Fase 1.5 — 3D**: piloto con Three.js y migración del reproductor a botargas 3D con escenarios.
 - **Fase 2 — Espectáculo**: torneo diario, narrador, temporadas, chat.
-- **Fase 3 — Crecimiento**: personalización de perfil, mejor arte y animación (esqueletal), comunidad.
+- **Fase 3 — Juego propio**: botarga de cada usuario, niveles, PvP asíncrono con ranking, amigos y torneos privados, skins.
 
 ## Métricas de éxito (MVP)
 - % de usuarios que regresan al día siguiente (D1) y a la semana (D7).
