@@ -2,7 +2,7 @@
 id: "017"
 title: Ritmo propio de las animaciones 3D
 type: feature
-status: draft
+status: done
 risk: low
 author: claude
 linear: TA-53
@@ -43,4 +43,4 @@ Los windups quedan en `LIMITS.windupMaxMs` (400 ms) o menos: así se mantiene la
 ## Pruebas
 - [x] `just check` en verde.
 - [x] Unit: cada acción suma su ritmo y su windup, los windups ≤ 400 ms, los manifests siguen válidos, es más lento que el sprite y lo demás pasa igual; `stretch` exacto y dentro de los límites, el `special` de cuadros cortos sigue válido y lo imposible queda original; en el spike y las peleas golden, cada golpe cae en su cue (`elapsed === windup`).
-- [x] e2e general (496 pasan) y `e2e-fights` (4 proyectos) en local; la pelea de prueba de `/dev/arena` se reproduce sin errores.
+- [x] e2e general en local: 495 pasan y 1 de tiempos (`?live=1` con "Reiniciar" en `/dev/arena`) falló con la máquina muy cargada y pasó 5 de 5 al repetirlo; `e2e-fights` (4 proyectos) en verde; la pelea de prueba de `/dev/arena` se reproduce sin errores.
