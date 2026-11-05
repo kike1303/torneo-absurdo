@@ -198,26 +198,52 @@ impl<'a> Fighter<'a> {
     }
 
     /// Weighted choice (RF7 step 1): strike, then the available abilities in file order.
-    /// `None` is the strike.
+    /// `None` is the strike. With `split_kind_weight` (v2, 016) each available ability gets
+    /// `weight / n` of its kind, and the first of the kind also the remainder.
     fn choose<R: Rolls>(&self, rolls: &mut R, r: &Ruleset, desperate: bool) -> Option<usize> {
         let p = self.spec.personality;
         let strike = r.w_strike_base() + u32::from(p.aggression);
+        let kind_weight = |kind: MoveKind| match kind {
+            MoveKind::Heavy => r.w_heavy_base() + u32::from(p.aggression),
+            MoveKind::Special => {
+                let w = r.w_special_base() + r.w_special_per_show() * u32::from(p.showmanship);
+                if desperate {
+                    w * r.w_special_desperation_mul()
+                } else {
+                    w
+                }
+            }
+        };
+        let available = |kind: MoveKind| {
+            self.spec
+                .abilities
+                .iter()
+                .zip(&self.cooldowns)
+                .filter(|(ability, cooldown)| ability.kind == kind && **cooldown == 0)
+                .count()
+        };
+        let (mut first_heavy, mut first_special) = (true, true);
         let mut options = vec![(None, strike)];
         for (i, (ability, cooldown)) in self.spec.abilities.iter().zip(&self.cooldowns).enumerate()
         {
             if *cooldown > 0 {
                 continue;
             }
-            let weight = match ability.kind {
-                MoveKind::Heavy => r.w_heavy_base() + u32::from(p.aggression),
-                MoveKind::Special => {
-                    let w = r.w_special_base() + r.w_special_per_show() * u32::from(p.showmanship);
-                    if desperate {
-                        w * r.w_special_desperation_mul()
-                    } else {
-                        w
-                    }
+            let full = kind_weight(ability.kind);
+            let weight = if r.split_kind_weight() {
+                let n = u32::try_from(available(ability.kind)).unwrap_or(u32::MAX);
+                let share = full.checked_div(n).unwrap_or(full);
+                let first = match ability.kind {
+                    MoveKind::Heavy => &mut first_heavy,
+                    MoveKind::Special => &mut first_special,
+                };
+                if std::mem::take(first) {
+                    share + full.checked_rem(n).unwrap_or(0)
+                } else {
+                    share
                 }
+            } else {
+                full
             };
             options.push((Some(i), weight));
         }
@@ -800,6 +826,120 @@ mod tests {
             .nth(nth)
             .map(FightEvent::t)
             .unwrap()
+    }
+
+    // --- Choice weights (016) --------------------------------------------------------------
+
+    /// Answers every roll with `value` and records the bound it was asked with.
+    struct Probe {
+        value: u32,
+        bounds: Vec<u32>,
+    }
+
+    impl Rolls for Probe {
+        fn roll(&mut self, n: NonZeroU32) -> u32 {
+            self.bounds.push(n.get());
+            self.value
+        }
+    }
+
+    /// The total weight `choose` rolls over, and what it picks with `value`.
+    fn choice(
+        spec: &CharacterSpec,
+        r: &Ruleset,
+        desperate: bool,
+        value: u32,
+    ) -> (u32, Option<usize>) {
+        let fighter = Fighter::new(spec, r).unwrap();
+        let mut probe = Probe {
+            value,
+            bounds: vec![],
+        };
+        let picked = fighter.choose(&mut probe, r, desperate);
+        assert_eq!(probe.bounds.len(), 1, "one roll per choice");
+        (probe.bounds.first().copied().unwrap(), picked)
+    }
+
+    fn with_abilities(abilities: Vec<Ability>) -> CharacterSpec {
+        fighter("probe", [50; 5], [31, 0, 40], abilities)
+    }
+
+    #[test]
+    fn v1_gives_every_ability_the_whole_weight_of_its_kind() {
+        let r = r();
+        let strike = r.w_strike_base() + 31;
+        let heavy = r.w_heavy_base() + 31;
+        let one = with_abilities(vec![ability("h0", MoveKind::Heavy, 20, 0)]);
+        let two = with_abilities(vec![
+            ability("h0", MoveKind::Heavy, 20, 0),
+            ability("h1", MoveKind::Heavy, 20, 0),
+        ]);
+        assert_eq!(choice(&one, &r, false, 0).0, strike + heavy);
+        assert_eq!(choice(&two, &r, false, 0).0, strike + 2 * heavy);
+    }
+
+    #[test]
+    fn v2_splits_the_weight_of_a_kind_among_its_available_abilities() {
+        let r = Ruleset::v2();
+        let strike = r.w_strike_base() + 31;
+        // 81 is odd: 40 each and the remainder to the first in file order.
+        let heavy = r.w_heavy_base() + 31;
+        assert_eq!(heavy, 81);
+        let special = r.w_special_base() + r.w_special_per_show() * 40;
+        let one = with_abilities(vec![
+            ability("h0", MoveKind::Heavy, 20, 0),
+            ability("s0", MoveKind::Special, 40, 2),
+        ]);
+        let two = with_abilities(vec![
+            ability("s0", MoveKind::Special, 40, 2),
+            ability("h0", MoveKind::Heavy, 20, 0),
+            ability("s1", MoveKind::Special, 40, 2),
+            ability("h1", MoveKind::Heavy, 20, 0),
+        ]);
+        let total = strike + heavy + special;
+        assert_eq!(choice(&one, &r, false, 0).0, total);
+        assert_eq!(choice(&two, &r, false, 0).0, total);
+        // Desperation doubles the special kind, still split.
+        let desperate = strike + heavy + 2 * special;
+        assert_eq!(choice(&two, &r, true, 0).0, desperate);
+
+        // Order of the options in `two`: strike, s0, h0, s1, h1.
+        let s0 = special / 2 + special % 2;
+        let h0 = heavy / 2 + 1;
+        let s1 = special / 2;
+        let picks = [
+            (0, None),
+            (strike, Some(0)),
+            (strike + s0, Some(1)),
+            (strike + s0 + h0 - 1, Some(1)),
+            (strike + s0 + h0, Some(2)),
+            (strike + s0 + h0 + s1, Some(3)),
+            (total - 1, Some(3)),
+        ];
+        for (value, expected) in picks {
+            assert_eq!(choice(&two, &r, false, value).1, expected, "value {value}");
+        }
+    }
+
+    #[test]
+    fn v2_gives_the_whole_weight_to_the_only_available_ability_of_a_kind() {
+        let r = Ruleset::v2();
+        let spec = with_abilities(vec![
+            ability("h0", MoveKind::Heavy, 20, 3),
+            ability("h1", MoveKind::Heavy, 20, 0),
+        ]);
+        let mut fighter = Fighter::new(&spec, &r).unwrap();
+        // h0 was just used: only h1 is available, and it carries the whole kind.
+        fighter.tick_cooldowns(Some(0));
+        let mut probe = Probe {
+            value: 0,
+            bounds: vec![],
+        };
+        fighter.choose(&mut probe, &r, false);
+        assert_eq!(
+            probe.bounds,
+            vec![r.w_strike_base() + 31 + r.w_heavy_base() + 31]
+        );
     }
 
     // --- Formulas -------------------------------------------------------------------------

@@ -69,7 +69,7 @@ fn seed_must_be_64_hex_characters() {
 #[test]
 fn unknown_ruleset() {
     assert_eq!(code(run(SEED, SPEC, SPEC, 0)), "ruleset.unknown");
-    assert_eq!(code(run(SEED, SPEC, SPEC, 2)), "ruleset.unknown");
+    assert_eq!(code(run(SEED, SPEC, SPEC, 3)), "ruleset.unknown");
 }
 
 #[test]
@@ -150,10 +150,23 @@ fn every_spec_error_has_its_code() {
         assert_eq!(code(run(SEED, spec, SPEC, 1)), expected);
         assert_eq!(code(run(SEED, SPEC, spec, 1)), expected);
     }
+    // The kind caps only bind in v2 (016).
+    let three_heavies = with(
+        r#"[{"id":"thunder_squeak","kind":"special","power":70,"cooldown":3,"element":"electric"}]"#,
+        r#"[{"id":"zap_a","kind":"heavy","power":20,"cooldown":0},{"id":"zap_b","kind":"heavy","power":20,"cooldown":0},{"id":"zap_c","kind":"heavy","power":20,"cooldown":0}]"#,
+    );
+    assert_eq!(code(run(SEED, SPEC, SPEC, 2)), "ok");
+    assert_eq!(code(run(SEED, &three_heavies, SPEC, 1)), "ok");
+    assert_eq!(
+        code(run(SEED, &three_heavies, SPEC, 2)),
+        "spec.ability_kind_count"
+    );
     // Every SpecError is produced above except the EventLimit guard, unreachable with v1.
     for error in SpecError::ALL {
         assert!(
-            cases.iter().any(|(e, _)| *e == error) || error == SpecError::EventLimit,
+            cases.iter().any(|(e, _)| *e == error)
+                || error == SpecError::EventLimit
+                || error == SpecError::AbilityKindCount,
             "{error:?}"
         );
     }

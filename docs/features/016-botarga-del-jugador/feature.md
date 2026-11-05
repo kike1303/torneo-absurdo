@@ -84,7 +84,7 @@ Además, win rate por banda de nivel contra la misma banda (que ningún nivel te
 
 ## Pruebas
 - [ ] `just check` en verde.
-- [ ] Motor: v2 rechaza 3 especiales o 3 pesados; con 1 o 2 habilidades de un tipo, ese tipo sale con la misma frecuencia (semillas fijas); los logs v1 se re-simulan idénticos.
+- [x] Motor: v2 rechaza 3 especiales o 3 pesados; con 1 o 2 habilidades de un tipo, ese tipo sale con la misma frecuencia (semillas fijas); los logs v1 se re-simulan idénticos.
 - [ ] Un accesorio que suma puntos netos o pasa el tope por stat se rechaza; una build con más de 2 debilidades también.
 - [ ] Sorteo: las 3 opciones nunca incluyen un ataque que el jugador ya tiene, y reintentar devuelve las mismas.
 - [ ] `just sim --check` (torneo, v1) y `just sim --builds N --check` (v2) pasan.
