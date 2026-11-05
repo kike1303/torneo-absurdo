@@ -2,7 +2,7 @@
 id: "014"
 title: Cámara cinemática y caminatas de la arena 3D
 type: feature
-status: draft
+status: done
 risk: low
 author: claude
 linear: TA-51
@@ -27,7 +27,7 @@ Decisión del owner (2026-11-05): cámara "viva pero legible". Intro con acercam
 - Intro: acercamiento desde 1,45 veces la distancia con un giro de −20°, en 2,6 s.
 - Intercambio: oscila ±17° alrededor del frente con un período de 14 s, igual hacia cada lado. Un 3/4 fijo dejaba a un luchador delante del otro y de espaldas.
 - Especial: corte a primer plano del atacante (0,62 de la distancia), girado 23° hacia su frente. Más giro ponía al rival en medio.
-- KO: órbita lenta (0,18 rad/s) alrededor del caído. Arranca donde estaba el intercambio y se acerca en 0,9 s. Victoria: tras un KO sigue la misma órbita y su foco se desliza al ganador (sin salto; revisión de #92); sin KO, la órbita arranca en el ganador.
+- KO: órbita lenta (0,18 rad/s) alrededor del caído. Arranca donde estaba el intercambio y se acerca en 0,9 s. Victoria: tras un KO sigue la misma órbita y su foco se desliza al ganador (sin salto; revisión de #92); sin KO, la órbita sale del plano del intercambio y llega al ganador en 0,9 s.
 - Movimiento reducido: `Scene.reducedMotion` (nuevo) da el plano de frente de siempre.
 
 `placeCamera` combina el plano con el zoom y el temblor que ya había. El HUD sigue en DOM y no depende de la cámara.
