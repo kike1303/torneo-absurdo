@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
   expect,
   test,
@@ -78,17 +79,53 @@ async function turn(info: TestInfo, stepMs = 1000): Promise<void> {
   await sleep(PROJECTS.indexOf(info.project.name) * stepMs);
 }
 
+// DIAGNOSTIC ONLY (do not merge): every page's console, with long tasks, to the uploaded logs.
+let pages = 0;
+async function diagnose(context: BrowserContext, info: TestInfo): Promise<BrowserContext> {
+  const file = join(dirname(SERVER_LOG), `console-${info.project.name}.log`);
+  await context.addInitScript(() => {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries())
+        if (e.duration > 300)
+          console.log(`PROBE longtask ${Math.round(e.duration)} at ${Math.round(e.startTime)}`);
+    }).observe({ type: 'longtask', buffered: true });
+    let last = performance.now();
+    const raf = () => {
+      const now = performance.now();
+      if (now - last > 1000) console.log(`PROBE raf-gap ${Math.round(now - last)}`);
+      last = now;
+      requestAnimationFrame(raf);
+    };
+    requestAnimationFrame(raf);
+  });
+  context.on('page', (page) => {
+    const id = ++pages;
+    page.on('console', (m) => {
+      if (m.text().startsWith('PROBE') || m.type() === 'error')
+        appendFileSync(
+          file,
+          `${new Date().toISOString()} p${id} ${page.url().slice(-12)} ${m.text()}\n`,
+        );
+    });
+    page.on('crash', () => appendFileSync(file, `${new Date().toISOString()} p${id} CRASH\n`));
+  });
+  return context;
+}
+
 async function newContext(browser: Browser, info: TestInfo): Promise<BrowserContext> {
   const use = info.project.use;
-  return browser.newContext({
-    baseURL: PUBLIC_ORIGIN,
-    proxy: EGRESS_PROXY,
-    viewport: use.viewport,
-    userAgent: use.userAgent,
-    deviceScaleFactor: use.deviceScaleFactor,
-    isMobile: use.isMobile,
-    hasTouch: use.hasTouch,
-  });
+  return diagnose(
+    await browser.newContext({
+      baseURL: PUBLIC_ORIGIN,
+      proxy: EGRESS_PROXY,
+      viewport: use.viewport,
+      userAgent: use.userAgent,
+      deviceScaleFactor: use.deviceScaleFactor,
+      isMobile: use.isMobile,
+      hasTouch: use.hasTouch,
+    }),
+    info,
+  );
 }
 
 async function watch(context: BrowserContext, locale: 'es' | 'en'): Promise<Page> {

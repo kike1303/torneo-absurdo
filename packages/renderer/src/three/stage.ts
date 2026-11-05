@@ -309,7 +309,15 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
       });
     },
     async loadAssets() {
+      const q0 = performance.now();
       const next = botarga ?? (await loadBotarga(model));
+      console.log(
+        `PROBE loadBotarga ${Math.round(performance.now() - q0)} net=${performance
+          .getEntriesByType('resource')
+          .filter((r) => /\.(glb|png)/.test(r.name))
+          .map((r) => `${r.name.split('/').pop()?.slice(0, 18)}:${Math.round(r.duration)}`)
+          .join(',')}`,
+      );
       if (destroyed) return;
       botarga = next;
       disposeFighters();
@@ -319,16 +327,25 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
       };
       for (const side of SIDES) world?.scene.add(created[side].root);
       fighters = created;
+      console.log(`PROBE createFighter ${Math.round(performance.now() - q0)} lite=${lite}`);
       // Compiled and uploaded now, while the stage may still be hidden: on the first visible frame
       // they would block the page (seconds on a weak GPU). Reading a pixel makes the browser do
       // that work here instead of on the first frame it shows.
       const w = world;
       if (w !== null) {
+        let c0 = performance.now();
         await w.renderer.compileAsync(w.scene, w.camera);
+        console.log(`PROBE compileAsync ${Math.round(performance.now() - c0)}`);
         if (destroyed) return;
+        c0 = performance.now();
         w.renderer.render(w.scene, w.camera);
+        console.log(`PROBE warm render ${Math.round(performance.now() - c0)}`);
+        c0 = performance.now();
         const gl = w.renderer.getContext();
         gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+        console.log(
+          `PROBE readPixels ${Math.round(performance.now() - c0)} programs=${w.renderer.info.programs?.length}`,
+        );
       }
       if (destroyed) return;
       lastScene = null;
