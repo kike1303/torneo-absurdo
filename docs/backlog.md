@@ -4,7 +4,7 @@ type: backlog
 status: draft
 author: owner
 created: 2026-11-04
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # Backlog de ideas
@@ -39,6 +39,14 @@ Cómo se ajustan prendas a cabezas y cuerpos de distinto tamaño (a validar en e
 ### Skins
 Ranuras: gorro, guantes, chaleco, pantalón y botas, para todos los personajes. También disfraces completos de los participantes del torneo. Arte de las prendas: concepto con IA de imagen y modelado con Tripo AI.
 
+### Botarga genérica y caras
+- La botarga genérica (la de cada jugador nuevo) es celeste pastel con short azul marino, sin pelo y con un cierre en la espalda del torso. Es el molde de la contextura "normal".
+- Se modela **sin cara**: cabeza lisa con orejas y nariz, y una zona fija de la cabeza (con su propia isla de UV) reservada para la cara.
+- **La cara es una ranura más**: una textura pintada (ojos, cejas y boca) sobre esa zona. Cambiar de cara es cambiar una imagen; no hay que modelar ni riggear. Todas las caras respetan la misma plantilla para encajar y no quedar tapadas por gorros o cascos.
+- Cara por defecto: "novato entusiasta" (ojos grandes, boca abierta y diente separado). Las demás de la hoja de exploración del 2026-11-04 (decidido, juguetón, nervioso valiente, mascota clásica, relajado) quedan como caras desbloqueables.
+- **Expresiones en la pelea**: la cara cambia según el `FightLog` (guardia, golpe recibido, victoria, KO). Al inicio cada cara trae solo su expresión base, y el golpe y el KO usan expresiones genéricas compartidas. Más adelante, las caras de la tienda pueden traer sus cuatro expresiones propias.
+- Los personajes del torneo tienen su cara como parte del diseño y no se cambia. Un disfraz completo trae su propia cabeza, y entonces su cara manda: la ranura de cara solo existe con la cabeza genérica.
+
 ## Acceso
 Las peleas del torneo se ven sin iniciar sesión. Para apostar, cobrar las monedas diarias o tener botarga propia se inicia sesión con Google o Discord.
 
@@ -65,3 +73,4 @@ Dos monedas: la de **apuestas** (la del torneo público) y la de **torneos de am
 - ¿Cómo se ganan las monedas de torneo de amigos sin pagar?
 - ¿Los niveles tienen tope? ¿Hay temporadas que reinician el ranking?
 - ¿Se puede apostar en peleas PvP de otros?
+- ¿Las caras se pueden recolorear (cejas y boca) o cada una trae colores fijos?
