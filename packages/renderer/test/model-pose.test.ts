@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CLIP_IMPACT,
   CLIP_NAMES,
+  OPTIONAL_CLIP_NAMES,
   clipFor,
   clipTime,
   faceFor,
@@ -26,6 +27,7 @@ function fighter(overrides: Partial<FighterScene>): FighterScene {
     windup: 0,
     total: 600,
     x: 0,
+    travel: 0,
     y: 0,
     mirror: false,
     scale: 1,
@@ -87,7 +89,7 @@ describe('clipFor', () => {
       'win',
     ] as const;
     for (const animation of codes) {
-      expect(CLIP_NAMES).toContain(clipFor(fighter({ animation }), 0));
+      expect([...CLIP_NAMES, ...OPTIONAL_CLIP_NAMES]).toContain(clipFor(fighter({ animation }), 0));
     }
   });
 });
@@ -136,4 +138,34 @@ describe('poseFor over a real timeline', () => {
       }
     },
   );
+});
+
+describe('walks (014)', () => {
+  it('picks the walk clip by the way the fighter moves', () => {
+    expect(clipFor(fighter({ animation: 'walk', travel: 1 }), 0)).toBe('walk_forward');
+    expect(clipFor(fighter({ animation: 'walk', travel: -1 }), 0)).toBe('walk_back');
+  });
+
+  it('steps at the clip pace from the start of the walk', () => {
+    const walk = fighter({ animation: 'walk', travel: -1, elapsed: 2500 });
+    expect(clipTime(walk, 'walk_back', 2, 99_000)).toBeCloseTo(0.5);
+  });
+
+  it('plays idle while the GLB lacks the walk clips', () => {
+    const walk = fighter({ animation: 'walk', travel: -1, elapsed: 300 });
+    expect(poseFor(walk, 4000, DURATIONS, CONTEXT).clip).toBe('idle');
+    const withWalks = { ...DURATIONS, walk_forward: 1, walk_back: 1 };
+    expect(poseFor(walk, 4000, withWalks, CONTEXT).clip).toBe('walk_back');
+  });
+
+  it('walks back to the mark after an exchange in the spike', () => {
+    const prepared = spikeScene();
+    const walks: number[] = [];
+    for (let t = 0; t < prepared.durationMs; t += 16) {
+      const f = sceneAt(prepared, t, { reducedMotion: false }).fighters.a;
+      if (f.animation === 'walk') walks.push(f.travel);
+    }
+    expect(walks.length).toBeGreaterThan(0);
+    expect(walks).toContain(-1);
+  });
 });

@@ -64,7 +64,7 @@ function fighterAt(
   const hold = fighter.hold;
   if (hold !== null && t >= hold.start) {
     const timing = fighter.timing[hold.animation];
-    return { ...base, ...animationAt(timing, t - hold.start), x: hold.x };
+    return { ...base, ...animationAt(timing, t - hold.start), x: hold.x, travel: 0 };
   }
   let active: Segment | undefined;
   for (const pc of window) {
@@ -76,10 +76,11 @@ function fighterAt(
   if (active === undefined) {
     // Idle at the mark, with a global phase so idle never depends on history.
     const timing = fighter.timing.idle;
-    return { ...base, ...animationAt(timing, t), x: MARK_X[side] };
+    return { ...base, ...animationAt(timing, t), x: MARK_X[side], travel: 0 };
   }
   const timing = fighter.timing[active.animation];
-  return { ...base, ...animationAt(timing, t - active.animStart), x: xAt(active, t) };
+  const travel = Math.sign((active.x1 - active.x0) * FACING[side]) as -1 | 0 | 1;
+  return { ...base, ...animationAt(timing, t - active.animStart), x: xAt(active, t), travel };
 }
 
 function phaseAt(prepared: PreparedScene, t: number): Phase {
@@ -202,6 +203,7 @@ export function sceneAt(prepared: PreparedScene, time: number, options: SceneOpt
     camera: options.reducedMotion
       ? cameraFrom(1, NO_OFFSET, { a: fighters.a.x, b: fighters.b.x })
       : cameraFrom(fx.zoom, fx.shake, { a: fighters.a.x, b: fighters.b.x }),
+    reducedMotion: options.reducedMotion,
     banners: bannersAt(prepared, t, options.reducedMotion),
     effects: [...fx.others, ...fx.particles],
   };

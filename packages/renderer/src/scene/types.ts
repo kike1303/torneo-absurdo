@@ -39,6 +39,11 @@ export interface FighterScene {
   readonly windup: number;
   readonly total: number;
   readonly x: number;
+  /**
+   * Which way it moves along its facing (014): 1 towards the rival, -1 away, 0 still. A 3D walk
+   * picks its clip from it.
+   */
+  readonly travel: -1 | 0 | 1;
   readonly y: number;
   readonly mirror: boolean;
   readonly scale: number;
@@ -115,6 +120,8 @@ export interface Scene {
   readonly fighters: Readonly<Record<Side, FighterScene>>;
   readonly hud: HudScene;
   readonly camera: CameraScene;
+  /** `prefers-reduced-motion` was on: a renderer adds no camera motion of its own (014). */
+  readonly reducedMotion: boolean;
   readonly banners: readonly BannerScene[];
   readonly effects: readonly EffectScene[];
 }

@@ -24,7 +24,11 @@ export const CLIP_NAMES = [
   'win_2',
   'win_3',
 ] as const;
-export type ClipName = (typeof CLIP_NAMES)[number];
+/** Clips a GLB may still lack (014): a walk falls back to `idle` until they are exported. */
+export const OPTIONAL_CLIP_NAMES = ['walk_forward', 'walk_back'] as const;
+type RequiredClip = (typeof CLIP_NAMES)[number];
+type OptionalClip = (typeof OPTIONAL_CLIP_NAMES)[number];
+export type ClipName = RequiredClip | OptionalClip;
 
 /**
  * Where each attack clip lands, as a fraction of its length: the frame where a wrist reaches
@@ -43,7 +47,8 @@ export const CLIP_IMPACT: Readonly<Partial<Record<ClipName, number>>> = Object.f
 const VARIANTS: Readonly<Record<AnimationCode, readonly ClipName[]>> = Object.freeze({
   idle: ['idle'],
   intro: ['idle'],
-  walk: ['idle'],
+  // Chosen by `travel` in `clipFor`.
+  walk: ['walk_forward'],
   attack_light: ['attack_light'],
   attack_heavy: ['attack_heavy_1', 'attack_heavy_2'],
   special: ['special_1', 'special_2', 'special_3', 'special_4'],
@@ -86,7 +91,8 @@ export type FaceCode = (typeof FACE_CODES)[number];
 export const TIRED_HP = 0.25;
 
 /** Seconds of each clip, read from the GLB by the Three layer. */
-export type ClipDurations = Readonly<Record<ClipName, number>>;
+export type ClipDurations = Readonly<Record<RequiredClip, number>> &
+  Readonly<Partial<Record<OptionalClip, number>>>;
 
 export interface Pose {
   readonly clip: ClipName;
@@ -109,9 +115,10 @@ function variantIndex(side: Side, start: number, count: number): number {
 
 /** The clip of `fighter` at scene time `t`; the variant depends only on when it started. */
 export function clipFor(
-  fighter: Pick<FighterScene, 'side' | 'animation' | 'elapsed'>,
+  fighter: Pick<FighterScene, 'side' | 'animation' | 'elapsed' | 'travel'>,
   t: number,
 ): ClipName {
+  if (fighter.animation === 'walk') return fighter.travel < 0 ? 'walk_back' : 'walk_forward';
   const variants = VARIANTS[fighter.animation];
   if (variants.length === 1) return variants[0] as ClipName;
   return variants[variantIndex(fighter.side, t - fighter.elapsed, variants.length)] as ClipName;
@@ -130,6 +137,9 @@ export function clipTime(
   t: number,
 ): number {
   const ms = Math.max(0, fighter.elapsed);
+  // A walk clip steps at its own pace from the start of the walk.
+  if (clip === 'walk_forward' || clip === 'walk_back')
+    return duration > 0 ? (ms / 1000) % duration : 0;
   if (fighter.animation === 'idle' || fighter.animation === 'intro' || fighter.animation === 'walk')
     return duration > 0 ? (Math.max(0, t) / 1000) % duration : 0;
   if (HELD.has(fighter.animation)) return Math.min(duration, ms / 1000);
@@ -184,10 +194,13 @@ export function poseFor(
   durations: ClipDurations,
   context: FaceContext,
 ): Pose {
-  const clip = clipFor(fighter, t);
+  const wanted = clipFor(fighter, t);
+  const length = durations[wanted];
+  // A clip the GLB lacks plays as idle (the walks before they are exported).
+  const clip = length === undefined ? 'idle' : wanted;
   return {
     clip,
-    time: clipTime(fighter, clip, durations[clip], t),
+    time: clipTime(fighter, clip, length ?? durations.idle, t),
     face: faceFor(fighter, context),
   };
 }
