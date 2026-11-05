@@ -12,7 +12,7 @@ import type {
   HudScene,
 } from '../scene/types.ts';
 import { SIDES, type Side } from '../timeline/types.ts';
-import { worldX, worldY } from './world.ts';
+import { arenaPoint } from './world.ts';
 
 /** Alpha of the empty track behind the bars, in the text color of the theme (as in Pixi). */
 const TRACK_ALPHA = 0.18;
@@ -43,6 +43,8 @@ export interface Overlay {
     numbers: readonly DamageNumberEffect[],
     camera: PerspectiveCamera,
     formatNumber: (n: number) => string,
+    /** The turn of the fight axis (018): the numbers follow the fighters. */
+    angle?: number,
   ): void;
   setTheme(theme: RendererTheme): void;
   destroy(): void;
@@ -145,7 +147,7 @@ export function createOverlay(
       }
       for (const code of BANNERS) banners[code].style.fontSize = `${layout.banner.fontPx}px`;
     },
-    apply(hud, sceneBanners, numbers, camera, formatNumber) {
+    apply(hud, sceneBanners, numbers, camera, formatNumber, angle = 0) {
       for (const side of SIDES) {
         const f = hud[side];
         fill(trail[side], side, f.trail / f.maxHp);
@@ -169,7 +171,8 @@ export function createOverlay(
           el.style.display = 'none';
           return;
         }
-        point.set(worldX(n.x), worldY(n.y), 0).project(camera);
+        const at = arenaPoint(n.x, n.y, angle);
+        point.set(at.x, at.y, at.z).project(camera);
         const x = ((point.x + 1) / 2) * viewport.width;
         // Never over the HUD: on a short stage the head is close to the bars and the names.
         const hudBottom = layout === null ? 0 : layout.names.a.y + layout.fontPx;
