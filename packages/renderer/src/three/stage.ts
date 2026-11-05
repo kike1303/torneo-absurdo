@@ -21,6 +21,7 @@ import {
 } from 'three';
 import { MAX_PARTICLES } from '../fx/particles.ts';
 import { poseFor } from '../model/pose.ts';
+import { shotFor } from '../model/shot.ts';
 import { RendererError } from '../player/errors.ts';
 import type { RendererTheme, Stage, StageSetup } from '../player/types.ts';
 import type { DamageNumberEffect, Scene } from '../scene/types.ts';
@@ -167,7 +168,7 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
   function draw(w: World, scene: Scene): void {
     const current = theme;
     if (current === null) return;
-    placeCamera(w.camera, aspect, scene.camera);
+    placeCamera(w.camera, aspect, scene.camera, shotFor(scene));
     for (const side of SIDES) w.blobs[side].position.x = worldX(scene.fighters[side].x);
     if (fighters !== null && botarga !== null) {
       for (const side of SIDES) {

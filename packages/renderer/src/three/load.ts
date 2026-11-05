@@ -3,7 +3,14 @@
 // default `ImageBitmapLoader` fetches their `blob:` URL and `connect-src 'self'` blocks that.
 import { SRGBColorSpace, TextureLoader, type AnimationClip, type Texture } from 'three';
 import { GLTFLoader, type GLTF, type GLTFParser } from 'three/addons/loaders/GLTFLoader.js';
-import { CLIP_NAMES, FACE_CODES, type ClipDurations, type FaceCode } from '../model/pose.ts';
+import {
+  CLIP_NAMES,
+  FACE_CODES,
+  OPTIONAL_CLIP_NAMES,
+  type ClipDurations,
+  type ClipName,
+  type FaceCode,
+} from '../model/pose.ts';
 import { RendererError } from '../player/errors.ts';
 import type { BotargaModel } from './types.ts';
 
@@ -39,11 +46,15 @@ export async function loadBotarga(model: BotargaModel): Promise<Botarga> {
       ...faceCodes.map((code) => loadFace(textures, model.faces[code] as string)),
     ]);
     const clips = new Map(gltf.animations.map((clip) => [clip.name, clip]));
-    const durations = {} as Record<(typeof CLIP_NAMES)[number], number>;
+    const durations = {} as Record<ClipName, number>;
     for (const name of CLIP_NAMES) {
       const clip = clips.get(name);
       if (clip === undefined) throw new Error(`missing clip ${name}`);
       durations[name] = clip.duration;
+    }
+    for (const name of OPTIONAL_CLIP_NAMES) {
+      const clip = clips.get(name);
+      if (clip !== undefined) durations[name] = clip.duration;
     }
     const faces = new Map(faceCodes.map((code, i) => [code, faceTextures[i] as Texture]));
     return { gltf, clips, durations, faces };
