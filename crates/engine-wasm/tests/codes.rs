@@ -96,7 +96,7 @@ fn the_bounds_are_those_of_the_ruleset() {
 #[test]
 fn the_bounds_of_an_unknown_ruleset() {
     assert_eq!(code(bounds(0)), "ruleset.unknown");
-    assert_eq!(code(bounds(2)), "ruleset.unknown");
+    assert_eq!(code(bounds(3)), "ruleset.unknown");
     assert_eq!(code(bounds(u16::MAX)), "ruleset.unknown");
 }
 

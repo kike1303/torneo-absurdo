@@ -41,8 +41,8 @@ describe('the committed engine wasm', () => {
   it('gives ruleset.unknown with an unknown version, from both functions', () => {
     const engine = realEngine();
     const spec = noFinalNewline('spec-tank.json');
-    expect(() => engine.simulate(deriveSeed(0), spec, spec, 2)).toThrow('ruleset.unknown');
-    expect(() => engine.rulesetBounds(2)).toThrow('ruleset.unknown');
+    expect(() => engine.simulate(deriveSeed(0), spec, spec, 3)).toThrow('ruleset.unknown');
+    expect(() => engine.rulesetBounds(3)).toThrow('ruleset.unknown');
   });
 
   it('gives the bounds of the ruleset', () => {

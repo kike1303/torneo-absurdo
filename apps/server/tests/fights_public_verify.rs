@@ -717,7 +717,7 @@ fn verify_vectors() -> Vec<Value> {
             "unknown_ruleset_with_its_hash",
             &ko,
             Box::new(|d| {
-                d["fight"]["ruleset_version"] = json!(2);
+                d["fight"]["ruleset_version"] = json!(3);
                 rehash(d);
             }),
             "err",

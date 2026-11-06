@@ -2002,9 +2002,9 @@
         "max_duration_ms": 90000,
         "opens_at": "1800000000000",
         "playback_delay_ms": 3500,
-        "ruleset_version": 2,
+        "ruleset_version": 3,
         "seed_commit": "719fc5e59390d5e42666897f4646fe43ff85c8fc146e224c9a3f379c38a1c768",
-        "snapshot_sha256": "aacf11ef84d1a74e4a90089423fe71d6ac7cfd586dfc9df551e75ca49cedbd37",
+        "snapshot_sha256": "35948c1fa054c2438db75bce822c10977331196e3018241b47e8ad9572980a43",
         "state": "settled",
         "time_limit_ms": 86000
       },
