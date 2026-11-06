@@ -23,6 +23,7 @@ import {
   GROUND_Y,
   MARK_X,
   type DamageNumberEffect,
+  type DodgeCut,
   type EffectScene,
   type FighterScene,
   type FlashEffect,
@@ -45,6 +46,30 @@ function animationAt(timing: AnimationTiming, elapsed: number) {
     windup: timing.windup,
     total: timing.total,
   };
+}
+
+/**
+ * The last dodge of `side` that another segment cut before its natural end, if `t` falls in what
+ * would have been its rest. It started at most `MAX_ACTION_MS` before `t`, so `window` reaches it.
+ */
+function dodgeCutAt(
+  prepared: PreparedScene,
+  window: readonly PreparedCue[],
+  side: Side,
+  t: number,
+): DodgeCut | null {
+  const timing = prepared.fighters[side].timing;
+  let cut: DodgeCut | null = null;
+  for (const pc of window) {
+    for (const segment of pc.segments) {
+      if (segment.side !== side) continue;
+      const { code, total } = timing[segment.animation];
+      if (code !== 'dodge' || segment.end > t || t >= segment.animStart + total) continue;
+      if (cut === null || segment.end > cut.at)
+        cut = { start: segment.animStart, at: segment.end, total };
+    }
+  }
+  return cut;
 }
 
 function fighterAt(
@@ -70,6 +95,7 @@ function fighterAt(
       x: hold.x,
       travel: 0,
       ability: null,
+      dodgeCut: dodgeCutAt(prepared, window, side, t),
     };
   }
   let active: Segment | undefined;
@@ -86,7 +112,14 @@ function fighterAt(
   if (active === undefined) {
     // Idle at the mark, with a global phase so idle never depends on history.
     const timing = fighter.timing.idle;
-    return { ...base, ...animationAt(timing, t), x: MARK_X[side], travel: 0, ability: null };
+    return {
+      ...base,
+      ...animationAt(timing, t),
+      x: MARK_X[side],
+      travel: 0,
+      ability: null,
+      dodgeCut: dodgeCutAt(prepared, window, side, t),
+    };
   }
   const timing = fighter.timing[active.animation];
   const travel = Math.sign((active.x1 - active.x0) * FACING[side]) as -1 | 0 | 1;
@@ -102,6 +135,7 @@ function fighterAt(
     x: xAt(active, t),
     travel,
     ability,
+    dodgeCut: dodgeCutAt(prepared, window, side, t),
   };
 }
 

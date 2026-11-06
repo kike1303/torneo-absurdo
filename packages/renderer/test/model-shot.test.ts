@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { arenaAngle } from '../src/model/circling.ts';
 import { FRONT_SHOT, shotFor } from '../src/model/shot.ts';
 import { sceneAt } from '../src/scene/scene-at.ts';
 import { FACING, type FighterScene, type Scene } from '../src/scene/types.ts';
@@ -45,18 +46,20 @@ describe('shotFor', () => {
   });
 
   it('cuts to a close-up of the side that throws a special, from its front', () => {
-    for (const side of ['a', 'b'] as const) {
-      const scene = withFighter(exchange(9000), {
-        side,
-        animation: 'special',
-        elapsed: 200,
-        total: 900,
-      });
-      const shot = shotFor(scene);
-      expect(Math.sign(shot.yaw)).toBe(FACING[side]);
-      expect(shot.distance).toBeLessThan(1);
-      expect(Math.abs((shot.focusX ?? 0) - scene.fighters[side].x)).toBeLessThan(40);
-    }
+    // At 0, and with the fight axis turned to each side (018): the angle is from the axis.
+    for (const t of [10_000, 5000, 15_000])
+      for (const side of ['a', 'b'] as const) {
+        const scene = withFighter(exchange(t), {
+          side,
+          animation: 'special',
+          elapsed: 200,
+          total: 900,
+        });
+        const shot = shotFor(scene);
+        expect(shot.yaw - arenaAngle(scene)).toBeCloseTo(FACING[side] * 0.4);
+        expect(shot.distance).toBeLessThan(1);
+        expect(Math.abs((shot.focusX ?? 0) - scene.fighters[side].x)).toBeLessThan(40);
+      }
   });
 
   it('starts the KO orbit where the exchange was, then closes on the fallen fighter', () => {

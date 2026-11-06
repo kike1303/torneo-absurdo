@@ -1,8 +1,10 @@
 // From the logical stage of `Scene` (640 × 360 px, RF-A15) to the 3D world in meters (013). The
 // botarga is 1 m tall, stands on y = 0 and the fight runs along x.
 import { PerspectiveCamera } from 'three';
+import { CIRCLE_ANGLE } from '../model/circling.ts';
 import { FRONT_SHOT, type Shot } from '../model/shot.ts';
 import { GROUND_Y, STAGE_WIDTH, type CameraScene } from '../scene/types.ts';
+import type { Side } from '../timeline/types.ts';
 
 /** Horizontal scale: the marks end up ~1.5 m apart and a strike connects at ~0.46 m. */
 export const METERS_PER_PX = 1 / 140;
@@ -13,6 +15,14 @@ export const HEIGHT_PER_PX = 1 / 120;
  * profile hides it).
  */
 export const TURN_TO_CAMERA = 0.45;
+
+/**
+ * The yaw of a fighter of `side` (a glTF model faces +z): towards its rival along the fight axis
+ * turned `angle` (018), then `turnToCamera` towards the camera.
+ */
+export function facingYaw(side: Side, angle: number, turnToCamera = TURN_TO_CAMERA): number {
+  return angle + (side === 'a' ? Math.PI / 2 - turnToCamera : turnToCamera - Math.PI / 2);
+}
 
 export const worldX = (x: number): number => (x - STAGE_WIDTH / 2) * METERS_PER_PX;
 export const worldY = (y: number): number => (GROUND_Y - y) * HEIGHT_PER_PX;
@@ -43,10 +53,11 @@ const TARGET_HEIGHT = 0.6;
 /** How far above the target the camera sits, for a slight top-down look. */
 const CAMERA_LIFT = 0.35;
 /**
- * How much farther the camera stands per radian the fight axis turns (018): the fighter that comes
- * towards it grows and drifts to the edge, and would be cut.
+ * How much farther the camera stands at the widest turn of the fight axis (018): the fighter that
+ * comes towards it grows and drifts to the edge, and would be cut. It grows with the square of the
+ * turn, so the dolly eases through the front instead of bouncing off it.
  */
-const TURN_PULLBACK = 0.5;
+const TURN_PULLBACK = 0.15;
 
 export function createCamera(): PerspectiveCamera {
   return new PerspectiveCamera(FOV_DEG, 16 / 9, 0.05, 50);
@@ -68,7 +79,8 @@ export function placeCamera(
   const half = Math.tan(((FOV_DEG / 2) * Math.PI) / 180);
   const base = Math.max(VIEW_HEIGHT / 2 / half, VIEW_WIDTH / 2 / (half * Math.max(0.1, aspect)));
   const zoom = Math.max(0.1, scene.zoom);
-  const distance = (base * shot.distance * (1 + TURN_PULLBACK * Math.abs(angle))) / zoom;
+  const turn = angle / CIRCLE_ANGLE;
+  const distance = (base * shot.distance * (1 + TURN_PULLBACK * turn * turn)) / zoom;
   // What the center of the screen shows under the 2D transform (center + zoom × (p − center)):
   // continuous in the zoom, so the camera never jumps when a punch zoom starts or ends.
   const focus = shot.focusX ?? scene.centerX + (STAGE_WIDTH / 2 - scene.centerX) / zoom;

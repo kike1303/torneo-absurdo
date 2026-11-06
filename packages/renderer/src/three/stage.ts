@@ -21,7 +21,7 @@ import {
 } from 'three';
 import { MAX_PARTICLES } from '../fx/particles.ts';
 import { poseFor } from '../model/pose.ts';
-import { arenaAngle, sidestep } from '../model/circling.ts';
+import { arenaAngle, depthAt, sidestep } from '../model/circling.ts';
 import { shotFor } from '../model/shot.ts';
 import { RendererError } from '../player/errors.ts';
 import type { RendererTheme, Stage, StageSetup } from '../player/types.ts';
@@ -145,7 +145,7 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
       if (effect.kind !== 'particle' || count >= MAX_PARTICLES) continue;
       const size = effect.size * METERS_PER_PX * PARTICLE_SCALE * effect.alpha;
       matrix.makeScale(size, size, size);
-      const at = arenaPoint(effect.x, effect.y, angle, PARTICLE_DEPTH);
+      const at = arenaPoint(effect.x, effect.y, angle, PARTICLE_DEPTH + depthAt(effect.x, scene));
       matrix.setPosition(at.x, at.y, at.z);
       w.particles.setMatrixAt(count, matrix);
       w.particles.setColorAt(count, tint.setHex(current.colors[effect.color]));
@@ -187,7 +187,9 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
     drawParticles(w, scene, current, angle);
     numbers.length = 0;
     for (const effect of scene.effects) if (effect.kind === 'damage') numbers.push(effect);
-    w.overlay.apply(scene.hud, scene.banners, numbers, w.camera, formatNumber, angle);
+    w.overlay.apply(scene.hud, scene.banners, numbers, w.camera, formatNumber, (x, y) =>
+      arenaPoint(x, y, angle, depthAt(x, scene)),
+    );
   }
 
   const disposeFighters = (): void => {
