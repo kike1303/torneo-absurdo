@@ -4,7 +4,8 @@
 mod common;
 
 use common::{
-    assert_invariants, assert_only_codes, derive_seed, fixture, fixtures, resolution_times, v1,
+    assert_invariants, assert_only_codes, derive_seed, fixture, fixtures, fixtures_v2,
+    resolution_times, v1, v2,
 };
 use engine::{
     Ability, CharacterSpec, Element, MoveKind, Personality, Seed, SpecError, Stats,
@@ -18,19 +19,34 @@ const SEEDS_PER_PAIR: u32 = 1000;
 /// (plan-a, Riesgos and Desviaciones); both sides attack in every fight anyway.
 #[test]
 fn every_log_is_deterministic_and_respects_rf2() {
-    let r = v1();
-    let all = fixtures();
+    deterministic_and_rf2(&v1(), &fixtures());
+}
+
+/// The same for ruleset v2 (016) and its fixtures.
+#[test]
+fn every_v2_log_is_deterministic_and_respects_rf2() {
+    let r = v2();
+    let all = fixtures_v2();
+    deterministic_and_rf2(&r, &all);
+    let log = simulate(&Seed::from_bytes(derive_seed(0)), &all[3].1, &all[0].1, &r).unwrap();
+    assert_eq!(log.ruleset_version, 2);
+}
+
+fn deterministic_and_rf2(r: &engine::Ruleset, all: &[(&str, CharacterSpec)]) {
     for (i, (_, a)) in all.iter().enumerate() {
         for (j, (_, b)) in all.iter().enumerate().skip(i) {
             for k in 0..SEEDS_PER_PAIR {
-                let n = u32::try_from(i * 4 + j).unwrap() * SEEDS_PER_PAIR + k;
-                let first = simulate(&Seed::from_bytes(derive_seed(n)), a, b, &r).unwrap();
-                let again = simulate(&Seed::from_bytes(derive_seed(n)), a, b, &r).unwrap();
+                let n =
+                    u32::try_from(i * 4 + j).unwrap_or_else(|e| panic!("{e}")) * SEEDS_PER_PAIR + k;
+                let first = simulate(&Seed::from_bytes(derive_seed(n)), a, b, r)
+                    .unwrap_or_else(|e| panic!("{e}"));
+                let again = simulate(&Seed::from_bytes(derive_seed(n)), a, b, r)
+                    .unwrap_or_else(|e| panic!("{e}"));
                 assert_eq!(
-                    canonical_json(&first).unwrap(),
-                    canonical_json(&again).unwrap()
+                    canonical_json(&first).unwrap_or_else(|e| panic!("{e}")),
+                    canonical_json(&again).unwrap_or_else(|e| panic!("{e}"))
                 );
-                assert_invariants(&first, &r);
+                assert_invariants(&first, r);
                 assert_only_codes(&first, a, b);
             }
         }
@@ -286,6 +302,28 @@ fn invalid_specs_return_their_error() {
         assert_eq!(simulate(&seed, &good, bad, &r), Err(*error), "{bad:?} as b");
         covered.push(*error);
     }
+    // The kind caps only bind in v2 (016).
+    let v2 = engine::Ruleset::for_version(2).unwrap_or_else(|| panic!("ruleset 2"));
+    let good_v2 = spec([20; 5], [0, 0, 0], one_heavy(), vec![]);
+    let three_heavies = spec(
+        [20; 5],
+        [0, 0, 0],
+        (0..3)
+            .map(|i| ability(&format!("bump_{i}"), MoveKind::Heavy, 20, 0, None))
+            .collect(),
+        vec![],
+    );
+    assert_eq!(simulate(&seed, &good_v2, &good_v2, &v2).map(|_| ()), Ok(()));
+    assert_eq!(
+        simulate(&seed, &three_heavies, &good_v2, &v2),
+        Err(SpecError::AbilityKindCount)
+    );
+    assert_eq!(
+        simulate(&seed, &good_v2, &three_heavies, &v2),
+        Err(SpecError::AbilityKindCount)
+    );
+    assert!(simulate(&seed, &three_heavies, &good_v2, &r).is_ok());
+    covered.push(SpecError::AbilityKindCount);
     // Every code except the EventLimit guard (covered by the unit tests of sim.rs).
     for error in SpecError::ALL {
         assert!(
@@ -348,12 +386,13 @@ fn seed_is_opaque() {
     assert!(implements!(CharacterSpec: Clone));
 }
 
-/// RF4: only version 1 exists.
+/// RF4: versions 1 (tournament) and 2 (player botargas, 016) exist.
 #[test]
 fn ruleset_versions() {
     assert!(engine::Ruleset::for_version(1).is_some());
+    assert!(engine::Ruleset::for_version(2).is_some());
     assert!(engine::Ruleset::for_version(0).is_none());
-    assert!(engine::Ruleset::for_version(2).is_none());
+    assert!(engine::Ruleset::for_version(3).is_none());
 }
 
 /// RF11: compact JSON (no spaces or newlines outside strings), fields in declaration order.

@@ -1,0 +1,12 @@
+{
+  "slug": "brawler",
+  "stats": { "hp": 70, "attack": 70, "defense": 50, "speed": 60, "special": 50 },
+  "personality": { "aggression": 61, "caution": 35, "showmanship": 65 },
+  "abilities": [
+    { "id": "elbow_drop", "kind": "heavy", "power": 40, "cooldown": 1 },
+    { "id": "mud_slap", "kind": "special", "power": 60, "cooldown": 3, "element": "ground" },
+    { "id": "jab_combo", "kind": "heavy", "power": 28, "cooldown": 0 },
+    { "id": "gust_spin", "kind": "special", "power": 90, "cooldown": 6, "element": "air" }
+  ],
+  "weaknesses": ["ice"]
+}
