@@ -8,8 +8,10 @@ author: owner
 approvals:
   - by: owner
     date: 2026-10-20
+  - by: owner
+    date: 2026-11-06
 created: 2026-10-20
-updated: 2026-11-02
+updated: 2026-11-06
 ---
 
 # ADR-0002: Semilla con commit-reveal
@@ -21,7 +23,7 @@ Con apuestas de por medio, el resultado no puede conocerse antes de que cierren 
 1. Al abrir las apuestas, el servidor genera `seed` (32 bytes) con un CSPRNG del sistema operativo (`OsRng`/`getrandom`) y publica `commit = SHA-256(seed)`.
 2. La semilla vive solo en el servidor, nunca en logs, respuestas del API ni mensajes WS, hasta `Settled`.
 3. Al cerrar las apuestas se calcula el `FightLog`. Los eventos se emiten **solo cuando les toca** según el tiempo de la pelea; nunca se envía el log completo ni eventos futuros.
-4. En `Settled` se publica la semilla. Cualquiera puede verificar `SHA-256(seed) == commit` y re-simular con `engine-wasm`.
+4. En `Settled` se publica la semilla. Cualquiera puede verificar `SHA-256(seed) == commit` y re-simular con `engine-wasm`. Salvo una pelea anulada porque el secreto se perdió (`voided(secret_lost)`), en la que no hay semilla que publicar y la pelea queda sin verificar (enmienda de 2026-11-02).
 
 ## Alternativas descartadas
 - Mezclar entropía aportada por los usuarios: es más complejo y no aporta mucho al inicio. Se puede revisar después.
@@ -31,8 +33,8 @@ Con apuestas de por medio, el resultado no puede conocerse antes de que cierren 
 - Hay tests que garantizan que ningún endpoint ni mensaje expone `seed` antes de `Settled`.
 - La semilla se guarda en la base de datos (necesaria si el servidor se reinicia a mitad de una pelea), en una columna que el API nunca serializa mientras la pelea no esté liquidada.
 
-## Enmienda propuesta 2026-11-02: pelea anulada con el secreto perdido
-**Estado: `proposed`. No está en vigor.** La decisión de arriba rige sin cambios hasta que esta enmienda pase por el gate de ADRs de [`docs/process.md`](../process.md): revisión de security-reviewer y OK explícito del owner. Viene de la preocupación 13 de la [spec de 010](../features/010-scheduler-de-peleas/spec.md) y la implementa la fase A de la [spec de 012](../features/012-apuestas/spec.md).
+## Enmienda 2026-11-02: pelea anulada con el secreto perdido
+**Estado: `approved`, en vigor desde 2026-11-06.** Pasó el gate de ADRs de [`docs/process.md`](../process.md): security-reviewer la aprobó en el PR #86 y el owner dio su OK explícito en chat el 2026-11-06, aceptando el riesgo de abajo. Viene de la preocupación 13 de la [spec de 010](../features/010-scheduler-de-peleas/spec.md) y la implementa la fase A de la [spec de 012](../features/012-apuestas/spec.md).
 
 **Qué cambia.** Solo el punto 4, al que se le suma esta frase:
 

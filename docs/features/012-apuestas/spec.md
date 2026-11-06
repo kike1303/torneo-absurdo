@@ -10,10 +10,11 @@ approvals:
   - {by: product-owner, date: 2026-11-02}
   - {by: security-reviewer, date: 2026-11-02}
   - {by: game-designer, date: 2026-11-02}
+  - {by: owner, date: 2026-11-06}
 linear: TA-27
 depends_on: ["008", "010"]
 created: 2026-11-02
-updated: 2026-11-02
+updated: 2026-11-06
 ---
 
 # Spec: Apuestas parimutuel, bono diario y rescate
