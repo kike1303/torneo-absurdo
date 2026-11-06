@@ -23,8 +23,8 @@ const asVersion = (json: unknown, version: number): unknown =>
 
 describe('timeline v2 types (RF1)', () => {
   it('lists the versions, cue types and endings of the spec', () => {
-    expect(TIMELINE_VERSIONS).toEqual([1, 2]);
-    expect(TIMELINE_VERSION).toBe(2);
+    expect(TIMELINE_VERSIONS).toEqual([1, 2, 3]);
+    expect(TIMELINE_VERSION).toBe(3);
     expect(CUE_TYPES_V1).toEqual(['intro', 'strike', 'knockdown', 'ko', 'win']);
     expect(CUE_TYPES).toEqual(['intro', 'strike', 'knockdown', 'ko', 'win', 'time_up', 'draw']);
     expect(ENDINGS).toEqual(['ko', 'decision', 'draw']);
@@ -85,7 +85,7 @@ describe('validateTimeline v2 (RF2, RF3)', () => {
     });
   });
 
-  it.each([0, 3, '2', null])('rejects timeline_version %s', (version) => {
+  it.each([0, 4, '2', null])('rejects timeline_version %s', (version) => {
     expect(validateTimeline(asVersion(valid, version as number))).toEqual({
       ok: false,
       errors: [{ code: 'timeline.unsupported_version', path: '/timeline_version' }],

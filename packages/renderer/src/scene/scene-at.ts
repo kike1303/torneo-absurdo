@@ -23,6 +23,7 @@ import {
   GROUND_Y,
   MARK_X,
   type DamageNumberEffect,
+  type DodgeCut,
   type EffectScene,
   type FighterScene,
   type FlashEffect,
@@ -47,6 +48,30 @@ function animationAt(timing: AnimationTiming, elapsed: number) {
   };
 }
 
+/**
+ * The last dodge of `side` that another segment cut before its natural end, if `t` falls in what
+ * would have been its rest. It started at most `MAX_ACTION_MS` before `t`, so `window` reaches it.
+ */
+function dodgeCutAt(
+  prepared: PreparedScene,
+  window: readonly PreparedCue[],
+  side: Side,
+  t: number,
+): DodgeCut | null {
+  const timing = prepared.fighters[side].timing;
+  let cut: DodgeCut | null = null;
+  for (const pc of window) {
+    for (const segment of pc.segments) {
+      if (segment.side !== side) continue;
+      const { code, total } = timing[segment.animation];
+      if (code !== 'dodge' || segment.end > t || t >= segment.animStart + total) continue;
+      if (cut === null || segment.end > cut.at)
+        cut = { start: segment.animStart, at: segment.end, total };
+    }
+  }
+  return cut;
+}
+
 function fighterAt(
   prepared: PreparedScene,
   window: readonly PreparedCue[],
@@ -64,22 +89,54 @@ function fighterAt(
   const hold = fighter.hold;
   if (hold !== null && t >= hold.start) {
     const timing = fighter.timing[hold.animation];
-    return { ...base, ...animationAt(timing, t - hold.start), x: hold.x };
+    return {
+      ...base,
+      ...animationAt(timing, t - hold.start),
+      x: hold.x,
+      travel: 0,
+      ability: null,
+      dodgeCut: dodgeCutAt(prepared, window, side, t),
+    };
   }
   let active: Segment | undefined;
+  let owner: PreparedCue | undefined;
   for (const pc of window) {
     for (const segment of pc.segments) {
       if (segment.side !== side || segment.start > t || t >= segment.end) continue;
-      if (active === undefined || segment.start > active.start) active = segment;
+      if (active === undefined || segment.start > active.start) {
+        active = segment;
+        owner = pc;
+      }
     }
   }
   if (active === undefined) {
     // Idle at the mark, with a global phase so idle never depends on history.
     const timing = fighter.timing.idle;
-    return { ...base, ...animationAt(timing, t), x: MARK_X[side] };
+    return {
+      ...base,
+      ...animationAt(timing, t),
+      x: MARK_X[side],
+      travel: 0,
+      ability: null,
+      dodgeCut: dodgeCutAt(prepared, window, side, t),
+    };
   }
   const timing = fighter.timing[active.animation];
-  return { ...base, ...animationAt(timing, t - active.animStart), x: xAt(active, t) };
+  const travel = Math.sign((active.x1 - active.x0) * FACING[side]) as -1 | 0 | 1;
+  // Only the striker's own move carries the ability, not the rival's reaction to it.
+  const cue = owner?.cue;
+  const ability =
+    cue?.type === 'strike' && cue.actor === side && active.animation === cue.move
+      ? (cue.ability ?? null)
+      : null;
+  return {
+    ...base,
+    ...animationAt(timing, t - active.animStart),
+    x: xAt(active, t),
+    travel,
+    ability,
+    dodgeCut: dodgeCutAt(prepared, window, side, t),
+  };
 }
 
 function phaseAt(prepared: PreparedScene, t: number): Phase {
@@ -202,6 +259,7 @@ export function sceneAt(prepared: PreparedScene, time: number, options: SceneOpt
     camera: options.reducedMotion
       ? cameraFrom(1, NO_OFFSET, { a: fighters.a.x, b: fighters.b.x })
       : cameraFrom(fx.zoom, fx.shake, { a: fighters.a.x, b: fighters.b.x }),
+    reducedMotion: options.reducedMotion,
     banners: bannersAt(prepared, t, options.reducedMotion),
     effects: [...fx.others, ...fx.particles],
   };

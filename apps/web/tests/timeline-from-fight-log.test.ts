@@ -95,7 +95,7 @@ function koLog(): FightLog {
 }
 
 const EXPECTED: Timeline = {
-  timeline_version: 2,
+  timeline_version: 3,
   duration_ms: 12400,
   fighters: { a: { asset: 'dummy_a', max_hp: 100 }, b: { asset: 'dummy_b', max_hp: 100 } },
   cues: [
@@ -105,6 +105,7 @@ const EXPECTED: Timeline = {
       type: 'strike',
       actor: 'a',
       move: 'attack_light',
+      ability: 'strike',
       result: 'hit',
       damage: 10,
       target_hp: 90,
@@ -114,6 +115,7 @@ const EXPECTED: Timeline = {
       type: 'strike',
       actor: 'b',
       move: 'attack_heavy',
+      ability: 'slam',
       result: 'block',
       damage: 5,
       target_hp: 95,
@@ -123,6 +125,7 @@ const EXPECTED: Timeline = {
       type: 'strike',
       actor: 'a',
       move: 'special',
+      ability: 'burst',
       result: 'dodge',
       damage: 0,
       target_hp: 90,
@@ -132,6 +135,7 @@ const EXPECTED: Timeline = {
       type: 'strike',
       actor: 'a',
       move: 'attack_light',
+      ability: 'strike',
       result: 'crit',
       damage: 40,
       target_hp: 50,
@@ -142,6 +146,7 @@ const EXPECTED: Timeline = {
       type: 'strike',
       actor: 'b',
       move: 'attack_light',
+      ability: 'strike',
       result: 'hit',
       damage: 20,
       target_hp: 75,
@@ -151,6 +156,7 @@ const EXPECTED: Timeline = {
       type: 'strike',
       actor: 'a',
       move: 'attack_heavy',
+      ability: 'slam',
       result: 'hit',
       damage: 50,
       target_hp: 0,
@@ -427,7 +433,7 @@ describe('timelineFromFightLog', () => {
   it('WIN_DELAY_MS, CLOSING_DELAY_MS and timeline_version are the renderer values', () => {
     expect(WIN_DELAY_MS).toBe(TIMELINE_LIMITS.winGapMs);
     expect(CLOSING_DELAY_MS).toBe(TIMELINE_LIMITS.winGapMs);
-    expect(TIMELINE_VERSION).toBe(2);
+    expect(TIMELINE_VERSION).toBe(3);
     const result = timelineFromFightLog(koLog(), ASSETS);
     expect(result.ok && result.timeline.timeline_version).toBe(TIMELINE_VERSION);
   });

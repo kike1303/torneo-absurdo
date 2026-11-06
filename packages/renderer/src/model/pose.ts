@@ -2,6 +2,7 @@
 // botarga, at which clip time, and which face. Pure: the Three layer only applies it, so `seek`
 // shows the same as playing up to there and every spectator sees the same variant.
 import type { AnimationCode } from '../manifest/types.ts';
+import { RETURN_MS } from '../scene/choreography.ts';
 import type { FighterScene } from '../scene/types.ts';
 import type { Side } from '../timeline/types.ts';
 
@@ -24,7 +25,18 @@ export const CLIP_NAMES = [
   'win_2',
   'win_3',
 ] as const;
-export type ClipName = (typeof CLIP_NAMES)[number];
+/** Clips a GLB may lack (014): each falls back to `idle`. */
+export const OPTIONAL_CLIP_NAMES = [
+  'walk_forward',
+  'walk_back',
+  'idle_2',
+  'idle_3',
+  'idle_4',
+  'idle_5',
+] as const;
+type RequiredClip = (typeof CLIP_NAMES)[number];
+type OptionalClip = (typeof OPTIONAL_CLIP_NAMES)[number];
+export type ClipName = RequiredClip | OptionalClip;
 
 /**
  * Where each attack clip lands, as a fraction of its length: the frame where a wrist reaches
@@ -40,10 +52,39 @@ export const CLIP_IMPACT: Readonly<Partial<Record<ClipName, number>>> = Object.f
   special_4: 0.2,
 });
 
+/** Idle changes variant every spell, per side (014): long waits do not loop one clip. */
+const IDLE_SPELL_MS = 8000;
+const IDLE_VARIANTS: readonly ClipName[] = ['idle', 'idle_2', 'idle_3', 'idle_4', 'idle_5'];
+
+/** The victory clips a player can pick (016). */
+const WIN_VARIANTS: readonly ClipName[] = ['win_1', 'win_2', 'win_3'];
+
+/** The idle clips a player can pick (016): one of the five idles. */
+export type IdleClip = 'idle' | 'idle_2' | 'idle_3' | 'idle_4' | 'idle_5';
+/** The victory clips a player can pick (016). */
+export type WinClip = 'win_1' | 'win_2' | 'win_3';
+
+/**
+ * What a player botarga picked to look like (016): its idle and its victory. Without a field, the
+ * variant of the tournament (the idle rotates by spell, the victory varies by fight). The KO is
+ * never picked: it varies by fight. The host data is not trusted: an unknown code is ignored.
+ */
+export interface FighterCosmetics {
+  readonly idle?: IdleClip;
+  readonly victory?: WinClip;
+}
+
+function picked(code: string | undefined, allowed: readonly ClipName[]): ClipName | null {
+  return code !== undefined && (allowed as readonly string[]).includes(code)
+    ? (code as ClipName)
+    : null;
+}
+
+// `idle` and `walk` are picked in `clipFor` (by spell and by `travel`); listed here for the record.
 const VARIANTS: Readonly<Record<AnimationCode, readonly ClipName[]>> = Object.freeze({
-  idle: ['idle'],
+  idle: IDLE_VARIANTS,
   intro: ['idle'],
-  walk: ['idle'],
+  walk: ['walk_forward', 'walk_back'],
   attack_light: ['attack_light'],
   attack_heavy: ['attack_heavy_1', 'attack_heavy_2'],
   special: ['special_1', 'special_2', 'special_3', 'special_4'],
@@ -52,7 +93,7 @@ const VARIANTS: Readonly<Record<AnimationCode, readonly ClipName[]>> = Object.fr
   block: ['block'],
   dodge: ['dodge'],
   ko: ['ko_1', 'ko_2'],
-  win: ['win_1', 'win_2', 'win_3'],
+  win: WIN_VARIANTS,
 });
 
 /** Clips that play at their own speed and hold the last frame (the ending, 013). */
@@ -86,7 +127,8 @@ export type FaceCode = (typeof FACE_CODES)[number];
 export const TIRED_HP = 0.25;
 
 /** Seconds of each clip, read from the GLB by the Three layer. */
-export type ClipDurations = Readonly<Record<ClipName, number>>;
+export type ClipDurations = Readonly<Record<RequiredClip, number>> &
+  Readonly<Partial<Record<OptionalClip, number>>>;
 
 export interface Pose {
   readonly clip: ClipName;
@@ -107,13 +149,41 @@ function variantIndex(side: Side, start: number, count: number): number {
   return h % count;
 }
 
-/** The clip of `fighter` at scene time `t`; the variant depends only on when it started. */
+/** FNV-1a over an ability id (015): the same ability always gets the same variant. */
+function abilityIndex(ability: string, count: number): number {
+  let h = 2166136261;
+  for (let i = 0; i < ability.length; i++) {
+    h ^= ability.charCodeAt(i) & 255;
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h % count;
+}
+
+/**
+ * The clip of `fighter` at scene time `t`; the variant depends only on when it started, or on what
+ * the player picked (`cosmetics`, 016).
+ */
 export function clipFor(
-  fighter: Pick<FighterScene, 'side' | 'animation' | 'elapsed'>,
+  fighter: Pick<FighterScene, 'side' | 'animation' | 'elapsed' | 'travel' | 'ability'>,
   t: number,
+  cosmetics?: FighterCosmetics,
 ): ClipName {
+  if (fighter.animation === 'walk') return fighter.travel < 0 ? 'walk_back' : 'walk_forward';
+  if (fighter.animation === 'idle') {
+    const idle = picked(cosmetics?.idle, IDLE_VARIANTS);
+    if (idle !== null) return idle;
+    const spell = Math.floor(Math.max(0, t) / IDLE_SPELL_MS);
+    return IDLE_VARIANTS[variantIndex(fighter.side, spell, IDLE_VARIANTS.length)] as ClipName;
+  }
+  if (fighter.animation === 'win') {
+    const victory = picked(cosmetics?.victory, WIN_VARIANTS);
+    if (victory !== null) return victory;
+  }
   const variants = VARIANTS[fighter.animation];
   if (variants.length === 1) return variants[0] as ClipName;
+  // A special or a heavy blow looks the same every time its ability is used (015).
+  if (fighter.ability !== null)
+    return variants[abilityIndex(fighter.ability, variants.length)] as ClipName;
   return variants[variantIndex(fighter.side, t - fighter.elapsed, variants.length)] as ClipName;
 }
 
@@ -130,6 +200,9 @@ export function clipTime(
   t: number,
 ): number {
   const ms = Math.max(0, fighter.elapsed);
+  // A walk (the return to the mark, `RETURN_MS`) takes one step: half the clip's cycle.
+  if (clip === 'walk_forward' || clip === 'walk_back')
+    return Math.min(1, ms / RETURN_MS) * (duration / 2);
   if (fighter.animation === 'idle' || fighter.animation === 'intro' || fighter.animation === 'walk')
     return duration > 0 ? (Math.max(0, t) / 1000) % duration : 0;
   if (HELD.has(fighter.animation)) return Math.min(duration, ms / 1000);
@@ -183,11 +256,15 @@ export function poseFor(
   t: number,
   durations: ClipDurations,
   context: FaceContext,
+  cosmetics?: FighterCosmetics,
 ): Pose {
-  const clip = clipFor(fighter, t);
+  const wanted = clipFor(fighter, t, cosmetics);
+  const length = durations[wanted];
+  // A clip the GLB lacks plays as idle (the walks before they are exported).
+  const clip = length === undefined ? 'idle' : wanted;
   return {
     clip,
-    time: clipTime(fighter, clip, durations[clip], t),
+    time: clipTime(fighter, clip, length ?? durations.idle, t),
     face: faceFor(fighter, context),
   };
 }

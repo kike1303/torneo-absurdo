@@ -24,6 +24,13 @@ export const FACING: Readonly<Record<Side, 1 | -1>> = Object.freeze({ a: 1, b: -
 /** Theme color roles; the Pixi layer maps them through `RendererTheme` (ADR-0009 D7). */
 export type ColorRole = 'hp' | 'hpLost' | 'crit' | 'text';
 
+export interface DodgeCut {
+  /** When the dodge started, when it was cut, and its whole length (ms). */
+  readonly start: number;
+  readonly at: number;
+  readonly total: number;
+}
+
 export interface FighterScene {
   readonly side: Side;
   readonly asset: string;
@@ -39,6 +46,18 @@ export interface FighterScene {
   readonly windup: number;
   readonly total: number;
   readonly x: number;
+  /**
+   * Which way it moves along its facing (014): 1 towards the rival, -1 away, 0 still. A 3D walk
+   * picks its clip from it.
+   */
+  readonly travel: -1 | 0 | 1;
+  /** The ability of its own strike while it plays that move (timeline v3, 015); null otherwise. */
+  readonly ability: string | null;
+  /**
+   * The last dodge this fighter cut short (another move started before it ended), while it would
+   * still be playing; null otherwise. The 3D sidestep (018) eases back from it instead of jumping.
+   */
+  readonly dodgeCut: DodgeCut | null;
   readonly y: number;
   readonly mirror: boolean;
   readonly scale: number;
@@ -115,6 +134,8 @@ export interface Scene {
   readonly fighters: Readonly<Record<Side, FighterScene>>;
   readonly hud: HudScene;
   readonly camera: CameraScene;
+  /** `prefers-reduced-motion` was on: a renderer adds no camera motion of its own (014). */
+  readonly reducedMotion: boolean;
   readonly banners: readonly BannerScene[];
   readonly effects: readonly EffectScene[];
 }

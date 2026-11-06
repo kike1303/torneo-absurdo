@@ -295,7 +295,9 @@ test.describe('in live (RF54, RF55)', () => {
   });
 
   test('the next fight in pre_live waits for the pose: 10 s after end.t', async ({ page }) => {
-    const { server, summary } = await watching(page, KO_AT + 3000, koFight(KO_AT));
+    // In before the KO: the stage needs its first frame before end.t (KO + 4 s), and the 3D arena
+    // takes more than the 1 s that coming in at KO + 3 s left (a lost race, not this rule).
+    const { server, summary } = await watching(page, KO_AT - 2000, koFight(KO_AT));
     await expect(home(page)).toHaveAttribute('data-stage', 'visible', { timeout: 15_000 });
     const settled: FightSummary = {
       ...summary,

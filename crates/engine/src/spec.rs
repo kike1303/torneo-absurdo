@@ -80,6 +80,8 @@ pub enum SpecError {
     PersonalityOutOfRange,
     /// Fewer than `abilities_min` or more than `abilities_max` abilities.
     AbilityCount,
+    /// More than `heavies_max` heavies or more than `specials_max` specials (016).
+    AbilityKindCount,
     /// An ability `id` does not match `^[a-z][a-z0-9_]{1,31}$` or is `strike`.
     AbilityIdInvalid,
     /// Two abilities share an `id`.
@@ -100,12 +102,13 @@ pub enum SpecError {
 
 impl SpecError {
     /// Every variant, once.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::SlugInvalid,
         Self::StatOutOfRange,
         Self::BudgetExceeded,
         Self::PersonalityOutOfRange,
         Self::AbilityCount,
+        Self::AbilityKindCount,
         Self::AbilityIdInvalid,
         Self::AbilityIdDuplicate,
         Self::PowerOutOfRange,
@@ -124,6 +127,7 @@ impl SpecError {
             Self::BudgetExceeded => "budget_exceeded",
             Self::PersonalityOutOfRange => "personality_out_of_range",
             Self::AbilityCount => "ability_count",
+            Self::AbilityKindCount => "ability_kind_count",
             Self::AbilityIdInvalid => "ability_id_invalid",
             Self::AbilityIdDuplicate => "ability_id_duplicate",
             Self::PowerOutOfRange => "power_out_of_range",
@@ -147,7 +151,7 @@ impl std::error::Error for SpecError {}
 pub(crate) const STRIKE_ID: &str = "strike";
 
 /// `^[a-z][a-z0-9<extra>]{1,31}$` (format rules, not game rules: they stay out of `Ruleset`).
-fn is_code(value: &str, extra: u8) -> bool {
+pub(crate) fn is_code(value: &str, extra: u8) -> bool {
     let bytes = value.as_bytes();
     let Some((first, rest)) = bytes.split_first() else {
         return false;
@@ -167,6 +171,47 @@ fn is_code(value: &str, extra: u8) -> bool {
 #[must_use]
 pub fn is_valid_slug(value: &str) -> bool {
     is_code(value, b'-')
+}
+
+impl Ability {
+    /// Checks one ability on its own: its `id`, and `power` and `cooldown` against the ranges of
+    /// its kind. [`CharacterSpec::validate`] applies the same rules (plus uniqueness), and the
+    /// player catalog uses this (016).
+    ///
+    /// # Errors
+    /// `AbilityIdInvalid`, `PowerOutOfRange` or `CooldownOutOfRange`, in that order.
+    pub fn validate(&self, ruleset: &Ruleset) -> Result<(), SpecError> {
+        self.check_id()?;
+        self.check_numbers(ruleset)
+    }
+
+    fn check_id(&self) -> Result<(), SpecError> {
+        if is_code(&self.id, b'_') && self.id != STRIKE_ID {
+            Ok(())
+        } else {
+            Err(SpecError::AbilityIdInvalid)
+        }
+    }
+
+    fn check_numbers(&self, ruleset: &Ruleset) -> Result<(), SpecError> {
+        let (power, cooldown) = match self.kind {
+            MoveKind::Heavy => (
+                ruleset.heavy_power_min()..=ruleset.heavy_power_max(),
+                ruleset.heavy_cooldown_min()..=ruleset.heavy_cooldown_max(),
+            ),
+            MoveKind::Special => (
+                ruleset.special_power_min()..=ruleset.special_power_max(),
+                ruleset.special_cooldown_min()..=ruleset.special_cooldown_max(),
+            ),
+        };
+        if !power.contains(&self.power) {
+            return Err(SpecError::PowerOutOfRange);
+        }
+        if !cooldown.contains(&self.cooldown) {
+            return Err(SpecError::CooldownOutOfRange);
+        }
+        Ok(())
+    }
 }
 
 impl CharacterSpec {
@@ -202,10 +247,18 @@ impl CharacterSpec {
         {
             return Err(SpecError::AbilityCount);
         }
+        let heavies = self
+            .abilities
+            .iter()
+            .filter(|ability| ability.kind == MoveKind::Heavy)
+            .count();
+        if heavies > usize::from(ruleset.heavies_max())
+            || count - heavies > usize::from(ruleset.specials_max())
+        {
+            return Err(SpecError::AbilityKindCount);
+        }
         for (i, ability) in self.abilities.iter().enumerate() {
-            if !is_code(&ability.id, b'_') || ability.id == STRIKE_ID {
-                return Err(SpecError::AbilityIdInvalid);
-            }
+            ability.check_id()?;
             if self
                 .abilities
                 .iter()
@@ -214,22 +267,7 @@ impl CharacterSpec {
             {
                 return Err(SpecError::AbilityIdDuplicate);
             }
-            let (power, cooldown) = match ability.kind {
-                MoveKind::Heavy => (
-                    ruleset.heavy_power_min()..=ruleset.heavy_power_max(),
-                    ruleset.heavy_cooldown_min()..=ruleset.heavy_cooldown_max(),
-                ),
-                MoveKind::Special => (
-                    ruleset.special_power_min()..=ruleset.special_power_max(),
-                    ruleset.special_cooldown_min()..=ruleset.special_cooldown_max(),
-                ),
-            };
-            if !power.contains(&ability.power) {
-                return Err(SpecError::PowerOutOfRange);
-            }
-            if !cooldown.contains(&ability.cooldown) {
-                return Err(SpecError::CooldownOutOfRange);
-            }
+            ability.check_numbers(ruleset)?;
         }
         if self.weaknesses.len() > usize::from(ruleset.weaknesses_max()) {
             return Err(SpecError::WeaknessCount);
@@ -292,6 +330,22 @@ mod tests {
             cooldown,
             element: None,
         }
+    }
+
+    fn special(id: &str) -> Ability {
+        Ability {
+            id: id.to_owned(),
+            kind: MoveKind::Special,
+            power: 70,
+            cooldown: 3,
+            element: None,
+        }
+    }
+
+    fn check_v2(change: impl FnOnce(&mut CharacterSpec)) -> Result<(), SpecError> {
+        let mut spec = valid();
+        change(&mut spec);
+        spec.validate(&Ruleset::v2())
     }
 
     #[test]
@@ -364,6 +418,12 @@ mod tests {
             check(|s| s.stats = all(100)),
             Err(SpecError::BudgetExceeded)
         );
+        // v2 (016): no stat below 20.
+        assert_eq!(check_v2(|s| s.stats = all(20)), Ok(()));
+        assert_eq!(
+            check_v2(|s| s.stats.defense = 19),
+            Err(SpecError::StatOutOfRange)
+        );
     }
 
     #[test]
@@ -385,6 +445,30 @@ mod tests {
         );
         assert_eq!(
             check(|s| s.abilities = (0..4).map(|i| heavy(&format!("h{i}"), 20, 0)).collect()),
+            Ok(())
+        );
+        // v1 allows 4 of a kind; v2 at most 2 of each (016).
+        assert_eq!(
+            check(|s| s.abilities = (0..4).map(|i| special(&format!("s{i}"))).collect()),
+            Ok(())
+        );
+        assert_eq!(
+            check_v2(|s| s.abilities = (0..3).map(|i| heavy(&format!("h{i}"), 20, 0)).collect()),
+            Err(SpecError::AbilityKindCount)
+        );
+        assert_eq!(
+            check_v2(|s| s.abilities = (0..3).map(|i| special(&format!("s{i}"))).collect()),
+            Err(SpecError::AbilityKindCount)
+        );
+        assert_eq!(
+            check_v2(|s| {
+                s.abilities = vec![
+                    heavy("h0", 20, 0),
+                    heavy("h1", 30, 1),
+                    special("s0"),
+                    special("s1"),
+                ];
+            }),
             Ok(())
         );
         for bad in ["strike", "a", "A_b", "a-b", "_a"] {
@@ -464,16 +548,17 @@ mod tests {
             SpecError::BudgetExceeded => 2,
             SpecError::PersonalityOutOfRange => 3,
             SpecError::AbilityCount => 4,
-            SpecError::AbilityIdInvalid => 5,
-            SpecError::AbilityIdDuplicate => 6,
-            SpecError::PowerOutOfRange => 7,
-            SpecError::CooldownOutOfRange => 8,
-            SpecError::WeaknessCount => 9,
-            SpecError::WeaknessDuplicate => 10,
-            SpecError::EventLimit => 11,
+            SpecError::AbilityKindCount => 5,
+            SpecError::AbilityIdInvalid => 6,
+            SpecError::AbilityIdDuplicate => 7,
+            SpecError::PowerOutOfRange => 8,
+            SpecError::CooldownOutOfRange => 9,
+            SpecError::WeaknessCount => 10,
+            SpecError::WeaknessDuplicate => 11,
+            SpecError::EventLimit => 12,
         };
         let indices: Vec<usize> = SpecError::ALL.iter().map(|&e| index(e)).collect();
-        assert_eq!(indices, (0..12).collect::<Vec<_>>());
+        assert_eq!(indices, (0..13).collect::<Vec<_>>());
         assert_eq!(SpecError::BudgetExceeded.to_string(), "budget_exceeded");
     }
 

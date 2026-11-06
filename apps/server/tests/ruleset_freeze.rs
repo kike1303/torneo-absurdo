@@ -22,9 +22,11 @@ fn fingerprint(version: u16) -> Option<String> {
     let ruleset = Ruleset::for_version(version)?;
     let mut hasher = Sha256::new();
     hasher.update(format!("{ruleset:?}").as_bytes());
+    // Only the specs the version accepts: v2 (016) rejects turtle's stats of 1.
     let specs: Vec<CharacterSpec> = SPECS
         .iter()
-        .map(|text| serde_json::from_str(text).unwrap())
+        .map(|text| serde_json::from_str::<CharacterSpec>(text).unwrap())
+        .filter(|spec| spec.validate(&ruleset).is_ok())
         .collect();
     for spec in &specs {
         hasher.update(canonical_spec_json(spec).unwrap());
@@ -76,5 +78,7 @@ fn the_mechanism_detects_a_change_and_a_missing_version() {
     check(&[(1, actual.as_str())], fingerprint).unwrap();
     assert!(check(&[(1, "0000")], fingerprint).is_err());
     assert_eq!(fingerprint(9999), None);
+    // v2 (016) can be fingerprinted too, and it is not v1.
+    assert_ne!(fingerprint(2).unwrap(), actual);
     assert!(check(&[(9999, "0000")], fingerprint).is_err());
 }

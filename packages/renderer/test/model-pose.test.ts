@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CLIP_IMPACT,
   CLIP_NAMES,
+  OPTIONAL_CLIP_NAMES,
   clipFor,
   clipTime,
   faceFor,
@@ -26,6 +27,9 @@ function fighter(overrides: Partial<FighterScene>): FighterScene {
     windup: 0,
     total: 600,
     x: 0,
+    travel: 0,
+    ability: null,
+    dodgeCut: null,
     y: 0,
     mirror: false,
     scale: 1,
@@ -87,7 +91,7 @@ describe('clipFor', () => {
       'win',
     ] as const;
     for (const animation of codes) {
-      expect(CLIP_NAMES).toContain(clipFor(fighter({ animation }), 0));
+      expect([...CLIP_NAMES, ...OPTIONAL_CLIP_NAMES]).toContain(clipFor(fighter({ animation }), 0));
     }
   });
 });
@@ -136,4 +140,142 @@ describe('poseFor over a real timeline', () => {
       }
     },
   );
+});
+
+describe('walks (014)', () => {
+  it('picks the walk clip by the way the fighter moves', () => {
+    expect(clipFor(fighter({ animation: 'walk', travel: 1 }), 0)).toBe('walk_forward');
+    expect(clipFor(fighter({ animation: 'walk', travel: -1 }), 0)).toBe('walk_back');
+  });
+
+  it('takes one step (half the cycle) over the return to the mark', () => {
+    const at = (elapsed: number) =>
+      clipTime(fighter({ animation: 'walk', travel: -1, elapsed }), 'walk_back', 2, 99_000);
+    expect(at(0)).toBe(0);
+    expect(at(150)).toBeCloseTo(0.5);
+    expect(at(300)).toBeCloseTo(1);
+    expect(at(5000)).toBeCloseTo(1);
+  });
+
+  it('plays idle while the GLB lacks the walk clips', () => {
+    const walk = fighter({ animation: 'walk', travel: -1, elapsed: 300 });
+    expect(poseFor(walk, 4000, DURATIONS, CONTEXT).clip).toBe('idle');
+    const withWalks = { ...DURATIONS, walk_forward: 1, walk_back: 1 };
+    expect(poseFor(walk, 4000, withWalks, CONTEXT).clip).toBe('walk_back');
+  });
+
+  it('walks back to the mark after an exchange in the spike', () => {
+    const prepared = spikeScene();
+    const walks: number[] = [];
+    for (let t = 0; t < prepared.durationMs; t += 16) {
+      const f = sceneAt(prepared, t, { reducedMotion: false }).fighters.a;
+      if (f.animation === 'walk') walks.push(f.travel);
+    }
+    expect(walks.length).toBeGreaterThan(0);
+    expect(walks).toContain(-1);
+  });
+});
+
+describe('idle variants (014)', () => {
+  it('changes idle every spell, the same for every viewer', () => {
+    const seen = new Set<string>();
+    for (let t = 0; t < 200_000; t += 8000) seen.add(clipFor(fighter({ animation: 'idle' }), t));
+    expect(seen.size).toBeGreaterThan(2);
+    expect(clipFor(fighter({ animation: 'idle' }), 12_345)).toBe(
+      clipFor(fighter({ animation: 'idle' }), 15_999),
+    );
+  });
+
+  it('falls back to the first idle when the GLB lacks a variant', () => {
+    for (let t = 0; t < 80_000; t += 8000) {
+      expect(poseFor(fighter({ animation: 'idle' }), t, DURATIONS, CONTEXT).clip).toBe('idle');
+    }
+  });
+});
+
+describe('one clip per ability (015)', () => {
+  it('gives the same clip to an ability whenever it is used', () => {
+    for (const animation of ['special', 'attack_heavy'] as const) {
+      const at = (ability: string, t: number) =>
+        clipFor(fighter({ animation, ability, elapsed: 100 }), t);
+      for (const ability of ['pipe_geyser', 'lunch_beam', 'boot_stomp'])
+        for (const t of [1000, 23_456, 77_000]) expect(at(ability, t)).toBe(at(ability, 1000));
+    }
+  });
+
+  it('keeps one clip per ability through a real fight, and only on the striker', () => {
+    const prepared = goldenScene('draw');
+    const clips = new Map<string, string>();
+    let carried = 0;
+    let reactions = 0;
+    for (let t = 0; t < prepared.durationMs; t += 16) {
+      for (const f of Object.values(sceneAt(prepared, t, { reducedMotion: false }).fighters)) {
+        // The rival's reaction to a strike, a walk and the closing hold never carry it.
+        if (
+          ['hit', 'block', 'dodge', 'knockdown', 'walk', 'ko', 'win', 'idle'].includes(f.animation)
+        ) {
+          expect(f.ability, `${f.side} ${f.animation} at ${t}`).toBeNull();
+          if (f.animation !== 'walk' && f.animation !== 'idle') reactions++;
+        }
+        if (f.ability === null) continue;
+        expect(['attack_light', 'attack_heavy', 'special']).toContain(f.animation);
+        carried++;
+        const clip = clipFor(f, t);
+        const key = `${f.ability}:${f.animation}`;
+        expect(clips.get(key) ?? clip, key).toBe(clip);
+        clips.set(key, clip);
+      }
+    }
+    expect(carried).toBeGreaterThan(0);
+    expect(reactions).toBeGreaterThan(0);
+  });
+});
+
+describe('player cosmetics (016)', () => {
+  const ALL = Object.fromEntries(
+    [...CLIP_NAMES, ...OPTIONAL_CLIP_NAMES].map((name) => [name, 2]),
+  ) as ClipDurations;
+
+  it('keeps the picked idle in every spell', () => {
+    for (let t = 0; t < 200_000; t += 8000) {
+      expect(clipFor(fighter({ animation: 'idle' }), t, { idle: 'idle_3' })).toBe('idle_3');
+    }
+  });
+
+  it('plays the picked victory, and still varies the ko by fight', () => {
+    for (let start = 0; start < 50_000; start += 997) {
+      const win = fighter({ animation: 'win', elapsed: 0 });
+      expect(clipFor(win, start, { victory: 'win_2' })).toBe('win_2');
+    }
+    const kos = new Set<string>();
+    for (let start = 0; start < 50_000; start += 997) {
+      kos.add(clipFor(fighter({ animation: 'ko' }), start, { idle: 'idle', victory: 'win_1' }));
+    }
+    expect(kos).toEqual(new Set(['ko_1', 'ko_2']));
+  });
+
+  it('touches nothing else and ignores unknown codes', () => {
+    const special = fighter({ animation: 'special', ability: 'pipe_geyser', elapsed: 100 });
+    expect(clipFor(special, 1000, { idle: 'idle_2', victory: 'win_3' })).toBe(
+      clipFor(special, 1000),
+    );
+    const bad = { idle: 'idle_9', victory: 'ko_1' } as unknown as Parameters<typeof clipFor>[2];
+    for (const t of [0, 8000, 16_000]) {
+      expect(clipFor(fighter({ animation: 'idle' }), t, bad)).toBe(
+        clipFor(fighter({ animation: 'idle' }), t),
+      );
+    }
+    expect(clipFor(fighter({ animation: 'win' }), 5000, bad)).toBe(
+      clipFor(fighter({ animation: 'win' }), 5000),
+    );
+  });
+
+  it('reaches the pose, with the idle fallback when the GLB lacks the clip', () => {
+    const idle = fighter({ animation: 'idle' });
+    expect(poseFor(idle, 0, ALL, CONTEXT, { idle: 'idle_4' }).clip).toBe('idle_4');
+    expect(poseFor(idle, 0, DURATIONS, CONTEXT, { idle: 'idle_4' }).clip).toBe('idle');
+    expect(
+      poseFor(fighter({ animation: 'win' }), 0, DURATIONS, CONTEXT, { victory: 'win_3' }).clip,
+    ).toBe('win_3');
+  });
 });

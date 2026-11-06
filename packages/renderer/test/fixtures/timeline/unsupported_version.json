@@ -3,7 +3,7 @@
     {
       "op": "set",
       "path": "/timeline_version",
-      "value": 3
+      "value": 4
     }
   ],
   "expect": {

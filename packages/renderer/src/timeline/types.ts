@@ -1,11 +1,14 @@
-// Renderer timeline v1 (002 spec "Diseño → Timeline v1", RF-A7) and v2 (005 spec, RF1): v2 is a
-// strict superset that adds the endings by time (`time_up`, then `win` or `draw`). Codes only, no
-// text (ADR-0007).
+// Renderer timeline v1 (002 spec "Diseño → Timeline v1", RF-A7), v2 (005 spec, RF1) and v3 (015):
+// each is a strict superset of the one before. v2 adds the endings by time (`time_up`, then `win`
+// or `draw`); v3 adds the optional `ability` of a strike. Codes only, no text (ADR-0007).
 
-export const TIMELINE_VERSIONS = [1, 2] as const;
+export const TIMELINE_VERSIONS = [1, 2, 3] as const;
 export type TimelineVersion = (typeof TIMELINE_VERSIONS)[number];
 /** The latest version, the one producers emit. */
-export const TIMELINE_VERSION = 2;
+export const TIMELINE_VERSION = 3;
+
+/** An ability id of the engine (v3): a code, never text. */
+export const ABILITY_PATTERN = /^[a-z0-9_]{1,64}$/;
 
 export const SIDES = ['a', 'b'] as const;
 export type Side = (typeof SIDES)[number];
@@ -49,6 +52,8 @@ export interface StrikeCue {
   readonly type: 'strike';
   readonly actor: Side;
   readonly move: Move;
+  /** The ability behind the strike (v3, optional): the 3D arena gives each its own clip (015). */
+  readonly ability?: string;
   readonly result: StrikeResult;
   readonly damage: number;
   /** HP of the target (the other side) after the strike. */
