@@ -723,8 +723,9 @@ const CASES = [
     'web Dockerfile: the characters after the build',
     {
       [WD]: [
+        ['COPY content/characters content/characters\n', ''],
         [
-          'COPY content/characters content/characters\nRUN pnpm --filter web build\n',
+          'RUN pnpm --filter web build\n',
           'RUN pnpm --filter web build\nCOPY content/characters content/characters\n',
         ],
       ],

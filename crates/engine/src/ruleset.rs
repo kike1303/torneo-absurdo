@@ -1,5 +1,10 @@
 //! Every game constant of the engine, by version (003 RF4, RF10, "Modelo de simulación").
 //!
+//! Values are fixed per `ruleset_version`. Version 2 (016) is the one of the player botargas: it
+//! caps each kind of ability, splits the weight of a kind among its available abilities, lends
+//! half the weight of a missing kind to the other, reads the critical from speed and raises the
+//! minimum stat; the tournament stays on version 1.
+//!
 //! Values are fixed per `ruleset_version`. Before the first production fight, version 1 may
 //! change if the goldens are regenerated in the same PR; afterwards every change is a new
 //! version and the old one stays here so old fights can be re-simulated (ADR-0001).
@@ -39,6 +44,9 @@ ruleset! {
     personality_max: u8,
     abilities_min: u8,
     abilities_max: u8,
+    /// Most abilities of each kind (016); `abilities_max` in v1, so it never binds there.
+    heavies_max: u8,
+    specials_max: u8,
     weaknesses_max: u8,
     heavy_power_min: u8,
     heavy_power_max: u8,
@@ -85,6 +93,14 @@ ruleset! {
     w_special_base: u32,
     w_special_per_show: u32,
     w_special_desperation_mul: u32,
+    /// When set (v2, 016), the weight of a kind is split among its available abilities: each
+    /// gets `weight / n`, and the first in file order also gets `weight % n`. A second ability
+    /// of a kind adds variety, not frequency. In v1 every ability carries the whole weight.
+    split_kind_weight: bool,
+    /// A character with no ability of a kind adds `empty_kind_share_pct`% of the weight of that
+    /// kind to the other one (v2, 016), so a build of a single kind is not left with fewer
+    /// abilities than a mix. 0 in v1: the weight is lost.
+    empty_kind_share_pct: u32,
     /// `dodge = dodge_base + dodge_per_speed * speed_def` (‰).
     dodge_base: u32,
     dodge_per_speed: u32,
@@ -103,9 +119,12 @@ ruleset! {
     desperation_crit_bonus: u32,
     desperation_dmg_num: u32,
     desperation_dmg_den: u32,
-    /// Critical when `roll(1000) < crit_base + crit_per_special * special_atk (+ bonus)`.
+    /// Critical when `roll(1000) < crit_base + crit_per_special * special_atk +
+    /// crit_per_speed * speed_atk (+ bonus)`. v1 reads special; v2 (016) reads speed, so
+    /// special counts twice (damage and defense of the specials) instead of three times.
     crit_base: u32,
     crit_per_special: u32,
+    crit_per_speed: u32,
     crit_num: u32,
     crit_den: u32,
     weak_num: u32,
@@ -124,11 +143,12 @@ ruleset! {
 }
 
 impl Ruleset {
-    /// The ruleset of a version, if it exists (v0 of the engine: only `1`).
+    /// The ruleset of a version, if it exists: `1` (tournament) and `2` (player botargas, 016).
     #[must_use]
     pub const fn for_version(version: u16) -> Option<Self> {
         match version {
             1 => Some(Self::v1()),
+            2 => Some(Self::v2()),
             _ => None,
         }
     }
@@ -142,6 +162,8 @@ impl Ruleset {
             personality_max: 100,
             abilities_min: 1,
             abilities_max: 4,
+            heavies_max: 4,
+            specials_max: 4,
             weaknesses_max: 2,
             heavy_power_min: 20,
             heavy_power_max: 60,
@@ -172,6 +194,8 @@ impl Ruleset {
             w_special_base: 30,
             w_special_per_show: 2,
             w_special_desperation_mul: 2,
+            split_kind_weight: false,
+            empty_kind_share_pct: 0,
             dodge_base: 40,
             dodge_per_speed: 2,
             block_base: 60,
@@ -186,6 +210,7 @@ impl Ruleset {
             desperation_dmg_den: 4,
             crit_base: 40,
             crit_per_special: 1,
+            crit_per_speed: 0,
             crit_num: 3,
             crit_den: 2,
             weak_num: 5,
@@ -198,6 +223,23 @@ impl Ruleset {
             comeback_deficit_permille: 250,
             clutch_permille: 60,
             max_events: 512,
+        }
+    }
+
+    /// Version 2 (016): v1 with at most 2 abilities of each kind, the weight of a kind split
+    /// among its available abilities, half the weight of a missing kind lent to the other
+    /// one, the critical read from speed and a minimum of 20 per stat (no stat dumped to 1).
+    pub(crate) const fn v2() -> Self {
+        Self {
+            version: 2,
+            stat_min: 20,
+            heavies_max: 2,
+            specials_max: 2,
+            split_kind_weight: true,
+            empty_kind_share_pct: 50,
+            crit_per_special: 0,
+            crit_per_speed: 1,
+            ..Self::v1()
         }
     }
 
@@ -257,17 +299,57 @@ mod tests {
     use crate::TIMELINE_CONTRACT;
 
     #[test]
-    fn only_version_one_exists() {
+    fn versions_one_and_two_exist() {
         assert_eq!(Ruleset::for_version(1), Some(Ruleset::v1()));
         assert_eq!(Ruleset::v1().version(), 1);
+        assert_eq!(Ruleset::for_version(2), Some(Ruleset::v2()));
+        assert_eq!(Ruleset::v2().version(), 2);
         assert_eq!(Ruleset::for_version(0), None);
-        assert_eq!(Ruleset::for_version(2), None);
+        assert_eq!(Ruleset::for_version(3), None);
     }
 
-    /// The pacing bounds of RF2 (data from 002) and the totality bounds of RF21.
+    /// v2 changes only what 016 asks for: the kind caps, the weights, the critical and the
+    /// minimum stat.
     #[test]
-    fn v1_respects_the_bounds() {
-        let r = Ruleset::v1();
+    fn v2_is_v1_plus_the_player_rules() {
+        let (v1, v2) = (Ruleset::v1(), Ruleset::v2());
+        assert_eq!((v1.heavies_max(), v1.specials_max()), (4, 4));
+        assert_eq!((v2.heavies_max(), v2.specials_max()), (2, 2));
+        assert!(!v1.split_kind_weight());
+        assert!(v2.split_kind_weight());
+        assert_eq!(v1.empty_kind_share_pct(), 0);
+        assert_eq!(v2.empty_kind_share_pct(), 50);
+        assert_eq!((v1.crit_per_special(), v1.crit_per_speed()), (1, 0));
+        assert_eq!((v2.crit_per_special(), v2.crit_per_speed()), (0, 1));
+        assert_eq!(v2.stat_min(), 20);
+        // Five stats at the minimum fit in the budget.
+        assert!(5 * u16::from(v2.stat_min()) <= v2.stat_budget());
+        let back = Ruleset {
+            version: 1,
+            stat_min: v1.stat_min(),
+            heavies_max: v1.heavies_max(),
+            specials_max: v1.specials_max(),
+            split_kind_weight: false,
+            empty_kind_share_pct: 0,
+            crit_per_special: v1.crit_per_special(),
+            crit_per_speed: v1.crit_per_speed(),
+            ..v2
+        };
+        assert_eq!(back, v1);
+    }
+
+    /// The pacing bounds of RF2 (data from 002) and the totality bounds of RF21, for every version.
+    #[test]
+    fn every_version_respects_the_bounds() {
+        for r in [Ruleset::v1(), Ruleset::v2()] {
+            respects_the_bounds(&r);
+        }
+    }
+
+    fn respects_the_bounds(r: &Ruleset) {
+        assert!(r.heavies_max() <= r.abilities_max());
+        assert!(r.specials_max() <= r.abilities_max());
+        assert!(r.abilities_min() <= r.heavies_max() + r.specials_max());
         // Pacing: the `Timeline` contract (spec 003 "Modelo de simulación", 006 RF6).
         let c = TIMELINE_CONTRACT;
         assert!(r.end_ms() >= c.win_gap_ms + c.win_pose_ms);

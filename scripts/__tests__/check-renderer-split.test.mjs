@@ -11,18 +11,30 @@ const run = (name) =>
   checkRendererSplit(read(name, 'manifest.json'), read(name, 'chunk-modules.json'));
 
 describe('check-renderer-split (002 RF-A17)', () => {
-  it('passes when Pixi and the renderer only load through import() from dev/arena', () => {
+  it('passes when Pixi, Three and the renderer only load through import() from dev/arena', () => {
     const result = run('pass');
     expect(result.problems).toEqual([]);
     expect(result.deferredFiles).toEqual([
       '_app/immutable/chunks/pixi.js',
       '_app/immutable/chunks/renderer.js',
+      '_app/immutable/chunks/renderer3d.js',
+      '_app/immutable/chunks/three.js',
+    ]);
+  });
+
+  it('fails when the root layout reaches Three statically (013)', () => {
+    const manifest = read('pass', 'manifest.json');
+    manifest['.svelte-kit/generated/build/client-optimized/nodes/0.js'].imports.push('_three.js');
+    expect(checkRendererSplit(manifest, read('pass', 'chunk-modules.json')).problems).toEqual([
+      expect.stringMatching(/nodes\/0\.js: reaches .*three\/build\/.* through static imports/),
     ]);
   });
 
   it('fails when the root layout reaches Pixi statically (through a shared chunk)', () => {
     expect(run('pixi-static-root').problems).toEqual([
       expect.stringMatching(/nodes\/0\.js: reaches .*pixi\.js\/lib\/.* through static imports/),
+      // This build predates the 3D arena (013).
+      expect.stringMatching(/nodes\/4\.js: does not reach three through dynamic imports/),
     ]);
   });
 
@@ -30,12 +42,14 @@ describe('check-renderer-split (002 RF-A17)', () => {
     expect(run('renderer-static-arena').problems).toEqual([
       expect.stringMatching(/nodes\/4\.js: reaches .* through static imports/),
       expect.stringMatching(/nodes\/4\.js: does not reach pixi\.js through dynamic imports/),
+      expect.stringMatching(/nodes\/4\.js: does not reach three through dynamic imports/),
     ]);
   });
 
   it('fails without the dynamic import (never passes empty)', () => {
     expect(run('no-dynamic').problems).toEqual([
       expect.stringMatching(/nodes\/4\.js: does not reach pixi\.js through dynamic imports/),
+      expect.stringMatching(/nodes\/4\.js: does not reach three through dynamic imports/),
     ]);
   });
 

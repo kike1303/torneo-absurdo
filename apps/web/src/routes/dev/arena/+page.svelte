@@ -51,6 +51,8 @@
   let paceInfo = $state<PaceResolution | null>(null);
   let extendMs = $state<DurationStats | undefined>(undefined);
   const start = initialT();
+  /** `?renderer=2d`: the hidden Pixi sprites (013); the 3D botarga otherwise. */
+  const view = page.url.searchParams.get('renderer') === '2d' ? '2d' : '3d';
   const pace = parsePace(page.url.searchParams.get('pace'));
   const retime =
     pace === null
@@ -104,6 +106,7 @@
     bind:this={stage}
     bind:phase
     fighters={{ a: fighters.a, b: fighters.b }}
+    {view}
     {reducedMotion}
     initialT={start}
     {local}

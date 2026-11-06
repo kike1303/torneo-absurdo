@@ -1,0 +1,229 @@
+{
+  "abilities": [
+    {
+      "id": "foam_headbutt",
+      "kind": "heavy",
+      "power": 47,
+      "cooldown": 1,
+      "element": null,
+      "tier": 1,
+      "starter": true
+    },
+    {
+      "id": "spicy_slap",
+      "kind": "heavy",
+      "power": 43,
+      "cooldown": 0,
+      "element": "fire",
+      "tier": 1
+    },
+    {
+      "id": "puddle_punt",
+      "kind": "heavy",
+      "power": 51,
+      "cooldown": 2,
+      "element": "water",
+      "tier": 2
+    },
+    {
+      "id": "confetti_cannon",
+      "kind": "special",
+      "power": 48,
+      "cooldown": 2,
+      "element": null,
+      "tier": 1
+    },
+    {
+      "id": "joy_buzzer_hug",
+      "kind": "special",
+      "power": 57,
+      "cooldown": 4,
+      "element": "electric",
+      "tier": 1
+    },
+    {
+      "id": "sandbox_surprise",
+      "kind": "special",
+      "power": 52,
+      "cooldown": 3,
+      "element": "ground",
+      "tier": 2
+    },
+    {
+      "id": "hand_fan_wallop",
+      "kind": "heavy",
+      "power": 47,
+      "cooldown": 1,
+      "element": "air",
+      "tier": 1
+    },
+    {
+      "id": "brain_freeze_bonk",
+      "kind": "heavy",
+      "power": 51,
+      "cooldown": 2,
+      "element": "ice",
+      "tier": 2
+    },
+    {
+      "id": "wet_noodle_whip",
+      "kind": "heavy",
+      "power": 43,
+      "cooldown": 0,
+      "element": null,
+      "tier": 2
+    },
+    {
+      "id": "kettle_screamer",
+      "kind": "special",
+      "power": 62,
+      "cooldown": 5,
+      "element": "fire",
+      "tier": 1
+    },
+    {
+      "id": "lawn_sprinkler_spin",
+      "kind": "special",
+      "power": 48,
+      "cooldown": 2,
+      "element": "water",
+      "tier": 2
+    },
+    {
+      "id": "dramatic_pause",
+      "kind": "special",
+      "power": 67,
+      "cooldown": 6,
+      "element": null,
+      "tier": 2
+    },
+    {
+      "id": "static_sock_shuffle",
+      "kind": "heavy",
+      "power": 43,
+      "cooldown": 0,
+      "element": "electric",
+      "tier": 3
+    },
+    {
+      "id": "dirt_clod_lob",
+      "kind": "heavy",
+      "power": 47,
+      "cooldown": 1,
+      "element": "ground",
+      "tier": 3
+    },
+    {
+      "id": "folding_chair_solo",
+      "kind": "heavy",
+      "power": 54,
+      "cooldown": 3,
+      "element": null,
+      "tier": 3
+    },
+    {
+      "id": "hailstorm_tantrum",
+      "kind": "special",
+      "power": 52,
+      "cooldown": 3,
+      "element": "ice",
+      "tier": 3
+    },
+    {
+      "id": "unlicensed_leaf_blower",
+      "kind": "special",
+      "power": 57,
+      "cooldown": 4,
+      "element": "air",
+      "tier": 3
+    },
+    {
+      "id": "curtain_call_clobber",
+      "kind": "special",
+      "power": 72,
+      "cooldown": 7,
+      "element": null,
+      "tier": 3
+    },
+    {
+      "id": "griddle_knee",
+      "kind": "heavy",
+      "power": 51,
+      "cooldown": 2,
+      "element": "fire",
+      "tier": 4
+    },
+    {
+      "id": "molehill_trip",
+      "kind": "heavy",
+      "power": 43,
+      "cooldown": 0,
+      "element": "ground",
+      "tier": 4
+    },
+    {
+      "id": "rubber_chicken_smack",
+      "kind": "heavy",
+      "power": 47,
+      "cooldown": 1,
+      "element": null,
+      "tier": 4
+    },
+    {
+      "id": "bucket_brigade_deluge",
+      "kind": "special",
+      "power": 77,
+      "cooldown": 8,
+      "element": "water",
+      "tier": 4
+    },
+    {
+      "id": "power_strip_polka",
+      "kind": "special",
+      "power": 62,
+      "cooldown": 5,
+      "element": "electric",
+      "tier": 4
+    },
+    {
+      "id": "hurricane_spinning_top",
+      "kind": "heavy",
+      "power": 54,
+      "cooldown": 3,
+      "element": "air",
+      "tier": 5
+    },
+    {
+      "id": "borrowed_trophy_bonk",
+      "kind": "heavy",
+      "power": 51,
+      "cooldown": 2,
+      "element": null,
+      "tier": 5
+    },
+    {
+      "id": "avalanche_hug",
+      "kind": "special",
+      "power": 77,
+      "cooldown": 8,
+      "element": "ice",
+      "tier": 5
+    },
+    {
+      "id": "crushing_ovation",
+      "kind": "special",
+      "power": 67,
+      "cooldown": 6,
+      "element": null,
+      "tier": 5
+    },
+    {
+      "id": "doomsday_pirouette",
+      "kind": "special",
+      "power": 72,
+      "cooldown": 7,
+      "element": null,
+      "tier": 5
+    }
+  ]
+}

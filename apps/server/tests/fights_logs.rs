@@ -68,10 +68,12 @@ fn a_whole_run_logs_no_seed_and_no_fragment_of_the_log() {
             ..Settings::default()
         };
         let (app, pool, shared) = f::start_app(&db, &[TRUST_LOOPBACK], &app_settings).await;
-        let runner = f::spawn_runner(&pool, &shared, f::config_without_roster(), settings);
 
-        // A fight from start to finish, opened with the known seed, with a socket on it.
+        // A fight from start to finish, opened with the known seed, with a socket on it. Opened
+        // before the runner: it reads the rows on its first pass and then only every `reread_ms`
+        // of the manual clock, which stands still until the hub knows the fight (TA-48).
         let id = f::open_vector(&pool, T0 + CADENCE, &vector).await;
+        let runner = f::spawn_runner(&pool, &shared, f::config_without_roster(), settings);
         wait_for("the hub", || async { shared.hub().knows(id) }).await;
         let mut client = ws::connect(app.addr, ORIGIN).await.unwrap();
         ws::subscribe(&mut client, &format!("fight:{id}")).await;

@@ -4,12 +4,13 @@
 
 <script lang="ts">
   // The only file that imports values from the renderer (ADR-0009 D4), and only with `import()`
-  // on mount, so Pixi never reaches another chunk (RF-A16, RF-A17).
+  // on mount, so Pixi and Three never reach another chunk (RF-A16, RF-A17, 013).
   import { onMount, untrack } from 'svelte';
   import type {
     FrameStats,
     RendererErrorCode,
     RendererHandle,
+    RendererOptions,
     RendererSnapshot,
     Side,
   } from '@torneo/renderer';
@@ -19,6 +20,7 @@
   import type { ArenaFighterId, PlaceholderFighterId } from '#lib/features/arena/fighters.js';
   import type { LiveSession } from '#lib/features/fight/live-session.js';
   import type { LocalAssets } from '#lib/features/arena/local-fighters.js';
+  import { loadBotargaModel, preloadBotargaModel } from './botarga-model.js';
   import { formatInteger } from '#lib/i18n/format.js';
   import { m } from '#lib/paraglide/messages.js';
   import { getLocale } from '#lib/paraglide/runtime.js';
@@ -29,6 +31,11 @@
 
   interface Props {
     fighters: Readonly<Record<Side, ArenaFighterId>>;
+    /**
+     * `3d`: the generic botarga with Three.js (013, the default everywhere). `2d`: the Pixi sprites,
+     * kept hidden (only `/dev/arena?renderer=2d`).
+     */
+    view?: '2d' | '3d';
     /** The "simulate reduced motion" switch; OR-ed with `prefers-reduced-motion`. */
     reducedMotion?: boolean;
     /** Where the paused stage starts (`?t=` on /dev/arena); it plays only on `toggle` (TA-20). */
@@ -67,6 +74,7 @@
 
   let {
     fighters,
+    view = '3d',
     reducedMotion = false,
     initialT = 0,
     debug = false,
@@ -123,6 +131,31 @@
   let contextLosses: number[] = [];
   /** How long each `extend` took, in ms, for the stats JSON (010 plan-c decision 13). */
   let extendSamples: number[] = [];
+
+  interface RendererModule {
+    create(container: HTMLElement, options: RendererOptions): RendererHandle;
+    isValid(timeline: Timeline): boolean;
+  }
+
+  /** The layer of `view`, loaded with `import()`: Pixi and the sprites, or Three and the botarga. */
+  async function loadRenderer(): Promise<RendererModule> {
+    if (view === '2d') {
+      const pixi = await import('@torneo/renderer');
+      return {
+        create: pixi.createRenderer,
+        isValid: (timeline) => pixi.validateTimeline(timeline).ok,
+      };
+    }
+    const [three, timelines, model] = await Promise.all([
+      import('@torneo/renderer/three'),
+      import('@torneo/renderer/timeline'),
+      loadBotargaModel(),
+    ]);
+    return {
+      create: (container, options) => three.createRenderer3d(container, { ...options, model }),
+      isValid: (timeline) => timelines.validateTimeline(timeline).ok,
+    };
+  }
 
   function isPlaceholder(id: ArenaFighterId): id is PlaceholderFighterId {
     return Object.hasOwn(MANIFESTS, id);
@@ -204,11 +237,15 @@
     snapshotTimer = setInterval(read, SNAPSHOT_MS);
   }
 
-  /** The scene comes from `t`: a new renderer with the same session is all it takes. */
-  function watchContext(container: HTMLElement): void {
+  /**
+   * The scene comes from `t`: a new renderer with the same session is all it takes. A renderer
+   * destroyed on purpose also loses its context (to free it): that loss is not a failure.
+   */
+  function watchContext(container: HTMLElement, handle: RendererHandle): void {
     container.querySelector('canvas')?.addEventListener(
       'webglcontextlost',
       (event) => {
+        if (renderer !== handle) return;
         event.preventDefault();
         const now = performance.now();
         contextLosses = [...contextLosses.filter((at) => now - at < CONTEXT_LOSS_WINDOW_MS), now];
@@ -253,9 +290,12 @@
       const opening = live?.(side);
       // The events only come at the start, so the sheets are in the cache before them: with a slow
       // network the first frame would not arrive in time (010 plan-d decision 14).
-      if (opening !== undefined) preloadSheets(ids);
+      if (opening !== undefined) {
+        if (view === '2d') preloadSheets(ids);
+        else preloadBotargaModel();
+      }
       const [rendererModule, cast, ...manifestModules] = await Promise.all([
-        import('@torneo/renderer'),
+        loadRenderer(),
         opening === undefined
           ? (source ?? spikeTimeline)(side)
           : opening.then((session) => session.timeline),
@@ -264,7 +304,7 @@
       const urls = (
         await Promise.all(
           ids.flatMap((fid) =>
-            isPlaceholder(fid)
+            view === '2d' && isPlaceholder(fid)
               ? Object.entries(SHEETS[fid]).map(async ([file, load]) => ({
                   fid,
                   file,
@@ -279,13 +319,11 @@
       const assets = new Map<string, unknown>(ids.map((fid, i) => [fid, manifestModules[i]]));
       const session = opening === undefined ? null : await opening;
       const timeline =
-        session !== null || retime === undefined
-          ? cast
-          : retime(cast, (t) => rendererModule.validateTimeline(t).ok);
+        session !== null || retime === undefined ? cast : retime(cast, rendererModule.isValid);
       loadedTimeline = timeline;
       const start = performance.now();
       const locale = getLocale();
-      const handle = rendererModule.createRenderer(container, {
+      const handle = rendererModule.create(container, {
         theme: currentRendererTheme(),
         reducedMotion: motionReduced,
         clock: session?.clock ?? (() => performance.now() - start),
@@ -336,7 +374,7 @@
         }
         if (!playing) return;
         watchSnapshots();
-        watchContext(container);
+        watchContext(container, handle);
         // Two frames: the one already asked for and the one that shows it.
         requestAnimationFrame(() =>
           requestAnimationFrame(() => {

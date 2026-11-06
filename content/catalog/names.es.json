@@ -1,0 +1,53 @@
+{
+  "abilities": {
+    "foam_headbutt": "Cabezazo Acolchado",
+    "spicy_slap": "Cachetada Picosa",
+    "puddle_punt": "Patada de Charco",
+    "confetti_cannon": "Cañonazo de Confeti",
+    "joy_buzzer_hug": "Abrazo con Chicharra",
+    "sandbox_surprise": "Puñito de Arena",
+    "hand_fan_wallop": "Abanicazo",
+    "brain_freeze_bonk": "Coscorrón Helado",
+    "wet_noodle_whip": "Latigazo de Fideo",
+    "kettle_screamer": "Silbido de Tetera",
+    "lawn_sprinkler_spin": "Aspersor Giratorio",
+    "dramatic_pause": "Pausa Dramática",
+    "static_sock_shuffle": "Deslizón en Calcetines",
+    "dirt_clod_lob": "Terronazo",
+    "folding_chair_solo": "Sillazo Plegable",
+    "hailstorm_tantrum": "Berrinche de Granizo",
+    "unlicensed_leaf_blower": "Sopladora Sin Permiso",
+    "curtain_call_clobber": "Tres Reverencias y un Golpe",
+    "griddle_knee": "Rodillazo de Comal",
+    "molehill_trip": "Zancadilla de Topo",
+    "rubber_chicken_smack": "Pollazo de Hule",
+    "bucket_brigade_deluge": "Diluvio de Cubetazos",
+    "power_strip_polka": "Polka del Multicontacto",
+    "hurricane_spinning_top": "Trompo Huracanado",
+    "borrowed_trophy_bonk": "Trofeazo Prestado",
+    "avalanche_hug": "Abrazo de Avalancha",
+    "crushing_ovation": "Ovación que Aplasta",
+    "doomsday_pirouette": "Pirueta del Fin del Mundo"
+  },
+  "accessories": {
+    "propeller_beanie": "Gorra con Hélice",
+    "tinfoil_crown": "Corona de Papel Aluminio",
+    "traffic_cone_helmet": "Casco de Cono Vial",
+    "oven_mitts": "Guantes de Cocina",
+    "giant_foam_finger": "Dedote de Espuma",
+    "mismatched_mitts": "Guantes que No Son Par",
+    "pool_floatie_vest": "Chaleco de Flotadores",
+    "sequin_waistcoat": "Chaleco de Lentejuelas",
+    "sunday_sweatpants": "Pants de Domingo",
+    "spandex_bike_shorts": "Licras de Ciclista",
+    "bunny_slippers": "Pantuflas de Conejo",
+    "grandma_roller_skates": "Patines de la Abuela",
+    "cement_galoshes": "Botas de Cemento"
+  },
+  "styles": {
+    "balanced": "Ni Fu Ni Fa",
+    "aggressive": "Puro Arrebato",
+    "defensive": "Tortuga con Casco",
+    "showman": "Divo de Pasarela"
+  }
+}

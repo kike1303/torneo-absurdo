@@ -2,17 +2,20 @@
 id: "0011"
 title: SDLC con agentes especializados
 type: adr
-status: approved
+status: superseded
 risk: medium
 author: owner
 approvals:
   - by: owner
     date: 2026-10-20
 created: 2026-10-20
-updated: 2026-10-20
+updated: 2026-11-04
+superseded_by: "0014"
 ---
 
 # ADR-0011: SDLC con agentes especializados
+
+> Reemplazada por [ADR-0014](0014-proceso-ligero.md) el 2026-11-04.
 
 ## Decisión
 - Adoptamos una versión ligera del *AI-native SDLC playbook*: intent → spec → plan → implementación → PR, con artefactos en Markdown y frontmatter dentro del repo.

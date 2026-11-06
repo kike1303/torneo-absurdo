@@ -73,7 +73,7 @@ abilities:
 - El nombre y el epíteto no repiten el nombre original ni una variación obvia (ver el checklist).
 
 ## Checklist "¿se parece demasiado?" (ADR-0004), obligatorio
-Lo **completa el autor** del personaje, uno por personaje, en la descripción del PR. Lo **aprueba un agente distinto del autor**: el product-owner por defecto (o el game-designer si el autor es otro), con un comentario firmado en el PR, por personaje, que incluye la comprobación de que los `abilities` de cada lore coinciden con los `id` del JSON. Como es un tema legal, además hace falta el OK del owner, que llega con el OK del merge.
+Lo **completa el autor** del personaje, uno por personaje, en la descripción del PR. Lo revisa el `reviewer` en su pase del PR, junto con la comprobación de que los `abilities` de cada lore coinciden con los `id` del JSON. Como es un tema legal, además hace falta el OK del owner antes del merge.
 
 - [ ] El nombre no es el original ni una variación obvia (nada de "Pikachú" ni "Gokú"), en ningún idioma.
 - [ ] `slug` y `archetype` describen el arquetipo, no el personaje concreto.

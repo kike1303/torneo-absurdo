@@ -26,6 +26,7 @@
 
 mod contract;
 mod encode;
+pub mod loadout;
 mod rng;
 mod ruleset;
 mod seed;

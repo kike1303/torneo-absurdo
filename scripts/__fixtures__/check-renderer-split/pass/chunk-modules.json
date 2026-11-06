@@ -27,5 +27,12 @@
   "_app/immutable/chunks/pixi.js": [
     "../../node_modules/.pnpm/pixi.js@8.22.0/node_modules/pixi.js/lib/index.mjs",
     "../../node_modules/.pnpm/pixi.js@8.22.0/node_modules/pixi.js/lib/app/Application.mjs"
+  ],
+  "_app/immutable/chunks/renderer3d.js": [
+    "../../packages/renderer/src/three/index.ts",
+    "../../packages/renderer/src/three/stage.ts"
+  ],
+  "_app/immutable/chunks/three.js": [
+    "../../node_modules/.pnpm/three@0.187.0/node_modules/three/build/three.module.js"
   ]
 }

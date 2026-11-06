@@ -1,0 +1,121 @@
+{
+  "accessories": [
+    {
+      "id": "propeller_beanie",
+      "slot": "head",
+      "tier": 1,
+      "deltas": {
+        "speed": 8,
+        "defense": -8
+      }
+    },
+    {
+      "id": "tinfoil_crown",
+      "slot": "head",
+      "tier": 2,
+      "deltas": {
+        "special": 6,
+        "hp": -6
+      }
+    },
+    {
+      "id": "traffic_cone_helmet",
+      "slot": "head",
+      "tier": 4,
+      "deltas": {
+        "defense": 10,
+        "special": -10
+      }
+    },
+    {
+      "id": "oven_mitts",
+      "slot": "hands",
+      "tier": 1,
+      "deltas": {
+        "attack": 8,
+        "speed": -8
+      }
+    },
+    {
+      "id": "giant_foam_finger",
+      "slot": "hands",
+      "tier": 3,
+      "deltas": {
+        "special": 4,
+        "attack": -4
+      }
+    },
+    {
+      "id": "mismatched_mitts",
+      "slot": "hands",
+      "tier": 5,
+      "deltas": {
+        "attack": 10,
+        "defense": -10
+      }
+    },
+    {
+      "id": "pool_floatie_vest",
+      "slot": "torso",
+      "tier": 1,
+      "deltas": {
+        "hp": 8,
+        "speed": -8
+      }
+    },
+    {
+      "id": "sequin_waistcoat",
+      "slot": "torso",
+      "tier": 3,
+      "deltas": {
+        "special": 6,
+        "defense": -6
+      }
+    },
+    {
+      "id": "sunday_sweatpants",
+      "slot": "legs",
+      "tier": 2,
+      "deltas": {
+        "hp": 6,
+        "attack": -6
+      }
+    },
+    {
+      "id": "spandex_bike_shorts",
+      "slot": "legs",
+      "tier": 4,
+      "deltas": {
+        "speed": 8,
+        "hp": -8
+      }
+    },
+    {
+      "id": "bunny_slippers",
+      "slot": "feet",
+      "tier": 1,
+      "deltas": {
+        "defense": 6,
+        "attack": -6
+      }
+    },
+    {
+      "id": "grandma_roller_skates",
+      "slot": "feet",
+      "tier": 3,
+      "deltas": {
+        "speed": 10,
+        "attack": -10
+      }
+    },
+    {
+      "id": "cement_galoshes",
+      "slot": "feet",
+      "tier": 5,
+      "deltas": {
+        "defense": 8,
+        "speed": -8
+      }
+    }
+  ]
+}
