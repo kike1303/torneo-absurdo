@@ -363,15 +363,15 @@ test.describe('the replays', { tag: '@replays' }, () => {
         ...ko,
         fight: {
           ...ko.fight,
-          ruleset_version: 2,
-          snapshot_sha256: sha256(`{"ruleset_version":2,"a":${a},"b":${b}}`),
+          ruleset_version: 3,
+          snapshot_sha256: sha256(`{"ruleset_version":3,"a":${a},"b":${b}}`),
         },
       });
       await page.goto(`/en/fights/${ID.ko}`);
       await expect(verdict(page)).toHaveAttribute('data-status', 'cannot_check', {
         timeout: 30_000,
       });
-      await expect(page.getByTestId('replay-verdict-text')).toContainText('version 2');
+      await expect(page.getByTestId('replay-verdict-text')).toContainText('version 3');
       await expect(page.getByTestId('replay-verdict-reload')).toBeVisible();
     });
 

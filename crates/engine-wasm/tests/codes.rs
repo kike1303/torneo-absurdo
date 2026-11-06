@@ -82,15 +82,17 @@ fn the_bounds_are_exact_json() {
 
 #[test]
 fn the_bounds_are_those_of_the_ruleset() {
-    let ruleset = engine::Ruleset::for_version(1).unwrap();
-    let json: serde_json::Value = serde_json::from_str(&bounds(1).unwrap()).unwrap();
-    let keys: Vec<&String> = json.as_object().unwrap().keys().collect();
-    assert_eq!(keys.len(), 2, "{keys:?}");
-    assert_eq!(json["time_limit_ms"], ruleset.time_limit_ms());
-    assert_eq!(
-        json["max_duration_ms"],
-        ruleset.time_limit_ms() + ruleset.end_ms()
-    );
+    for version in [1, 2] {
+        let ruleset = engine::Ruleset::for_version(version).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&bounds(version).unwrap()).unwrap();
+        let keys: Vec<&String> = json.as_object().unwrap().keys().collect();
+        assert_eq!(keys.len(), 2, "{keys:?}");
+        assert_eq!(json["time_limit_ms"], ruleset.time_limit_ms());
+        assert_eq!(
+            json["max_duration_ms"],
+            ruleset.time_limit_ms() + ruleset.end_ms()
+        );
+    }
 }
 
 #[test]

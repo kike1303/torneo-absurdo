@@ -9,15 +9,15 @@ import { SERVER_LOG, WEB_DIR, fileLines } from './support/logs.js';
 const readsOfFights = () =>
   fileLines(SERVER_LOG).filter((line) => line.includes('"route":"/api/fights')).length;
 
-/** The chunks that hold Pixi, from what the build recorded. */
-function pixiChunks(): string[] {
+/** The chunks that hold a renderer (Pixi or Three), from what the build recorded. */
+function rendererChunks(): string[] {
   const file = path.join(WEB_DIR, '.svelte-kit/output/client/.vite/chunk-modules.json');
   const chunks = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string[]>;
-  const pixi = Object.entries(chunks)
-    .filter(([, modules]) => modules.some((id) => /node_modules\/.*pixi\.js\//.test(id)))
+  const renderer = Object.entries(chunks)
+    .filter(([, modules]) => modules.some((id) => /node_modules\/.*(pixi\.js|three)\//.test(id)))
     .map(([chunk]) => chunk);
-  expect(pixi.length, 'the build has chunks with Pixi').toBeGreaterThan(0);
-  return pixi;
+  expect(renderer.length, 'the build has chunks with Pixi or Three').toBeGreaterThan(0);
+  return renderer;
 }
 
 test.describe('the list without fights', () => {
@@ -74,8 +74,8 @@ test.describe('the URL of a fight (RF18)', () => {
 
 test.describe('what the first pages load (RF5)', () => {
   for (const url of ['/es/', '/es/fights']) {
-    test(`${url} asks for neither the wasm nor Pixi`, async ({ page }) => {
-      const pixi = pixiChunks();
+    test(`${url} asks for neither the wasm nor a renderer`, async ({ page }) => {
+      const renderer = rendererChunks();
       const asked: string[] = [];
       page.on('request', (request) => asked.push(new URL(request.url()).pathname));
       await page.goto(url);
@@ -83,7 +83,8 @@ test.describe('what the first pages load (RF5)', () => {
       await page.waitForLoadState('networkidle');
       expect(asked.length).toBeGreaterThan(0);
       expect(asked.filter((file) => file.endsWith('.wasm'))).toEqual([]);
-      expect(asked.filter((file) => pixi.some((chunk) => file.endsWith(chunk)))).toEqual([]);
+      expect(asked.filter((file) => file.endsWith('.glb'))).toEqual([]);
+      expect(asked.filter((file) => renderer.some((chunk) => file.endsWith(chunk)))).toEqual([]);
     });
   }
 });

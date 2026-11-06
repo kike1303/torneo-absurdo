@@ -189,9 +189,10 @@ pub async fn settled_page(
     let rows = sqlx::query(concat!(
         "SELECT ",
         summary_columns!(),
-        " FROM fights WHERE state = 'settled' AND id < $1::bigint ORDER BY id DESC LIMIT 21"
+        " FROM fights WHERE state = 'settled' AND id < $1::bigint ORDER BY id DESC LIMIT $2"
     ))
     .bind(below)
+    .bind(i64::try_from(PAGE_SIZE + 1).unwrap_or(i64::MAX))
     .fetch_all(&mut *tx)
     .await?;
     tx.commit().await?;

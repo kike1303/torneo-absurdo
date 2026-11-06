@@ -14,7 +14,7 @@ approvals:
 linear: TA-44
 depends_on: ["010", "003", "002"]
 created: 2026-11-02
-updated: 2026-11-02
+updated: 2026-11-06
 ---
 
 # Spec: Repeticiones y verificación en el navegador
@@ -295,6 +295,15 @@ Sale de la revisión de [plan.md](./plan.md), cuyos puntos conservan aquí su n�
 | D5 | Vectores construidos con los bytes del motor, sin Postgres | RF14 | Un archivo estable, sin `id` ni hora de una corrida. `every_kind_of_final_verifies_with_public_data` sigue cubriendo la lectura real | — |
 | D6 | Límite del job `rust`: 25 min | Preocupación 4 | Una corrida de `main` ya tarda 14 min 10 s | devops-engineer, en el PR |
 | Architect | Una respuesta sin forma solo da `mismatch(data)` | RF24 | Ni la spec ni el plan decían qué se dibuja en ese caso | security-reviewer |
+
+## Enmienda (merge de main, 2026-11-06)
+Al traer `main` antes del PR cambiaron tres premisas. La spec sigue aprobada y ningún ADR cambia.
+
+| Qué cambia | Dónde | Por qué |
+|---|---|---|
+| La corrida sembrada (`playwright.replays.config.ts`) y todo `_e2e-fights-run` corren **solo en local**, con `just e2e`, y su salida va en el PR. Ya no hay job `e2e-fights` | "Estrategia de pruebas", preocupación 12, tabla de RF2 | TA-56 lo sacó de CI: sin GPU, el 3D por software lo volvía inestable. El caso B4.1 de `csp.spec.ts` (evidencia de ADR-0012 B6) queda también en local |
+| La repetición usa la vista 3D por defecto de `FightStage` (feature 013), sin cambios en `packages/renderer`. "Pixi solo por `import()`" se lee como "el renderer (Pixi o Three) y el modelo `.glb`" | RF5, RF18 | TA-50 hizo del 3D la vista por defecto |
+| El motor conoce el ruleset 2 (feature 016), así que el "ruleset desconocido" de los vectores, los tests y el e2e pasa a ser el 3. El verificador acepta cualquier versión de `Ruleset::for_version` | RF14 | El server sigue programando solo peleas v1 |
 
 ## Revisión
 ### architect — 2026-11-02 — Enmienda (revisión del plan)

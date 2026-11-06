@@ -5,8 +5,8 @@ import { EGRESS_PROXY, PUBLIC_ORIGIN } from './e2e/support/topology.js';
 // The seeded replays (011 "Estrategia de pruebas"): `just _e2e-fights-run` runs this after the real
 // fights, on a new torneo_e2e. A KO, a decision, a draw, a voided, two cancelled and a scheduled one,
 // with real data and no roster, so no other fight appears. One worker: the four projects share one
-// IP and the 120 reads per minute of FIGHT_READ_IP (preocupacion 11). What is under `fights-artifacts`
-// reaches the artifact of the job `e2e-fights` as it is.
+// IP and the 120 reads per minute of FIGHT_READ_IP (preocupacion 11). Only local, with `just e2e`:
+// the job `e2e-fights` left CI (TA-56).
 //
 // The flows run in the phones, the case of the spectator, and desktop only keeps what is of desktop:
 // the CSP in both engines, axe, the hydration and the screenshots (preocupacion 12: the four projects
