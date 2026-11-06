@@ -14,8 +14,8 @@
       "slot": "head",
       "tier": 2,
       "deltas": {
-        "special": 8,
-        "hp": -8
+        "special": 6,
+        "hp": -6
       }
     },
     {
@@ -41,8 +41,8 @@
       "slot": "hands",
       "tier": 3,
       "deltas": {
-        "special": 6,
-        "attack": -6
+        "special": 4,
+        "attack": -4
       }
     },
     {
@@ -59,8 +59,8 @@
       "slot": "torso",
       "tier": 1,
       "deltas": {
-        "hp": 10,
-        "speed": -10
+        "hp": 8,
+        "speed": -8
       }
     },
     {
@@ -68,8 +68,8 @@
       "slot": "torso",
       "tier": 3,
       "deltas": {
-        "special": 8,
-        "defense": -8
+        "special": 6,
+        "defense": -6
       }
     },
     {
@@ -77,8 +77,8 @@
       "slot": "legs",
       "tier": 2,
       "deltas": {
-        "hp": 8,
-        "attack": -8
+        "hp": 6,
+        "attack": -6
       }
     },
     {
@@ -105,7 +105,7 @@
       "tier": 3,
       "deltas": {
         "speed": 10,
-        "special": -10
+        "attack": -10
       }
     },
     {
