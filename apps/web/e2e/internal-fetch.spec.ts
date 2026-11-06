@@ -103,6 +103,13 @@ for (const host of [
   });
 }
 
+// 010 RF53: this API knows nothing of the fights, as one that fails.
+test('/es/ with an API that fails is a 200 with the error state, never a 500', async () => {
+  const res = await raw(WEB, '/es/', { headers: { 'x-forwarded-proto': 'http' } });
+  expect(res.status).toBe(200);
+  expect(res.body).toContain('data-testid="fight-error"');
+});
+
 test('Host equal to INTERNAL_API_URL: no cookie but the policy one leaves, nothing loops', async () => {
   const before = seen.length;
   const res = await raw(WEB, '/es/login', {

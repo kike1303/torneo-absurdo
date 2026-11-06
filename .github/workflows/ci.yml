@@ -82,6 +82,8 @@ jobs:
               # Read by the sprite importer check inside check-web (007 plan-b decision 27).
               - content/sprites/**
               - content/characters/**
+              # The 3D botarga the web bundles (013).
+              - content/models/**
               - crates/content/tests/golden/**
               - docs/guides/**
               - crates/protocol/**
@@ -126,6 +128,8 @@ jobs:
               - .dockerignore
               # The final stage of the server copies it (010 RNF "Imagen").
               - content/characters/**
+              # The web build bundles it (013).
+              - content/models/**
               - scripts/check-compose.mjs
               - scripts/check-dockerignore.sh
               - scripts/check-release-binary.mjs
@@ -293,7 +297,7 @@ jobs:
     # options other than --shm-size here). Public e2e credentials, never a secret.
     services:
       postgres:
-        image: postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        image: postgres:17.11-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
         env:
           POSTGRES_USER: torneo
           POSTGRES_PASSWORD: torneo_e2e
@@ -438,7 +442,7 @@ jobs:
           tags: ghcr.io/kike1303/torneo-absurdo/web:ci
           cache-from: type=gha,scope=web
           cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=web' || '' }}
-      - name: Non-root user, Node version, static binary, no dev-auth, no node_modules (RF-C1, RF-C2, RF-D9)
+      - name: Non-root user, Node version, static binary, no dev-auth nor dev-fights, no node_modules (RF-C1, RF-C2, RF-D9)
         run: |
           set -euo pipefail
           for svc in server web; do
@@ -463,7 +467,7 @@ jobs:
             exit 1
           fi
           file "$RUNNER_TEMP/server"
-          # 008 RF-D9: the binary of the image carries none of the dev-auth strings.
+          # 008 RF-D9, 010 RF45: the binary of the image carries none of the strings of dev-auth and dev-fights.
           node scripts/check-release-binary.mjs "$RUNNER_TEMP/server"
           cid="$(docker create "$REPO/web:ci")"
           count="$(docker export "$cid" | tar -t | grep -c '^app/node_modules/' || true)"

@@ -2,7 +2,7 @@
 id: "010"
 title: "Scheduler de peleas en vivo, fase A: ciclo, integridad, recuperación y API de lectura"
 type: plan
-status: approved
+status: done
 risk: high
 author: backend-engineer
 reviewers: [architect]
@@ -12,7 +12,7 @@ approvals:
 linear: TA-13
 depends_on: ["010"]
 created: 2026-10-31
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # Plan: Scheduler de peleas, fase A (desde spec.md 2026-10-31)

@@ -4,7 +4,8 @@
 //! time, redeems the `code` with PKCE, reads the identity from `userinfo`, drops the provider's
 //! tokens and logs in. Success: 303 to the `next` of the flow, with the session cookie. Any
 //! failure: 303 to `/login` with an `error` query that is a `CallbackErrorCode` and nothing
-//! else; no session, never `next`. Both always expire the flow cookie and say `no-store`.
+//! else; no session, never `next`, only the fixed language prefix derived from it when there is
+//! a flow (TA-35). Both always expire the flow cookie and say `no-store`.
 
 use axum::Extension;
 use axum::extract::rejection::QueryRejection;
@@ -16,7 +17,7 @@ use oauth2::{
     AuthorizationCode, ClientId, ClientSecret, PkceCodeVerifier, RedirectUrl, RequestTokenError,
     TokenResponse, TokenUrl,
 };
-use protocol::{ApiErrorCode, CallbackErrorCode, Provider};
+use protocol::{ApiErrorCode, CallbackErrorCode, Locale, Provider};
 use serde::Deserialize;
 use sqlx::Row;
 use subtle::ConstantTimeEq;
@@ -25,7 +26,7 @@ use uuid::Uuid;
 use super::link::{self, LinkRequest};
 use super::login::{self, Identity, LoginError};
 use super::reauth::{self, ReauthRequest};
-use super::{client, flow_hash, providers};
+use super::{client, flow_hash, next, providers};
 use crate::app::AppState;
 use crate::http::cookies::CookiePolicy;
 use crate::http::errors::error_response;
@@ -33,15 +34,26 @@ use crate::net::{ClientContext, IpKey, LocalAddr};
 use crate::sessions::{self, Issued, TokenHash, UaFamily};
 
 /// The login page with an error code from the closed list: the only place that builds this
-/// `Location` (the callback errors and a logout that could not revoke).
+/// `Location` (the callback errors and a logout that could not revoke or proved no session).
 pub fn error_location(code: CallbackErrorCode) -> HeaderValue {
-    let location = format!("/login?error={}", code.as_str());
-    HeaderValue::from_str(&location).unwrap_or(HeaderValue::from_static("/"))
+    error_location_in(code, None)
+}
+
+/// [`error_location`] with the language of a flow (TA-35): a fixed prefix or none, so the web
+/// does not have to guess. Nothing of the request or of `next` reaches the `Location`.
+fn error_location_in(code: CallbackErrorCode, locale: Option<Locale>) -> HeaderValue {
+    let prefix = match locale {
+        Some(Locale::En) => "/en",
+        Some(Locale::Es) => "/es",
+        None => "",
+    };
+    let path = format!("/login?error={}", code.as_str());
+    HeaderValue::from_str(&format!("{prefix}{path}")).unwrap_or(HeaderValue::from_static("/"))
 }
 
 /// The login page with no query: where `link` without a session (008 "Enmienda 2026-10-30" of
-/// RF-C2) and `logout-all` without one (TA-30) send the browser. Built here, beside
-/// [`error_location`], so every `Location` to the login page has one home.
+/// RF-C2) sends the browser. Built here, beside [`error_location`], so every `Location` to the
+/// login page has one home.
 pub fn login_location() -> HeaderValue {
     HeaderValue::from_static("/login")
 }
@@ -71,7 +83,10 @@ pub fn code_redirect(code: CallbackErrorCode, cache_control: HeaderValue) -> Res
 /// The error redirect of the callback: it always expires the flow cookie. The quota layer of the
 /// callback (`rate::http::redirect_layer`) answers with this very function.
 pub fn error_redirect(cookies: &CookiePolicy, code: CallbackErrorCode) -> Response {
-    let location = error_location(code);
+    redirect_expiring_flow(cookies, error_location(code))
+}
+
+fn redirect_expiring_flow(cookies: &CookiePolicy, location: HeaderValue) -> Response {
     (
         StatusCode::SEE_OTHER,
         [
@@ -116,10 +131,15 @@ pub async fn handler(
         previous: cookies.read_session(&headers).map(TokenHash::of),
         local: local.map(|l| l.0.0),
     };
-    let flow = cookies.read_flow(&headers).map(flow_hash);
+    let flow = match take_flow(&state, cookies.read_flow(&headers).map(flow_hash)).await {
+        Ok(flow) => flow,
+        // No flow to read a language from: the web chooses, as for any unprefixed path.
+        Err(code) => return error_redirect(&cookies, code),
+    };
+    let locale = next::locale_of(&flow.next);
     match run(&state, provider, flow, query.ok().map(|q| q.0), context).await {
         Ok((issued, location)) => success(&cookies, &issued, location),
-        Err(code) => error_redirect(&cookies, code),
+        Err(code) => redirect_expiring_flow(&cookies, error_location_in(code, locale)),
     }
 }
 
@@ -183,14 +203,9 @@ fn purpose_of(flow: &Flow) -> Option<FlowPurpose> {
     }
 }
 
-async fn run(
-    state: &AppState,
-    provider: Provider,
-    flow: Option<[u8; 32]>,
-    query: Option<CallbackQuery>,
-    context: Context,
-) -> Result<(Issued, HeaderValue), CallbackErrorCode> {
-    use CallbackErrorCode::{InvalidState, ProviderError};
+/// Consumes the flow of the cookie: one use, whatever the callback does with it afterwards.
+async fn take_flow(state: &AppState, flow: Option<[u8; 32]>) -> Result<Flow, CallbackErrorCode> {
+    use CallbackErrorCode::InvalidState;
     let flow = flow.ok_or(InvalidState)?;
     let row = sqlx::query(
         "DELETE FROM oauth_flows WHERE id_hash = $1 \
@@ -203,7 +218,7 @@ async fn run(
     .map_err(|_| CallbackErrorCode::TryAgain)?
     .ok_or(InvalidState)?;
     let get = |i| row.try_get::<String, _>(i).map_err(|_| InvalidState);
-    let flow = Flow {
+    Ok(Flow {
         provider: get(0)?,
         purpose: get(1)?,
         state: get(2)?,
@@ -211,7 +226,17 @@ async fn run(
         next: get(4)?,
         live: row.try_get(5).map_err(|_| InvalidState)?,
         link_user_id: row.try_get(6).map_err(|_| InvalidState)?,
-    };
+    })
+}
+
+async fn run(
+    state: &AppState,
+    provider: Provider,
+    flow: Flow,
+    query: Option<CallbackQuery>,
+    context: Context,
+) -> Result<(Issued, HeaderValue), CallbackErrorCode> {
+    use CallbackErrorCode::{InvalidState, ProviderError};
     let query = query.ok_or(InvalidState)?;
     let same_state = query
         .state

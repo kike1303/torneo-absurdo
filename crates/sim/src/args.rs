@@ -11,6 +11,12 @@ pub const DEFAULT_FIGHTS: u32 = 10_000;
 pub const MAX_FIGHTS: u32 = 10_000_000;
 /// `--content` when absent, relative to the working directory (`just sim` runs at the root).
 pub const DEFAULT_CONTENT: &str = "content/characters";
+/// `--catalog` when absent (016), relative to the working directory.
+pub const DEFAULT_CATALOG: &str = "content/catalog";
+/// `--level` when absent: the open builds are measured at the top level by default.
+pub const DEFAULT_LEVEL: u8 = 100;
+/// Largest `--builds` accepted.
+pub const MAX_BUILDS: u32 = 100_000;
 
 pub const HELP: &str = "\
 Mass fight simulation and balance report (feature 003, RF15 and RF17).
@@ -25,7 +31,11 @@ Options:
   --seed HEX      root seed of the simulator, 64 hex digits (default: a fixed constant)
   --content DIR   roster directory (default content/characters)
   --json          print the report as JSON instead of text
-  --check         exit with 1 if a balance criterion of RF17 fails
+  --check         exit with 1 if a balance criterion of RF17 fails (with --builds, of 016)
+  --builds N      instead of the roster, draw N random player builds from the catalog (2 to
+                  100000) and play --fights random pairs of them with ruleset v2 (feature 016)
+  --catalog DIR   player catalog for --builds (default content/catalog)
+  --level L       level of the builds, 1 to 100 (default 100)
   --help          print this help
 
 The root seed only derives the seeds of simulated fights: never pass the seed of a real fight.
@@ -46,6 +56,10 @@ pub struct Args {
     pub content: PathBuf,
     pub json: bool,
     pub check: bool,
+    /// `--builds N`: the open builds report of 016 instead of the roster one.
+    pub builds: Option<u32>,
+    pub catalog: PathBuf,
+    pub level: u8,
 }
 
 impl Default for Args {
@@ -56,6 +70,9 @@ impl Default for Args {
             content: PathBuf::from(DEFAULT_CONTENT),
             json: false,
             check: false,
+            builds: None,
+            catalog: PathBuf::from(DEFAULT_CATALOG),
+            level: DEFAULT_LEVEL,
         }
     }
 }
@@ -75,6 +92,13 @@ pub enum ArgsError {
     InvalidFights,
     #[error("usage.invalid_seed: --seed must be exactly 64 hex digits")]
     InvalidSeed,
+    #[error("usage.invalid_builds: --builds must be an integer from 2 to {MAX_BUILDS}")]
+    InvalidBuilds,
+    #[error("usage.invalid_level: --level must be an integer from 1 to 100")]
+    InvalidLevel,
+    /// `--catalog` or `--level` without `--builds`, or `--content` with it.
+    #[error("usage.flag_conflict: {0} does not go with this mode (--builds or the roster)")]
+    FlagConflict(&'static str),
 }
 
 impl ArgsError {
@@ -87,6 +111,9 @@ impl ArgsError {
             Self::RepeatedFlag(_) => "usage.repeated_flag",
             Self::InvalidFights => "usage.invalid_fights",
             Self::InvalidSeed => "usage.invalid_seed",
+            Self::InvalidBuilds => "usage.invalid_builds",
+            Self::InvalidLevel => "usage.invalid_level",
+            Self::FlagConflict(_) => "usage.flag_conflict",
         }
     }
 }
@@ -117,6 +144,9 @@ where
             "--content" => "--content",
             "--json" => "--json",
             "--check" => "--check",
+            "--builds" => "--builds",
+            "--catalog" => "--catalog",
+            "--level" => "--level",
             _ => return Err(ArgsError::UnknownFlag(arg)),
         };
         if seen.contains(&flag) {
@@ -134,20 +164,43 @@ where
             "--seed" => out.seed = parse_seed_hex(&value()?).ok_or(ArgsError::InvalidSeed)?,
             "--content" => out.content = PathBuf::from(value()?),
             "--json" => out.json = true,
+            "--builds" => {
+                let n = parse_count(&value()?, 2, MAX_BUILDS).ok_or(ArgsError::InvalidBuilds)?;
+                out.builds = Some(n);
+            }
+            "--catalog" => out.catalog = PathBuf::from(value()?),
+            "--level" => {
+                let max = u32::from(engine::loadout::LEVEL_MAX);
+                let level = parse_count(&value()?, 1, max).ok_or(ArgsError::InvalidLevel)?;
+                out.level = u8::try_from(level).map_err(|_| ArgsError::InvalidLevel)?;
+            }
             _ => out.check = true,
         }
+    }
+    let wrong_mode: &[&'static str] = if out.builds.is_some() {
+        &["--content"]
+    } else {
+        &["--catalog", "--level"]
+    };
+    if let Some(flag) = seen.iter().find(|flag| wrong_mode.contains(flag)) {
+        return Err(ArgsError::FlagConflict(flag));
     }
     Ok(Command::Run(out))
 }
 
 fn parse_fights(value: &str) -> Result<u32, ArgsError> {
+    parse_count(value, 1, MAX_FIGHTS).ok_or(ArgsError::InvalidFights)
+}
+
+/// Plain decimal digits within `min..=max`.
+fn parse_count(value: &str, min: u32, max: u32) -> Option<u32> {
     if value.is_empty() || !value.bytes().all(|c| c.is_ascii_digit()) {
-        return Err(ArgsError::InvalidFights);
+        return None;
     }
-    match value.parse::<u32>() {
-        Ok(n) if (1..=MAX_FIGHTS).contains(&n) => Ok(n),
-        _ => Err(ArgsError::InvalidFights),
-    }
+    value
+        .parse::<u32>()
+        .ok()
+        .filter(|n| (min..=max).contains(n))
 }
 
 /// 64 hex digits (either case) to 32 bytes.
@@ -211,6 +264,45 @@ mod tests {
         assert_eq!(d.seed, *b"torneo-absurdo-sim-default-v1!!!");
         assert_eq!(d.content, PathBuf::from("content/characters"));
         assert!(!d.json && !d.check);
+        assert_eq!(d.builds, None);
+        assert_eq!(d.catalog, PathBuf::from("content/catalog"));
+        assert_eq!(d.level, 100);
+    }
+
+    #[test]
+    fn builds_flags() {
+        assert_eq!(
+            run(&["--level", "30"]),
+            Err(ArgsError::FlagConflict("--level"))
+        );
+        assert_eq!(
+            run(&["--catalog", "c"]),
+            Err(ArgsError::FlagConflict("--catalog"))
+        );
+        assert_eq!(
+            run(&["--builds", "10", "--content", "x"]),
+            Err(ArgsError::FlagConflict("--content"))
+        );
+        let args = run_ok(&["--builds", "500", "--catalog", "c", "--level", "30"]);
+        assert_eq!(args.builds, Some(500));
+        assert_eq!(args.catalog, PathBuf::from("c"));
+        assert_eq!(args.level, 30);
+        for bad in ["0", "1", "100001", "x", ""] {
+            assert_eq!(
+                run(&["--builds", bad]),
+                Err(ArgsError::InvalidBuilds),
+                "{bad}"
+            );
+        }
+        for bad in ["0", "101", "-1", "1.5"] {
+            assert_eq!(
+                run(&["--builds", "2", "--level", bad]),
+                Err(ArgsError::InvalidLevel),
+                "{bad}"
+            );
+        }
+        assert_eq!(run_ok(&["--builds", "2", "--level", "1"]).level, 1);
+        assert_eq!(run_ok(&["--builds", "2"]).builds, Some(2));
     }
 
     #[test]
@@ -236,6 +328,7 @@ mod tests {
                 content: PathBuf::from("x/y"),
                 json: true,
                 check: true,
+                ..Args::default()
             }
         );
         assert_eq!(run(&["--check", "--help"]), Ok(Command::Help));
@@ -305,6 +398,9 @@ mod tests {
             ArgsError::RepeatedFlag("--seed"),
             ArgsError::InvalidFights,
             ArgsError::InvalidSeed,
+            ArgsError::InvalidBuilds,
+            ArgsError::InvalidLevel,
+            ArgsError::FlagConflict("--level"),
         ];
         for error in all {
             assert!(error.to_string().starts_with(error.code()), "{error}");
@@ -343,6 +439,9 @@ mod tests {
             "--content",
             "--json",
             "--check",
+            "--builds",
+            "--catalog",
+            "--level",
             "--help",
         ] {
             assert!(HELP.contains(flag), "{flag}");

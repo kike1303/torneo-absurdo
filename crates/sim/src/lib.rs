@@ -18,6 +18,7 @@ use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 
 pub mod args;
+pub mod builds;
 mod report;
 
 pub use report::{Criteria, Failure, Report, Warning};
@@ -59,6 +60,12 @@ pub enum SimError {
     /// A log without `end` (a guard: the engine always writes it).
     #[error("sim.log_without_end")]
     LogWithoutEnd,
+    /// `--builds` below 2, no fights or a level outside `1..=LEVEL_MAX` (016).
+    #[error("sim.builds_too_few")]
+    BuildsTooFew,
+    /// The catalog cannot produce a valid build at the level (016).
+    #[error("sim.builds_draw")]
+    BuildsDraw,
 }
 
 impl SimError {
@@ -71,6 +78,8 @@ impl SimError {
             Self::Spec { .. } => "sim.spec",
             Self::Encode => "sim.encode_failed",
             Self::LogWithoutEnd => "sim.log_without_end",
+            Self::BuildsTooFew => "sim.builds_too_few",
+            Self::BuildsDraw => "sim.builds_draw",
         }
     }
 }

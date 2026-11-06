@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { waitForHydration } from '../support/hydration.js';
 import { EGRESS_LOG, addDynamicCanary, expectEgress, fileLines } from '../support/logs.js';
 import { PUBLIC_ORIGIN } from '../support/topology.js';
-import { expect, login, press, reflected, test, text } from './fixtures.js';
+import { clientFor, expect, login, newContext, press, reflected, test, text } from './fixtures.js';
 
 // 008 RF-D6, the T4 case of the 2026-10-28 amendment, the 2026-10-30 amendment of RF-B5 and
 // open question 1 of plan-d (decision 11). `page.route` never sees the destination of a 303, so
@@ -154,6 +154,38 @@ test('5. open question 1: the Google and Discord buttons reach their provider', 
     expect(violations, provider).toEqual([]);
     await page.close();
   }
+});
+
+test('5b. TA-35: /es/, no locale cookie, Accept-Language en: the error stays in Spanish', async ({
+  browser,
+  identity,
+}, info) => {
+  const context = await newContext(browser, info, 'ta35');
+  await context.setExtraHTTPHeaders({
+    'accept-language': 'en',
+    'x-e2e-client': clientFor(info, 'ta35'),
+  });
+  const page = await context.newPage();
+  addDynamicCanary(identity);
+  const start = await page.request.post('/api/auth/dev/start', {
+    form: { dev_identity: identity, next: '/es/welcome' },
+    headers: { origin: PUBLIC_ORIGIN },
+    maxRedirects: 0,
+  });
+  const authorize = await page.request.get(start.headers().location ?? '', { maxRedirects: 0 });
+  const url = new URL(authorize.headers().location ?? '', PUBLIC_ORIGIN);
+  url.searchParams.set('state', `${url.searchParams.get('state')}x`);
+  await page.goto(url.toString());
+  await expect(page).toHaveURL(/\/es\/login\?error=auth\.invalid_state$/);
+  await expect(page.getByTestId('login-error')).toHaveText(text('es', 'error_auth_invalid_state'));
+  await expect(page.locator('html')).toHaveAttribute('lang', 'es');
+
+  // And what follows /login: the next sign-in stays in Spanish too (QA of the PR of TA-31).
+  await waitForHydration(page);
+  await page.getByLabel(text('es', 'login_dev_identity_label')).fill(identity);
+  await press(page.getByTestId('login-provider-dev'));
+  await expect(page).toHaveURL(/\/es\//);
+  await context.close();
 });
 
 test('6. the 2026-10-30 amendment: an exhausted quota ends in /login, never in JSON', async ({

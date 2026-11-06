@@ -8,7 +8,7 @@ import {
 } from './error-text.js';
 
 // 008 RF-D6, plan-d decision 6 and the condition of architect in plan-a (answer 5). 009 RF24:
-// the closed list grows from six to eight.
+// the closed list grows from six to eight. TA-37: nine.
 const CALLBACK = [
   'auth.invalid_state',
   'auth.banned',
@@ -18,6 +18,7 @@ const CALLBACK = [
   'auth.provider_already_linked',
   'auth.reauth_required',
   'auth.reauth_mismatch',
+  'auth.sessions_not_closed',
 ] as const;
 
 describe('resolveCallbackError', () => {
@@ -82,8 +83,8 @@ describe('every code has a text in en and es (condition of plan-a, answer 5)', (
   });
 
   it('every code of the protocol is in the table', () => {
-    // 4 + 11 + 11 + 3 + 2 (ApiErrorCode, WsErrorCode, AuthErrorCode, ProfileErrorCode, FightErrorCode).
-    expect(Object.keys(ERROR_TEXT)).toHaveLength(31);
+    // 4 + 11 + 12 + 3 + 2 (ApiErrorCode, WsErrorCode, AuthErrorCode, ProfileErrorCode, FightErrorCode).
+    expect(Object.keys(ERROR_TEXT)).toHaveLength(32);
     expect(Object.keys(CALLBACK_ERROR_TEXT)).toEqual([...CALLBACK]);
   });
 

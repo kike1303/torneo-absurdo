@@ -421,6 +421,7 @@ function checkE2eCache(jobs, file, problems) {
 function checkE2e(jobs, file, problems, tree) {
   const server = jobs['e2e-server'];
   const e2e = jobs.e2e;
+  // The real fights (`_e2e-fights-run`) run locally before a push, not in CI (TA-56).
   if (isMap(e2e) && String(e2e.if ?? '').trim() !== E2E_IF) {
     problems.push(`${file}: e2e-server-if: jobs.e2e must run with if: ${E2E_IF}`);
   }

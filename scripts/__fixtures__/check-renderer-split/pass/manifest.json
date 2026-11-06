@@ -25,7 +25,8 @@
       "_preload.js"
     ],
     "dynamicImports": [
-      "../../packages/renderer/src/index.ts"
+      "../../packages/renderer/src/index.ts",
+      "../../packages/renderer/src/three/index.ts"
     ]
   },
   "_runtime.js": {
@@ -48,5 +49,17 @@
   },
   "_pixi.js": {
     "file": "_app/immutable/chunks/pixi.js"
+  },
+  "../../packages/renderer/src/three/index.ts": {
+    "file": "_app/immutable/chunks/renderer3d.js",
+    "src": "../../packages/renderer/src/three/index.ts",
+    "isDynamicEntry": true,
+    "imports": [
+      "_preload.js",
+      "_three.js"
+    ]
+  },
+  "_three.js": {
+    "file": "_app/immutable/chunks/three.js"
   }
 }

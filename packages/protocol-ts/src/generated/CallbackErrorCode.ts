@@ -16,4 +16,5 @@ export type CallbackErrorCode =
   | 'auth.already_linked'
   | 'auth.provider_already_linked'
   | 'auth.reauth_required'
-  | 'auth.reauth_mismatch';
+  | 'auth.reauth_mismatch'
+  | 'auth.sessions_not_closed';

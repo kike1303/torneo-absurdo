@@ -1,5 +1,5 @@
 {
-  "timeline_version": 2,
+  "timeline_version": 3,
   "duration_ms": 90000,
   "fighters": {
     "a": {
@@ -21,6 +21,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_heavy",
+      "ability": "shell_bump",
       "result": "block",
       "damage": 3,
       "target_hp": 897
@@ -30,6 +31,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 11,
       "target_hp": 889
@@ -39,6 +41,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 11,
       "target_hp": 886
@@ -48,6 +51,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_heavy",
+      "ability": "shell_bump",
       "result": "hit",
       "damage": 8,
       "target_hp": 881
@@ -57,6 +61,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 8,
       "target_hp": 878
@@ -66,6 +71,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 11,
       "target_hp": 870
@@ -75,6 +81,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 8,
       "target_hp": 870
@@ -84,6 +91,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 11,
       "target_hp": 859
@@ -93,6 +101,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 11,
       "target_hp": 859
@@ -102,6 +111,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 10,
       "target_hp": 849
@@ -111,6 +121,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 10,
       "target_hp": 849
@@ -120,6 +131,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 11,
       "target_hp": 838
@@ -129,6 +141,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_heavy",
+      "ability": "shell_bump",
       "result": "hit",
       "damage": 9,
       "target_hp": 840
@@ -138,6 +151,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "block",
       "damage": 2,
       "target_hp": 836
@@ -147,6 +161,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "block",
       "damage": 3,
       "target_hp": 837
@@ -156,6 +171,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 9,
       "target_hp": 827
@@ -165,6 +181,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 10,
       "target_hp": 827
@@ -174,6 +191,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_heavy",
+      "ability": "shell_bump",
       "result": "hit",
       "damage": 9,
       "target_hp": 818
@@ -183,6 +201,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 8,
       "target_hp": 819
@@ -192,6 +211,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 10,
       "target_hp": 808
@@ -201,6 +221,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 9,
       "target_hp": 810
@@ -210,6 +231,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 10,
       "target_hp": 798
@@ -219,6 +241,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 10,
       "target_hp": 800
@@ -228,6 +251,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 10,
       "target_hp": 788
@@ -237,6 +261,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 8,
       "target_hp": 792
@@ -246,6 +271,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 9,
       "target_hp": 779
@@ -255,6 +281,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_heavy",
+      "ability": "shell_bump",
       "result": "hit",
       "damage": 11,
       "target_hp": 781
@@ -264,6 +291,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 9,
       "target_hp": 770
@@ -273,6 +301,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 11,
       "target_hp": 770
@@ -282,6 +311,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 9,
       "target_hp": 761
@@ -291,6 +321,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "block",
       "damage": 3,
       "target_hp": 767
@@ -300,6 +331,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 9,
       "target_hp": 752
@@ -309,6 +341,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "block",
       "damage": 3,
       "target_hp": 764
@@ -318,6 +351,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_heavy",
+      "ability": "shell_bump",
       "result": "block",
       "damage": 2,
       "target_hp": 750
@@ -327,6 +361,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 8,
       "target_hp": 756
@@ -336,6 +371,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 10,
       "target_hp": 740
@@ -345,6 +381,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 10,
       "target_hp": 746
@@ -354,6 +391,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "dodge",
       "damage": 0,
       "target_hp": 740
@@ -363,6 +401,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_heavy",
+      "ability": "shell_bump",
       "result": "block",
       "damage": 2,
       "target_hp": 744
@@ -372,6 +411,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 10,
       "target_hp": 730
@@ -381,6 +421,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 10,
       "target_hp": 734
@@ -390,6 +431,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 8,
       "target_hp": 722
@@ -399,6 +441,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 11,
       "target_hp": 723
@@ -408,6 +451,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "block",
       "damage": 2,
       "target_hp": 720
@@ -417,6 +461,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "block",
       "damage": 3,
       "target_hp": 720
@@ -426,6 +471,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_heavy",
+      "ability": "shell_bump",
       "result": "hit",
       "damage": 10,
       "target_hp": 710
@@ -435,6 +481,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "block",
       "damage": 2,
       "target_hp": 718
@@ -444,6 +491,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 9,
       "target_hp": 701
@@ -453,6 +501,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "dodge",
       "damage": 0,
       "target_hp": 718
@@ -462,6 +511,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "dodge",
       "damage": 0,
       "target_hp": 701
@@ -471,6 +521,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "crit",
       "damage": 12,
       "target_hp": 706
@@ -480,6 +531,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "crit",
       "damage": 13,
       "target_hp": 688
@@ -489,6 +541,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 10,
       "target_hp": 696
@@ -498,6 +551,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "dodge",
       "damage": 0,
       "target_hp": 688
@@ -507,6 +561,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "block",
       "damage": 3,
       "target_hp": 693
@@ -516,6 +571,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "block",
       "damage": 2,
       "target_hp": 686
@@ -525,6 +581,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "block",
       "damage": 3,
       "target_hp": 690
@@ -534,6 +591,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "block",
       "damage": 2,
       "target_hp": 684
@@ -543,6 +601,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_heavy",
+      "ability": "shell_bump",
       "result": "hit",
       "damage": 11,
       "target_hp": 679
@@ -552,6 +611,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 8,
       "target_hp": 676
@@ -561,6 +621,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 9,
       "target_hp": 670
@@ -570,6 +631,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "block",
       "damage": 3,
       "target_hp": 673
@@ -579,6 +641,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 9,
       "target_hp": 661
@@ -588,6 +651,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "block",
       "damage": 3,
       "target_hp": 670
@@ -597,6 +661,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 9,
       "target_hp": 652
@@ -606,6 +671,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_heavy",
+      "ability": "shell_bump",
       "result": "hit",
       "damage": 9,
       "target_hp": 661
@@ -615,6 +681,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "dodge",
       "damage": 0,
       "target_hp": 652
@@ -624,6 +691,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 11,
       "target_hp": 650
@@ -633,6 +701,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "block",
       "damage": 2,
       "target_hp": 650
@@ -642,6 +711,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 8,
       "target_hp": 642
@@ -651,6 +721,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_heavy",
+      "ability": "shell_bump",
       "result": "crit",
       "damage": 15,
       "target_hp": 635
@@ -660,6 +731,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 10,
       "target_hp": 632
@@ -669,6 +741,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 9,
       "target_hp": 626
@@ -678,6 +751,7 @@
       "type": "strike",
       "actor": "a",
       "move": "attack_light",
+      "ability": "strike",
       "result": "crit",
       "damage": 16,
       "target_hp": 616
@@ -687,6 +761,7 @@
       "type": "strike",
       "actor": "b",
       "move": "attack_light",
+      "ability": "strike",
       "result": "hit",
       "damage": 10,
       "target_hp": 616
