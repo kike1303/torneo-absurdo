@@ -1,4 +1,5 @@
-//! Loader of `content/characters` (003 RF12, RF13).
+//! Loader of `content/characters` (003 RF12, RF13) and of the player catalog `content/catalog`
+//! (016, [`load_catalog`]).
 //!
 //! Contract: this crate only does I/O and conversion. Every game rule (ranges, budget,
 //! uniqueness and code patterns) lives in the engine (`CharacterSpec::validate`,
@@ -19,9 +20,11 @@ use std::path::{Path, PathBuf};
 
 use engine::{CharacterSpec, Ruleset, is_valid_slug};
 
+mod catalog;
 mod error;
 mod file;
 
+pub use catalog::{Catalog, CatalogAbility, CatalogAccessory, NAME_MAX_CHARS, Style, load_catalog};
 pub use error::ContentError;
 
 use file::CharacterFile;

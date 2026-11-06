@@ -992,12 +992,13 @@ function checkWebCharacters(text, problems) {
   } else if (builds !== -1 && (copies[0] ?? 0) > builds) {
     problems.push(`${file}: web-characters: COPY ${required} must come before the build`);
   }
-  // The build reads only the characters of content/, and copies by name.
+  // The build reads only the characters and the 3D models (013) of content/, and copies by name.
+  const models = 'content/models content/models';
   for (const { line, keyword, args } of build) {
     const wide =
       keyword === 'COPY' && /(?:^|\s)(?:\.\/?|\/|\*)(?:\s|$)/.test(args.replace(/\s\S+$/, ' '));
     const content = (keyword === 'COPY' || keyword === 'ADD') && /\bcontent\b/.test(args);
-    if (keyword === 'ADD' || wide || (content && args !== required)) {
+    if (keyword === 'ADD' || wide || (content && args !== required && args !== models)) {
       problems.push(`${file}:${line}: web-characters: ${keyword} ${args} is not allowed`);
     }
   }

@@ -1,27 +1,24 @@
 ---
 name: review-pr
-description: Review a Torneo Absurdo pull request as a specific agent (qa-engineer, architect, security-reviewer, devops-engineer) using REVIEW.md, and post a signed comment with findings and verdict via gh. Use when a PR is open and needs that agent's review.
+description: Review a Torneo Absurdo pull request as the reviewer or security-reviewer agent using REVIEW.md, and post one signed comment with findings and verdict via gh. Use when a PR is open and needs its review pass.
 ---
 
 # Revisar un PR
 
 ## Procedimiento
 1. `gh pr view <n> --json title,body,files,headRefName` y `gh pr diff <n>`.
-2. Lee el `plan.md` y la `spec.md` enlazados, y [REVIEW.md](../../../REVIEW.md).
-3. Aplica **solo los pases de tu rol**:
-   - qa-engineer: Bugs, Cumplimiento
-   - architect: Cumplimiento, Determinismo, límites entre módulos
-   - security-reviewer: Seguridad
-   - devops-engineer: infra, CI (incluye la estimación de minutos), Dockerfiles
-   - frontend-engineer (si se le pide): i18n y UI
+2. Lee el `feature.md` enlazado (si hay) y [REVIEW.md](../../../REVIEW.md).
+3. Aplica tu rol: `reviewer` hace todos los pases salvo Seguridad; `security-reviewer`, solo Seguridad.
 4. Cada hallazgo: `[Pase][Important|Nit] archivo:línea — problema — escenario concreto — sugerencia`. Como máximo 5 nits; el resto se resume como un conteo.
 5. Veredicto: `APPROVE` (sin Important), `REQUEST_CHANGES` (al menos un Important) o `COMMENT`.
+
+En una segunda ronda revisa solo lo que cambió para atender tus hallazgos.
 
 ## Publicar
 Un solo comentario por agente y ronda:
 
 ```bash
-gh pr comment <n> --body-file /tmp/review-<agente>.md
+gh pr comment <n> --body-file <archivo temporal>
 ```
 
 Formato del cuerpo:

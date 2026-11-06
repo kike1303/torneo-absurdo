@@ -14,10 +14,11 @@ import ts from 'typescript-eslint';
 const CLOCK_MESSAGE =
   'Time comes from the injected clock (RF-A11) and randomness from src/fx/prng.ts (RF-A10).';
 const DOM_MESSAGE =
-  'The pure core (manifest, timeline, scene, fx, player, stats, guide) has no DOM (RF-A3).';
+  'The pure core (manifest, timeline, scene, fx, player, stats, guide, model) has no DOM (RF-A3).';
 const FRAMEWORK_MESSAGE =
   'The renderer is framework agnostic and decoupled from the protocol (RF-A3).';
 const PIXI_MESSAGE = 'Only src/stage/ imports pixi.js; the pure core never does (RF-A3).';
+const THREE_MESSAGE = 'Only src/three/ imports three; the pure core never does (013).';
 const PIXI_WORKER_MESSAGE =
   'No compressed textures, GIFs nor workers: they need loaders the CSP blocks (ADR-0012 B4.2, plan-a2 decision 11).';
 /** Pixi submodules that pull workers or loaders with workers; forbidden in the whole package. */
@@ -34,6 +35,7 @@ const PURE = [
   'src/player/**/*.ts',
   'src/stats/**/*.ts',
   'src/guide/**/*.ts',
+  'src/model/**/*.ts',
 ];
 
 const clockGlobals = ['Date', 'performance', 'crypto'].map((name) => ({
@@ -79,7 +81,12 @@ function restrictedImports(pure) {
       paths: [
         { name: 'svelte', message: FRAMEWORK_MESSAGE },
         { name: '@torneo/protocol', message: FRAMEWORK_MESSAGE },
-        ...(pure ? [{ name: 'pixi.js', message: PIXI_MESSAGE }] : []),
+        ...(pure
+          ? [
+              { name: 'pixi.js', message: PIXI_MESSAGE },
+              { name: 'three', message: THREE_MESSAGE },
+            ]
+          : []),
         ...PIXI_FORBIDDEN.map((name) => ({ name, message: PIXI_WORKER_MESSAGE })),
       ],
       patterns: [
@@ -87,7 +94,12 @@ function restrictedImports(pure) {
         { regex: '^#lib(?:/|$)', message: FRAMEWORK_MESSAGE },
         // A relative path from packages/renderer never names `packages/`, so match the folder name.
         { group: ['**/protocol-ts/**', '**/apps/web/**'], message: FRAMEWORK_MESSAGE },
-        ...(pure ? [{ group: ['pixi.js/*'], message: PIXI_MESSAGE }] : []),
+        ...(pure
+          ? [
+              { group: ['pixi.js/*'], message: PIXI_MESSAGE },
+              { group: ['three/*'], message: THREE_MESSAGE },
+            ]
+          : []),
         {
           group: PIXI_FORBIDDEN.flatMap((name) => [
             `${name}/**`,

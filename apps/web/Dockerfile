@@ -27,10 +27,12 @@ COPY packages packages
 # Only for the name and the epithet of each fighter (010 RF56): nothing else of content/ is read,
 # and the final stage does not have it.
 COPY content/characters content/characters
+# The 3D botarga (013): the build hashes it into the client assets.
+COPY content/models content/models
 RUN pnpm --filter web build
 
 # distroless/nodejs22-debian13:nonroot, index digest (Node v22.23.4, uid 65532, no shell).
-FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:10747a1323be68f206aed893599d43e6697ad67257e7c42703553f99fbce3d33
+FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:8ad9cc935b7843c4024b7e1487b5ef472c354ea847b97c667023e2618552607e
 WORKDIR /app
 COPY --from=build /app/apps/web/build build/
 # "type": "module" for build/index.js.

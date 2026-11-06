@@ -599,8 +599,8 @@ const CASES = [
     {
       [CI]: [
         [
-          'needs: [changes, policy, rust, web, e2e-server, e2e, e2e-fights, images]',
-          'needs: [changes, rust, web, e2e-server, e2e, e2e-fights, images]',
+          'needs: [changes, policy, rust, web, e2e-server, e2e, images]',
+          'needs: [changes, rust, web, e2e-server, e2e, images]',
         ],
       ],
     },
@@ -878,50 +878,13 @@ const UPLOAD_PATHS =
 
 /** @type {[string, Record<string, [string, string][]>, RegExp][]} */
 const E2E_CASES = [
-  // 010 plan-d decision 16: the job of the real fights takes the same rules as `e2e`.
-  [
-    'e2e-fights outside ci-ok',
-    {
-      [CI]: [
-        [
-          '[changes, policy, rust, web, e2e-server, e2e, e2e-fights, images]',
-          '[changes, policy, rust, web, e2e-server, e2e, images]',
-        ],
-      ],
-    },
-    /ci-ok: jobs\.ci-ok must need every other job/,
-  ],
-  [
-    'e2e-fights with another if',
-    {
-      [CI]: [
-        [
-          "  e2e-fights:\n    needs: [changes, e2e-server]\n    if: needs.changes.outputs.e2e == 'true'\n",
-          "  e2e-fights:\n    needs: [changes, e2e-server]\n    if: needs.changes.outputs.web == 'true'\n",
-        ],
-      ],
-    },
-    /e2e-server-if: jobs\.e2e-fights must run with if:/,
-  ],
-  [
-    'e2e-fights uploading the canaries',
-    {
-      [CI]: [
-        [
-          '          name: e2e-fights-screenshots-and-logs\n          path: |\n            apps/web/test-results/screenshots\n            apps/web/test-results/logs\n            !apps/web/test-results/logs/dynamic-canaries.txt\n',
-          '          name: e2e-fights-screenshots-and-logs\n          path: |\n            apps/web/test-results/screenshots\n            apps/web/test-results/logs\n',
-        ],
-      ],
-    },
-    /upload-canaries: jobs\.e2e-fights/,
-  ],
   [
     'e2e-server outside ci-ok',
     {
       [CI]: [
         [
-          '[changes, policy, rust, web, e2e-server, e2e, e2e-fights, images]',
-          '[changes, policy, rust, web, e2e, e2e-fights, images]',
+          '[changes, policy, rust, web, e2e-server, e2e, images]',
+          '[changes, policy, rust, web, e2e, images]',
         ],
       ],
     },
@@ -1684,14 +1647,7 @@ describe('ci.yml filters cover what each job runs (review of PR #5)', () => {
     .filter(([, , filter]) => filter);
 
   it('finds the gated jobs', () => {
-    expect(jobs.map(([id]) => id).sort()).toEqual([
-      'e2e',
-      'e2e-fights',
-      'e2e-server',
-      'images',
-      'rust',
-      'web',
-    ]);
+    expect(jobs.map(([id]) => id).sort()).toEqual(['e2e', 'e2e-server', 'images', 'rust', 'web']);
   });
 
   it.each(jobs)('every script that %s runs is in its filter', (_id, job, filter) => {

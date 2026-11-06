@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use sqlx::PgPool;
-use sqlx::migrate::Migrator;
+use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use tokio::time::Instant;
 
@@ -133,12 +133,35 @@ where
 pub async fn migrate(pool: &PgPool) -> Result<(), StartupError> {
     let mut migrator = sqlx::migrate!("./migrations");
     migrator.set_ignore_missing(true);
-    let migrated = migrator.run(pool).await.is_ok() && warn_if_ahead(pool, &migrator).await.is_ok();
-    if !migrated {
-        tracing::error!(event = "db.migrate_failed");
+    let migrated = match migrator.run(pool).await {
+        Ok(()) => warn_if_ahead(pool, &migrator)
+            .await
+            .map_err(|error| error_kind(&error)),
+        Err(error) => Err(migrate_error_kind(&error)),
+    };
+    if let Err(kind) = migrated {
+        tracing::error!(event = "db.migrate_failed", error_kind = kind);
         return Err(StartupError::Migrate);
     }
     Ok(())
+}
+
+/// The kind of a migration error, as a code from a closed set (TA-47). Never its `Display`,
+/// which carries the versions and, for a failed migration, Postgres' text.
+pub fn migrate_error_kind(error: &MigrateError) -> &'static str {
+    match error {
+        // The database itself failed (down, closed pool, …): the kind of the inner error.
+        MigrateError::Execute(error) => error_kind(error),
+        // The SQL of a migration failed while it was applied.
+        MigrateError::ExecuteMigration(..) => "migration_failed",
+        // A version this image knows was applied with other content.
+        MigrateError::VersionMismatch(_) => "checksum_mismatch",
+        // A row marked as failed in `_sqlx_migrations`.
+        MigrateError::Dirty(_) => "migration_dirty",
+        MigrateError::VersionMissing(_) => "version_missing",
+        MigrateError::Source(_) => "migration_source",
+        _ => "other",
+    }
 }
 
 /// Logs `db.migrations_ahead` if the database has versions that `migrator` does not know.
@@ -215,6 +238,26 @@ mod tests {
         assert_eq!(result, Err(StartupError::DbUnavailable));
         assert_eq!(origin.elapsed(), Duration::from_secs(9));
         assert_eq!(*starts.lock().unwrap(), [0, 2000, 4000, 6000, 8000]);
+    }
+
+    #[test]
+    fn migrate_errors_have_a_kind_each() {
+        let cases = [
+            (MigrateError::Execute(sqlx::Error::PoolClosed), "pool"),
+            (MigrateError::Execute(sqlx::Error::PoolTimedOut), "timeout"),
+            (
+                MigrateError::ExecuteMigration(sqlx::Error::Protocol("x".into()), 1),
+                "migration_failed",
+            ),
+            (MigrateError::VersionMismatch(1), "checksum_mismatch"),
+            (MigrateError::Dirty(1), "migration_dirty"),
+            (MigrateError::VersionMissing(1), "version_missing"),
+            (MigrateError::Source("x".into()), "migration_source"),
+            (MigrateError::VersionNotPresent(1), "other"),
+        ];
+        for (error, kind) in cases {
+            assert_eq!(migrate_error_kind(&error), kind, "{error:?}");
+        }
     }
 
     #[tokio::test(start_paused = true)]
