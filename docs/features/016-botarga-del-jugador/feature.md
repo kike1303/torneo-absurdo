@@ -64,6 +64,12 @@ La regla de daño es la de hoy y no cambia: si el elemento del ataque está entr
 
 `--check` corre una versión chica en `just check`; el informe completo, a mano.
 
+Ajustes de la implementación (fase 3):
+- Cada build llena todas las ranuras que su nivel abre, como haría un jugador. Por eso el criterio "por número de ranuras" no se juzga: con más ataques se gana más (con 1 ranura, 27 %; con 4, 73 %), y eso es progresión, no un desbalance dentro de un nivel.
+- La dominancia se mide entre las builds escaladas, no contra la población al azar, que tiene muchas builds flojas. La ganadora se vuelve a medir con semillas nuevas.
+- Con el catálogo ajustado por el `game-designer`, el nivel 100 pasa sin fallos con dos semillas, y la mejor build queda entre 53 % y 65 %.
+- En niveles bajos queda dominancia (nivel 30: 66-68 %; nivel 5: 66-72 %) y, en el nivel 5, la mezcla de tipos (1 pesado y 1 especial: 58 %; 2 pesados: 40 %). El contenido ya no lo arregla; son reglas del motor (ver Preguntas abiertas).
+
 Además, win rate por banda de nivel contra la misma banda (que ningún nivel tenga una build rota) y la ventaja de 10 niveles de diferencia, para fijar cuánta distancia de nivel tolera el emparejamiento.
 
 **Mínimo de stats** (v2, a medir): con `stat_min = 1` se puede volcar todo en pocos stats; conviene un mínimo de 20 por stat (el roster va de 30 a 95). Con 200 de presupuesto en el nivel 1 cabe.
@@ -87,7 +93,7 @@ Además, win rate por banda de nivel contra la misma banda (que ningún nivel te
 - [x] Motor: v2 rechaza 3 especiales o 3 pesados; en cada elección, el peso de un tipo es el mismo con 1 o 2 habilidades disponibles; los logs v1 se re-simulan idénticos. A lo largo de una pelea, una segunda habilidad sí cubre el cooldown de la primera y el tipo sale algo más: lo mide `just sim --builds` (win rate por número de ranuras).
 - [x] Un accesorio que suma puntos netos o pasa el tope por stat se rechaza; una build con más de 2 debilidades también.
 - [ ] Sorteo: las 3 opciones nunca incluyen un ataque que el jugador ya tiene, y reintentar devuelve las mismas.
-- [ ] `just sim --check` (torneo, v1) y `just sim --builds N --check` (v2) pasan.
+- [x] `just sim --check` (torneo, v1) y `just sim --builds 2000 --fights 50000 --check` (v2, nivel 100) pasan; una versión chica corre en `just check`.
 - [ ] Renderer: con `FighterCosmetics` salen la victoria y el idle elegidos; sin ellos, lo de hoy; el KO es el mismo en dos cargas de la misma pelea.
 
 ## Respuestas del owner (2026-11-05)
@@ -102,3 +108,7 @@ Además, win rate por banda de nivel contra la misma banda (que ningún nivel te
 - Estilo de pelea de una lista fija: sí.
 - Debilidades según los ataques elementales equipados: sí.
 - La regla de daño elemental queda como hoy (×5/4 contra una debilidad).
+
+## Preguntas abiertas al owner
+1. **Peso del tipo vacío (v2):** con pocas ranuras, el peso de un tipo sin ataques disponibles se pierde, y tener un ataque de cada tipo gana más. ¿Ese peso pasa al golpe básico o al otro tipo?
+2. **Stat especial (v2):** cuenta tres veces (ataque y defensa de los especiales y probabilidad de crítico), y por eso domina en las builds optimizadas. ¿Que el crítico dependa de la velocidad, o que la defensa contra especiales use la defensa?

@@ -11,25 +11,25 @@
     {
       "id": "aggressive",
       "personality": {
-        "aggression": 75,
-        "caution": 30,
-        "showmanship": 45
+        "aggression": 70,
+        "caution": 45,
+        "showmanship": 50
       }
     },
     {
       "id": "defensive",
       "personality": {
-        "aggression": 35,
-        "caution": 80,
+        "aggression": 40,
+        "caution": 70,
         "showmanship": 35
       }
     },
     {
       "id": "showman",
       "personality": {
-        "aggression": 30,
+        "aggression": 35,
         "caution": 35,
-        "showmanship": 85
+        "showmanship": 70
       }
     }
   ]

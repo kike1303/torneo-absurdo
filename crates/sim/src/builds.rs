@@ -32,7 +32,7 @@ pub const BUILDS_RULESET_VERSION: u16 = 2;
 
 /// Opponents a climbing build is scored against, each in both orientations.
 pub const CLIMB_OPPONENTS: u32 = 40;
-/// Steps of each climb.
+/// Steps of each climb on the command line.
 pub const CLIMB_STEPS: u32 = 30;
 /// Most climbs: one every 10 builds, up to this.
 pub const CLIMBS_MAX: u32 = 200;
@@ -48,13 +48,24 @@ pub struct BuildsConfig {
     pub fights: u32,
     pub level: u8,
     pub seed: [u8; 32],
+    /// Hill climbs (at most `builds`) and steps of each.
+    pub climbs: u32,
+    pub climb_steps: u32,
 }
 
 impl BuildsConfig {
-    /// One climb every 10 builds, at least 1 and at most [`CLIMBS_MAX`].
+    /// The command line's: one climb every 10 builds (from 1 to [`CLIMBS_MAX`]) of
+    /// [`CLIMB_STEPS`] steps.
     #[must_use]
-    pub fn climbs(&self) -> u32 {
-        (self.builds / 10).clamp(1, CLIMBS_MAX)
+    pub fn new(builds: u32, fights: u32, level: u8, seed: [u8; 32]) -> Self {
+        Self {
+            builds,
+            fights,
+            level,
+            seed,
+            climbs: (builds / 10).clamp(1, CLIMBS_MAX),
+            climb_steps: CLIMB_STEPS,
+        }
     }
 }
 
@@ -137,6 +148,7 @@ pub struct BuildsReport {
     pub builds: u32,
     pub fights: u32,
     pub climbs: u32,
+    pub climb_steps: u32,
     pub time_up_permille: u32,
     pub in_band_permille: u32,
     pub draw_permille: u32,
@@ -209,8 +221,8 @@ impl BuildsReport {
         );
         let _ = writeln!(
             s,
-            "{} builds at level {}, {} fights, {} climbs of {CLIMB_STEPS} steps",
-            self.builds, self.level, self.fights, self.climbs
+            "{} builds at level {}, {} fights, {} climbs of {} steps",
+            self.builds, self.level, self.fights, self.climbs, self.climb_steps
         );
         let _ = writeln!(
             s,
@@ -278,15 +290,20 @@ struct Build {
 /// Runs the builds report.
 ///
 /// # Errors
-/// [`SimError::BuildsTooFew`] with fewer than 2 builds, no fights or a level outside
-/// `1..=LEVEL_MAX`, [`SimError::BuildsDraw`] if the catalog cannot produce a valid build, and the
+/// [`SimError::BuildsTooFew`] with fewer than 2 builds, no fights, no climbs or more climbs than
+/// builds, or a level outside `1..=LEVEL_MAX`, [`SimError::BuildsDraw`] if the catalog cannot produce a valid build, and the
 /// errors of the engine.
 pub fn run_builds(
     config: &BuildsConfig,
     catalog: &Catalog,
     ruleset: &Ruleset,
 ) -> Result<BuildsReport, SimError> {
-    if config.builds < 2 || loadout::tier(config.level).is_none() || config.fights == 0 {
+    if config.builds < 2
+        || loadout::tier(config.level).is_none()
+        || config.fights == 0
+        || config.climbs == 0
+        || config.climbs > config.builds
+    {
         return Err(SimError::BuildsTooFew);
     }
     let mut rng = ChaCha20Rng::from_seed(config.seed);
@@ -341,7 +358,7 @@ pub fn run_builds(
         })
         .collect();
 
-    let climbs = config.climbs();
+    let climbs = config.climbs;
     let opponents: Vec<u32> = (0..CLIMB_OPPONENTS.min(config.builds))
         .map(|_| pick(&mut rng, config.builds))
         .collect();
@@ -354,7 +371,7 @@ pub fn run_builds(
     for c in 0..climbs {
         let mut current = build(&builds, c % config.builds)?.clone();
         let mut score = evaluate(&current.spec, &opponent_specs, &seeds, ruleset)?;
-        for _ in 0..CLIMB_STEPS {
+        for _ in 0..config.climb_steps {
             let Some(candidate) = mutate(&mut rng, &current, catalog, config.level, ruleset) else {
                 continue;
             };
@@ -424,6 +441,7 @@ pub fn run_builds(
         builds: config.builds,
         fights: config.fights,
         climbs,
+        climb_steps: config.climb_steps,
         time_up_permille: permille(time_up, total),
         in_band_permille: permille(in_band, total),
         draw_permille: permille(draws, total),
@@ -727,4 +745,157 @@ fn mutate(
         style,
         spec,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn catalog() -> Catalog {
+        let root =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../content/catalog");
+        content::load_catalog(&root, &v2()).unwrap()
+    }
+
+    fn v2() -> Ruleset {
+        Ruleset::for_version(BUILDS_RULESET_VERSION).unwrap()
+    }
+
+    fn small(level: u8) -> BuildsConfig {
+        BuildsConfig {
+            builds: 40,
+            fights: 200,
+            level,
+            seed: crate::DEFAULT_SEED,
+            climbs: 2,
+            climb_steps: 3,
+        }
+    }
+
+    #[test]
+    fn the_same_config_gives_the_same_report() {
+        let (catalog, r) = (catalog(), v2());
+        let first = run_builds(&small(100), &catalog, &r).unwrap();
+        assert_eq!(first, run_builds(&small(100), &catalog, &r).unwrap());
+        let mut other = small(100);
+        other.seed[0] ^= 1;
+        assert_ne!(first, run_builds(&other, &catalog, &r).unwrap());
+    }
+
+    #[test]
+    fn builds_fill_the_open_slots_of_their_level_and_are_valid() {
+        let (catalog, r) = (catalog(), v2());
+        let mut rng = ChaCha20Rng::from_seed(crate::DEFAULT_SEED);
+        for level in [1, 5, 15, 30, 100] {
+            for i in 0..50 {
+                let b = draw_build(&mut rng, &catalog, level, i, &r).unwrap();
+                assert_eq!(
+                    b.loadout.abilities.len(),
+                    loadout::slots(level),
+                    "level {level}"
+                );
+                assert_eq!(loadout::resolve(&b.loadout, &r).unwrap(), b.spec);
+                let tier = loadout::tier(level).unwrap();
+                for a in &b.loadout.abilities {
+                    let entry = catalog
+                        .abilities
+                        .iter()
+                        .find(|c| c.ability.id == a.id)
+                        .unwrap();
+                    assert!(entry.tier <= tier, "{} at level {level}", a.id);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mutations_keep_builds_valid() {
+        let (catalog, r) = (catalog(), v2());
+        let mut rng = ChaCha20Rng::from_seed(crate::DEFAULT_SEED);
+        let mut current = draw_build(&mut rng, &catalog, 100, 0, &r).unwrap();
+        let mut changed = 0;
+        for _ in 0..200 {
+            if let Some(next) = mutate(&mut rng, &current, &catalog, 100, &r) {
+                assert_eq!(loadout::resolve(&next.loadout, &r).unwrap(), next.spec);
+                assert_eq!(next.loadout.abilities.len(), 4);
+                current = next;
+                changed += 1;
+            }
+        }
+        assert!(changed > 100, "{changed}");
+    }
+
+    #[test]
+    fn invalid_configs() {
+        let (catalog, r) = (catalog(), v2());
+        for change in [
+            (|c: &mut BuildsConfig| c.builds = 1) as fn(&mut BuildsConfig),
+            |c| c.fights = 0,
+            |c| c.level = 0,
+            |c| c.level = 101,
+            |c| c.climbs = 0,
+            |c| c.climbs = 41,
+        ] {
+            let mut config = small(100);
+            change(&mut config);
+            assert_eq!(
+                run_builds(&config, &catalog, &r),
+                Err(SimError::BuildsTooFew),
+                "{config:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn pick_is_in_range_and_covers_it() {
+        let mut rng = ChaCha20Rng::from_seed(crate::DEFAULT_SEED);
+        let mut seen = [false; 7];
+        for _ in 0..500 {
+            let x = pick(&mut rng, 7);
+            assert!(x < 7);
+            seen[usize::try_from(x).unwrap()] = true;
+        }
+        assert!(seen.iter().all(|&s| s));
+        assert_eq!(pick(&mut rng, 1), 0);
+        assert_eq!(pick(&mut rng, 0), 0);
+    }
+
+    #[test]
+    fn failures_follow_the_criteria() {
+        let report = run_builds(&small(100), &catalog(), &v2()).unwrap();
+        let strict = BuildsCriteria {
+            group_min_permille: 1000,
+            group_max_permille: 1000,
+            group_min_appearances: 0,
+            dominant_max_permille: 0,
+            time_up_max_permille: 0,
+            in_band_min_permille: 1001,
+        };
+        let failures = report.failures(&strict);
+        assert!(
+            failures
+                .iter()
+                .any(|f| matches!(f, BuildsFailure::Dominant { .. }))
+        );
+        assert!(
+            failures
+                .iter()
+                .any(|f| matches!(f, BuildsFailure::InBand { .. }))
+        );
+        assert!(
+            failures
+                .iter()
+                .any(|f| matches!(f, BuildsFailure::GroupWinRate { .. }))
+        );
+        let lax = BuildsCriteria {
+            group_min_permille: 0,
+            group_max_permille: 1000,
+            group_min_appearances: 0,
+            dominant_max_permille: 1000,
+            time_up_max_permille: 1000,
+            in_band_min_permille: 0,
+        };
+        assert!(report.failures(&lax).is_empty());
+        assert!(report.render_text(&lax).contains("0 failure(s)"));
+    }
 }

@@ -135,12 +135,7 @@ fn run_builds(args: &Args, builds: u32) -> ExitCode {
             return ExitCode::from(EXIT_ERROR);
         }
     };
-    let config = BuildsConfig {
-        builds,
-        fights: args.fights,
-        level: args.level,
-        seed: args.seed,
-    };
+    let config = BuildsConfig::new(builds, args.fights, args.level, args.seed);
     let start = Instant::now();
     let report = match sim::builds::run_builds(&config, &catalog, &ruleset) {
         Ok(report) => report,
