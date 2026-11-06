@@ -15,7 +15,7 @@
 //! (ADR-0002).
 use engine::{CharacterSpec, Ruleset, Seed, SpecError, canonical_json, simulate};
 use rand_chacha::ChaCha20Rng;
-use rand_chacha::rand_core::{RngCore, SeedableRng};
+use rand_chacha::rand_core::{Rng, SeedableRng};
 
 pub mod args;
 pub mod builds;

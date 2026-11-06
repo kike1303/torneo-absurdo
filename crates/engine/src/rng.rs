@@ -4,7 +4,7 @@
 use std::num::NonZeroU32;
 
 use rand_chacha::ChaCha20Rng;
-use rand_chacha::rand_core::{RngCore, SeedableRng};
+use rand_chacha::rand_core::{Rng, SeedableRng};
 
 use crate::Seed;
 
@@ -27,7 +27,7 @@ impl Roller<ChaCha20Rng> {
     }
 }
 
-impl<R: RngCore> Rolls for Roller<R> {
+impl<R: Rng> Rolls for Roller<R> {
     /// Uniform in `0..n`: `zone = (2^32 / n) * n` computed in `u64`; `x >= zone` is discarded
     /// and `x mod n` returned.
     fn roll(&mut self, n: NonZeroU32) -> u32 {
@@ -54,6 +54,8 @@ pub(crate) const fn bound(n: u32) -> NonZeroU32 {
 mod tests {
     use std::collections::VecDeque;
 
+    use rand_chacha::rand_core::{Infallible, TryRng};
+
     use super::*;
 
     /// Returns the queued values in order (then zeros) and counts the draws.
@@ -71,16 +73,19 @@ mod tests {
         }
     }
 
-    impl RngCore for Fixed {
-        fn next_u32(&mut self) -> u32 {
+    /// `Rng` comes from `TryRng` with an infallible error (rand_core 0.10).
+    impl TryRng for Fixed {
+        type Error = Infallible;
+        fn try_next_u32(&mut self) -> Result<u32, Infallible> {
             self.draws += 1;
-            self.values.pop_front().unwrap_or(0)
+            Ok(self.values.pop_front().unwrap_or(0))
         }
-        fn next_u64(&mut self) -> u64 {
-            u64::from(self.next_u32())
+        fn try_next_u64(&mut self) -> Result<u64, Infallible> {
+            self.try_next_u32().map(u64::from)
         }
-        fn fill_bytes(&mut self, dst: &mut [u8]) {
+        fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Infallible> {
             dst.fill(0);
+            Ok(())
         }
     }
 
@@ -123,6 +128,16 @@ mod tests {
     fn bound_never_returns_zero() {
         assert_eq!(bound(0).get(), 1);
         assert_eq!(bound(1000).get(), 1000);
+    }
+
+    /// Pins the ChaCha20 stream itself: the first words for the zero seed are the ChaCha20
+    /// keystream of RFC 8439 with a zero key and nonce. A dependency bump that changes them would
+    /// change every fight.
+    #[test]
+    fn the_chacha_stream_is_pinned() {
+        let mut rng = ChaCha20Rng::from_seed([0; 32]);
+        let words: Vec<u32> = (0..4).map(|_| rng.next_u32()).collect();
+        assert_eq!(words, [0xade0_b876, 0x903d_f1a0, 0xe56a_5d40, 0x28bd_8653]);
     }
 
     #[test]

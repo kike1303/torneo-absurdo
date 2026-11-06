@@ -58,7 +58,8 @@ base64 = "=0.23.1"
 # Session token hashes and ip_hash (008 phase B; already in the lock via sqlx, digest 0.11).
 sha2 = "=0.11.1"
 hmac = "=0.13.0"
-# OsRng for tokens, state, code_verifier and the alias (008 phase B; the line of rand_chacha 0.9).
+# OsRng for tokens, state, code_verifier and the alias (008 phase B). Stays on 0.9: rand_core 0.10
+# (the line of rand_chacha 0.10) dropped OsRng for getrandom::SysRng (TA-58).
 rand_core = { version = "=0.9.5", default-features = false, features = ["os_rng"] }
 # display_name (008 RF-B7): NFC/NFKC, graphemes, UTS #39 skeleton and full case folding.
 unicode-normalization = "=0.1.26"
