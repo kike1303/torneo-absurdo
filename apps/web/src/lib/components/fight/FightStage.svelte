@@ -404,7 +404,7 @@
       refresh();
       if (onsnapshot !== undefined) {
         watchSnapshots();
-        watchContext(container);
+        watchContext(container, handle);
       }
     } catch (error) {
       if (id !== run) return;
