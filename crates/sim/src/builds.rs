@@ -166,6 +166,9 @@ pub struct MomentCounts {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Dominant {
     pub win_permille: u32,
+    /// Half points and the most it could get, for the exact comparison.
+    pub points: u64,
+    pub total: u64,
     pub abilities: Vec<String>,
     pub accessories: Vec<String>,
     pub style: String,
@@ -233,7 +236,11 @@ impl BuildsReport {
                 });
             }
         }
-        if self.dominant.win_permille > c.dominant_max_permille {
+        if !at_most(
+            self.dominant.points,
+            self.dominant.total,
+            c.dominant_max_permille,
+        ) {
             out.push(BuildsFailure::Dominant {
                 permille: self.dominant.win_permille,
             });
@@ -492,19 +499,23 @@ pub fn run_builds(
         .filter(|b| b.loadout.slug != top.loadout.slug)
         .map(|b| &b.spec)
         .collect();
-    let mut win_permille = 500;
-    if !others.is_empty() {
-        let (mut sum, mut rounds) = (0_u64, 0_u64);
+    let (mut points, mut total) = (0_u64, 0_u64);
+    if others.is_empty() {
+        (points, total) = (1, 2);
+    } else {
         for _ in 0..DOMINANT_ROUNDS {
             let fresh: Vec<[u8; 32]> = others.iter().map(|_| next_seed(&mut rng)).collect();
-            sum += u64::from(evaluate(&top.spec, &others, &fresh, ruleset)?);
-            rounds += 1;
+            let (p, t) = evaluate_points(&top.spec, &others, &fresh, ruleset)?;
+            points += p;
+            total += t;
         }
-        win_permille = u32::try_from(sum / rounds).unwrap_or(u32::MAX);
     }
+    let win_permille = permille(points, total);
     let s = top.spec.stats;
     let dominant = Dominant {
         win_permille,
+        points,
+        total,
         abilities: top.loadout.abilities.iter().map(|a| a.id.clone()).collect(),
         accessories: top
             .loadout
@@ -606,6 +617,18 @@ fn evaluate(
     seeds: &[[u8; 32]],
     ruleset: &Ruleset,
 ) -> Result<u32, SimError> {
+    let (points, total) = evaluate_points(candidate, opponents, seeds, ruleset)?;
+    Ok(permille(points, total))
+}
+
+/// Half points of `candidate` and the most it could get, against every opponent in both
+/// orientations.
+fn evaluate_points(
+    candidate: &CharacterSpec,
+    opponents: &[&CharacterSpec],
+    seeds: &[[u8; 32]],
+    ruleset: &Ruleset,
+) -> Result<(u64, u64), SimError> {
     let (mut points, mut total) = (0_u64, 0_u64);
     for (&other, &seed) in opponents.iter().zip(seeds) {
         for (a, b, side) in [(candidate, other, Side::A), (other, candidate, Side::B)] {
@@ -618,7 +641,7 @@ fn evaluate(
             total += 2;
         }
     }
-    Ok(permille(points, total))
+    Ok((points, total))
 }
 
 /// A uniform value in `0..n` by rejection sampling (`0` when `n <= 1`).
@@ -765,8 +788,18 @@ fn draw_build(
         let low = n.saturating_sub(2);
         let high = n.min(2);
         let h = low + pick(rng, high - low + 1);
-        let mut abilities = choose(rng, &heavies, h);
-        abilities.extend(choose(rng, &specials, n - h));
+        let mut abilities = if loadout::draws(level) == 0 {
+            // Before the first draw the player only owns the starter.
+            catalog
+                .starter()
+                .map(|s| vec![s.ability.clone()])
+                .unwrap_or_default()
+        } else {
+            choose(rng, &heavies, h)
+        };
+        if loadout::draws(level) > 0 {
+            abilities.extend(choose(rng, &specials, n - h));
+        }
         if abilities.len() != usize::try_from(n).unwrap_or(0) {
             continue;
         }
@@ -840,6 +873,10 @@ fn mutate(
     let mut style = current.style.clone();
     match pick(rng, 4) {
         0 => {
+            // Before the first draw the starter is the only ability.
+            if loadout::draws(level) == 0 {
+                return None;
+            }
             let n = u32::try_from(next.abilities.len()).ok()?;
             let i = usize::try_from(pick(rng, n)).ok()?;
             let kind = next.abilities.get(i)?.kind;

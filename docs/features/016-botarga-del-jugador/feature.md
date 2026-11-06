@@ -70,7 +70,12 @@ Ajustes de la implementación (fase 3):
 - También se juzgan los momentos de RF17: al menos 15 % de peleas con alguno y 3 % con cada tipo.
 - Por encima del nivel 10 se informa cuánto pesan 10 niveles de diferencia; no se juzga. Es el dato que necesita el emparejamiento del PvP: el nivel 100 le gana al 90 el 58 % de las veces, y el 30 al 20, el 65 %.
 - Con el catálogo ajustado por el `game-designer`, el nivel 100 pasa sin fallos con dos semillas, y la mejor build queda entre 53 % y 65 %. Es la versión chica que corre en `just check`.
-- En niveles bajos los resultados son informativos. En el nivel 30, la mejor build escalada gana el 66 %. El nivel 5 es atípico porque se pelea con un solo ataque: al pesado de fuego (`spicy_slap`) le va 61 %, la mejor build escalada gana el 79 % y las remontadas bajan al 2 %. El contenido ya no lo arregla; son reglas del motor (ver Preguntas abiertas).
+- En niveles bajos los resultados son informativos:
+  - Nivel 30: la mejor build escalada gana el 66 %.
+  - Nivel 10, con 2 ataques: la mezcla de 1 pesado y 1 especial gana el 59 % y la de 2 pesados, el 40 %.
+  - Nivel 5: todos llevan solo el ataque inicial, así que la build se diferencia solo por stats, accesorios y estilo. La mejor escalada gana el 79 % y las remontadas bajan al 2 %.
+
+  El contenido ya no lo arregla; son reglas del motor (ver Preguntas abiertas).
 
 Además, win rate por banda de nivel contra la misma banda (que ningún nivel tenga una build rota) y la ventaja de 10 niveles de diferencia, para fijar cuánta distancia de nivel tolera el emparejamiento.
 
@@ -112,5 +117,5 @@ Además, win rate por banda de nivel contra la misma banda (que ningún nivel te
 - La regla de daño elemental queda como hoy (×5/4 contra una debilidad).
 
 ## Preguntas abiertas al owner
-1. **Peso del tipo vacío (v2):** con pocas ranuras, el peso de un tipo sin ataques disponibles se pierde (en el nivel 5, un pesado gana 55 % contra un especial). ¿Ese peso pasa al golpe básico o al otro tipo?
+1. **Peso del tipo vacío (v2):** con pocas ranuras, el peso de un tipo sin ataques disponibles se pierde (en el nivel 10, la mezcla de 1 pesado y 1 especial gana el 59 % y la de 2 pesados, el 40 %). ¿Ese peso pasa al golpe básico o al otro tipo?
 2. **Stat especial (v2):** cuenta tres veces (ataque y defensa de los especiales y probabilidad de crítico), y por eso domina en las builds optimizadas. ¿Que el crítico dependa de la velocidad, o que la defensa contra especiales use la defensa?
