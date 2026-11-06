@@ -41,7 +41,7 @@ fn the_real_catalog_loads_and_validates() {
         catalog.abilities.len()
     );
     // Draws only reach the tier of the level, so each tier must cover its own draws: the draws
-    // of the levels of tier t (by 5, minus the slot levels) plus 2, over the abilities of
+    // of the levels of tier t (one every 5) plus 2, over the abilities of
     // tiers <= t.
     for t in 1..=TIERS {
         // The draws made while the level is still in a tier <= t.

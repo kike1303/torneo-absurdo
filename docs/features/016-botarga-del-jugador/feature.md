@@ -105,7 +105,7 @@ Además, win rate por banda de nivel contra la misma banda (que ningún nivel te
 
 ## Pruebas
 - [ ] `just check` en verde.
-- [x] Motor: v2 rechaza 3 especiales o 3 pesados; en cada elección, el peso de un tipo es el mismo con 1 o 2 habilidades disponibles; los logs v1 se re-simulan idénticos. A lo largo de una pelea, una segunda habilidad sí cubre el cooldown de la primera y el tipo sale algo más: lo mide `just sim --builds` (win rate por número de ranuras).
+- [x] Motor: v2 rechaza 3 especiales o 3 pesados; con todas libres, el peso de un tipo es el mismo con 1 o 2 habilidades, y una en cooldown deja fuera su parte; los logs v1 se re-simulan idénticos. A lo largo de una pelea, una segunda habilidad sí cubre el cooldown de la primera y el tipo sale algo más: lo mide `just sim --builds` (win rate por número de ranuras).
 - [x] Un accesorio que suma puntos netos o pasa el tope por stat se rechaza; una build con más de 2 debilidades también.
 - [ ] Sorteo: las 3 opciones nunca incluyen un ataque que el jugador ya tiene, y reintentar devuelve las mismas.
 - [x] `just sim --check` (torneo, v1) y `just sim --builds 2000 --fights 50000 --check` (v2, nivel 100) pasan; una versión chica corre en `just check`.
