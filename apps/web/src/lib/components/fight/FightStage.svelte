@@ -4,12 +4,13 @@
 
 <script lang="ts">
   // The only file that imports values from the renderer (ADR-0009 D4), and only with `import()`
-  // on mount, so Pixi never reaches another chunk (RF-A16, RF-A17).
+  // on mount, so Pixi and Three never reach another chunk (RF-A16, RF-A17, 013).
   import { onMount, untrack } from 'svelte';
   import type {
     FrameStats,
     RendererErrorCode,
     RendererHandle,
+    RendererOptions,
     RendererSnapshot,
     Side,
   } from '@torneo/renderer';
@@ -19,15 +20,22 @@
   import type { ArenaFighterId, PlaceholderFighterId } from '#lib/features/arena/fighters.js';
   import type { LiveSession } from '#lib/features/fight/live-session.js';
   import type { LocalAssets } from '#lib/features/arena/local-fighters.js';
+  import { loadBotargaModel, preloadBotargaModel } from './botarga-model.js';
   import { formatInteger } from '#lib/i18n/format.js';
   import { m } from '#lib/paraglide/messages.js';
   import { getLocale } from '#lib/paraglide/runtime.js';
   import { theme } from '#lib/theme/theme.svelte.js';
   import { fighterName } from './fighter-name.js';
+  import { startLive, type LiveRun } from './live-host.js';
   import { currentRendererTheme } from './renderer-theme.js';
 
   interface Props {
     fighters: Readonly<Record<Side, ArenaFighterId>>;
+    /**
+     * `3d`: the generic botarga with Three.js (013, the default everywhere). `2d`: the Pixi sprites,
+     * kept hidden (only `/dev/arena?renderer=2d`).
+     */
+    view?: '2d' | '3d';
     /** The "simulate reduced motion" switch; OR-ed with `prefers-reduced-motion`. */
     reducedMotion?: boolean;
     /** Where the paused stage starts (`?t=` on /dev/arena); it plays only on `toggle` (TA-20). */
@@ -52,10 +60,21 @@
      * no pause nor seek. `source`, `retime` and `initialT` do not apply.
      */
     live?: (assets: Readonly<Record<Side, string>>) => Promise<LiveSession>;
+    /** The names to show; without it, those of the arena fighters. */
+    displayNames?: Readonly<Record<Side, string>>;
+    /** Shows the result, "replay" and the status under the stage (the arena). */
+    showResult?: boolean;
+    /** With `live`, every 250 ms: the way the host learns the result (010 plan-d decision 9). */
+    onsnapshot?: (snapshot: RendererSnapshot | null) => void;
+    /** With `live`: the first frame is on screen. */
+    onpainted?: () => void;
+    /** It will not draw: an error, or the WebGL context lost too often (plan-d decision 13). */
+    onfailure?: (code: RendererErrorCode) => void;
   }
 
   let {
     fighters,
+    view = '3d',
     reducedMotion = false,
     initialT = 0,
     debug = false,
@@ -64,7 +83,17 @@
     retime,
     source,
     live,
+    displayNames,
+    showResult = true,
+    onsnapshot,
+    onpainted,
+    onfailure,
   }: Props = $props();
+
+  const SNAPSHOT_MS = 250;
+  /** More lost contexts than this in the window, and the canvas gives up (plan-d decision 13). */
+  const MAX_CONTEXT_LOSSES = 2;
+  const CONTEXT_LOSS_WINDOW_MS = 60_000;
 
   type Loader<T> = () => Promise<{ default: T }>;
   // Loaders by fighter id: the manifest JSON and the URL of each sheet (Vite hashes the PNG).
@@ -97,9 +126,36 @@
   let mounted = $state(false);
   let run = 0;
   let loadedTimeline: Timeline | null = null;
-  let stopLive: (() => void) | null = null;
+  let liveRun: LiveRun | null = null;
+  let snapshotTimer: ReturnType<typeof setInterval> | undefined;
+  let contextLosses: number[] = [];
   /** How long each `extend` took, in ms, for the stats JSON (010 plan-c decision 13). */
   let extendSamples: number[] = [];
+
+  interface RendererModule {
+    create(container: HTMLElement, options: RendererOptions): RendererHandle;
+    isValid(timeline: Timeline): boolean;
+  }
+
+  /** The layer of `view`, loaded with `import()`: Pixi and the sprites, or Three and the botarga. */
+  async function loadRenderer(): Promise<RendererModule> {
+    if (view === '2d') {
+      const pixi = await import('@torneo/renderer');
+      return {
+        create: pixi.createRenderer,
+        isValid: (timeline) => pixi.validateTimeline(timeline).ok,
+      };
+    }
+    const [three, timelines, model] = await Promise.all([
+      import('@torneo/renderer/three'),
+      import('@torneo/renderer/timeline'),
+      loadBotargaModel(),
+    ]);
+    return {
+      create: (container, options) => three.createRenderer3d(container, { ...options, model }),
+      isValid: (timeline) => timelines.validateTimeline(timeline).ok,
+    };
+  }
 
   function isPlaceholder(id: ArenaFighterId): id is PlaceholderFighterId {
     return Object.hasOwn(MANIFESTS, id);
@@ -111,6 +167,20 @@
     if (local === undefined)
       throw Object.assign(new Error('asset_load_failed'), { code: 'asset_load_failed' });
     return local.loadManifest(id);
+  }
+
+  function preloadSheets(ids: readonly ArenaFighterId[]): void {
+    for (const fid of ids) {
+      if (!isPlaceholder(fid)) continue;
+      for (const load of Object.values(SHEETS[fid])) {
+        // A failure here is not one: `loadLive` asks for them again and reports it.
+        void load()
+          .then(({ default: url }) => {
+            new Image().src = url;
+          })
+          .catch(() => undefined);
+      }
+    }
   }
 
   /** The spike script with the assets of each side (the default `source`). */
@@ -126,7 +196,9 @@
     };
   }
 
-  const names = $derived({ a: fighterName(fighters.a), b: fighterName(fighters.b) });
+  const names = $derived(
+    displayNames ?? { a: fighterName(fighters.a), b: fighterName(fighters.b) },
+  );
   const winnerName = $derived(snapshot?.winner ? names[snapshot.winner] : null);
   /** The result text in `finished`, by `ending` (005 RF16): KO, decision or draw. */
   const result = $derived.by((): { testid: string; text: string } | null => {
@@ -146,8 +218,45 @@
   }
 
   function cancelLive(): void {
-    stopLive?.();
-    stopLive = null;
+    liveRun?.cancel();
+    liveRun = null;
+    clearInterval(snapshotTimer);
+    snapshotTimer = undefined;
+  }
+
+  function watchSnapshots(): void {
+    const read = (): void => {
+      refresh();
+      onsnapshot?.(snapshot);
+      if (snapshot?.phase === 'finished') {
+        clearInterval(snapshotTimer);
+        snapshotTimer = undefined;
+      }
+    };
+    read();
+    snapshotTimer = setInterval(read, SNAPSHOT_MS);
+  }
+
+  /**
+   * The scene comes from `t`: a new renderer with the same session is all it takes. A renderer
+   * destroyed on purpose also loses its context (to free it): that loss is not a failure.
+   */
+  function watchContext(container: HTMLElement, handle: RendererHandle): void {
+    container.querySelector('canvas')?.addEventListener(
+      'webglcontextlost',
+      (event) => {
+        if (renderer !== handle) return;
+        event.preventDefault();
+        const now = performance.now();
+        contextLosses = [...contextLosses.filter((at) => now - at < CONTEXT_LOSS_WINDOW_MS), now];
+        if (contextLosses.length >= MAX_CONTEXT_LOSSES) {
+          fail(Object.assign(new Error('webgl_unavailable'), { code: 'webgl_unavailable' }));
+        } else {
+          void start();
+        }
+      },
+      { once: true },
+    );
   }
 
   function fail(error: unknown): void {
@@ -160,6 +269,7 @@
         ? (code as RendererErrorCode)
         : 'asset_load_failed';
     phase = 'error';
+    onfailure?.(errorCode);
   }
 
   async function start(): Promise<void> {
@@ -178,8 +288,14 @@
     try {
       const ids = [...new Set([side.a, side.b])];
       const opening = live?.(side);
+      // The events only come at the start, so the sheets are in the cache before them: with a slow
+      // network the first frame would not arrive in time (010 plan-d decision 14).
+      if (opening !== undefined) {
+        if (view === '2d') preloadSheets(ids);
+        else preloadBotargaModel();
+      }
       const [rendererModule, cast, ...manifestModules] = await Promise.all([
-        import('@torneo/renderer'),
+        loadRenderer(),
         opening === undefined
           ? (source ?? spikeTimeline)(side)
           : opening.then((session) => session.timeline),
@@ -188,7 +304,7 @@
       const urls = (
         await Promise.all(
           ids.flatMap((fid) =>
-            isPlaceholder(fid)
+            view === '2d' && isPlaceholder(fid)
               ? Object.entries(SHEETS[fid]).map(async ([file, load]) => ({
                   fid,
                   file,
@@ -203,13 +319,11 @@
       const assets = new Map<string, unknown>(ids.map((fid, i) => [fid, manifestModules[i]]));
       const session = opening === undefined ? null : await opening;
       const timeline =
-        session !== null || retime === undefined
-          ? cast
-          : retime(cast, (t) => rendererModule.validateTimeline(t).ok);
+        session !== null || retime === undefined ? cast : retime(cast, rendererModule.isValid);
       loadedTimeline = timeline;
       const start = performance.now();
       const locale = getLocale();
-      const handle = rendererModule.createRenderer(container, {
+      const handle = rendererModule.create(container, {
         theme: currentRendererTheme(),
         reducedMotion: motionReduced,
         clock: session?.clock ?? (() => performance.now() - start),
@@ -235,31 +349,38 @@
         refresh();
       });
       if (session !== null) {
-        // Not awaited before subscribing: `loadLive` takes each `extend` while the sheets load, and
-        // `end` may come out in that time (010 plan-c decision 11).
-        const loading = handle.loadLive(timeline, assets);
-        stopLive = session.subscribe((next) => {
-          if (id !== run) return;
-          try {
-            const before = performance.now();
-            handle.extend(next);
-            extendSamples.push(performance.now() - before);
+        const liveNow = startLive({
+          handle,
+          session,
+          timeline,
+          assets,
+          now: () => performance.now(),
+          onExtended: (next, ms) => {
+            extendSamples.push(ms);
             loadedTimeline = next;
-          } catch (error) {
-            fail(error);
-          }
+          },
+          beforePlay: () => {
+            if (debug) handle.onCue(refresh);
+          },
+          onFail: (error) => {
+            if (id === run) fail(error);
+          },
         });
-        // `fail` may have run inside `subscribe`, in its immediate delivery, with nothing to cancel.
-        if (renderer !== handle) cancelLive();
-        await loading;
+        liveRun = liveNow;
+        const playing = await liveNow.done;
         if (id !== run) {
           handle.destroy();
           return;
         }
-        if (renderer !== handle) return;
-        if (debug) handle.onCue(refresh);
-        handle.play();
-        refresh();
+        if (!playing) return;
+        watchSnapshots();
+        watchContext(container, handle);
+        // Two frames: the one already asked for and the one that shows it.
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            if (id === run) onpainted?.();
+          }),
+        );
         return;
       }
       await handle.load(timeline, assets);
@@ -373,17 +494,19 @@
     {/if}
   </div>
 
-  <div aria-live="polite" class="flex flex-wrap items-center gap-3 empty:hidden">
-    {#if phase === 'loading'}
-      <p class="text-sm text-muted-foreground">{m.arena_loading()}</p>
-    {:else if phase === 'error' && errorCode !== null}
-      <p class="text-sm" data-testid="fight-error">{ERROR_MESSAGES[errorCode]()}</p>
-      <Button variant="outline" onclick={() => void start()}>{m.arena_retry()}</Button>
-    {:else if phase === 'finished' && result !== null}
-      <p class="font-display text-lg font-semibold" data-testid={result.testid}>
-        {result.text}
-      </p>
-      <Button variant="outline" onclick={restart}>{m.arena_replay()}</Button>
-    {/if}
-  </div>
+  {#if showResult}
+    <div aria-live="polite" class="flex flex-wrap items-center gap-3 empty:hidden">
+      {#if phase === 'loading'}
+        <p class="text-sm text-muted-foreground">{m.arena_loading()}</p>
+      {:else if phase === 'error' && errorCode !== null}
+        <p class="text-sm" data-testid="fight-error">{ERROR_MESSAGES[errorCode]()}</p>
+        <Button variant="outline" onclick={() => void start()}>{m.arena_retry()}</Button>
+      {:else if phase === 'finished' && result !== null}
+        <p class="font-display text-lg font-semibold" data-testid={result.testid}>
+          {result.text}
+        </p>
+        <Button variant="outline" onclick={restart}>{m.arena_replay()}</Button>
+      {/if}
+    </div>
+  {/if}
 </div>

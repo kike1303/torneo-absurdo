@@ -13,8 +13,8 @@
 mod common;
 
 use common::{
-    FIXTURES, assert_invariants, assert_only_codes, derive_seed, fixture, fixtures, hex,
-    resolution_times, v1,
+    FIXTURES, assert_invariants, assert_only_codes, derive_seed, fixture, fixtures, fixtures_v2,
+    hex, resolution_times, v1, v2,
 };
 use engine::{
     CharacterSpec, EndReason, FightEvent, FightLog, MomentKind, Seed, Side, TIMELINE_CONTRACT,
@@ -326,7 +326,25 @@ fn fnv1a(hash: u64, bytes: &[u8]) -> u64 {
 /// `b = FIXTURES[p % 4]`, mirrors included. Changing this mapping regenerates the digest.
 #[test]
 fn digest_of_1000_fights() {
-    let all = fixtures();
+    check_golden(
+        "digest-1000.txt",
+        digest(&fixtures(), &v1()).as_bytes(),
+        include_bytes!("golden/digest-1000.txt"),
+    );
+}
+
+/// (b) The same digest for ruleset v2 (016) over `FIXTURES_V2` (striker, trickster, tank,
+/// brawler). v1's digest above must not change when v2 does.
+#[test]
+fn digest_of_1000_fights_v2() {
+    check_golden(
+        "digest-1000-v2.txt",
+        digest(&fixtures_v2(), &v2()).as_bytes(),
+        include_bytes!("golden/digest-1000-v2.txt"),
+    );
+}
+
+fn digest(all: &[(&str, CharacterSpec)], r: &engine::Ruleset) -> String {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for i in 0..1000_u32 {
         let p = (i % 16) as usize;
@@ -334,18 +352,14 @@ fn digest_of_1000_fights() {
             (Some((_, a)), Some((_, b))) => (a, b),
             _ => panic!("pair {p}"),
         };
-        let log = simulate_vector(a, b, i);
+        let log =
+            simulate(&Seed::from_bytes(derive_seed(i)), a, b, r).unwrap_or_else(|e| panic!("{e}"));
         hash = fnv1a(
             hash,
             &canonical_json(&log).unwrap_or_else(|e| panic!("{e}")),
         );
     }
-    let actual = format!("{hash:016x}\n");
-    check_golden(
-        "digest-1000.txt",
-        actual.as_bytes(),
-        include_bytes!("golden/digest-1000.txt"),
-    );
+    format!("{hash:016x}\n")
 }
 
 /// (c) Canonical specs of the fixtures, and their round trip.

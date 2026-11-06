@@ -11,7 +11,7 @@ supersedes: null
 linear: TA-7
 depends_on: ["0002", "0003", "0006", "0007", "0008", "0009"]
 created: 2026-10-26
-updated: 2026-10-30
+updated: 2026-11-02
 ---
 
 # ADR-0012: Contrato de logs y cabeceras de seguridad (CSP y HSTS)
@@ -58,7 +58,7 @@ updated: 2026-10-30
 | Nivel | Uso | Ejemplos actuales |
 |---|---|---|
 | `error` | Falla propia que necesita atención: el proceso no puede seguir o una petición falló por nuestro código | `panic`, `db.migrate_failed`, `config.invalid`, `cli.invalid`, `server.bind_failed`, `unhandled_error`, `unhandled_rejection`, `uncaught_exception` |
-| `warn` | Degradación que se recupera sola; techo de los crates externos | `db.unavailable`, `server.shutdown_timeout`, cualquier línea `external` |
+| `warn` | Degradación que se recupera sola; techo de los crates externos | `db.unavailable`, `db.migrations_ahead`, `server.shutdown_timeout`, cualquier línea `external` |
 | `info` | Ciclo de vida y, en el server, una línea por petición HTTP | `server.listening`, `server.stopping`, `http.request`, `web_started` |
 | `debug` | Diagnóstico en desarrollo | `ws.closed` |
 | `trace` | Solo en desarrollo local | — |

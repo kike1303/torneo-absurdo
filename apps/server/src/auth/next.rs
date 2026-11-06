@@ -1,5 +1,7 @@
 //! `next` after a login (ADR-0008 D2): only a relative path, never another origin.
 
+use protocol::Locale;
+
 /// `next` if it matches `^/(?![/\\])[^\x00-\x1f]*$` and has no other control character
 /// either: DEL, which a `Location` header cannot carry, and the C1 controls. Otherwise `/`.
 /// Written by hand: the `regex` crate has no lookahead.
@@ -7,6 +9,17 @@ pub fn sanitize(next: Option<&str>) -> String {
     match next {
         Some(path) if is_local_path(path) => path.to_owned(),
         _ => "/".to_owned(),
+    }
+}
+
+/// The language of a `next` (TA-35): its first path segment, compared exactly, as one of the
+/// fixed values. Nothing of `next` itself ever leaves this function.
+pub fn locale_of(next: &str) -> Option<Locale> {
+    let path = next.strip_prefix('/')?;
+    match path.split(['/', '?', '#']).next()? {
+        "en" => Some(Locale::En),
+        "es" => Some(Locale::Es),
+        _ => None,
     }
 }
 
@@ -22,6 +35,31 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
+
+    #[test]
+    fn the_locale_is_an_exact_first_segment() {
+        for (next, expected) in [
+            ("/es", Some(Locale::Es)),
+            ("/es/", Some(Locale::Es)),
+            ("/es/welcome?next=%2Fen%2F", Some(Locale::Es)),
+            ("/es?a=1", Some(Locale::Es)),
+            ("/es#a", Some(Locale::Es)),
+            ("/en/account", Some(Locale::En)),
+            ("/", None),
+            ("", None),
+            ("es/welcome", None),
+            ("/esp", None),
+            ("/ES/welcome", None),
+            ("/%65s/welcome", None),
+            ("/es%2Fwelcome", None),
+            ("/es\\evil.example", None),
+            ("//es/", None),
+            ("/fr/welcome", None),
+            ("/cuenta/es/", None),
+        ] {
+            assert_eq!(locale_of(next), expected, "{next}");
+        }
+    }
 
     #[test]
     fn table() {

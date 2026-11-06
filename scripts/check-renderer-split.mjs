@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// 002 RF-A17 and plan-a2 decision 9: Pixi and the renderer only load through `import()`.
+// 002 RF-A17 and plan-a2 decision 9: Pixi, Three (013) and the renderer only load through `import()`.
 // Reads the client build of apps/web (`.svelte-kit/output/client/.vite/`): `manifest.json` (the
 // chunk graph, forced by Kit) and `chunk-modules.json` (the modules inside each chunk, written by
 // apps/web/vite/chunk-modules.ts, because the manifest does not list them). Fails if:
-// - any entry or route node (the dev/arena one included) reaches a module of `pixi.js` or of
-//   `packages/renderer/` through static imports;
-// - no node holds `src/routes/dev/arena/+page.svelte`, or that node does not reach `pixi.js`
-//   through dynamic imports (so the check never passes empty if the format changes).
+// - any entry or route node (the dev/arena one included) reaches a module of `pixi.js`, of `three`
+//   or of `packages/renderer/` through static imports;
+// - no node holds `src/routes/dev/arena/+page.svelte`, or that node does not reach `pixi.js` and
+//   `three` through dynamic imports (so the check never passes empty if the format changes).
 // Prints the gzip size of the deferred closure of dev/arena as a report.
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -17,6 +17,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BUILD_DIR = path.join(ROOT, 'apps/web/.svelte-kit/output/client');
 
 const PIXI = /(?:^|\/)node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?pixi\.js\//;
+const THREE = /(?:^|\/)node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?three\//;
 const RENDERER = /(?:^|\/)packages\/renderer\//;
 const ARENA_PAGE = /(?:^|\/)src\/routes\/dev\/arena\/\+page\.svelte$/;
 
@@ -58,7 +59,7 @@ function modulesOf(manifest, chunkModules, keys) {
   return modules;
 }
 
-const forbidden = (id) => PIXI.test(id) || RENDERER.test(id);
+const forbidden = (id) => PIXI.test(id) || THREE.test(id) || RENDERER.test(id);
 
 /**
  * @param {Record<string, Chunk>} manifest
@@ -102,6 +103,9 @@ export function checkRendererSplit(manifest, chunkModules) {
     const deferred = [...modulesOf(manifest, chunkModules, reach)].filter((id) => !own.has(id));
     if (!deferred.some((id) => PIXI.test(id))) {
       problems.push(`${arena}: does not reach pixi.js through dynamic imports`);
+    }
+    if (!deferred.some((id) => THREE.test(id))) {
+      problems.push(`${arena}: does not reach three through dynamic imports`);
     }
     deferredFiles = [...new Set([...reach].map((k) => manifest[k]?.file))]
       .filter((file) => file !== undefined && !staticFiles.has(file) && file.endsWith('.js'))

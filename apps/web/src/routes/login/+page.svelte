@@ -31,7 +31,9 @@
   {#if data.errorKey}
     <AuthErrorNotice
       key={data.errorKey}
-      title={data.signedIn ? m.login_signed_in_error_title() : m.login_error_title()}
+      title={data.signedIn || data.errorKey === 'error_auth_sessions_not_closed'
+        ? m.login_signed_in_error_title()
+        : m.login_error_title()}
     />
   {/if}
 

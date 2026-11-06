@@ -14,9 +14,20 @@ pub const FIXTURES: [(&str, &str); 4] = [
     ("turtle", include_str!("../fixtures/turtle.json")),
 ];
 
+/// The fixtures of ruleset v2 (016), in this fixed order (the v2 digest depends on it). `turtle`
+/// is left out: its stats of 1 are below the v2 minimum. `brawler` carries 2 abilities of each
+/// kind, so the weight split matters.
+pub const FIXTURES_V2: [(&str, &str); 4] = [
+    ("striker", include_str!("../fixtures/striker.json")),
+    ("trickster", include_str!("../fixtures/trickster.json")),
+    ("tank", include_str!("../fixtures/tank.json")),
+    ("brawler", include_str!("../fixtures/brawler.json")),
+];
+
 pub fn fixture(name: &str) -> CharacterSpec {
     let json = FIXTURES
         .iter()
+        .chain(&FIXTURES_V2)
         .find(|(n, _)| *n == name)
         .map(|(_, json)| *json)
         .unwrap_or_else(|| panic!("unknown fixture {name}"));
@@ -30,8 +41,19 @@ pub fn fixtures() -> Vec<(&'static str, CharacterSpec)> {
         .collect()
 }
 
+pub fn fixtures_v2() -> Vec<(&'static str, CharacterSpec)> {
+    FIXTURES_V2
+        .iter()
+        .map(|(name, _)| (*name, fixture(name)))
+        .collect()
+}
+
 pub fn v1() -> Ruleset {
     Ruleset::for_version(1).unwrap_or_else(|| panic!("ruleset 1 exists"))
+}
+
+pub fn v2() -> Ruleset {
+    Ruleset::for_version(2).unwrap_or_else(|| panic!("ruleset 2 exists"))
 }
 
 /// Fixed root of every test seed (exactly 32 bytes).

@@ -45,17 +45,29 @@ describe('engine goldens through the adapter', () => {
     expect(goldenLogNames()).toEqual([...KO_LOGS, ...TIME_LOGS].sort());
   });
 
-  it.each(KO_LOGS)('%s gives a v2 timeline that is also valid as v1 (RF4)', (name) => {
-    const { timeline, end } = adapt(name);
-    expect(timeline.timeline_version).toBe(2);
-    const win = timeline.cues.find((c) => c.type === 'win');
-    expect(end?.winner).toBe(win?.fighter);
-    const asV1 = validateTimeline({ ...timeline, timeline_version: 1 }, MANIFESTS);
-    expect(asV1.ok ? { ...asV1.timeline, timeline_version: 2 } : asV1.errors).toEqual(timeline);
-  });
+  it.each(KO_LOGS)(
+    '%s gives a v3 timeline that, without abilities, is valid as v1 (RF4)',
+    (name) => {
+      const { timeline, end } = adapt(name);
+      expect(timeline.timeline_version).toBe(3);
+      const win = timeline.cues.find((c) => c.type === 'win');
+      expect(end?.winner).toBe(win?.fighter);
+      // v3 only adds the optional `ability` of a strike (015).
+      const cues = timeline.cues.map((cue) => {
+        if (cue.type !== 'strike') return cue;
+        const { ability, ...rest } = cue;
+        expect(ability).toMatch(/^[a-z][a-z0-9_]+$/);
+        return rest;
+      });
+      const plain = { ...timeline, cues };
+      const asV1 = validateTimeline({ ...plain, timeline_version: 1 }, MANIFESTS);
+      expect(asV1.ok ? { ...asV1.timeline, timeline_version: 3 } : asV1.errors).toEqual(plain);
+    },
+  );
 
-  it.each(TIME_LOGS)('%s gives a v2 timeline with time_up and the right closing', (name) => {
+  it.each(TIME_LOGS)('%s gives a v3 timeline with time_up and the right closing', (name) => {
     const { timeline, end } = adapt(name);
+    expect(timeline.timeline_version).toBe(3);
     const timeUp = timeline.cues.find((c) => c.type === 'time_up');
     expect(timeUp).toEqual({ at_ms: 86000, type: 'time_up' });
     expect(timeline.cues.some((c) => c.type === 'ko')).toBe(false);

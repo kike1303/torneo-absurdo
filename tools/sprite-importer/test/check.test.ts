@@ -382,7 +382,9 @@ describe('runCheck', () => {
     const file = path.join(root, ...GOLDEN_FILE.split('/'));
     const golden = JSON.parse(readFileSync(file, 'utf8')) as { versions: Record<string, number>[] };
     const v1 = golden.versions[0] ?? {};
-    golden.versions.push({ ...v1, ruleset_version: 2, windup_heavy_ms: 250 });
+    // The next version after the last one in the real golden.
+    const next = Math.max(...golden.versions.map((v) => v.ruleset_version ?? 0)) + 1;
+    golden.versions.push({ ...v1, ruleset_version: next, windup_heavy_ms: 250 });
     writeFileSync(file, json(golden));
     expect(runCheck({ root })).toEqual({
       status: 1,
@@ -391,7 +393,7 @@ describe('runCheck', () => {
           code: 'guide.windup_long',
           file: `${SET_REL}/manifest.json`,
           path: '/animations/attack_heavy/impact_frame',
-          data: { windup_ms: 300, cap_ms: 250, ruleset_version: 2 },
+          data: { windup_ms: 300, cap_ms: 250, ruleset_version: next },
         },
       ],
     });

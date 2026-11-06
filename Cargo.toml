@@ -54,7 +54,7 @@ governor = { version = "=0.10.4", default-features = false, features = ["std"] }
 # Constant-time comparison of X-Internal-Secret (already in the lock via rustls).
 subtle = "=2.6.1"
 # INTERNAL_API_SECRET decoding (already in the lock via rustls).
-base64 = "=0.22.1"
+base64 = "=0.23.1"
 # Session token hashes and ip_hash (008 phase B; already in the lock via sqlx, digest 0.11).
 sha2 = "=0.11.1"
 hmac = "=0.13.0"
@@ -63,7 +63,7 @@ rand_core = { version = "=0.9.5", default-features = false, features = ["os_rng"
 # display_name (008 RF-B7): NFC/NFKC, graphemes, UTS #39 skeleton and full case folding.
 unicode-normalization = "=0.1.26"
 unicode-segmentation = "=1.13.3"
-unicode-security = "=0.1.2"
+unicode-security = "=0.1.3"
 caseless = "=0.2.2"
 # OAuth 2.0 client (ADR-0008 D2) without reqwest, curl nor ureq: the HTTP client is ours.
 oauth2 = { version = "=5.0.0", default-features = false }
@@ -71,7 +71,7 @@ oauth2 = { version = "=5.0.0", default-features = false }
 # `aws_lc_rs` and `logging`; rustls and webpki-roots were already in the lock via sqlx.
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
-webpki-roots = "=1.0.10"
+webpki-roots = "=1.0.11"
 # Certificates generated on the fly for the TLS unit tests (dev-dependency only).
 rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "ring", "pem"] }
 # Property tests of the server (dev-dependency only): no fork, timeout nor tempfile.

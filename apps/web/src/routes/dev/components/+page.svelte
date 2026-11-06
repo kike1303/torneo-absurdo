@@ -2,6 +2,7 @@
   import ArenaSection from './_sections/ArenaSection.svelte';
   import AuthSection from './_sections/AuthSection.svelte';
   import ButtonSection from './_sections/ButtonSection.svelte';
+  import FightSection from './_sections/FightSection.svelte';
   import DisplaySection from './_sections/DisplaySection.svelte';
   import FormSection from './_sections/FormSection.svelte';
   import LayoutSection from './_sections/LayoutSection.svelte';
@@ -20,6 +21,7 @@
   <LayoutSection theme={data.theme} />
   <ButtonSection />
   <FormSection />
+  <FightSection />
   <DisplaySection />
   <OverlaySection />
   <ArenaSection />
