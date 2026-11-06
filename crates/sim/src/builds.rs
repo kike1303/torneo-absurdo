@@ -23,7 +23,7 @@ use engine::{
     Side, simulate,
 };
 use rand_chacha::ChaCha20Rng;
-use rand_chacha::rand_core::{RngCore, SeedableRng};
+use rand_chacha::rand_core::{Rng, SeedableRng};
 use serde::Serialize;
 
 use crate::args::seed_hex;

@@ -4,13 +4,14 @@ allow-expect-in-tests = true
 
 # 003 RF5: the engine is pure. Every rand_core path has `allow-invalid`, so a future rand_core
 # that moves or drops an item does not make clippy reject the file (`OsRng`, `from_os_rng` and
-# `try_from_os_rng` do not even exist without `os_rng`: the engine alone, the wasm target).
+# `try_from_os_rng` no longer exist in rand_core 0.10, whose OS source is `getrandom::SysRng`).
 disallowed-types = [
     { path = "std::collections::HashMap", reason = "iteration order is not deterministic; use BTreeMap or Vec" },
     { path = "std::collections::HashSet", reason = "iteration order is not deterministic; use BTreeSet or Vec" },
     { path = "std::time::Instant", reason = "the engine has no clock" },
     { path = "std::time::SystemTime", reason = "the engine has no clock" },
     { path = "rand_core::OsRng", reason = "the only randomness is ChaCha20 seeded with the Seed", allow-invalid = true },
+    { path = "getrandom::SysRng", reason = "the only randomness is ChaCha20 seeded with the Seed", allow-invalid = true },
     # Phase B (plan-b decision 13): no I/O, processes, network nor threads. A banned type covers
     # all of its methods.
     { path = "std::fs::File", reason = "the engine has no I/O" },
