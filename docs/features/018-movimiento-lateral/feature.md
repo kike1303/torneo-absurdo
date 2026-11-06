@@ -34,7 +34,7 @@ En la arena 3D las dos botargas pelean siempre sobre la misma línea, de izquier
 - Mareo: giro lento (20 s por ciclo); movimiento reducido lo apaga.
 
 ## Pruebas
-- [ ] `just check` en verde.
+- [x] `just check` en verde.
 - [x] Unit: el giro, acotado, simétrico y sin saltos entre cuadros, y 0 con movimiento reducido; el paso del esquive sale y vuelve, no cambia de lado y aparecen los dos lados; nadie más se mueve fuera del eje en las peleas reales; `arenaPoint` coincide con el mapeo 2D sin giro, gira alrededor del centro manteniendo la distancia y da el paso perpendicular al eje.
 - [x] Visual en `/dev/arena` con el eje girado a cada lado, en escritorio y a 375 px.
-- [ ] e2e general y `e2e-fights` en local.
+- [x] e2e general (496 pasan) y `e2e-fights` (4 proyectos) en local.
