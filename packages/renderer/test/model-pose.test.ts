@@ -229,3 +229,52 @@ describe('one clip per ability (015)', () => {
     expect(reactions).toBeGreaterThan(0);
   });
 });
+
+describe('player cosmetics (016)', () => {
+  const ALL = Object.fromEntries(
+    [...CLIP_NAMES, ...OPTIONAL_CLIP_NAMES].map((name) => [name, 2]),
+  ) as ClipDurations;
+
+  it('keeps the picked idle in every spell', () => {
+    for (let t = 0; t < 200_000; t += 8000) {
+      expect(clipFor(fighter({ animation: 'idle' }), t, { idle: 'idle_3' })).toBe('idle_3');
+    }
+  });
+
+  it('plays the picked victory, and still varies the ko by fight', () => {
+    for (let start = 0; start < 50_000; start += 997) {
+      const win = fighter({ animation: 'win', elapsed: 0 });
+      expect(clipFor(win, start, { victory: 'win_2' })).toBe('win_2');
+    }
+    const kos = new Set<string>();
+    for (let start = 0; start < 50_000; start += 997) {
+      kos.add(clipFor(fighter({ animation: 'ko' }), start, { idle: 'idle', victory: 'win_1' }));
+    }
+    expect(kos).toEqual(new Set(['ko_1', 'ko_2']));
+  });
+
+  it('touches nothing else and ignores unknown codes', () => {
+    const special = fighter({ animation: 'special', ability: 'pipe_geyser', elapsed: 100 });
+    expect(clipFor(special, 1000, { idle: 'idle_2', victory: 'win_3' })).toBe(
+      clipFor(special, 1000),
+    );
+    const bad = { idle: 'idle_9', victory: 'ko_1' } as unknown as Parameters<typeof clipFor>[2];
+    for (const t of [0, 8000, 16_000]) {
+      expect(clipFor(fighter({ animation: 'idle' }), t, bad)).toBe(
+        clipFor(fighter({ animation: 'idle' }), t),
+      );
+    }
+    expect(clipFor(fighter({ animation: 'win' }), 5000, bad)).toBe(
+      clipFor(fighter({ animation: 'win' }), 5000),
+    );
+  });
+
+  it('reaches the pose, with the idle fallback when the GLB lacks the clip', () => {
+    const idle = fighter({ animation: 'idle' });
+    expect(poseFor(idle, 0, ALL, CONTEXT, { idle: 'idle_4' }).clip).toBe('idle_4');
+    expect(poseFor(idle, 0, DURATIONS, CONTEXT, { idle: 'idle_4' }).clip).toBe('idle');
+    expect(
+      poseFor(fighter({ animation: 'win' }), 0, DURATIONS, CONTEXT, { victory: 'win_3' }).clip,
+    ).toBe('win_3');
+  });
+});

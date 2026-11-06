@@ -85,7 +85,7 @@ Además, win rate por banda de nivel contra la misma banda (que ningún nivel te
 1. Motor: ruleset v2 (tope por tipo, reparto del peso, mínimo de stats) y sus goldens. El torneo no cambia.
 2. Catálogos de habilidades y de accesorios en `content/` y su carga en `crates/content`.
 3. `just sim --builds` con los criterios nuevos.
-4. `FighterCosmetics` en `protocol` (`just gen`), KO al azar por hash y victoria e idle elegidos en el renderer.
+4. Victoria e idle elegidos en el renderer (`FighterCosmetics` en `BotargaModel.cosmetics`, por lado). El KO ya variaba por pelea con un hash (013), así que no cambia. El tipo de `protocol` que lleva los cosméticos del server al cliente se agrega con la fase 5, cuando haya un mensaje de pelea PvP que lo use.
 5. Server y UI (niveles, sorteo, inventario y armado de la build): depende de la feature de botarga propia y PvP.
 
 ## Riesgos
@@ -101,7 +101,7 @@ Además, win rate por banda de nivel contra la misma banda (que ningún nivel te
 - [x] Un accesorio que suma puntos netos o pasa el tope por stat se rechaza; una build con más de 2 debilidades también.
 - [ ] Sorteo: las 3 opciones nunca incluyen un ataque que el jugador ya tiene, y reintentar devuelve las mismas.
 - [x] `just sim --check` (torneo, v1) y `just sim --builds 2000 --fights 50000 --check` (v2, nivel 100) pasan; una versión chica corre en `just check`.
-- [ ] Renderer: con `FighterCosmetics` salen la victoria y el idle elegidos; sin ellos, lo de hoy; el KO es el mismo en dos cargas de la misma pelea.
+- [x] Renderer: con `FighterCosmetics` salen la victoria y el idle elegidos; sin ellos, lo de hoy; el KO es el mismo en dos cargas de la misma pelea.
 
 ## Respuestas del owner (2026-11-05)
 - Animaciones de victoria e idle: se desbloquean como los accesorios (en el futuro también se compran). Los ataques se ganan al subir de nivel, uno al azar en niveles fijos. Otros niveles dan otras recompensas.

@@ -177,10 +177,16 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
           if (effect.kind === 'flash' && effect.side === side)
             flash = Math.max(flash, effect.alpha);
         }
-        const pose = poseFor(f, scene.t, botarga.durations, {
-          hpFraction: hud.maxHp > 0 ? hud.hp / hud.maxHp : 1,
-          intro: scene.phase === 'intro',
-        });
+        const pose = poseFor(
+          f,
+          scene.t,
+          botarga.durations,
+          {
+            hpFraction: hud.maxHp > 0 ? hud.hp / hud.maxHp : 1,
+            intro: scene.phase === 'intro',
+          },
+          model.cosmetics?.[side],
+        );
         fighters[side].apply(f, pose, scene.t, flash, angle, sidestep(f, scene));
       }
     }

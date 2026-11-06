@@ -7,7 +7,13 @@ import { createThreeStage } from './stage.ts';
 import type { Renderer3dOptions } from './types.ts';
 
 export type { BotargaModel, BotargaTint, Renderer3dOptions } from './types.ts';
-export { FACE_CODES, type FaceCode } from '../model/pose.ts';
+export {
+  FACE_CODES,
+  type FaceCode,
+  type FighterCosmetics,
+  type IdleClip,
+  type WinClip,
+} from '../model/pose.ts';
 
 /**
  * Draws a timeline in `container` with Three.js and the generic botarga. Same handle as

@@ -1,6 +1,6 @@
 // What the host gives the 3D layer (013): the URL of the botarga and of each face, and the tint of
 // each side. No colors here: they come from the GLB (`extras.tint_default`) or from the host.
-import type { FaceCode } from '../model/pose.ts';
+import type { FaceCode, FighterCosmetics } from '../model/pose.ts';
 import type { RendererOptions } from '../player/types.ts';
 import type { Side } from '../timeline/types.ts';
 
@@ -18,6 +18,8 @@ export interface BotargaModel {
   readonly faces: Readonly<Partial<Record<FaceCode, string>>>;
   /** Without it, or without a field, the GLB default. */
   readonly tints?: Readonly<Partial<Record<Side, BotargaTint>>>;
+  /** The idle and victory a player picked (016); without it, the tournament variants. */
+  readonly cosmetics?: Readonly<Partial<Record<Side, FighterCosmetics>>>;
 }
 
 export interface Renderer3dOptions extends RendererOptions {
