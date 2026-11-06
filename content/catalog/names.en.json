@@ -1,0 +1,53 @@
+{
+  "abilities": {
+    "foam_headbutt": "Padded Headbutt",
+    "spicy_slap": "Hot Sauce Slap",
+    "puddle_punt": "Puddle Punt",
+    "confetti_cannon": "Confetti Cannon",
+    "joy_buzzer_hug": "Joy Buzzer Hug",
+    "sandbox_surprise": "Sandbox Surprise",
+    "hand_fan_wallop": "Hand Fan Wallop",
+    "brain_freeze_bonk": "Brain Freeze Bonk",
+    "wet_noodle_whip": "Wet Noodle Whip",
+    "kettle_screamer": "Kettle Screamer",
+    "lawn_sprinkler_spin": "Lawn Sprinkler Spin",
+    "dramatic_pause": "Dramatic Pause",
+    "static_sock_shuffle": "Static Sock Shuffle",
+    "dirt_clod_lob": "Dirt Clod Lob",
+    "folding_chair_solo": "Folding Chair Solo",
+    "hailstorm_tantrum": "Hailstorm Tantrum",
+    "unlicensed_leaf_blower": "Unlicensed Leaf Blower",
+    "curtain_call_clobber": "Curtain Call Clobber",
+    "griddle_knee": "Hot Griddle Knee",
+    "molehill_trip": "Molehill Trip",
+    "rubber_chicken_smack": "Rubber Chicken Smack",
+    "bucket_brigade_deluge": "Bucket Brigade Deluge",
+    "power_strip_polka": "Power Strip Polka",
+    "hurricane_spinning_top": "Hurricane Spinning Top",
+    "borrowed_trophy_bonk": "Borrowed Trophy Bonk",
+    "avalanche_hug": "Avalanche Bear Hug",
+    "crushing_ovation": "Crushing Standing Ovation",
+    "doomsday_pirouette": "Doomsday Pirouette"
+  },
+  "accessories": {
+    "propeller_beanie": "Propeller Beanie",
+    "tinfoil_crown": "Tinfoil Crown",
+    "traffic_cone_helmet": "Traffic Cone Helmet",
+    "oven_mitts": "Oven Mitts",
+    "giant_foam_finger": "Giant Foam Finger",
+    "mismatched_mitts": "Mismatched Mitts",
+    "pool_floatie_vest": "Pool Floatie Vest",
+    "sequin_waistcoat": "Sequin Waistcoat",
+    "sunday_sweatpants": "Sunday Sweatpants",
+    "spandex_bike_shorts": "Spandex Bike Shorts",
+    "bunny_slippers": "Bunny Slippers",
+    "grandma_roller_skates": "Grandma's Roller Skates",
+    "cement_galoshes": "Cement Galoshes"
+  },
+  "styles": {
+    "balanced": "Middle of the Road",
+    "aggressive": "All Gas, No Brakes",
+    "defensive": "Turtle in a Helmet",
+    "showman": "Runway Diva"
+  }
+}

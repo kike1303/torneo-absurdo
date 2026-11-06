@@ -89,6 +89,19 @@ pub enum ContentError {
         slug: String,
         rival: String,
     },
+    /// A file of the player catalog (016) does not exist.
+    #[error("missing_catalog_file at {}", path.display())]
+    MissingCatalogFile { path: PathBuf },
+    /// An entry of the player catalog (016) breaks a rule. `rule` is a code: one of the catalog
+    /// (`duplicate_id`, `tier_out_of_range`, `starter_count`, `starter_invalid`, `name_missing`,
+    /// `name_unknown`, `name_invalid`, `style_id_invalid`, `personality_out_of_range`), or the
+    /// engine's as `spec.<code>` and `loadout.<code>`.
+    #[error("catalog ({rule}) at {} ({id})", path.display())]
+    Catalog {
+        path: PathBuf,
+        id: String,
+        rule: String,
+    },
 }
 
 impl ContentError {
@@ -111,6 +124,8 @@ impl ContentError {
             Self::RivalUnknown { .. } => "rival_unknown",
             Self::RivalSelf { .. } => "rival_self",
             Self::RivalDuplicate { .. } => "rival_duplicate",
+            Self::MissingCatalogFile { .. } => "missing_catalog_file",
+            Self::Catalog { .. } => "catalog",
         }
     }
 
@@ -133,7 +148,9 @@ impl ContentError {
             | Self::Spec { path, .. }
             | Self::RivalUnknown { path, .. }
             | Self::RivalSelf { path, .. }
-            | Self::RivalDuplicate { path, .. } => path,
+            | Self::RivalDuplicate { path, .. }
+            | Self::MissingCatalogFile { path }
+            | Self::Catalog { path, .. } => path,
         }
     }
 }
@@ -200,10 +217,16 @@ mod tests {
                 slug: s(),
                 rival: s(),
             },
+            ContentError::MissingCatalogFile { path: p.clone() },
+            ContentError::Catalog {
+                path: p.clone(),
+                id: s(),
+                rule: "duplicate_id".to_owned(),
+            },
         ];
         // A new variant fails to compile in code() and path(); this count catches a variant
         // that is added there but not here.
-        assert_eq!(all.len(), 15);
+        assert_eq!(all.len(), 17);
         let codes: Vec<&str> = all.iter().map(ContentError::code).collect();
         for (i, (error, code)) in all.iter().zip(&codes).enumerate() {
             assert!(

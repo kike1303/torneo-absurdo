@@ -1,0 +1,36 @@
+{
+  "styles": [
+    {
+      "id": "balanced",
+      "personality": {
+        "aggression": 50,
+        "caution": 50,
+        "showmanship": 50
+      }
+    },
+    {
+      "id": "aggressive",
+      "personality": {
+        "aggression": 75,
+        "caution": 30,
+        "showmanship": 45
+      }
+    },
+    {
+      "id": "defensive",
+      "personality": {
+        "aggression": 35,
+        "caution": 80,
+        "showmanship": 35
+      }
+    },
+    {
+      "id": "showman",
+      "personality": {
+        "aggression": 30,
+        "caution": 35,
+        "showmanship": 85
+      }
+    }
+  ]
+}

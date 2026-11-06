@@ -151,7 +151,7 @@ impl std::error::Error for SpecError {}
 pub(crate) const STRIKE_ID: &str = "strike";
 
 /// `^[a-z][a-z0-9<extra>]{1,31}$` (format rules, not game rules: they stay out of `Ruleset`).
-fn is_code(value: &str, extra: u8) -> bool {
+pub(crate) fn is_code(value: &str, extra: u8) -> bool {
     let bytes = value.as_bytes();
     let Some((first, rest)) = bytes.split_first() else {
         return false;
@@ -171,6 +171,47 @@ fn is_code(value: &str, extra: u8) -> bool {
 #[must_use]
 pub fn is_valid_slug(value: &str) -> bool {
     is_code(value, b'-')
+}
+
+impl Ability {
+    /// Checks one ability on its own: its `id`, and `power` and `cooldown` against the ranges of
+    /// its kind. [`CharacterSpec::validate`] applies the same rules (plus uniqueness), and the
+    /// player catalog uses this (016).
+    ///
+    /// # Errors
+    /// `AbilityIdInvalid`, `PowerOutOfRange` or `CooldownOutOfRange`, in that order.
+    pub fn validate(&self, ruleset: &Ruleset) -> Result<(), SpecError> {
+        self.check_id()?;
+        self.check_numbers(ruleset)
+    }
+
+    fn check_id(&self) -> Result<(), SpecError> {
+        if is_code(&self.id, b'_') && self.id != STRIKE_ID {
+            Ok(())
+        } else {
+            Err(SpecError::AbilityIdInvalid)
+        }
+    }
+
+    fn check_numbers(&self, ruleset: &Ruleset) -> Result<(), SpecError> {
+        let (power, cooldown) = match self.kind {
+            MoveKind::Heavy => (
+                ruleset.heavy_power_min()..=ruleset.heavy_power_max(),
+                ruleset.heavy_cooldown_min()..=ruleset.heavy_cooldown_max(),
+            ),
+            MoveKind::Special => (
+                ruleset.special_power_min()..=ruleset.special_power_max(),
+                ruleset.special_cooldown_min()..=ruleset.special_cooldown_max(),
+            ),
+        };
+        if !power.contains(&self.power) {
+            return Err(SpecError::PowerOutOfRange);
+        }
+        if !cooldown.contains(&self.cooldown) {
+            return Err(SpecError::CooldownOutOfRange);
+        }
+        Ok(())
+    }
 }
 
 impl CharacterSpec {
@@ -217,9 +258,7 @@ impl CharacterSpec {
             return Err(SpecError::AbilityKindCount);
         }
         for (i, ability) in self.abilities.iter().enumerate() {
-            if !is_code(&ability.id, b'_') || ability.id == STRIKE_ID {
-                return Err(SpecError::AbilityIdInvalid);
-            }
+            ability.check_id()?;
             if self
                 .abilities
                 .iter()
@@ -228,22 +267,7 @@ impl CharacterSpec {
             {
                 return Err(SpecError::AbilityIdDuplicate);
             }
-            let (power, cooldown) = match ability.kind {
-                MoveKind::Heavy => (
-                    ruleset.heavy_power_min()..=ruleset.heavy_power_max(),
-                    ruleset.heavy_cooldown_min()..=ruleset.heavy_cooldown_max(),
-                ),
-                MoveKind::Special => (
-                    ruleset.special_power_min()..=ruleset.special_power_max(),
-                    ruleset.special_cooldown_min()..=ruleset.special_cooldown_max(),
-                ),
-            };
-            if !power.contains(&ability.power) {
-                return Err(SpecError::PowerOutOfRange);
-            }
-            if !cooldown.contains(&ability.cooldown) {
-                return Err(SpecError::CooldownOutOfRange);
-            }
+            ability.check_numbers(ruleset)?;
         }
         if self.weaknesses.len() > usize::from(ruleset.weaknesses_max()) {
             return Err(SpecError::WeaknessCount);
