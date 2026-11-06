@@ -2,6 +2,7 @@
 // same shot at the same `t`. Angles turn around the vertical axis through the focus; 0 is the
 // front view, and a positive yaw moves the camera towards +x (the side `a` faces).
 import { FACING, STAGE_WIDTH, type FighterScene, type Scene } from '../scene/types.ts';
+import { arenaAngle } from './circling.ts';
 import { SIDES, type Side } from '../timeline/types.ts';
 
 export interface Shot {
@@ -22,7 +23,10 @@ const SWAY_PERIOD_MS = 14_000;
 const INTRO_YAW = -0.35;
 const INTRO_DISTANCE = 1.45;
 const INTRO_PUSH_MS = 2600;
-/** A special cuts to the attacker, a little to its front: more would put the rival in between. */
+/**
+ * A special cuts to the attacker, a little to its front: more would put the rival in between. The
+ * angle is from the fight axis, which turns (018).
+ */
 const SPECIAL_YAW = 0.4;
 const SPECIAL_DISTANCE = 0.62;
 /** How far towards the opponent the close-up looks, in logical px. */
@@ -94,7 +98,7 @@ export function shotFor(scene: Scene): Shot {
   if (attacker !== null) {
     const facing = FACING[attacker.side];
     return {
-      yaw: facing * SPECIAL_YAW,
+      yaw: arenaAngle(scene) + facing * SPECIAL_YAW,
       distance: SPECIAL_DISTANCE,
       focusX: Math.min(STAGE_WIDTH, Math.max(0, attacker.x + facing * SPECIAL_LEAD_PX)),
     };

@@ -29,6 +29,7 @@ function fighter(overrides: Partial<FighterScene>): FighterScene {
     x: 0,
     travel: 0,
     ability: null,
+    dodgeCut: null,
     y: 0,
     mirror: false,
     scale: 1,
