@@ -1,4 +1,5 @@
-//! `sim` binary (003 RF15): `just sim [--fights N] [--seed HEX] [--content DIR] [--json] [--check]`.
+//! `sim` binary (003 RF15): `just sim [--fights N] [--seed HEX] [--content DIR] [--json] [--check]`,
+//! and the open builds report of 016 with `--builds N [--catalog DIR] [--level L]`.
 //!
 //! Exit codes (plan-b decision 12): 0 ok, 1 a criterion of RF17 fails with `--check`, 2 a
 //! usage, content or simulation error (its code and path on stderr). The elapsed time is
@@ -8,7 +9,10 @@ use std::time::Instant;
 
 use engine::{CharacterSpec, Ruleset};
 use serde::Serialize;
-use sim::args::{self, Command, HELP};
+use sim::args::{self, Args, Command, HELP};
+use sim::builds::{
+    BUILDS_RULESET_VERSION, BuildsConfig, BuildsCriteria, BuildsFailure, BuildsReport,
+};
 use sim::{Config, Criteria, Failure, RULESET_VERSION, Report, Warning};
 
 const EXIT_FAILED_CHECK: u8 = 1;
@@ -20,6 +24,15 @@ struct JsonOutput<'a> {
     report: &'a Report,
     failures: Vec<Failure>,
     warnings: Vec<Warning>,
+    elapsed_ms: u128,
+}
+
+/// `--builds --json`.
+#[derive(Serialize)]
+struct BuildsJsonOutput<'a> {
+    report: &'a BuildsReport,
+    criteria: BuildsCriteria,
+    failures: Vec<BuildsFailure>,
     elapsed_ms: u128,
 }
 
@@ -35,6 +48,9 @@ fn main() -> ExitCode {
             return ExitCode::from(EXIT_ERROR);
         }
     };
+    if let Some(builds) = args.builds {
+        return run_builds(&args, builds);
+    }
     let Some(ruleset) = Ruleset::for_version(RULESET_VERSION) else {
         err("sim: sim.unknown_ruleset");
         return ExitCode::from(EXIT_ERROR);
@@ -92,6 +108,68 @@ fn main() -> ExitCode {
     } else {
         out(&format!(
             "{}elapsed: {elapsed_ms} ms (simulation and canonical_json)\n",
+            report.render_text(&criteria)
+        ));
+    }
+    if args.check && failed {
+        ExitCode::from(EXIT_FAILED_CHECK)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+/// `--builds N`: the open builds report of 016 over the player catalog.
+fn run_builds(args: &Args, builds: u32) -> ExitCode {
+    let Some(ruleset) = Ruleset::for_version(BUILDS_RULESET_VERSION) else {
+        err("sim: sim.unknown_ruleset");
+        return ExitCode::from(EXIT_ERROR);
+    };
+    let catalog = match content::load_catalog(&args.catalog, &ruleset) {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            err(&format!(
+                "sim: content.{} in {}: {error}",
+                error.code(),
+                args.catalog.display()
+            ));
+            return ExitCode::from(EXIT_ERROR);
+        }
+    };
+    let config = BuildsConfig {
+        builds,
+        fights: args.fights,
+        level: args.level,
+        seed: args.seed,
+    };
+    let start = Instant::now();
+    let report = match sim::builds::run_builds(&config, &catalog, &ruleset) {
+        Ok(report) => report,
+        Err(error) => {
+            err(&format!("sim: {error}"));
+            return ExitCode::from(EXIT_ERROR);
+        }
+    };
+    let elapsed_ms = start.elapsed().as_millis();
+    let criteria = BuildsCriteria::FEATURE_016;
+    let failures = report.failures(&criteria);
+    let failed = !failures.is_empty();
+    if args.json {
+        let output = BuildsJsonOutput {
+            report: &report,
+            criteria,
+            failures,
+            elapsed_ms,
+        };
+        match serde_json::to_string_pretty(&output) {
+            Ok(json) => out(&format!("{json}\n")),
+            Err(_) => {
+                err("sim: sim.encode_failed");
+                return ExitCode::from(EXIT_ERROR);
+            }
+        }
+    } else {
+        out(&format!(
+            "{}elapsed: {elapsed_ms} ms\n",
             report.render_text(&criteria)
         ));
     }
