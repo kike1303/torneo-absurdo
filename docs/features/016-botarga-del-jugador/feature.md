@@ -28,7 +28,7 @@ Diseño previo con el `game-designer` y respuestas del owner (2026-11-05), aprob
 
 **Ranuras de ataque.** Además del strike básico, que tienen todos, hay **4 ranuras de ataque: hasta 2 especiales y 2 pesados**. Cabe en `abilities_max = 4`. El tope por tipo es una regla nueva del ruleset (`specials_max`, `heavies_max`), no de la UI. Sin él, 4 especiales con cooldown 2 dan un especial en casi cada acción, con unas 3,7 veces el daño por ms del strike. Las ranuras se abren con el nivel (tabla de abajo).
 
-**Cómo elige el motor (v2).** En v1 el peso es por habilidad: cada ranura de más sube la frecuencia total de habilidades, y la build óptima sería llenar todo. En v2 el peso de un tipo se **reparte** entre las habilidades disponibles de ese tipo: `w_kind / n_disponibles`, con división entera y el resto a la primera en orden de archivo (determinista). Una ranura de más da variedad, no frecuencia. Los cooldowns siguen por habilidad. Se descartó un cooldown compartido por tipo. Si la botarga no tiene ningún ataque de un tipo, la mitad del peso de ese tipo pasa al otro (`empty_kind_share_pct = 50`). Si no pasara nada, 2 pesados actuarían menos que 1 pesado y 1 especial; si pasara todo, 2 pesados ganarían el 60 % (medido en el nivel 10). En v2 el crítico depende de la velocidad (`crit_per_speed`) y no del especial: así el especial cuenta dos veces (daño y defensa de los especiales) en vez de tres. La velocidad ya pesaba en el turno, el intervalo y la esquiva, y ahora también en el crítico: hay que vigilarla en `--builds`, aunque en las mediciones no domina (las mejores builds quedan con velocidad de 35 a 45).
+**Cómo elige el motor (v2).** En v1 el peso es por habilidad: cada ranura de más sube la frecuencia total de habilidades, y la build óptima sería llenar todo. En v2 el peso de un tipo se **reparte** entre las habilidades de ese tipo que lleva el personaje: `w_kind / n`, con división entera y el resto a la primera en orden de archivo (determinista). Cada habilidad tiene así un peso fijo, y mientras está en cooldown su parte espera con ella. Una ranura de más da variedad y cubre un cooldown, pero no da frecuencia. Al principio se repartía entre las *disponibles*, y la que quedaba libre se llevaba todo el peso del tipo. Eso premiaba llevar 2 especiales (cooldowns largos) sobre 2 pesados: con 3 ranuras, 56 % contra 44 %. Los cooldowns siguen por habilidad. Se descartó un cooldown compartido por tipo. Si la botarga no tiene ningún ataque de un tipo, la mitad del peso de ese tipo pasa al otro (`empty_kind_share_pct = 50`). Si no pasara nada, 2 pesados actuarían menos que 1 pesado y 1 especial; si pasara todo, 2 pesados ganarían el 60 % (medido en el nivel 10). En v2 el crítico depende de la velocidad (`crit_per_speed`) y no del especial: así el especial cuenta dos veces (daño y defensa de los especiales) en vez de tres. La velocidad ya pesaba en el turno, el intervalo y la esquiva, y ahora también en el crítico: hay que vigilarla en `--builds`, aunque en las mediciones no domina (las mejores builds quedan con velocidad de 35 a 45).
 
 **Catálogo de habilidades.** `content/catalog/abilities.json` (`kind`, `power`, `cooldown`, `element`, `tier` y un `starter`), junto a `accessories.json`, `styles.json` y los nombres en `names.es.json` y `names.en.json`. Lo carga `content::load_catalog`; las reglas del armado (nivel, presupuesto, ranuras, accesorios y debilidades) viven en `engine::loadout`, que resuelve una botarga a un `CharacterSpec`. Esas reglas no son parte del ruleset: la pelea solo necesita el spec resuelto. El jugador elige ids de las que tiene desbloqueadas, nunca números: con números libres el óptimo es trivial y el espacio no se puede simular. Poder y cooldown se pagan entre sí; por ejemplo, especiales 100/8, 70/4 y 50/2, y pesados 55/2, 40/1 y 28/0. Cada habilidad trae su clip; mientras no haya uno propio, sale del hash de su id (015).
 
@@ -40,11 +40,11 @@ Diseño previo con el `game-designer` y respuestas del owner (2026-11-05), aprob
 |---|---|
 | 1 | Botarga genérica, strike, 1 pesado inicial y 1 ranura abierta |
 | 5 / 15 / 30 | Se abre la 2.ª / 3.ª / 4.ª ranura |
-| Cada 5 (salvo los de ranura) | Elegir 1 de 3 ataques nuevos al azar del tier del nivel |
+| Cada 5 (también los de ranura) | Elegir 1 de 3 ataques nuevos al azar del tier del nivel |
 | Cada 10 | Un cosmético: accesorio, victoria, idle o skin |
 | 25, 50, 75, 100 | Hito: un cosmético especial del tier |
 
-Tiers del catálogo cada 20 niveles (1-19, 20-39, …, 80-100). Los ataques de tier alto no son más fuertes: tienen efectos más vistosos o combinaciones raras de poder y cooldown, porque la fuerza ya la da el presupuesto. Con unas 17 tiradas hasta el 100, el catálogo necesita al menos 3 ataques que el jugador no tenga en cada tirada, unos 24 a 30 en total.
+Tiers del catálogo cada 20 niveles (1-19, 20-39, …, 80-100). Los ataques de tier alto no son más fuertes: tienen efectos más vistosos o combinaciones raras de poder y cooldown, porque la fuerza ya la da el presupuesto. Con 20 tiradas hasta el 100 (una cada 5 niveles; las de los niveles 5, 15 y 30 llenan la ranura que se abre), el catálogo necesita al menos 3 ataques que el jugador no tenga en cada tirada, unos 24 a 30 en total.
 
 **Sorteo de ataques.** Lo hace el **server** (no el motor): saca 3 ataques **que el jugador no tiene**, del tier de su nivel o de uno inferior; el jugador elige 1. Si quedan menos de 3 sin tener, se ofrecen los que queden; si no queda ninguno, la tirada da un cosmético. Las 3 opciones se guardan en el mismo paso que sube el nivel y quedan pendientes hasta que elija: recargar o reintentar no vuelve a sortear.
 
@@ -70,16 +70,20 @@ Ajustes de la implementación (fase 3):
 - También se juzgan los momentos de RF17: al menos 15 % de peleas con alguno y 3 % con cada tipo.
 - Por encima del nivel 10 se informa cuánto pesan 10 niveles de diferencia; no se juzga. Es el dato que necesita el emparejamiento del PvP: el nivel 100 le gana al 90 el 58 % de las veces, y el 30 al 20, el 65 %.
 - Con el catálogo ajustado por el `game-designer`, el nivel 100 pasa sin fallos con dos semillas, y la mejor build queda entre 53 % y 65 %. Es la versión chica que corre en `just check`.
-- En niveles bajos los resultados son informativos. Con el peso del tipo vacío y el crítico por velocidad (promedio de 4 semillas, la mejor build escalada):
+- En niveles bajos los resultados son informativos. Ajustes medidos con `--builds` (promedio de 4 semillas de la mejor build escalada; entre semillas varía unos ±4 puntos):
 
-  | Nivel | Antes | Ahora | Mezclas de 2 ataques (nivel 10) |
+  | Nivel | Inicial | + tipo vacío y crítico por velocidad | + sorteo en niveles de ranura y reparto entre las que lleva |
   |---|---|---|---|
-  | 100 | 63,6 % | 59,7 % | — |
-  | 30 | 63,0 % | 63,2 % | — |
-  | 10 | 65,5 % | 68,1 % | antes 1p1e 58 % y 2p 40 %; ahora entre 47 % y 53 % |
-  | 5 | 75,7 % | 75,1 % | — |
+  | 100 | 63,6 % | 59,7 % | 56,8 % |
+  | 30 | 63,0 % | 63,2 % | 61,5 % |
+  | 20 | — | — | 66,0 % |
+  | 10 | 65,5 % | 68,1 % | 65,8 % |
+  | 5 | 75,7 % | 75,1 % | 62,8 % |
 
-  Se compararon también el crítico por especial y por ataque. El de ataque deja el nivel 100 en 62,6 % y el 10 en 69,7 %. El de velocidad es el mejor en el 100 y no peor en los demás, dentro del ruido (±4 puntos entre semillas). En los niveles 5 y 10 la build se decide casi solo por stats: hasta el nivel 10 no hay sorteo, así que la 2.ª ranura (nivel 5) queda vacía. Eso es de la progresión, no del motor (ver Preguntas abiertas).
+  - Crítico: también se probó por especial y por ataque. Por ataque, el nivel 100 queda en 62,6 % y el 10 en 69,7 %; el de velocidad es el mejor en el 100 y no peor en los demás.
+  - Sorteo en el nivel 5: antes la 2.ª ranura quedaba vacía hasta el 10 y la build se decidía solo por stats; las remontadas del nivel 5 suben del 3 % al 6 %.
+  - Mezclas: con 2 ranuras (niveles 5 a 14), 1 pesado y 1 especial gana el 54 %, 2 pesados el 51 % y 2 especiales el 44 % (antes de los ajustes, 58 % y 40 %). Con 3 ranuras (15 a 29), 2 especiales y 1 pesado gana el 55 % y 2 pesados y 1 especial el 45 %. Quedan en el borde del criterio de 45 % a 55 %.
+  - Entre los niveles 10 y 20 la mejor build escalada sigue en torno al 66 %, apenas por encima del 65 %: con 2 o 3 ataques la build se decide sobre todo por stats. Se acepta por ahora; el emparejamiento por nivel y rating lo amortigua.
 
 Además, win rate por banda de nivel contra la misma banda (que ningún nivel tenga una build rota) y la ventaja de 10 niveles de diferencia, para fijar cuánta distancia de nivel tolera el emparejamiento.
 
@@ -101,7 +105,7 @@ Además, win rate por banda de nivel contra la misma banda (que ningún nivel te
 
 ## Pruebas
 - [ ] `just check` en verde.
-- [x] Motor: v2 rechaza 3 especiales o 3 pesados; en cada elección, el peso de un tipo es el mismo con 1 o 2 habilidades disponibles; los logs v1 se re-simulan idénticos. A lo largo de una pelea, una segunda habilidad sí cubre el cooldown de la primera y el tipo sale algo más: lo mide `just sim --builds` (win rate por número de ranuras).
+- [x] Motor: v2 rechaza 3 especiales o 3 pesados; con todas libres, el peso de un tipo es el mismo con 1 o 2 habilidades, y una en cooldown deja fuera su parte; los logs v1 se re-simulan idénticos. A lo largo de una pelea, una segunda habilidad sí cubre el cooldown de la primera y el tipo sale algo más: lo mide `just sim --builds` (win rate por número de ranuras).
 - [x] Un accesorio que suma puntos netos o pasa el tope por stat se rechaza; una build con más de 2 debilidades también.
 - [ ] Sorteo: las 3 opciones nunca incluyen un ataque que el jugador ya tiene, y reintentar devuelve las mismas.
 - [x] `just sim --check` (torneo, v1) y `just sim --builds 2000 --fights 50000 --check` (v2, nivel 100) pasan; una versión chica corre en `just check`.
@@ -119,8 +123,5 @@ Además, win rate por banda de nivel contra la misma banda (que ningún nivel te
 - Estilo de pelea de una lista fija: sí.
 - Debilidades según los ataques elementales equipados: sí.
 - La regla de daño elemental queda como hoy (×5/4 contra una debilidad).
-
 - Peso del tipo vacío y stat especial (v2): "lo que recomiendes" → la mitad del peso al otro tipo y el crítico por velocidad, elegidos con `just sim --builds` (ver Diseño).
-
-## Preguntas abiertas al owner
-1. **2.ª ranura sin ataque:** la ranura 2 se abre en el nivel 5, pero el primer sorteo es en el 10. ¿Damos un sorteo también en los niveles que abren ranura (20 en total en vez de 17)?
+- Sorteo también en los niveles que abren ranura (2026-11-06): sí, 20 tiradas en vez de 17.

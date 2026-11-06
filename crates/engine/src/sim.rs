@@ -201,8 +201,9 @@ impl<'a> Fighter<'a> {
     }
 
     /// Weighted choice (RF7 step 1): strike, then the available abilities in file order.
-    /// `None` is the strike. With `split_kind_weight` (v2, 016) each available ability gets
-    /// `weight / n` of its kind, and the first of the kind also the remainder. With
+    /// `None` is the strike. With `split_kind_weight` (v2, 016) each ability of a kind gets
+    /// `weight / n`, `n` being how many of that kind the character has, and the first of the
+    /// kind in file order also the remainder; an ability on cooldown leaves its share out. With
     /// `empty_kind_share_pct` (v2) a kind the character does not have lends part of its weight
     /// to the other.
     fn choose<R: Rolls>(&self, rolls: &mut R, r: &Ruleset, desperate: bool) -> Option<usize> {
@@ -231,30 +232,29 @@ impl<'a> Fighter<'a> {
                 own_weight(kind) + own_weight(other) * r.empty_kind_share_pct() / 100
             }
         };
-        let available = |kind: MoveKind| {
+        let count = |kind: MoveKind| {
             self.spec
                 .abilities
                 .iter()
-                .zip(&self.cooldowns)
-                .filter(|(ability, cooldown)| ability.kind == kind && **cooldown == 0)
+                .filter(|a| a.kind == kind)
                 .count()
         };
         let (mut first_heavy, mut first_special) = (true, true);
         let mut options = vec![(None, strike)];
         for (i, (ability, cooldown)) in self.spec.abilities.iter().zip(&self.cooldowns).enumerate()
         {
+            let first = std::mem::take(match ability.kind {
+                MoveKind::Heavy => &mut first_heavy,
+                MoveKind::Special => &mut first_special,
+            });
             if *cooldown > 0 {
                 continue;
             }
             let full = kind_weight(ability.kind);
             let weight = if r.split_kind_weight() {
-                let n = u32::try_from(available(ability.kind)).unwrap_or(u32::MAX);
+                let n = u32::try_from(count(ability.kind)).unwrap_or(u32::MAX);
                 let share = full.checked_div(n).unwrap_or(full);
-                let first = match ability.kind {
-                    MoveKind::Heavy => &mut first_heavy,
-                    MoveKind::Special => &mut first_special,
-                };
-                if std::mem::take(first) {
+                if first {
                     share + full.checked_rem(n).unwrap_or(0)
                 } else {
                     share
@@ -896,7 +896,7 @@ mod tests {
     }
 
     #[test]
-    fn v2_splits_the_weight_of_a_kind_among_its_available_abilities() {
+    fn v2_splits_the_weight_of_a_kind_among_its_abilities() {
         let r = Ruleset::v2();
         let strike = r.w_strike_base() + 31;
         // 81 is odd: 40 each and the remainder to the first in file order.
@@ -994,15 +994,16 @@ mod tests {
     }
 
     #[test]
-    fn v2_gives_the_whole_weight_to_the_only_available_ability_of_a_kind() {
+    fn v2_leaves_out_the_share_of_an_ability_on_cooldown() {
         let r = Ruleset::v2();
         let spec = with_abilities(vec![
             ability("h0", MoveKind::Heavy, 20, 3),
             ability("h1", MoveKind::Heavy, 20, 0),
         ]);
         let mut fighter = Fighter::new(&spec, &r).unwrap();
-        // h0 was just used: only h1 is available, and it carries the whole kind (with the
-        // special weight lent to it, since there are no specials).
+        // h0 was just used: h1 keeps its own half of the kind (with half of the special weight
+        // lent to the heavies, since there are no specials); h0's half waits with it, so a
+        // second ability adds variety and covers a cooldown, not frequency.
         fighter.tick_cooldowns(Some(0));
         let mut probe = Probe {
             value: 0,
@@ -1010,10 +1011,25 @@ mod tests {
         };
         fighter.choose(&mut probe, &r, false);
         let special = r.w_special_base() + r.w_special_per_show() * 40;
-        assert_eq!(
-            probe.bounds,
-            vec![r.w_strike_base() + 31 + r.w_heavy_base() + 31 + special / 2]
-        );
+        let kind = r.w_heavy_base() + 31 + special / 2;
+        assert_eq!(probe.bounds, vec![r.w_strike_base() + 31 + kind / 2]);
+
+        // The remainder stays with h0, first in file order, even while it waits: 81 heavy is
+        // 41 + 40, and h1 alone offers 40.
+        let odd = with_abilities(vec![
+            ability("h0", MoveKind::Heavy, 20, 3),
+            ability("h1", MoveKind::Heavy, 20, 0),
+            ability("s0", MoveKind::Special, 40, 2),
+        ]);
+        let mut fighter = Fighter::new(&odd, &r).unwrap();
+        fighter.tick_cooldowns(Some(0));
+        let mut probe = Probe {
+            value: 0,
+            bounds: vec![],
+        };
+        fighter.choose(&mut probe, &r, false);
+        assert_eq!(r.w_heavy_base() + 31, 81);
+        assert_eq!(probe.bounds, vec![r.w_strike_base() + 31 + 40 + special]);
     }
 
     // --- Formulas -------------------------------------------------------------------------

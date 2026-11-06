@@ -24,7 +24,8 @@ pub const BUDGET_AT_LEVEL_MAX: u16 = 300;
 /// Level at which each ability slot opens (the first one from the start).
 pub const SLOT_LEVELS: [u8; 4] = [1, 5, 15, 30];
 
-/// A level that is a multiple of this and does not open a slot draws a new ability (016).
+/// Every level that is a multiple of this draws a new ability (016), the ones that open a slot
+/// too, so a new slot never waits empty for the next draw.
 pub const DRAW_EVERY: u8 = 5;
 
 /// Catalog tiers: tier `t` covers levels `(t - 1) * LEVELS_PER_TIER` up to the next tier, and the
@@ -60,15 +61,13 @@ pub fn slots(level: u8) -> usize {
 }
 
 /// How many ability draws a player has had up to `level` (0 outside `1..=LEVEL_MAX`): one at
-/// every multiple of [`DRAW_EVERY`] that does not open a slot.
+/// every multiple of [`DRAW_EVERY`].
 #[must_use]
 pub fn draws(level: u8) -> usize {
     if level == 0 || level > LEVEL_MAX {
         return 0;
     }
-    (1..=level)
-        .filter(|l| l % DRAW_EVERY == 0 && !SLOT_LEVELS.contains(l))
-        .count()
+    usize::from(level / DRAW_EVERY)
 }
 
 /// The highest catalog tier a level reaches (`None` outside `1..=LEVEL_MAX`).
@@ -368,7 +367,7 @@ mod tests {
             .iter()
             .map(|&l| draws(l))
             .collect();
-        assert_eq!(drawn, vec![0, 0, 0, 1, 1, 2, 3, 17, 0]);
+        assert_eq!(drawn, vec![0, 0, 1, 2, 3, 4, 6, 20, 0]);
 
         let tiers: Vec<Option<u8>> = [0, 1, 19, 20, 39, 40, 79, 80, 99, 100]
             .iter()
