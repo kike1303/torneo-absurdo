@@ -4,6 +4,7 @@
   import type { FighterDisplay } from '#lib/features/fight/live/fighter-names.js';
   import type { FightResult } from '#lib/features/fight/live/view-state.js';
   import type { VoidStats } from '#lib/features/fight/live/void-stats.js';
+  import { formatInteger } from '#lib/i18n/format.js';
   import type { Locale } from '#lib/i18n/locale.js';
   import { m } from '#lib/paraglide/messages.js';
 
@@ -52,8 +53,8 @@
     {#if result.kind === 'voided_unverifiable' && voidStats !== null}
       <p class="text-sm text-muted-foreground" data-testid="fight-result-void-count">
         {m.fight_result_void_count({
-          voided: voidStats.voided,
-          secret_lost: voidStats.secret_lost,
+          voided: formatInteger(voidStats.voided, locale),
+          secret_lost: formatInteger(voidStats.secret_lost, locale),
         })}
       </p>
     {/if}

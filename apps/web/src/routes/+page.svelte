@@ -4,7 +4,11 @@
   import FightHome from '#lib/components/fight/FightHome.svelte';
   import { fighterDisplay } from '#lib/features/fight/live/fighter-names.js';
   import { FightStore } from '#lib/features/fight/live/live-store.svelte.js';
-  import { createVoidStatsReader } from '#lib/features/fight/live/void-stats.js';
+  import {
+    createVoidStatsReader,
+    voidStatsOf,
+    type VoidStatsRead,
+  } from '#lib/features/fight/live/void-stats.js';
   import { m } from '#lib/paraglide/messages.js';
 
   let { data } = $props();
@@ -17,16 +21,20 @@
   // 012 RF22: the SSR read the counter if the last fight needed it; one that becomes so by the socket
   // reads it here, once, with its delay.
   // svelte-ignore state_referenced_locally
-  let voidStats = $state(data.voidStats);
+  const lastId = data.board?.last?.id ?? null;
   // svelte-ignore state_referenced_locally
-  const voidReader = createVoidStatsReader(
-    data.voidStats === null ? null : (data.board?.last?.id ?? null),
+  const ssrStats = data.voidStats;
+  let voidRead = $state.raw<VoidStatsRead | null>(
+    ssrStats === null || lastId === null ? null : { fightId: lastId, stats: ssrStats },
   );
+  const voidReader = createVoidStatsReader(ssrStats === null ? null : lastId);
+  const voidStats = $derived(voidStatsOf(voidRead, store.view.result?.fight.id ?? null));
   $effect(() => {
     const result = store.view.result;
     if (result?.kind !== 'voided_unverifiable') return;
-    void voidReader.read(result.fight.id).then((stats) => {
-      if (stats !== null) voidStats = stats;
+    const fightId = result.fight.id;
+    void voidReader.read(fightId).then((stats) => {
+      if (stats !== null) voidRead = { fightId, stats };
     });
   });
 </script>

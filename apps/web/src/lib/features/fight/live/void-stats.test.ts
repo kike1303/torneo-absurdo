@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MAX_READ_DELAY_MS, createVoidStatsReader, parseVoidStats } from './void-stats.js';
+import {
+  MAX_READ_DELAY_MS,
+  createVoidStatsReader,
+  parseVoidStats,
+  voidStatsOf,
+} from './void-stats.js';
 
 const answer = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -16,6 +21,20 @@ describe('parseVoidStats', () => {
       expect(parseVoidStats(bad)).toBeNull();
     }
     expect(parseVoidStats({ voided: 1.5, secret_lost: 1 })).toBeNull();
+  });
+});
+
+describe('voidStatsOf', () => {
+  const stats = { voided: 4, secret_lost: 1 };
+
+  it('gives the counter read for this fight', () => {
+    expect(voidStatsOf({ fightId: 7, stats }, 7)).toEqual(stats);
+  });
+
+  it('never gives the one of another fight: it would be missing the new one', () => {
+    expect(voidStatsOf({ fightId: 7, stats }, 9)).toBeNull();
+    expect(voidStatsOf({ fightId: 7, stats }, null)).toBeNull();
+    expect(voidStatsOf(null, 7)).toBeNull();
   });
 });
 

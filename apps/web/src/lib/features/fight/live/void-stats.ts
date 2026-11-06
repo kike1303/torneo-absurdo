@@ -17,6 +17,20 @@ export function parseVoidStats(value: unknown): VoidStats | null {
   return { voided: voided as number, secret_lost: secretLost as number };
 }
 
+/** A counter and the fight it was read for. */
+export interface VoidStatsRead {
+  readonly fightId: number;
+  readonly stats: VoidStats;
+}
+
+/**
+ * The counter to show with this fight. One read for another fight does not count: it would leave
+ * out the fight on screen, and RF22 wants no line rather than that.
+ */
+export function voidStatsOf(read: VoidStatsRead | null, fightId: number | null): VoidStats | null {
+  return read !== null && read.fightId === fightId ? read.stats : null;
+}
+
 export interface VoidStatsDeps {
   readonly fetchFn: typeof fetch;
   readonly random: () => number;
