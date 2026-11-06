@@ -4,7 +4,7 @@ allow-expect-in-tests = true
 
 # 003 RF5: the engine is pure. Every rand_core path has `allow-invalid`, so a future rand_core
 # that moves or drops an item does not make clippy reject the file (`OsRng`, `from_os_rng` and
-# `try_from_os_rng` do not even exist without `os_rng`: the engine alone, the wasm target).
+# `try_from_os_rng` no longer exist in rand_core 0.10; they stay listed as a guard).
 disallowed-types = [
     { path = "std::collections::HashMap", reason = "iteration order is not deterministic; use BTreeMap or Vec" },
     { path = "std::collections::HashSet", reason = "iteration order is not deterministic; use BTreeSet or Vec" },
