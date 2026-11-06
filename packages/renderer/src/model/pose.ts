@@ -56,6 +56,30 @@ export const CLIP_IMPACT: Readonly<Partial<Record<ClipName, number>>> = Object.f
 const IDLE_SPELL_MS = 8000;
 const IDLE_VARIANTS: readonly ClipName[] = ['idle', 'idle_2', 'idle_3', 'idle_4', 'idle_5'];
 
+/** The victory clips a player can pick (016). */
+const WIN_VARIANTS: readonly ClipName[] = ['win_1', 'win_2', 'win_3'];
+
+/** The idle clips a player can pick (016): one of the five idles. */
+export type IdleClip = 'idle' | 'idle_2' | 'idle_3' | 'idle_4' | 'idle_5';
+/** The victory clips a player can pick (016). */
+export type WinClip = 'win_1' | 'win_2' | 'win_3';
+
+/**
+ * What a player botarga picked to look like (016): its idle and its victory. Without a field, the
+ * variant of the tournament (the idle rotates by spell, the victory varies by fight). The KO is
+ * never picked: it varies by fight. The host data is not trusted: an unknown code is ignored.
+ */
+export interface FighterCosmetics {
+  readonly idle?: IdleClip;
+  readonly victory?: WinClip;
+}
+
+function picked(code: string | undefined, allowed: readonly ClipName[]): ClipName | null {
+  return code !== undefined && (allowed as readonly string[]).includes(code)
+    ? (code as ClipName)
+    : null;
+}
+
 // `idle` and `walk` are picked in `clipFor` (by spell and by `travel`); listed here for the record.
 const VARIANTS: Readonly<Record<AnimationCode, readonly ClipName[]>> = Object.freeze({
   idle: IDLE_VARIANTS,
@@ -69,7 +93,7 @@ const VARIANTS: Readonly<Record<AnimationCode, readonly ClipName[]>> = Object.fr
   block: ['block'],
   dodge: ['dodge'],
   ko: ['ko_1', 'ko_2'],
-  win: ['win_1', 'win_2', 'win_3'],
+  win: WIN_VARIANTS,
 });
 
 /** Clips that play at their own speed and hold the last frame (the ending, 013). */
@@ -135,15 +159,25 @@ function abilityIndex(ability: string, count: number): number {
   return h % count;
 }
 
-/** The clip of `fighter` at scene time `t`; the variant depends only on when it started. */
+/**
+ * The clip of `fighter` at scene time `t`; the variant depends only on when it started, or on what
+ * the player picked (`cosmetics`, 016).
+ */
 export function clipFor(
   fighter: Pick<FighterScene, 'side' | 'animation' | 'elapsed' | 'travel' | 'ability'>,
   t: number,
+  cosmetics?: FighterCosmetics,
 ): ClipName {
   if (fighter.animation === 'walk') return fighter.travel < 0 ? 'walk_back' : 'walk_forward';
   if (fighter.animation === 'idle') {
+    const idle = picked(cosmetics?.idle, IDLE_VARIANTS);
+    if (idle !== null) return idle;
     const spell = Math.floor(Math.max(0, t) / IDLE_SPELL_MS);
     return IDLE_VARIANTS[variantIndex(fighter.side, spell, IDLE_VARIANTS.length)] as ClipName;
+  }
+  if (fighter.animation === 'win') {
+    const victory = picked(cosmetics?.victory, WIN_VARIANTS);
+    if (victory !== null) return victory;
   }
   const variants = VARIANTS[fighter.animation];
   if (variants.length === 1) return variants[0] as ClipName;
@@ -222,8 +256,9 @@ export function poseFor(
   t: number,
   durations: ClipDurations,
   context: FaceContext,
+  cosmetics?: FighterCosmetics,
 ): Pose {
-  const wanted = clipFor(fighter, t);
+  const wanted = clipFor(fighter, t, cosmetics);
   const length = durations[wanted];
   // A clip the GLB lacks plays as idle (the walks before they are exported).
   const clip = length === undefined ? 'idle' : wanted;
