@@ -308,7 +308,11 @@ fn attach<'a>(
             return Err(catalog_error(path, id, "name_missing".to_owned()));
         };
         let chars = name.chars().count();
-        if name.trim() != name || chars == 0 || chars > NAME_MAX_CHARS || name.contains('\n') {
+        if name.trim() != name
+            || chars == 0
+            || chars > NAME_MAX_CHARS
+            || name.chars().any(char::is_control)
+        {
             return Err(catalog_error(path, id, "name_invalid".to_owned()));
         }
         slot.insert(locale, name);

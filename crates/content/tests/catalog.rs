@@ -278,6 +278,7 @@ fn every_rule_has_its_code() {
         ("name-long", "x".repeat(NAME_MAX_CHARS + 1)),
         ("name-padded", " Padded".to_owned()),
         ("name-empty", String::new()),
+        ("name-control", "Tab\there".to_owned()),
     ] {
         let error = failing(case, |root| {
             let id = first_id(root, "styles.json", "styles");
