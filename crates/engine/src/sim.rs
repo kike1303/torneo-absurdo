@@ -8,7 +8,7 @@ use protocol::{AbilityKind, EndReason, FightEvent, FightLog, FighterInfo, Moment
 
 use crate::rng::{Rolls, bound};
 use crate::ruleset::{EVENTS_PER_ACTION_MAX, EVENTS_TAIL_MAX, Ruleset};
-use crate::spec::{CharacterSpec, MoveKind, STRIKE_ID, SpecError};
+use crate::spec::{CharacterSpec, MoveKind, STRIKE_ID, SpecError, Stats};
 
 const PERMILLE: NonZeroU32 = bound(1000);
 const COIN: NonZeroU32 = bound(2);
@@ -54,13 +54,16 @@ pub(crate) fn is_desperate(r: &Ruleset, hp: u16, max_hp: u16) -> bool {
     relative(hp, max_hp) <= r.desperation_permille()
 }
 
-pub(crate) fn crit_permille(r: &Ruleset, special_atk: u8, desperate: bool) -> u32 {
+pub(crate) fn crit_permille(r: &Ruleset, atk: &Stats, desperate: bool) -> u32 {
     let bonus = if desperate {
         r.desperation_crit_bonus()
     } else {
         0
     };
-    r.crit_base() + r.crit_per_special() * u32::from(special_atk) + bonus
+    r.crit_base()
+        + r.crit_per_special() * u32::from(atk.special)
+        + r.crit_per_speed() * u32::from(atk.speed)
+        + bonus
 }
 
 /// `power * (offset + off) / (offset + def)`.
@@ -199,11 +202,13 @@ impl<'a> Fighter<'a> {
 
     /// Weighted choice (RF7 step 1): strike, then the available abilities in file order.
     /// `None` is the strike. With `split_kind_weight` (v2, 016) each available ability gets
-    /// `weight / n` of its kind, and the first of the kind also the remainder.
+    /// `weight / n` of its kind, and the first of the kind also the remainder. With
+    /// `empty_kind_share_pct` (v2) a kind the character does not have lends part of its weight
+    /// to the other.
     fn choose<R: Rolls>(&self, rolls: &mut R, r: &Ruleset, desperate: bool) -> Option<usize> {
         let p = self.spec.personality;
         let strike = r.w_strike_base() + u32::from(p.aggression);
-        let kind_weight = |kind: MoveKind| match kind {
+        let own_weight = |kind: MoveKind| match kind {
             MoveKind::Heavy => r.w_heavy_base() + u32::from(p.aggression),
             MoveKind::Special => {
                 let w = r.w_special_base() + r.w_special_per_show() * u32::from(p.showmanship);
@@ -212,6 +217,18 @@ impl<'a> Fighter<'a> {
                 } else {
                     w
                 }
+            }
+        };
+        let owns = |kind: MoveKind| self.spec.abilities.iter().any(|a| a.kind == kind);
+        let kind_weight = |kind: MoveKind| {
+            let other = match kind {
+                MoveKind::Heavy => MoveKind::Special,
+                MoveKind::Special => MoveKind::Heavy,
+            };
+            if owns(other) {
+                own_weight(kind)
+            } else {
+                own_weight(kind) + own_weight(other) * r.empty_kind_share_pct() / 100
             }
         };
         let available = |kind: MoveKind| {
@@ -424,7 +441,7 @@ impl Fight<'_> {
             }
             Defense::Hit => {
                 let variance = rolls.roll(bound(r.variance_span()));
-                crit = rolls.roll(PERMILLE) < crit_permille(r, atk.spec.stats.special, desperate);
+                crit = rolls.roll(PERMILLE) < crit_permille(r, &atk.spec.stats, desperate);
                 let (d, nc) = hit_damage(r, base, variance, desperate, crit, weak);
                 without_crit = nc;
                 applied(d, hp_before)
@@ -575,7 +592,7 @@ impl Fight<'_> {
 mod tests {
     use super::*;
     use crate::rng::Roller;
-    use crate::spec::{Ability, Element, Personality, Stats};
+    use crate::spec::{Ability, Element, Personality};
     use crate::{Seed, simulate};
 
     fn r() -> Ruleset {
@@ -922,6 +939,61 @@ mod tests {
     }
 
     #[test]
+    fn v2_lends_half_the_weight_of_a_missing_kind_to_the_other() {
+        let (v1, v2) = (Ruleset::v1(), Ruleset::v2());
+        let strike = v2.w_strike_base() + 31;
+        let heavy = v2.w_heavy_base() + 31;
+        let special = v2.w_special_base() + v2.w_special_per_show() * 40;
+        let heavies = with_abilities(vec![
+            ability("h0", MoveKind::Heavy, 20, 0),
+            ability("h1", MoveKind::Heavy, 20, 0),
+        ]);
+        let specials = with_abilities(vec![ability("s0", MoveKind::Special, 40, 2)]);
+        // Half of the missing kind, rounded down.
+        assert_eq!(v2.empty_kind_share_pct(), 50);
+        assert_eq!(
+            choice(&heavies, &v2, false, 0).0,
+            strike + heavy + special / 2
+        );
+        assert_eq!(
+            choice(&specials, &v2, false, 0).0,
+            strike + special + heavy / 2
+        );
+        // Desperation still doubles the special part, now lent to the heavies.
+        assert_eq!(choice(&heavies, &v2, true, 0).0, strike + heavy + special);
+        // v1 loses it.
+        assert_eq!(choice(&heavies, &v1, false, 0).0, strike + 2 * heavy);
+        // A kind only on cooldown keeps its own weight: nothing moves, it waits.
+        let mixed = with_abilities(vec![
+            ability("h0", MoveKind::Heavy, 20, 0),
+            ability("s0", MoveKind::Special, 40, 2),
+        ]);
+        let mut fighter = Fighter::new(&mixed, &v2).unwrap();
+        fighter.tick_cooldowns(Some(1));
+        let mut probe = Probe {
+            value: 0,
+            bounds: vec![],
+        };
+        fighter.choose(&mut probe, &v2, false);
+        assert_eq!(probe.bounds, vec![strike + heavy]);
+        // A missing kind while every ability of the other is on cooldown: the lent weight goes
+        // nowhere, only the strike is left.
+        let slow = with_abilities(vec![
+            ability("h0", MoveKind::Heavy, 20, 3),
+            ability("h1", MoveKind::Heavy, 20, 3),
+        ]);
+        let mut fighter = Fighter::new(&slow, &v2).unwrap();
+        fighter.tick_cooldowns(Some(0));
+        fighter.tick_cooldowns(Some(1));
+        let mut probe = Probe {
+            value: 0,
+            bounds: vec![],
+        };
+        assert_eq!(fighter.choose(&mut probe, &v2, false), None);
+        assert_eq!(probe.bounds, vec![strike]);
+    }
+
+    #[test]
     fn v2_gives_the_whole_weight_to_the_only_available_ability_of_a_kind() {
         let r = Ruleset::v2();
         let spec = with_abilities(vec![
@@ -929,16 +1001,18 @@ mod tests {
             ability("h1", MoveKind::Heavy, 20, 0),
         ]);
         let mut fighter = Fighter::new(&spec, &r).unwrap();
-        // h0 was just used: only h1 is available, and it carries the whole kind.
+        // h0 was just used: only h1 is available, and it carries the whole kind (with the
+        // special weight lent to it, since there are no specials).
         fighter.tick_cooldowns(Some(0));
         let mut probe = Probe {
             value: 0,
             bounds: vec![],
         };
         fighter.choose(&mut probe, &r, false);
+        let special = r.w_special_base() + r.w_special_per_show() * 40;
         assert_eq!(
             probe.bounds,
-            vec![r.w_strike_base() + 31 + r.w_heavy_base() + 31]
+            vec![r.w_strike_base() + 31 + r.w_heavy_base() + 31 + special / 2]
         );
     }
 
@@ -958,8 +1032,17 @@ mod tests {
         assert_eq!(windup(&r, AbilityKind::Special), 1100);
         assert_eq!(dodge_permille(&r, 85), 210);
         assert_eq!(block_permille(&r, 45, 20), 60 + 22 + 20);
-        assert_eq!(crit_permille(&r, 55, false), 95);
-        assert_eq!(crit_permille(&r, 55, true), 245);
+        let atk = Stats {
+            hp: 20,
+            attack: 70,
+            defense: 20,
+            speed: 20,
+            special: 55,
+        };
+        assert_eq!(crit_permille(&r, &atk, false), 95);
+        assert_eq!(crit_permille(&r, &atk, true), 245);
+        // v2 reads speed instead of special.
+        assert_eq!(crit_permille(&Ruleset::v2(), &atk, false), 60);
         // Strike 20 * (100 + 60) / (100 + 45) = 22; special 70 * 155 / 160 = 67.
         assert_eq!(base_damage(&r, 20, 60, 45), 22);
         assert_eq!(base_damage(&r, 70, 55, 60), 67);
