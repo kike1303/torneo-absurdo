@@ -16,11 +16,11 @@ import {
 } from 'three';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import type { ClipName, Pose } from '../model/pose.ts';
-import type { FighterScene } from '../scene/types.ts';
 import type { Side } from '../timeline/types.ts';
 import type { Botarga } from './load.ts';
 import type { BotargaTint } from './types.ts';
-import { TURN_TO_CAMERA, worldX } from './world.ts';
+import { GROUND_Y, type FighterScene } from '../scene/types.ts';
+import { TURN_TO_CAMERA, arenaPoint } from './world.ts';
 
 /** Length of the cross-fade between two clips. */
 export const FADE_MS = 200;
@@ -86,7 +86,15 @@ interface Playing {
 
 export interface Fighter3d {
   readonly root: Object3D;
-  apply(fighter: FighterScene, pose: Pose, t: number, flash: number): void;
+  /** `angle` turns the fight axis and `depth` steps off it (018). */
+  apply(
+    fighter: FighterScene,
+    pose: Pose,
+    t: number,
+    flash: number,
+    angle?: number,
+    depth?: number,
+  ): void;
   dispose(): void;
 }
 
@@ -149,9 +157,12 @@ export function createFighter(
 
   return {
     root,
-    apply(fighter, pose, t, flash) {
-      root.position.set(worldX(fighter.x), 0, 0);
-      root.rotation.y = side === 'a' ? Math.PI / 2 - TURN_TO_CAMERA : TURN_TO_CAMERA - Math.PI / 2;
+    apply(fighter, pose, t, flash, angle = 0, depth = 0) {
+      const at = arenaPoint(fighter.x, GROUND_Y, angle, depth);
+      root.position.set(at.x, 0, at.z);
+      // Facing the rival along the turned axis (`angle`, 018), still a little to the camera.
+      root.rotation.y =
+        angle + (side === 'a' ? Math.PI / 2 - TURN_TO_CAMERA : TURN_TO_CAMERA - Math.PI / 2);
 
       if (current === null || current.clip !== pose.clip) {
         if (previous !== null && previous.clip !== pose.clip) previous.action.stop();

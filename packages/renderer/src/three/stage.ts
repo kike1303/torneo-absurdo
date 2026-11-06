@@ -21,17 +21,18 @@ import {
 } from 'three';
 import { MAX_PARTICLES } from '../fx/particles.ts';
 import { poseFor } from '../model/pose.ts';
+import { arenaAngle, sidestep } from '../model/circling.ts';
 import { shotFor } from '../model/shot.ts';
 import { RendererError } from '../player/errors.ts';
 import type { RendererTheme, Stage, StageSetup } from '../player/types.ts';
-import type { DamageNumberEffect, Scene } from '../scene/types.ts';
+import { GROUND_Y, type DamageNumberEffect, type Scene } from '../scene/types.ts';
 import { SIDES, type Side } from '../timeline/types.ts';
 import { createFighter, type Fighter3d } from './fighter.ts';
 import { loadBotarga, type Botarga } from './load.ts';
 import { createOverlay, type Overlay } from './overlay.ts';
 import { createPacer } from './pacer.ts';
 import type { BotargaModel } from './types.ts';
-import { METERS_PER_PX, createCamera, placeCamera, worldX, worldY } from './world.ts';
+import { METERS_PER_PX, arenaPoint, createCamera, placeCamera } from './world.ts';
 
 /** Device pixels per CSS px, capped: a phone at 3× costs more than it shows. */
 const MAX_PIXEL_RATIO = 2;
@@ -138,13 +139,14 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
     dirty = true;
   };
 
-  function drawParticles(w: World, scene: Scene, current: RendererTheme): void {
+  function drawParticles(w: World, scene: Scene, current: RendererTheme, angle: number): void {
     let count = 0;
     for (const effect of scene.effects) {
       if (effect.kind !== 'particle' || count >= MAX_PARTICLES) continue;
       const size = effect.size * METERS_PER_PX * PARTICLE_SCALE * effect.alpha;
       matrix.makeScale(size, size, size);
-      matrix.setPosition(worldX(effect.x), worldY(effect.y), PARTICLE_DEPTH);
+      const at = arenaPoint(effect.x, effect.y, angle, PARTICLE_DEPTH);
+      matrix.setPosition(at.x, at.y, at.z);
       w.particles.setMatrixAt(count, matrix);
       w.particles.setColorAt(count, tint.setHex(current.colors[effect.color]));
       count++;
@@ -157,8 +159,15 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
   function draw(w: World, scene: Scene): void {
     const current = theme;
     if (current === null) return;
-    placeCamera(w.camera, aspect, scene.camera, shotFor(scene));
-    for (const side of SIDES) w.blobs[side].position.x = worldX(scene.fighters[side].x);
+    // The fight axis turns and a dodge steps off it (018): presentation only, from the scene.
+    const angle = arenaAngle(scene);
+    placeCamera(w.camera, aspect, scene.camera, shotFor(scene), angle);
+    for (const side of SIDES) {
+      const f = scene.fighters[side];
+      const at = arenaPoint(f.x, GROUND_Y, angle, sidestep(f, scene));
+      w.blobs[side].position.x = at.x;
+      w.blobs[side].position.z = at.z;
+    }
     if (fighters !== null && botarga !== null) {
       for (const side of SIDES) {
         const f = scene.fighters[side];
@@ -172,13 +181,13 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
           hpFraction: hud.maxHp > 0 ? hud.hp / hud.maxHp : 1,
           intro: scene.phase === 'intro',
         });
-        fighters[side].apply(f, pose, scene.t, flash);
+        fighters[side].apply(f, pose, scene.t, flash, angle, sidestep(f, scene));
       }
     }
-    drawParticles(w, scene, current);
+    drawParticles(w, scene, current, angle);
     numbers.length = 0;
     for (const effect of scene.effects) if (effect.kind === 'damage') numbers.push(effect);
-    w.overlay.apply(scene.hud, scene.banners, numbers, w.camera, formatNumber);
+    w.overlay.apply(scene.hud, scene.banners, numbers, w.camera, formatNumber, angle);
   }
 
   const disposeFighters = (): void => {
