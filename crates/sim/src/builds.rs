@@ -2,8 +2,11 @@
 //!
 //! [`run_builds`] draws `N` random valid loadouts from the player catalog at one level, plays
 //! `fights` random pairs of them with ruleset v2, and tallies the win rate of every catalog piece
-//! (ability, accessory, style) and of every mix of kinds. A build fills every ability slot open
-//! at its level, as a player does: an empty slot only makes a build weaker. Then it looks for
+//! (ability, accessory, style) and of every mix of kinds, plus the RF17 measures of duration,
+//! `time_up` and moments. A build fills every ability slot open at its level that the player can
+//! fill (the starter plus one ability per draw so far), as a player does: an empty slot only makes
+//! a build weaker. When the level is above 10 it also plays builds of that level against builds 10
+//! levels lower, which tells the PvP matchmaking how much a gap of 10 levels weighs. Then it looks for
 //! dominant builds: a hill climb from some builds, changing one piece at a time, scored against
 //! a fixed sample of opponents with fixed seeds; the climbed builds then face each other, and
 //! the best of them against the rest is the dominant one. Its win rate is measured again with
@@ -16,16 +19,16 @@ use std::fmt::Write as _;
 use content::Catalog;
 use engine::loadout::{self, Accessory, Loadout, Slot};
 use engine::{
-    Ability, CharacterSpec, EndReason, FightEvent, FightLog, MoveKind, Ruleset, Seed, Side,
-    simulate,
+    Ability, CharacterSpec, EndReason, FightEvent, FightLog, MomentKind, MoveKind, Ruleset, Seed,
+    Side, simulate,
 };
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 use serde::Serialize;
 
-use crate::SimError;
 use crate::args::seed_hex;
 use crate::report::DURATION_BAND_MS;
+use crate::{Criteria, SimError};
 
 /// The ruleset of the player botargas.
 pub const BUILDS_RULESET_VERSION: u16 = 2;
@@ -51,7 +54,12 @@ pub struct BuildsConfig {
     /// Hill climbs (at most `builds`) and steps of each.
     pub climbs: u32,
     pub climb_steps: u32,
+    /// Fights between builds of `level` and builds of `level - LEVEL_GAP` (0 to skip).
+    pub gap_fights: u32,
 }
+
+/// The level gap the report measures.
+pub const LEVEL_GAP: u8 = 10;
 
 impl BuildsConfig {
     /// The command line's: one climb every 10 builds (from 1 to [`CLIMBS_MAX`]) of
@@ -65,6 +73,7 @@ impl BuildsConfig {
             seed,
             climbs: (builds / 10).clamp(1, CLIMBS_MAX),
             climb_steps: CLIMB_STEPS,
+            gap_fights: if level > LEVEL_GAP { fights / 10 } else { 0 },
         }
     }
 }
@@ -83,6 +92,9 @@ pub struct BuildsCriteria {
     pub time_up_max_permille: u32,
     /// Fights with `end.t` inside the duration band of RF17.
     pub in_band_min_permille: u32,
+    /// Fights with at least one `moment`, and with one of each kind (RF17).
+    pub any_moment_min_permille: u32,
+    pub moment_kind_min_permille: u32,
 }
 
 impl BuildsCriteria {
@@ -92,8 +104,10 @@ impl BuildsCriteria {
         group_max_permille: 550,
         group_min_appearances: 200,
         dominant_max_permille: 650,
-        time_up_max_permille: 100,
-        in_band_min_permille: 900,
+        time_up_max_permille: Criteria::RF17.time_up_max_permille,
+        in_band_min_permille: Criteria::RF17.in_band_min_permille,
+        any_moment_min_permille: Criteria::RF17.any_moment_min_permille,
+        moment_kind_min_permille: Criteria::RF17.moment_kind_min_permille,
     };
 }
 
@@ -104,7 +118,6 @@ pub enum GroupKind {
     Ability,
     Accessory,
     Style,
-
     /// Heavies and specials, as `"<h>h<s>s"`.
     Mix,
 }
@@ -115,7 +128,6 @@ impl GroupKind {
             Self::Ability => "ability",
             Self::Accessory => "accessory",
             Self::Style => "style",
-
             Self::Mix => "mix",
         }
     }
@@ -127,7 +139,27 @@ pub struct Group {
     pub id: String,
     /// Fighters (one per side of a fight) whose build is in the group.
     pub appearances: u64,
+    /// Half points: 2 per win, 1 per draw.
+    pub points: u64,
     pub win_permille: u32,
+}
+
+/// Builds of the report's level against builds `LEVEL_GAP` levels lower (informative).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LevelGap {
+    pub lower_level: u8,
+    pub fights: u32,
+    /// Win rate of the higher level (draws count half).
+    pub higher_win_permille: u32,
+}
+
+/// Fights with each `moment` kind.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct MomentCounts {
+    pub any: u64,
+    pub comeback: u64,
+    pub decisive_crit: u64,
+    pub clutch_ko: u64,
 }
 
 /// The climbed build that does best against the other climbed builds.
@@ -149,9 +181,11 @@ pub struct BuildsReport {
     pub fights: u32,
     pub climbs: u32,
     pub climb_steps: u32,
-    pub time_up_permille: u32,
-    pub in_band_permille: u32,
-    pub draw_permille: u32,
+    pub time_up: u64,
+    pub in_band: u64,
+    pub draws: u64,
+    pub moments: MomentCounts,
+    pub level_gap: Option<LevelGap>,
     /// Sorted by kind, then id.
     pub groups: Vec<Group>,
     pub dominant: Dominant,
@@ -175,15 +209,22 @@ pub enum BuildsFailure {
     InBand {
         permille: u32,
     },
+    Moments {
+        kind: &'static str,
+        permille: u32,
+    },
 }
 
 impl BuildsReport {
     #[must_use]
     pub fn failures(&self, c: &BuildsCriteria) -> Vec<BuildsFailure> {
         let mut out = Vec::new();
+        let total = u64::from(self.fights);
         for g in &self.groups {
+            let half = g.appearances * 2;
             if g.appearances >= c.group_min_appearances
-                && !(c.group_min_permille..=c.group_max_permille).contains(&g.win_permille)
+                && !(at_least(g.points, half, c.group_min_permille)
+                    && at_most(g.points, half, c.group_max_permille))
             {
                 out.push(BuildsFailure::GroupWinRate {
                     kind: g.kind,
@@ -197,15 +238,29 @@ impl BuildsReport {
                 permille: self.dominant.win_permille,
             });
         }
-        if self.time_up_permille > c.time_up_max_permille {
+        if !at_most(self.time_up, total, c.time_up_max_permille) {
             out.push(BuildsFailure::TimeUp {
-                permille: self.time_up_permille,
+                permille: permille(self.time_up, total),
             });
         }
-        if self.in_band_permille < c.in_band_min_permille {
+        if !at_least(self.in_band, total, c.in_band_min_permille) {
             out.push(BuildsFailure::InBand {
-                permille: self.in_band_permille,
+                permille: permille(self.in_band, total),
             });
+        }
+        let m = self.moments;
+        for (kind, count, min) in [
+            ("any", m.any, c.any_moment_min_permille),
+            ("comeback", m.comeback, c.moment_kind_min_permille),
+            ("decisive_crit", m.decisive_crit, c.moment_kind_min_permille),
+            ("clutch_ko", m.clutch_ko, c.moment_kind_min_permille),
+        ] {
+            if !at_least(count, total, min) {
+                out.push(BuildsFailure::Moments {
+                    kind,
+                    permille: permille(count, total),
+                });
+            }
         }
         out
     }
@@ -224,15 +279,38 @@ impl BuildsReport {
             "{} builds at level {}, {} fights, {} climbs of {} steps",
             self.builds, self.level, self.fights, self.climbs, self.climb_steps
         );
+        let total = u64::from(self.fights);
+        let share = |count: u64| pct(permille(count, total));
         let _ = writeln!(
             s,
             "time_up {} (max {}), in band {} (min {}), draws {}",
-            pct(self.time_up_permille),
+            share(self.time_up),
             pct(c.time_up_max_permille),
-            pct(self.in_band_permille),
+            share(self.in_band),
             pct(c.in_band_min_permille),
-            pct(self.draw_permille)
+            share(self.draws)
         );
+        let m = self.moments;
+        let _ = writeln!(
+            s,
+            "moments: any {} (min {}), comeback {}, decisive_crit {}, clutch_ko {} (min {} each)",
+            share(m.any),
+            pct(c.any_moment_min_permille),
+            share(m.comeback),
+            share(m.decisive_crit),
+            share(m.clutch_ko),
+            pct(c.moment_kind_min_permille)
+        );
+        if let Some(gap) = &self.level_gap {
+            let _ = writeln!(
+                s,
+                "level {} against level {}: {} over {} fights (informative)",
+                self.level,
+                gap.lower_level,
+                pct(gap.higher_win_permille),
+                gap.fights
+            );
+        }
         let _ = writeln!(
             s,
             "\nwin rate by group ({}-{}, groups under {} appearances not judged):",
@@ -243,7 +321,9 @@ impl BuildsReport {
         let width = self.groups.iter().map(|g| g.id.len()).max().unwrap_or(0);
         for g in &self.groups {
             let judged = g.appearances >= c.group_min_appearances;
-            let ok = (c.group_min_permille..=c.group_max_permille).contains(&g.win_permille);
+            let half = g.appearances * 2;
+            let ok = at_least(g.points, half, c.group_min_permille)
+                && at_most(g.points, half, c.group_max_permille);
             let mark = match (judged, ok) {
                 (false, _) => "  -",
                 (true, true) => " ok",
@@ -314,6 +394,7 @@ pub fn run_builds(
 
     let mut tally: BTreeMap<(GroupKind, String), (u64, u64)> = BTreeMap::new();
     let (mut time_up, mut in_band, mut draws) = (0_u64, 0_u64, 0_u64);
+    let mut moments = MomentCounts::default();
     for _ in 0..config.fights {
         let a = pick(&mut rng, config.builds);
         let b = (a + 1 + pick(&mut rng, config.builds - 1)) % config.builds;
@@ -335,6 +416,7 @@ pub fn run_builds(
         if reason == EndReason::Draw {
             draws += 1;
         }
+        count_moments(&log, &mut moments);
         for (side, fighter) in [(Side::A, ba), (Side::B, bb)] {
             let points = match winner {
                 Some(w) if w == side => 2,
@@ -354,6 +436,7 @@ pub fn run_builds(
             kind,
             id,
             appearances,
+            points,
             win_permille: permille(points, appearances * 2),
         })
         .collect();
@@ -433,7 +516,39 @@ pub fn run_builds(
         stats: [s.hp, s.attack, s.defense, s.speed, s.special],
     };
 
-    let total = u64::from(config.fights);
+    let level_gap = if config.gap_fights > 0 && config.level > LEVEL_GAP {
+        let lower_level = config.level - LEVEL_GAP;
+        let mut lower = Vec::new();
+        for i in 0..config.builds {
+            lower.push(draw_build(&mut rng, catalog, lower_level, i, ruleset)?);
+        }
+        let mut points = 0_u64;
+        for k in 0..config.gap_fights {
+            let high = &build(&builds, pick(&mut rng, config.builds))?.spec;
+            let low = &build(&lower, pick(&mut rng, config.builds))?.spec;
+            let seed = next_seed(&mut rng);
+            // Alternate sides, so side `a` does not lean the result.
+            let (a, b, side) = if k % 2 == 0 {
+                (high, low, Side::A)
+            } else {
+                (low, high, Side::B)
+            };
+            let log = fight(seed, a, b, ruleset)?;
+            points += match log.outcome().ok_or(SimError::LogWithoutEnd)?.0 {
+                Some(w) if w == side => 2,
+                Some(_) => 0,
+                None => 1,
+            };
+        }
+        Some(LevelGap {
+            lower_level,
+            fights: config.gap_fights,
+            higher_win_permille: permille(points, u64::from(config.gap_fights) * 2),
+        })
+    } else {
+        None
+    };
+
     Ok(BuildsReport {
         ruleset_version: ruleset.version(),
         seed_hex: seed_hex(&config.seed),
@@ -442,9 +557,11 @@ pub fn run_builds(
         fights: config.fights,
         climbs,
         climb_steps: config.climb_steps,
-        time_up_permille: permille(time_up, total),
-        in_band_permille: permille(in_band, total),
-        draw_permille: permille(draws, total),
+        time_up,
+        in_band,
+        draws,
+        moments,
+        level_gap,
         groups,
         dominant,
     })
@@ -546,6 +663,33 @@ fn fight(
     })
 }
 
+fn count_moments(log: &FightLog, counts: &mut MomentCounts) {
+    let (mut comeback, mut crit, mut clutch) = (false, false, false);
+    for event in &log.events {
+        if let FightEvent::Moment { kind, .. } = event {
+            match kind {
+                MomentKind::Comeback => comeback = true,
+                MomentKind::DecisiveCrit => crit = true,
+                MomentKind::ClutchKo => clutch = true,
+            }
+        }
+    }
+    counts.any += u64::from(comeback || crit || clutch);
+    counts.comeback += u64::from(comeback);
+    counts.decisive_crit += u64::from(crit);
+    counts.clutch_ko += u64::from(clutch);
+}
+
+/// `count / total >= min ‰`, exactly.
+fn at_least(count: u64, total: u64, min_permille: u32) -> bool {
+    count * 1000 >= u64::from(min_permille) * total
+}
+
+/// `count / total <= max ‰`, exactly.
+fn at_most(count: u64, total: u64, max_permille: u32) -> bool {
+    count * 1000 <= u64::from(max_permille) * total
+}
+
 fn permille(count: u64, total: u64) -> u32 {
     if total == 0 {
         return 0;
@@ -612,7 +756,9 @@ fn draw_build(
 ) -> Result<Build, SimError> {
     let heavies = abilities_at(catalog, level, MoveKind::Heavy);
     let specials = abilities_at(catalog, level, MoveKind::Special);
-    let slots = u32::try_from(loadout::slots(level)).unwrap_or(0);
+    // The open slots the player can fill: the starter plus one ability per draw so far.
+    let filled = loadout::slots(level).min(1 + loadout::draws(level));
+    let slots = u32::try_from(filled).unwrap_or(0);
     for _ in 0..DRAW_ATTEMPTS {
         let n = slots.max(1);
         // Heavies h with h <= 2 and n - h <= 2.
@@ -769,6 +915,7 @@ mod tests {
             seed: crate::DEFAULT_SEED,
             climbs: 2,
             climb_steps: 3,
+            gap_fights: 50,
         }
     }
 
@@ -791,7 +938,7 @@ mod tests {
                 let b = draw_build(&mut rng, &catalog, level, i, &r).unwrap();
                 assert_eq!(
                     b.loadout.abilities.len(),
-                    loadout::slots(level),
+                    loadout::slots(level).min(1 + loadout::draws(level)),
                     "level {level}"
                 );
                 assert_eq!(loadout::resolve(&b.loadout, &r).unwrap(), b.spec);
@@ -870,6 +1017,8 @@ mod tests {
             dominant_max_permille: 0,
             time_up_max_permille: 0,
             in_band_min_permille: 1001,
+            any_moment_min_permille: 1001,
+            moment_kind_min_permille: 1001,
         };
         let failures = report.failures(&strict);
         assert!(
@@ -887,6 +1036,11 @@ mod tests {
                 .iter()
                 .any(|f| matches!(f, BuildsFailure::GroupWinRate { .. }))
         );
+        assert!(
+            failures
+                .iter()
+                .any(|f| matches!(f, BuildsFailure::Moments { .. }))
+        );
         let lax = BuildsCriteria {
             group_min_permille: 0,
             group_max_permille: 1000,
@@ -894,8 +1048,41 @@ mod tests {
             dominant_max_permille: 1000,
             time_up_max_permille: 1000,
             in_band_min_permille: 0,
+            any_moment_min_permille: 0,
+            moment_kind_min_permille: 0,
         };
         assert!(report.failures(&lax).is_empty());
         assert!(report.render_text(&lax).contains("0 failure(s)"));
+    }
+}
+
+#[cfg(test)]
+mod more_tests {
+    use super::*;
+
+    #[test]
+    fn exact_comparisons_do_not_truncate() {
+        // 1009 of 10 000 is 100.9 ‰: above a 100 ‰ cap, though it truncates to 100.
+        assert!(!at_most(1009, 10_000, 100));
+        assert!(at_most(1000, 10_000, 100));
+        assert!(at_least(4500, 10_000, 450));
+        assert!(!at_least(4499, 10_000, 450));
+    }
+
+    #[test]
+    fn the_level_gap_is_measured_above_level_10_only() {
+        let root =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../content/catalog");
+        let r = Ruleset::for_version(BUILDS_RULESET_VERSION).unwrap();
+        let catalog = content::load_catalog(&root, &r).unwrap();
+        let config = BuildsConfig::new(40, 200, 30, crate::DEFAULT_SEED);
+        assert_eq!(config.gap_fights, 20);
+        let report = run_builds(&config, &catalog, &r).unwrap();
+        let gap = report.level_gap.unwrap();
+        assert_eq!((gap.lower_level, gap.fights), (20, 20));
+        assert_eq!(
+            BuildsConfig::new(40, 200, 10, crate::DEFAULT_SEED).gap_fights,
+            0
+        );
     }
 }

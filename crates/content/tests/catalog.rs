@@ -4,12 +4,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use content::{Catalog, ContentError, LOCALES, NAME_MAX_CHARS, load_catalog};
-use engine::loadout::{LEVEL_MAX, Slot, TIERS, tier};
+use engine::loadout::{LEVEL_MAX, Slot, TIERS, draws, tier};
 use engine::{MoveKind, Ruleset};
 use serde_json::{Value, json};
-
-/// Draws of 1 out of 3 up to `LEVEL_MAX`: every 5 levels except the ones that open a slot.
-const DRAWS: usize = 17;
 
 fn v2() -> Ruleset {
     Ruleset::for_version(2).unwrap_or_else(|| panic!("ruleset v2"))
@@ -39,19 +36,20 @@ fn the_real_catalog_loads_and_validates() {
 
     // Every draw offers 3 abilities the player does not own: the starter plus the draws plus 2.
     assert!(
-        catalog.abilities.len() > DRAWS + 2,
+        catalog.abilities.len() > draws(LEVEL_MAX) + 2,
         "{}",
         catalog.abilities.len()
     );
     // Draws only reach the tier of the level, so each tier must cover its own draws: the draws
     // of the levels of tier t (by 5, minus the slot levels) plus 2, over the abilities of
     // tiers <= t.
-    let slot_levels = engine::loadout::SLOT_LEVELS;
     for t in 1..=TIERS {
-        let draws_up_to_t = (1..=LEVEL_MAX)
-            .filter(|l| l % 5 == 0 && !slot_levels.contains(l))
+        // The draws made while the level is still in a tier <= t.
+        let last_level = (1..=LEVEL_MAX)
             .filter(|&l| tier(l).is_some_and(|lt| lt <= t))
-            .count();
+            .max()
+            .unwrap_or(0);
+        let draws_up_to_t = draws(last_level);
         let available = catalog
             .abilities
             .iter()

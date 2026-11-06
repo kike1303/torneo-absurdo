@@ -96,6 +96,9 @@ pub enum ArgsError {
     InvalidBuilds,
     #[error("usage.invalid_level: --level must be an integer from 1 to 100")]
     InvalidLevel,
+    /// `--catalog` or `--level` without `--builds`, or `--content` with it.
+    #[error("usage.flag_conflict: {0} does not go with this mode (--builds or the roster)")]
+    FlagConflict(&'static str),
 }
 
 impl ArgsError {
@@ -110,6 +113,7 @@ impl ArgsError {
             Self::InvalidSeed => "usage.invalid_seed",
             Self::InvalidBuilds => "usage.invalid_builds",
             Self::InvalidLevel => "usage.invalid_level",
+            Self::FlagConflict(_) => "usage.flag_conflict",
         }
     }
 }
@@ -172,6 +176,14 @@ where
             }
             _ => out.check = true,
         }
+    }
+    let wrong_mode: &[&'static str] = if out.builds.is_some() {
+        &["--content"]
+    } else {
+        &["--catalog", "--level"]
+    };
+    if let Some(flag) = seen.iter().find(|flag| wrong_mode.contains(flag)) {
+        return Err(ArgsError::FlagConflict(flag));
     }
     Ok(Command::Run(out))
 }
@@ -259,6 +271,18 @@ mod tests {
 
     #[test]
     fn builds_flags() {
+        assert_eq!(
+            run(&["--level", "30"]),
+            Err(ArgsError::FlagConflict("--level"))
+        );
+        assert_eq!(
+            run(&["--catalog", "c"]),
+            Err(ArgsError::FlagConflict("--catalog"))
+        );
+        assert_eq!(
+            run(&["--builds", "10", "--content", "x"]),
+            Err(ArgsError::FlagConflict("--content"))
+        );
         let args = run_ok(&["--builds", "500", "--catalog", "c", "--level", "30"]);
         assert_eq!(args.builds, Some(500));
         assert_eq!(args.catalog, PathBuf::from("c"));
@@ -272,12 +296,12 @@ mod tests {
         }
         for bad in ["0", "101", "-1", "1.5"] {
             assert_eq!(
-                run(&["--level", bad]),
+                run(&["--builds", "2", "--level", bad]),
                 Err(ArgsError::InvalidLevel),
                 "{bad}"
             );
         }
-        assert_eq!(run_ok(&["--level", "1"]).level, 1);
+        assert_eq!(run_ok(&["--builds", "2", "--level", "1"]).level, 1);
         assert_eq!(run_ok(&["--builds", "2"]).builds, Some(2));
     }
 
@@ -376,6 +400,7 @@ mod tests {
             ArgsError::InvalidSeed,
             ArgsError::InvalidBuilds,
             ArgsError::InvalidLevel,
+            ArgsError::FlagConflict("--level"),
         ];
         for error in all {
             assert!(error.to_string().starts_with(error.code()), "{error}");

@@ -28,6 +28,7 @@ fn the_real_catalog_passes_the_builds_criteria() {
         seed: DEFAULT_SEED,
         climbs: 20,
         climb_steps: 15,
+        gap_fights: 0,
     };
     let report = run_builds(&config, &catalog, &ruleset).unwrap_or_else(|e| panic!("{e}"));
     let criteria = BuildsCriteria::FEATURE_016;
