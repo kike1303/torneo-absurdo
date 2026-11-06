@@ -1,8 +1,9 @@
 //! Every game constant of the engine, by version (003 RF4, RF10, "Modelo de simulación").
 //!
 //! Values are fixed per `ruleset_version`. Version 2 (016) is the one of the player botargas: it
-//! caps each kind of ability, splits the weight of a kind among its available abilities and
-//! raises the minimum stat; the tournament stays on version 1.
+//! caps each kind of ability, splits the weight of a kind among its available abilities, lends
+//! half the weight of a missing kind to the other, reads the critical from speed and raises the
+//! minimum stat; the tournament stays on version 1.
 //!
 //! Values are fixed per `ruleset_version`. Before the first production fight, version 1 may
 //! change if the goldens are regenerated in the same PR; afterwards every change is a new
@@ -96,6 +97,10 @@ ruleset! {
     /// gets `weight / n`, and the first in file order also gets `weight % n`. A second ability
     /// of a kind adds variety, not frequency. In v1 every ability carries the whole weight.
     split_kind_weight: bool,
+    /// A character with no ability of a kind adds `empty_kind_share_pct`% of the weight of that
+    /// kind to the other one (v2, 016), so a build of a single kind is not left with fewer
+    /// abilities than a mix. 0 in v1: the weight is lost.
+    empty_kind_share_pct: u32,
     /// `dodge = dodge_base + dodge_per_speed * speed_def` (‰).
     dodge_base: u32,
     dodge_per_speed: u32,
@@ -114,9 +119,12 @@ ruleset! {
     desperation_crit_bonus: u32,
     desperation_dmg_num: u32,
     desperation_dmg_den: u32,
-    /// Critical when `roll(1000) < crit_base + crit_per_special * special_atk (+ bonus)`.
+    /// Critical when `roll(1000) < crit_base + crit_per_special * special_atk +
+    /// crit_per_speed * speed_atk (+ bonus)`. v1 reads special; v2 (016) reads speed, so
+    /// special counts twice (damage and defense of the specials) instead of three times.
     crit_base: u32,
     crit_per_special: u32,
+    crit_per_speed: u32,
     crit_num: u32,
     crit_den: u32,
     weak_num: u32,
@@ -187,6 +195,7 @@ impl Ruleset {
             w_special_per_show: 2,
             w_special_desperation_mul: 2,
             split_kind_weight: false,
+            empty_kind_share_pct: 0,
             dodge_base: 40,
             dodge_per_speed: 2,
             block_base: 60,
@@ -201,6 +210,7 @@ impl Ruleset {
             desperation_dmg_den: 4,
             crit_base: 40,
             crit_per_special: 1,
+            crit_per_speed: 0,
             crit_num: 3,
             crit_den: 2,
             weak_num: 5,
@@ -217,7 +227,8 @@ impl Ruleset {
     }
 
     /// Version 2 (016): v1 with at most 2 abilities of each kind, the weight of a kind split
-    /// among its available abilities and a minimum of 20 per stat (no stat dumped to 1).
+    /// among its available abilities, half the weight of a missing kind lent to the other
+    /// one, the critical read from speed and a minimum of 20 per stat (no stat dumped to 1).
     pub(crate) const fn v2() -> Self {
         Self {
             version: 2,
@@ -225,6 +236,9 @@ impl Ruleset {
             heavies_max: 2,
             specials_max: 2,
             split_kind_weight: true,
+            empty_kind_share_pct: 50,
+            crit_per_special: 0,
+            crit_per_speed: 1,
             ..Self::v1()
         }
     }
@@ -294,7 +308,8 @@ mod tests {
         assert_eq!(Ruleset::for_version(3), None);
     }
 
-    /// v2 changes only what 016 asks for: the kind caps, the weight split and the minimum stat.
+    /// v2 changes only what 016 asks for: the kind caps, the weights, the critical and the
+    /// minimum stat.
     #[test]
     fn v2_is_v1_plus_the_player_rules() {
         let (v1, v2) = (Ruleset::v1(), Ruleset::v2());
@@ -302,6 +317,10 @@ mod tests {
         assert_eq!((v2.heavies_max(), v2.specials_max()), (2, 2));
         assert!(!v1.split_kind_weight());
         assert!(v2.split_kind_weight());
+        assert_eq!(v1.empty_kind_share_pct(), 0);
+        assert_eq!(v2.empty_kind_share_pct(), 50);
+        assert_eq!((v1.crit_per_special(), v1.crit_per_speed()), (1, 0));
+        assert_eq!((v2.crit_per_special(), v2.crit_per_speed()), (0, 1));
         assert_eq!(v2.stat_min(), 20);
         // Five stats at the minimum fit in the budget.
         assert!(5 * u16::from(v2.stat_min()) <= v2.stat_budget());
@@ -311,6 +330,9 @@ mod tests {
             heavies_max: v1.heavies_max(),
             specials_max: v1.specials_max(),
             split_kind_weight: false,
+            empty_kind_share_pct: 0,
+            crit_per_special: v1.crit_per_special(),
+            crit_per_speed: v1.crit_per_speed(),
             ..v2
         };
         assert_eq!(back, v1);

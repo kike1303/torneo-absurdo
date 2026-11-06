@@ -8,7 +8,7 @@ author: claude
 linear: TA-55
 depends_on: ["003", "015"]
 created: 2026-11-05
-updated: 2026-11-05
+updated: 2026-11-06
 ---
 
 # Botarga del jugador con varios especiales y animaciones
@@ -28,7 +28,7 @@ Diseño previo con el `game-designer` y respuestas del owner (2026-11-05), aprob
 
 **Ranuras de ataque.** Además del strike básico, que tienen todos, hay **4 ranuras de ataque: hasta 2 especiales y 2 pesados**. Cabe en `abilities_max = 4`. El tope por tipo es una regla nueva del ruleset (`specials_max`, `heavies_max`), no de la UI. Sin él, 4 especiales con cooldown 2 dan un especial en casi cada acción, con unas 3,7 veces el daño por ms del strike. Las ranuras se abren con el nivel (tabla de abajo).
 
-**Cómo elige el motor (v2).** En v1 el peso es por habilidad: cada ranura de más sube la frecuencia total de habilidades, y la build óptima sería llenar todo. En v2 el peso de un tipo se **reparte** entre las habilidades disponibles de ese tipo: `w_kind / n_disponibles`, con división entera y el resto a la primera en orden de archivo (determinista). Una ranura de más da variedad, no frecuencia. Los cooldowns siguen por habilidad. Se descartó un cooldown compartido por tipo.
+**Cómo elige el motor (v2).** En v1 el peso es por habilidad: cada ranura de más sube la frecuencia total de habilidades, y la build óptima sería llenar todo. En v2 el peso de un tipo se **reparte** entre las habilidades disponibles de ese tipo: `w_kind / n_disponibles`, con división entera y el resto a la primera en orden de archivo (determinista). Una ranura de más da variedad, no frecuencia. Los cooldowns siguen por habilidad. Se descartó un cooldown compartido por tipo. Si la botarga no tiene ningún ataque de un tipo, la mitad del peso de ese tipo pasa al otro (`empty_kind_share_pct = 50`). Si no pasara nada, 2 pesados actuarían menos que 1 pesado y 1 especial; si pasara todo, 2 pesados ganarían el 60 % (medido en el nivel 10). En v2 el crítico depende de la velocidad (`crit_per_speed`) y no del especial: así el especial cuenta dos veces, en el daño y la defensa de los especiales, como el resto de los stats salvo la vida.
 
 **Catálogo de habilidades.** `content/catalog/abilities.json` (`kind`, `power`, `cooldown`, `element`, `tier` y un `starter`), junto a `accessories.json`, `styles.json` y los nombres en `names.es.json` y `names.en.json`. Lo carga `content::load_catalog`; las reglas del armado (nivel, presupuesto, ranuras, accesorios y debilidades) viven en `engine::loadout`, que resuelve una botarga a un `CharacterSpec`. Esas reglas no son parte del ruleset: la pelea solo necesita el spec resuelto. El jugador elige ids de las que tiene desbloqueadas, nunca números: con números libres el óptimo es trivial y el espacio no se puede simular. Poder y cooldown se pagan entre sí; por ejemplo, especiales 100/8, 70/4 y 50/2, y pesados 55/2, 40/1 y 28/0. Cada habilidad trae su clip; mientras no haya uno propio, sale del hash de su id (015).
 
@@ -70,12 +70,16 @@ Ajustes de la implementación (fase 3):
 - También se juzgan los momentos de RF17: al menos 15 % de peleas con alguno y 3 % con cada tipo.
 - Por encima del nivel 10 se informa cuánto pesan 10 niveles de diferencia; no se juzga. Es el dato que necesita el emparejamiento del PvP: el nivel 100 le gana al 90 el 58 % de las veces, y el 30 al 20, el 65 %.
 - Con el catálogo ajustado por el `game-designer`, el nivel 100 pasa sin fallos con dos semillas, y la mejor build queda entre 53 % y 65 %. Es la versión chica que corre en `just check`.
-- En niveles bajos los resultados son informativos:
-  - Nivel 30: la mejor build escalada gana el 66 %.
-  - Nivel 10, con 2 ataques: la mezcla de 1 pesado y 1 especial gana el 59 % y la de 2 pesados, el 40 %.
-  - Nivel 5: todos llevan solo el ataque inicial, así que la build se diferencia solo por stats, accesorios y estilo. La mejor escalada gana el 79 % y las remontadas bajan al 2 %.
+- En niveles bajos los resultados son informativos. Con el peso del tipo vacío y el crítico por velocidad (promedio de 4 semillas, la mejor build escalada):
 
-  El contenido ya no lo arregla; son reglas del motor (ver Preguntas abiertas).
+  | Nivel | Antes | Ahora | Mezclas de 2 ataques (nivel 10) |
+  |---|---|---|---|
+  | 100 | 63,6 % | 59,7 % | — |
+  | 30 | 63,0 % | 63,2 % | — |
+  | 10 | 65,5 % | 68,1 % | antes 1p1e 58 % y 2p 40 %; ahora entre 47 % y 53 % |
+  | 5 | 75,7 % | 75,1 % | — |
+
+  Se compararon también el crítico por especial y por ataque. El de ataque deja el nivel 100 en 62,6 % y el 10 en 69,7 %. El de velocidad es el mejor en el 100 y no peor en los demás, dentro del ruido (±4 puntos entre semillas). En los niveles 5 y 10 la build se decide casi solo por stats: hasta el nivel 10 no hay sorteo, así que la 2.ª ranura (nivel 5) queda vacía. Eso es de la progresión, no del motor (ver Preguntas abiertas).
 
 Además, win rate por banda de nivel contra la misma banda (que ningún nivel tenga una build rota) y la ventaja de 10 niveles de diferencia, para fijar cuánta distancia de nivel tolera el emparejamiento.
 
@@ -116,6 +120,7 @@ Además, win rate por banda de nivel contra la misma banda (que ningún nivel te
 - Debilidades según los ataques elementales equipados: sí.
 - La regla de daño elemental queda como hoy (×5/4 contra una debilidad).
 
+- Peso del tipo vacío y stat especial (v2): "lo que recomiendes" → la mitad del peso al otro tipo y el crítico por velocidad, elegidos con `just sim --builds` (ver Diseño).
+
 ## Preguntas abiertas al owner
-1. **Peso del tipo vacío (v2):** con pocas ranuras, el peso de un tipo sin ataques disponibles se pierde (en el nivel 10, la mezcla de 1 pesado y 1 especial gana el 59 % y la de 2 pesados, el 40 %). ¿Ese peso pasa al golpe básico o al otro tipo?
-2. **Stat especial (v2):** cuenta tres veces (ataque y defensa de los especiales y probabilidad de crítico), y por eso domina en las builds optimizadas. ¿Que el crítico dependa de la velocidad, o que la defensa contra especiales use la defensa?
+1. **2.ª ranura sin ataque:** la ranura 2 se abre en el nivel 5, pero el primer sorteo es en el 10. ¿Damos un sorteo también en los niveles que abren ranura (20 en total en vez de 17)?
