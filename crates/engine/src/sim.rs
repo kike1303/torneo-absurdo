@@ -976,6 +976,21 @@ mod tests {
         };
         fighter.choose(&mut probe, &v2, false);
         assert_eq!(probe.bounds, vec![strike + heavy]);
+        // A missing kind while every ability of the other is on cooldown: the lent weight goes
+        // nowhere, only the strike is left.
+        let slow = with_abilities(vec![
+            ability("h0", MoveKind::Heavy, 20, 3),
+            ability("h1", MoveKind::Heavy, 20, 3),
+        ]);
+        let mut fighter = Fighter::new(&slow, &v2).unwrap();
+        fighter.tick_cooldowns(Some(0));
+        fighter.tick_cooldowns(Some(1));
+        let mut probe = Probe {
+            value: 0,
+            bounds: vec![],
+        };
+        assert_eq!(fighter.choose(&mut probe, &v2, false), None);
+        assert_eq!(probe.bounds, vec![strike]);
     }
 
     #[test]
