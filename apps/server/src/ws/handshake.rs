@@ -106,6 +106,18 @@ pub async fn handler(
     let Ok(permit) = ws.permits.clone().try_acquire_owned() else {
         return error_response(StatusCode::SERVICE_UNAVAILABLE, WsErrorCode::Capacity);
     };
+    // 012 RF39: take, then check, so the reserve is never crossed; two at the edge at most both
+    // fail. Probation is only asked here, so the common path adds no query.
+    if ws.available_permits() < ws.reserve() {
+        let mature = match &admission {
+            Admission::Anonymous { .. } => false,
+            Admission::Session { info, .. } => out_of_probation(&state.db, info.user_id).await,
+        };
+        if !mature {
+            drop(permit);
+            return error_response(StatusCode::SERVICE_UNAVAILABLE, WsErrorCode::Capacity);
+        }
+    }
     // Taken before the upgrade and moved into the callback with the permit, so a socket
     // upgraded during shutdown is still tracked; if the upgrade fails, all of them (the slots
     // included) are dropped.
@@ -164,4 +176,17 @@ pub async fn handler(
             session::run(socket, context, shutdown, auth, hub).await;
             drop(admission);
         })
+}
+
+/// Whether the account is out of probation (012 RF27), within 1 s. A failure or a timeout counts as
+/// probation: the reserve is never opened by an error.
+async fn out_of_probation(db: &sqlx::PgPool, user_id: uuid::Uuid) -> bool {
+    let read = async {
+        let mut conn = db.acquire().await?;
+        crate::bets::facts::read(&mut conn, user_id).await
+    };
+    match tokio::time::timeout(std::time::Duration::from_secs(1), read).await {
+        Ok(Ok(Some(facts))) => facts.probation().is_none(),
+        _ => false,
+    }
 }
