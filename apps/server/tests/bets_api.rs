@@ -34,6 +34,7 @@ struct World {
     /// the rows never meet D7.
     rate: ServerClock,
     _runner: f::Running,
+    shared: Arc<server::fights::FightsShared>,
     fight: i32,
 }
 
@@ -77,6 +78,7 @@ async fn world() -> World {
     .await;
     World {
         _db: db,
+        shared: state.fights.clone(),
         app: support::app::start(state).await,
         pool,
         clock,
@@ -552,47 +554,53 @@ async fn a_held_fight_fails_closed() {
     assert_eq!(w.written().await, before);
 }
 
-/// Bet against close: a bet that saw the window open commits before the fight closes, and after the
-/// close none goes in.
+/// Bet against close: a bet that saw the window open holds the fight `FOR SHARE` until it commits,
+/// so the close waits for it, even with the clock past `closes_at`; after the close, none goes in.
+/// No clock is compared: the fight's hours come from the manual clock, `created_at` from Postgres.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn no_bet_goes_in_after_the_close() {
-    let w = Arc::new(world().await);
-    let mut tokens = Vec::new();
-    for _ in 0..8 {
-        tokens.push(w.bettor(B).await.1);
-    }
-    let mut tasks = Vec::new();
-    for token in tokens {
-        let w = w.clone();
-        tasks.push(tokio::spawn(async move {
-            let mut accepted = 0;
-            for _ in 0..4 {
-                if w.bet(&token, "a", 25).await.status == 201 {
-                    accepted += 1;
-                }
-            }
-            accepted
-        }));
-    }
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    let w = world().await;
+    let user = bets::funded_user(&w.pool, B).await;
+    // A bet in flight: the window taken, as `POST /api/bets` takes it.
+    let mut tx = w.pool.begin().await.unwrap();
+    w.shared
+        .lock_open_for_bet(&mut tx, w.fight, T0)
+        .await
+        .expect("the window is open");
     let (closes_at, _) = f::hours(T0);
     w.clock.set(closes_at);
-    let mut accepted = 0;
-    for task in tasks {
-        accepted += task.await.unwrap();
-    }
+    // The runner tries to close and waits on the bet's lock.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(
+        f::row(&w.pool, w.fight).await.state,
+        protocol::FightState::BettingOpen
+    );
+    let bet = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO bets (id, fight_id, user_id, side, stake, ranked_stake, client_key) \
+         VALUES ($1, $2, $3, 'a', 25, false, $4)",
+    )
+    .bind(bet)
+    .bind(w.fight)
+    .bind(user)
+    .bind(Uuid::new_v4())
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    server::ledger::bet_stake(&mut tx, bet, w.fight, user, server::ledger::Coins(25))
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    // Now the close goes through, and after it nothing enters.
     f::wait_state(&w.pool, w.fight, protocol::FightState::BettingClosed).await;
     let (_, late) = w.bettor(B).await;
     refusal(&w.bet(&late, "a", 25).await, 409, "bet.window_closed");
-    let row = sqlx::query(
-        "SELECT count(*), count(*) FILTER (WHERE b.created_at > f.closed_at) \
-         FROM bets b JOIN fights f ON f.id = b.fight_id",
-    )
-    .fetch_one(&w.pool)
-    .await
-    .unwrap();
-    assert_eq!(row.get::<i64, _>(0), accepted);
-    assert_eq!(row.get::<i64, _>(1), 0);
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM bets WHERE fight_id = $1")
+        .bind(w.fight)
+        .fetch_one(&w.pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 1);
 }
 
 /// RF33: only one's own bets, a canonical id, `max_stake` at 0 when nothing would be taken, and no

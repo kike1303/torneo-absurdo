@@ -68,6 +68,30 @@ pub async fn read(conn: &mut PgConnection, user_id: Uuid) -> Result<Option<Facts
     }))
 }
 
+/// Only probation (RF27), for the reserve of the sockets (RF39): the age and the settled fights, by
+/// the partial index, without summing the ledger. `None` if the user does not exist.
+///
+/// # Errors
+/// The database error.
+pub async fn probation_of(
+    conn: &mut PgConnection,
+    user_id: Uuid,
+) -> Result<Option<Option<Probation>>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT (SELECT (EXTRACT(EPOCH FROM now() - created_at) * 1000)::bigint FROM users \
+           WHERE id = $1), \
+         (SELECT count(DISTINCT fight_id) FROM bet_settlements \
+           WHERE user_id = $1 AND outcome <> 'refunded')",
+    )
+    .bind(user_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    let Some(age_ms) = row.try_get::<Option<i64>, _>(0)? else {
+        return Ok(None);
+    };
+    Ok(Some(probation::of(age_ms, row.try_get(1)?)))
+}
+
 impl Facts {
     #[must_use]
     pub fn probation(&self) -> Option<Probation> {

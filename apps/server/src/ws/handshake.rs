@@ -183,10 +183,10 @@ pub async fn handler(
 async fn out_of_probation(db: &sqlx::PgPool, user_id: uuid::Uuid) -> bool {
     let read = async {
         let mut conn = db.acquire().await?;
-        crate::bets::facts::read(&mut conn, user_id).await
+        crate::bets::facts::probation_of(&mut conn, user_id).await
     };
     match tokio::time::timeout(std::time::Duration::from_secs(1), read).await {
-        Ok(Ok(Some(facts))) => facts.probation().is_none(),
+        Ok(Ok(Some(probation))) => probation.is_none(),
         _ => false,
     }
 }

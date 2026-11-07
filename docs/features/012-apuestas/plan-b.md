@@ -353,6 +353,9 @@ Sin cambios en workflows. El job `rust` suma varias decenas de tests de integrac
 - **La consulta de custodia** compara con `open_stakes` de peleas que no están `settled`. El gancho solo, llamado fuera del runner, no cambia el estado de la pelea, así que un test que lo llama a mano ve `open_stakes` mayor que `escrow`; con el runner los dos cambian en la misma transacción.
 - **Helpers de tests.** `user_with_session` y `user_with_dev_account` decían crear la cuenta del ledger y no la creaban; ahora la crean, como un login real. Los tests que arrancan la app corren en `multi_thread`, como pide `TestDb`.
 - **El pozo en el hub** guarda el último valor de hasta 8 peleas (`MAX_POOLS`), y un socket recibe los de ese momento al suscribirse a `schedule`.
+- **Para C:** el hub guarda el último pozo de hasta 8 peleas, también de peleas ya liquidadas, así que un socket nuevo recibe `pool_update` viejos. El panel de C debe ignorar los de una pelea que no está en su ventana.
+- **`check-compose` exige `DAILY_GRANT` de 50 a 10 000:** el compose no pasa `BET_MIN`, y con el de por defecto el server no arranca por debajo de 50.
+- **La consulta de custodia** vive en `apps/server/sql/custody.sql`; el README la enlaza y el test la ejecuta tal cual.
 - **La barrera de `.outcome`** de `fights_source_guard.rs` no distingue SQL: las consultas de `bets/` no califican esa columna.
 
 ## Revisión

@@ -188,31 +188,10 @@ Las apuestas (feature 012) son solo con monedas ficticias (ADR-0005). Los valore
 
 ### Comprobar la custodia
 
-Una consulta de solo lectura, en **una sola sentencia** para que una liquidación a medias no dé un falso positivo (RF13). Sana, `escrow` y `open_stakes` coinciden, y las otras tres dan 0:
-
-<!-- custody:start -->
-```sql
-SELECT
-  (SELECT COALESCE(SUM(amount), 0)::bigint FROM ledger_postings
-     WHERE account_id = '00000000-0000-0000-0000-000000000002') AS escrow,
-  (SELECT COALESCE(SUM(b.stake), 0)::bigint FROM bets b
-     JOIN fights f ON f.id = b.fight_id WHERE f.state <> 'settled') AS open_stakes,
-  (SELECT COALESCE(SUM(amount), 0)::bigint FROM ledger_postings) AS all_movements,
-  (SELECT count(*) FROM bets b WHERE NOT EXISTS (
-     SELECT 1 FROM ledger_entries e
-     JOIN ledger_postings p ON p.entry_id = e.id
-       AND p.account_id = '00000000-0000-0000-0000-000000000002'
-     WHERE e.bet_id = b.id AND e.kind = 'bet_stake' AND p.amount = b.stake)) AS bets_without_stake,
-  (SELECT count(*) FROM ledger_entries e
-     JOIN ledger_postings p ON p.entry_id = e.id
-       AND p.account_id = '00000000-0000-0000-0000-000000000002'
-     JOIN bets b ON b.id = e.bet_id
-     WHERE e.kind = 'refund' AND -p.amount <> b.stake) AS wrong_refunds;
-```
-<!-- custody:end -->
+Una consulta de solo lectura, en **una sola sentencia** para que una liquidación a medias no dé un falso positivo (RF13). Sana, `escrow` y `open_stakes` coinciden, y las otras tres dan 0. La consulta está en [`sql/custody.sql`](sql/custody.sql), y un test la ejecuta tal cual (`tests/bets_custody.rs`).
 
 ```sh
-psql "$DATABASE_URL" -f custody.sql
+psql "$DATABASE_URL" -f apps/server/sql/custody.sql
 ```
 
 **Si no da limpia:** no la corrijas con SQL. Detén el server, guarda la salida y la hora, y abre un issue en Linear con lo que diga cada columna. `escrow` distinto de `open_stakes` con las otras en 0 apunta a un pago de más o de menos en una liquidación; `bets_without_stake` o `wrong_refunds` distintos de 0, a una escritura que no pasó por la API ni por el gancho. Quien tiene `DATABASE_URL` también podría haberlo hecho (preocupación 21 de la spec).

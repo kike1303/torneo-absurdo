@@ -1,4 +1,5 @@
-//! 012 RF13 in production: the custody query of `apps/server/README.md`, read from the file itself,
+//! 012 RF13 in production: the custody query of `apps/server/sql/custody.sql`, the file the README
+//! sends operators to,
 //! is clean on a healthy database after refunds and splits, and points at a refund of more and at a
 //! bet without its stake, written with direct SQL.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -15,14 +16,9 @@ use support::db::TestDb;
 use support::fights::{self as f, KO, T0, Vector};
 use uuid::Uuid;
 
-/// The SQL between the custody markers of the README.
+/// The query the README sends operators to.
 fn custody_query() -> String {
-    let readme = include_str!("../README.md");
-    let start = readme.find("<!-- custody:start -->").unwrap();
-    let end = readme.find("<!-- custody:end -->").unwrap();
-    let block = &readme[start..end];
-    let sql = block.split_once("```sql").unwrap().1;
-    sql.split_once("```").unwrap().0.trim().to_owned()
+    include_str!("../sql/custody.sql").to_owned()
 }
 
 /// `(escrow, open_stakes, all_movements, bets_without_stake, wrong_refunds)`.
