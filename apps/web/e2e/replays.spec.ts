@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
-import type { FightDetail } from '@torneo/protocol';
+import type { FightDetail, FightFinal } from '@torneo/protocol';
 import { waitForHydration } from './support/hydration.js';
 import { PUBLIC_ORIGIN } from './support/topology.js';
 
@@ -449,7 +449,10 @@ test.describe('the replays', { tag: '@replays' }, () => {
       await answered(page, ID.voided, {
         ...voided,
         seed: null,
-        fight: { ...voided.fight, final: { kind: 'voided', reason: 'secret_lost' } },
+        fight: {
+          ...voided.fight,
+          final: { kind: 'voided', reason: 'meteor' } as unknown as FightFinal,
+        },
       });
       await page.goto(`/es/fights/${ID.voided}`);
       await expect(page.getByTestId('replay-final')).toHaveText(ES.replay_final_voided ?? '');
@@ -457,6 +460,31 @@ test.describe('the replays', { tag: '@replays' }, () => {
         timeout: 30_000,
       });
       await expect(page.getByTestId('replay-verdict-reload')).toBeVisible();
+    });
+
+    // 012 RF22: a lost seed says it cannot be verified, with neither the check nor the seed.
+    test('a lost seed: its own notice, and no check unless the data does not hold', async ({
+      page,
+    }) => {
+      const response = await page.request.get(`/api/fights/${ID.voided}`);
+      const voided = (await response.json()) as FightDetail;
+      const lost = { ...voided.fight, final: { kind: 'voided', reason: 'secret_lost' } as const };
+      await answered(page, ID.voided, { ...voided, seed: null, fight: lost });
+      await page.goto(`/es/fights/${ID.voided}`);
+      await expect(page.getByTestId('replay-final')).toHaveAttribute('data-reason', 'secret_lost');
+      await expect(page.getByTestId('replay-final')).toHaveText(ES.replay_final_secret_lost ?? '');
+      await waitForHydration(page);
+      await expect(verdict(page)).toHaveCount(0);
+      await expect(page.getByTestId('replay-field-seed')).toHaveCount(0);
+
+      // The same final with its seed still published is not a lost seed.
+      await answered(page, ID.voided, { ...voided, fight: lost });
+      await page.reload();
+      await expect(verdict(page)).toHaveAttribute('data-status', 'mismatch', { timeout: 30_000 });
+      await expect(page.getByTestId('replay-verdict-check')).toHaveAttribute(
+        'data-check',
+        'commit',
+      );
     });
   });
 
