@@ -26,6 +26,8 @@ updated: 2026-11-07
 - las dos notas `proposed` de ADR-0008 (tope del rake y carencia por peleas);
 - las preocupaciones 1 y 3 de la spec de 010, que se vuelven reales con la primera apuesta (preocupación 6), y lo que queda abierto de la preocupación 21 de esta spec.
 
+**OK del owner, en chat, el 2026-11-07:** los valores de RF40 tal como están, las dos notas de ADR-0008 (ya marcadas como aprobadas en el ADR), y las preocupaciones 1 y 3 de 010 y lo abierto de la 21 de esta spec, como riesgo aceptado. Con eso, el gate queda cumplido. Lo que falta antes del merge es lo de siempre: `just check`, `just e2e`, reviewer y security-reviewer.
+
 Con ese OK, el mismo PR marca aprobadas las notas de ADR-0008. Este gate manda sobre la autonomía de merge. **Si el owner rechaza una nota,** se vuelve a la letra de D8 y la spec regresa a revisión (preocupación 4): el paso 3 y el 5 cambian de fórmula, y no se fusiona con la nota rechazada.
 
 ## Importes de los asientos (decidido por architect, preocupación 21)

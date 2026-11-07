@@ -187,7 +187,7 @@ Cada fase es un PR con su plan. Ninguna empieza hasta aprobar esta spec. `voided
 ### Configuración (B)
 - **RF40. Valores.** `B` sigue siendo `DAILY_GRANT`. Son nuevas `BET_MIN` (`m`, por defecto 25), `BET_RAKE_BP` (`r`, por defecto **0**) y `BET_CAP_MULTIPLE` (por defecto 5), en `Config`. `R = ⌊B / 2⌋`, derivado. Al arrancar se exige `1 ≤ m ≤ R`, para que un rescate siempre permita apostar (con `m = 25`, `B ≥ 50`), `0 ≤ r_bp ≤ 2000` y `1 ≤ m_cap ≤ 20`. Si no, `config.invalid` con el nombre de la variable. El compose de producción no pasa `BET_*`: rigen los valores por defecto (preocupación 12). La CLI de anulación no las lee. → unitarias de `config.rs`; test de arranque.
 
-  **Valores: decisión de quien coordina, a partir de la propuesta de game-designer, pendientes del OK del owner** (gate de B). Reemplazan a la recomendación del intent.
+  **Valores: decisión de quien coordina, a partir de la propuesta de game-designer, con el OK del owner del 2026-11-07** (gate de B). Reemplazan a la recomendación del intent.
 
   | Parámetro | Valor | Consecuencia |
   |---|---|---|
@@ -421,7 +421,7 @@ Una columna a 375 px: escenario o anuncio, y debajo el panel. En escritorio, el 
     Riesgo sobre monedas ficticias y el ranking (ADR-0005), que entra en el OK del owner de la preocupación 6, en el gate de B. **Se revisa** si la app pasa a un rol de base sin permiso para apagar triggers, o si aparece otra ruta que escriba estos asientos.
 
 ## Respuestas a preguntas abiertas del intent
-1. **Valores de `B`, `m` y `r`** → RF40: 500, 25, y 0 al inicio con 5 % de objetivo. `R = 250`, tope de 2500 y 500. Decidido por quien coordina a partir de la propuesta de game-designer, **pendiente del OK del owner.**
+1. **Valores de `B`, `m` y `r`** → RF40: 500, 25, y 0 al inicio con 5 % de objetivo. `R = 250`, tope de 2500 y 500. Decidido por quien coordina a partir de la propuesta de game-designer, **con el OK del owner del 2026-11-07.**
 2. **`season_stats`** → TA-28, ya decidido. Aquí, RF6 y RF11.
 3. **Pozo de un solo lado** → reembolso sin rake (RF9, preocupación 1). 25(e) se prueba sobre la función.
 
