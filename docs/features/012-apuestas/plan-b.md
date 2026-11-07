@@ -348,7 +348,12 @@ No se debilita ninguno. Cada uno cambia porque la spec cambia lo que afirma.
 Sin cambios en workflows. El job `rust` suma varias decenas de tests de integración y el de 2000 apuestas, unos segundos cada uno, sin esperas largas. El de 20 000 va con `#[ignore]`, fuera de CI. El tiempo real se reporta en el PR. `check-compose` sigue pasando con `DAILY_GRANT: '500'`.
 
 ## Desviaciones durante la implementación
-_(Se llena si la implementación se aparta del plan.)_
+- **Medición de RF15, más simple que "Montaje real".** `tests/bets_load.rs` cronometra el gancho y su `COMMIT` sobre dos pozos de 20 000 apuestas sembradas por SQL (cada `bet_stake` por su `stake`, con los triggers activos), sin runner, sin apuestas concurrentes, sin la relectura de RF36 y sin `quote`. Resultado en release, con otras sesiones corriendo (carga media 11,5): reembolso 3,0 s y reparto 1,8 s. El criterio de ≤ 10 s se cumple con margen, y `BETS_MAX_PER_FIGHT` queda en 20 000. La medición con contención queda para el prerrequisito 12 de TA-8, en el VPS.
+- **`ledger::rake` y `check_split`** como dice el plan. `SPLIT_MISMATCH` reemplaza a `PAYOUT_UNAVAILABLE`, que desaparece.
+- **La consulta de custodia** compara con `open_stakes` de peleas que no están `settled`. El gancho solo, llamado fuera del runner, no cambia el estado de la pelea, así que un test que lo llama a mano ve `open_stakes` mayor que `escrow`; con el runner los dos cambian en la misma transacción.
+- **Helpers de tests.** `user_with_session` y `user_with_dev_account` decían crear la cuenta del ledger y no la creaban; ahora la crean, como un login real. Los tests que arrancan la app corren en `multi_thread`, como pide `TestDb`.
+- **El pozo en el hub** guarda el último valor de hasta 8 peleas (`MAX_POOLS`), y un socket recibe los de ese momento al suscribirse a `schedule`.
+- **La barrera de `.outcome`** de `fights_source_guard.rs` no distingue SQL: las consultas de `bets/` no califican esa columna.
 
 ## Revisión
 ### architect — 2026-11-02 — REQUEST_CHANGES
