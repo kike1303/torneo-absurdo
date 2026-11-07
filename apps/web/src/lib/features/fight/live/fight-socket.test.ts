@@ -128,6 +128,30 @@ describe('connecting', () => {
     expect(messages).toEqual([subscribed('schedule')]);
   });
 
+  it('a pool_update only passes on: no poll, no subscription and no protocol error (012 RF35)', () => {
+    const { socket, last, messages, polls } = setup();
+    socket.start();
+    last().accept();
+    last().deliver(subscribed('schedule'));
+    const sent = last().sent.length;
+    const update: ServerMessage = {
+      type: 'pool_update',
+      pool: {
+        fight_id: 7,
+        a: { stake: 25, bets: 1, payout_bp: null },
+        b: { stake: 0, bets: 0, payout_bp: null },
+        rake_bp: 0,
+        server_time: '9',
+        settlement: null,
+      },
+    };
+    last().deliver(update);
+    expect(messages).toEqual([subscribed('schedule'), update]);
+    expect(last().sent).toHaveLength(sent);
+    expect(polls()).toBe(0);
+    expect(last().closed).toBe(false);
+  });
+
   it('ignores what does not parse, and binary data', () => {
     const { socket, last, messages } = setup();
     socket.start();

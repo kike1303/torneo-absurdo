@@ -315,6 +315,148 @@ impl FightErrorCode {
 /// TypeScript it is the union of the domain enums. Each enum owns one prefix and their string
 /// sets never overlap, which keeps deserialization unambiguous. A new domain gets a new enum
 /// and a new variant here, never codes inside an existing enum.
+/// Betting codes (`bet.*`, feature 012 RF25, RF33, RF47).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum BetErrorCode {
+    /// A body that does not parse, a `client_key` that is not a canonical UUID or a query out of shape (012 RF25, RF47): never serde's text.
+    #[serde(rename = "bet.invalid_request")]
+    InvalidRequest,
+    /// The same `client_key` with another body (012 RF25, row 3).
+    #[serde(rename = "bet.key_reused")]
+    KeyReused,
+    /// The window is not open, or the fight does not exist: never says which (010 RF29).
+    #[serde(rename = "bet.window_closed")]
+    WindowClosed,
+    #[serde(rename = "bet.below_minimum")]
+    BelowMinimum,
+    /// The user already bet on the other side of this fight (012 RF26).
+    #[serde(rename = "bet.side_locked")]
+    SideLocked,
+    #[serde(rename = "bet.too_many_bets")]
+    TooManyBets,
+    #[serde(rename = "bet.pool_full")]
+    PoolFull,
+    #[serde(rename = "bet.fight_cap_exceeded")]
+    FightCapExceeded,
+    #[serde(rename = "bet.insufficient_balance")]
+    InsufficientBalance,
+    #[serde(rename = "bet.unavailable")]
+    Unavailable,
+}
+
+impl BetErrorCode {
+    /// Every variant. A test with an exhaustive `match` keeps this list complete.
+    pub const ALL: &'static [Self] = &[
+        Self::InvalidRequest,
+        Self::KeyReused,
+        Self::WindowClosed,
+        Self::BelowMinimum,
+        Self::SideLocked,
+        Self::TooManyBets,
+        Self::PoolFull,
+        Self::FightCapExceeded,
+        Self::InsufficientBalance,
+        Self::Unavailable,
+    ];
+    /// The only domain prefix this enum may use.
+    pub const PREFIX: &'static str = "bet.";
+
+    /// The serialized code (the same string serde writes).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidRequest => "bet.invalid_request",
+            Self::KeyReused => "bet.key_reused",
+            Self::WindowClosed => "bet.window_closed",
+            Self::BelowMinimum => "bet.below_minimum",
+            Self::SideLocked => "bet.side_locked",
+            Self::TooManyBets => "bet.too_many_bets",
+            Self::PoolFull => "bet.pool_full",
+            Self::FightCapExceeded => "bet.fight_cap_exceeded",
+            Self::InsufficientBalance => "bet.insufficient_balance",
+            Self::Unavailable => "bet.unavailable",
+        }
+    }
+}
+
+/// Daily grant codes (`bonus.*`, feature 012 RF29).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum BonusErrorCode {
+    #[serde(rename = "bonus.already_claimed")]
+    AlreadyClaimed,
+}
+
+impl BonusErrorCode {
+    /// Every variant. A test with an exhaustive `match` keeps this list complete.
+    pub const ALL: &'static [Self] = &[Self::AlreadyClaimed];
+    /// The only domain prefix this enum may use.
+    pub const PREFIX: &'static str = "bonus.";
+
+    /// The serialized code (the same string serde writes).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AlreadyClaimed => "bonus.already_claimed",
+        }
+    }
+}
+
+/// Bailout codes (`bailout.*`, feature 012 RF30).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum BailoutErrorCode {
+    /// Today's grant is still unclaimed: it comes first (012 RF30).
+    #[serde(rename = "bailout.grant_available")]
+    GrantAvailable,
+    /// Balance plus open stakes reach the minimum bet (012 RF30).
+    #[serde(rename = "bailout.not_eligible")]
+    NotEligible,
+    #[serde(rename = "bailout.already_claimed")]
+    AlreadyClaimed,
+}
+
+impl BailoutErrorCode {
+    /// Every variant. A test with an exhaustive `match` keeps this list complete.
+    pub const ALL: &'static [Self] = &[
+        Self::GrantAvailable,
+        Self::NotEligible,
+        Self::AlreadyClaimed,
+    ];
+    /// The only domain prefix this enum may use.
+    pub const PREFIX: &'static str = "bailout.";
+
+    /// The serialized code (the same string serde writes).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::GrantAvailable => "bailout.grant_available",
+            Self::NotEligible => "bailout.not_eligible",
+            Self::AlreadyClaimed => "bailout.already_claimed",
+        }
+    }
+}
+
+/// Wallet codes (`wallet.*`, feature 012 RF29, RF30, RF32).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum WalletErrorCode {
+    #[serde(rename = "wallet.unavailable")]
+    Unavailable,
+}
+
+impl WalletErrorCode {
+    /// Every variant. A test with an exhaustive `match` keeps this list complete.
+    pub const ALL: &'static [Self] = &[Self::Unavailable];
+    /// The only domain prefix this enum may use.
+    pub const PREFIX: &'static str = "wallet.";
+
+    /// The serialized code (the same string serde writes).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unavailable => "wallet.unavailable",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(untagged)]
@@ -324,6 +466,10 @@ pub enum ErrorCode {
     Auth(AuthErrorCode),
     Profile(ProfileErrorCode),
     Fight(FightErrorCode),
+    Bet(BetErrorCode),
+    Bonus(BonusErrorCode),
+    Bailout(BailoutErrorCode),
+    Wallet(WalletErrorCode),
 }
 
 impl ErrorCode {
@@ -335,6 +481,10 @@ impl ErrorCode {
             Self::Auth(code) => code.as_str(),
             Self::Profile(code) => code.as_str(),
             Self::Fight(code) => code.as_str(),
+            Self::Bet(code) => code.as_str(),
+            Self::Bonus(code) => code.as_str(),
+            Self::Bailout(code) => code.as_str(),
+            Self::Wallet(code) => code.as_str(),
         }
     }
 }
@@ -366,6 +516,30 @@ impl From<ProfileErrorCode> for ErrorCode {
 impl From<FightErrorCode> for ErrorCode {
     fn from(code: FightErrorCode) -> Self {
         Self::Fight(code)
+    }
+}
+
+impl From<BetErrorCode> for ErrorCode {
+    fn from(code: BetErrorCode) -> Self {
+        Self::Bet(code)
+    }
+}
+
+impl From<BonusErrorCode> for ErrorCode {
+    fn from(code: BonusErrorCode) -> Self {
+        Self::Bonus(code)
+    }
+}
+
+impl From<BailoutErrorCode> for ErrorCode {
+    fn from(code: BailoutErrorCode) -> Self {
+        Self::Bailout(code)
+    }
+}
+
+impl From<WalletErrorCode> for ErrorCode {
+    fn from(code: WalletErrorCode) -> Self {
+        Self::Wallet(code)
     }
 }
 
@@ -460,12 +634,51 @@ mod tests {
         }
     }
 
+    fn bet_index(code: BetErrorCode) -> usize {
+        match code {
+            BetErrorCode::InvalidRequest => 0,
+            BetErrorCode::KeyReused => 1,
+            BetErrorCode::WindowClosed => 2,
+            BetErrorCode::BelowMinimum => 3,
+            BetErrorCode::SideLocked => 4,
+            BetErrorCode::TooManyBets => 5,
+            BetErrorCode::PoolFull => 6,
+            BetErrorCode::FightCapExceeded => 7,
+            BetErrorCode::InsufficientBalance => 8,
+            BetErrorCode::Unavailable => 9,
+        }
+    }
+
+    fn bonus_index(code: BonusErrorCode) -> usize {
+        match code {
+            BonusErrorCode::AlreadyClaimed => 0,
+        }
+    }
+
+    fn bailout_index(code: BailoutErrorCode) -> usize {
+        match code {
+            BailoutErrorCode::GrantAvailable => 0,
+            BailoutErrorCode::NotEligible => 1,
+            BailoutErrorCode::AlreadyClaimed => 2,
+        }
+    }
+
+    fn wallet_index(code: WalletErrorCode) -> usize {
+        match code {
+            WalletErrorCode::Unavailable => 0,
+        }
+    }
+
     const API_COUNT: usize = 4;
     const WS_COUNT: usize = 11;
     const AUTH_COUNT: usize = 12;
     const CALLBACK_COUNT: usize = 9;
     const PROFILE_COUNT: usize = 3;
     const FIGHT_COUNT: usize = 2;
+    const BET_COUNT: usize = 10;
+    const BONUS_COUNT: usize = 1;
+    const BAILOUT_COUNT: usize = 3;
+    const WALLET_COUNT: usize = 1;
 
     #[test]
     fn all_lists_every_variant_once() {
@@ -496,6 +709,109 @@ mod tests {
             .collect();
         assert_eq!(fight.len(), FIGHT_COUNT);
         assert_eq!(FightErrorCode::ALL.len(), FIGHT_COUNT);
+    }
+
+    /// The codes of 012 RF38, each wrapped in its `ErrorCode` variant.
+    fn money_codes() -> Vec<ErrorCode> {
+        let mut codes: Vec<ErrorCode> = BetErrorCode::ALL.iter().map(|c| (*c).into()).collect();
+        codes.extend(BonusErrorCode::ALL.iter().map(|c| ErrorCode::from(*c)));
+        codes.extend(BailoutErrorCode::ALL.iter().map(|c| ErrorCode::from(*c)));
+        codes.extend(WalletErrorCode::ALL.iter().map(|c| ErrorCode::from(*c)));
+        codes
+    }
+
+    #[test]
+    fn money_codes_list_every_variant_once() {
+        let bet: HashSet<usize> = BetErrorCode::ALL.iter().map(|c| bet_index(*c)).collect();
+        assert_eq!((bet.len(), BetErrorCode::ALL.len()), (BET_COUNT, BET_COUNT));
+        let bonus: HashSet<usize> = BonusErrorCode::ALL
+            .iter()
+            .map(|c| bonus_index(*c))
+            .collect();
+        assert_eq!(
+            (bonus.len(), BonusErrorCode::ALL.len()),
+            (BONUS_COUNT, BONUS_COUNT)
+        );
+        let bailout: HashSet<usize> = BailoutErrorCode::ALL
+            .iter()
+            .map(|c| bailout_index(*c))
+            .collect();
+        assert_eq!(
+            (bailout.len(), BailoutErrorCode::ALL.len()),
+            (BAILOUT_COUNT, BAILOUT_COUNT)
+        );
+        let wallet: HashSet<usize> = WalletErrorCode::ALL
+            .iter()
+            .map(|c| wallet_index(*c))
+            .collect();
+        assert_eq!(
+            (wallet.len(), WalletErrorCode::ALL.len()),
+            (WALLET_COUNT, WALLET_COUNT)
+        );
+    }
+
+    /// 012 RF38: the exact strings, and each one comes back as its own `ErrorCode` variant.
+    #[test]
+    fn money_codes_have_the_exact_strings_and_round_trip() {
+        let expected = [
+            (
+                ErrorCode::Bet(BetErrorCode::InvalidRequest),
+                "bet.invalid_request",
+            ),
+            (ErrorCode::Bet(BetErrorCode::KeyReused), "bet.key_reused"),
+            (
+                ErrorCode::Bet(BetErrorCode::WindowClosed),
+                "bet.window_closed",
+            ),
+            (
+                ErrorCode::Bet(BetErrorCode::BelowMinimum),
+                "bet.below_minimum",
+            ),
+            (ErrorCode::Bet(BetErrorCode::SideLocked), "bet.side_locked"),
+            (
+                ErrorCode::Bet(BetErrorCode::TooManyBets),
+                "bet.too_many_bets",
+            ),
+            (ErrorCode::Bet(BetErrorCode::PoolFull), "bet.pool_full"),
+            (
+                ErrorCode::Bet(BetErrorCode::FightCapExceeded),
+                "bet.fight_cap_exceeded",
+            ),
+            (
+                ErrorCode::Bet(BetErrorCode::InsufficientBalance),
+                "bet.insufficient_balance",
+            ),
+            (ErrorCode::Bet(BetErrorCode::Unavailable), "bet.unavailable"),
+            (
+                ErrorCode::Bonus(BonusErrorCode::AlreadyClaimed),
+                "bonus.already_claimed",
+            ),
+            (
+                ErrorCode::Bailout(BailoutErrorCode::GrantAvailable),
+                "bailout.grant_available",
+            ),
+            (
+                ErrorCode::Bailout(BailoutErrorCode::NotEligible),
+                "bailout.not_eligible",
+            ),
+            (
+                ErrorCode::Bailout(BailoutErrorCode::AlreadyClaimed),
+                "bailout.already_claimed",
+            ),
+            (
+                ErrorCode::Wallet(WalletErrorCode::Unavailable),
+                "wallet.unavailable",
+            ),
+        ];
+        assert_eq!(expected.len(), money_codes().len());
+        for (code, text) in expected {
+            assert_eq!(code.as_str(), text);
+            assert_eq!(serde_json::to_string(&code).unwrap(), format!("\"{text}\""));
+            assert_eq!(
+                serde_json::from_str::<ErrorCode>(&format!("\"{text}\"")).unwrap(),
+                code
+            );
+        }
     }
 
     #[test]
@@ -711,9 +1027,28 @@ mod tests {
             );
             assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
         }
+        for code in money_codes() {
+            let prefix = match code {
+                ErrorCode::Bet(_) => BetErrorCode::PREFIX,
+                ErrorCode::Bonus(_) => BonusErrorCode::PREFIX,
+                ErrorCode::Bailout(_) => BailoutErrorCode::PREFIX,
+                ErrorCode::Wallet(_) => WalletErrorCode::PREFIX,
+                other => panic!("not a money code: {other:?}"),
+            };
+            assert!(code.as_str().starts_with(prefix), "{code:?}");
+            assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
+        }
         assert_eq!(
             seen.len(),
-            API_COUNT + WS_COUNT + AUTH_COUNT + PROFILE_COUNT + FIGHT_COUNT
+            API_COUNT
+                + WS_COUNT
+                + AUTH_COUNT
+                + PROFILE_COUNT
+                + FIGHT_COUNT
+                + BET_COUNT
+                + BONUS_COUNT
+                + BAILOUT_COUNT
+                + WALLET_COUNT
         );
     }
 

@@ -37,6 +37,21 @@ const ERROR_CODES: { readonly [K in ErrorCode]: true } = {
   'profile.display_name_taken': true,
   'fight.not_found': true,
   'fight.unavailable': true,
+  'bet.invalid_request': true,
+  'bet.key_reused': true,
+  'bet.window_closed': true,
+  'bet.below_minimum': true,
+  'bet.side_locked': true,
+  'bet.too_many_bets': true,
+  'bet.pool_full': true,
+  'bet.fight_cap_exceeded': true,
+  'bet.insufficient_balance': true,
+  'bet.unavailable': true,
+  'bonus.already_claimed': true,
+  'bailout.grant_available': true,
+  'bailout.not_eligible': true,
+  'bailout.already_claimed': true,
+  'wallet.unavailable': true,
 };
 
 const CALLBACK_ERROR_CODES: { readonly [K in CallbackErrorCode]: true } = {
