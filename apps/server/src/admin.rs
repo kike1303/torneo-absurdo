@@ -1031,7 +1031,7 @@ mod source_rules {
     /// Only 009: the guard also had to refuse `admin_account_cutoff`, which took a new body and,
     /// as `UPDATE OF` can not be altered, a drop and a create in the same migration, which runs in
     /// one transaction. A later migration needs its own line here, and a review.
-    const GUARD_CHANGES_ALLOWED: [(i64, &str, &str); 4] = [
+    const GUARD_CHANGES_ALLOWED: [(i64, &str, &str); 5] = [
         (
             20261030000000,
             "or replace function",
@@ -1041,6 +1041,12 @@ mod source_rules {
         // 012 RF1 widens the two, in the same statement that adds them back.
         (20261102000000, "drop constraint", "ledger_entries_kind_ck"),
         (20261102000000, "drop constraint", "ledger_entries_user_ck"),
+        // 012 phase B ties a `bet_stake` to its bet's stake: one more branch, nothing taken away.
+        (
+            20261103000000,
+            "or replace function",
+            "ledger_posting_rules",
+        ),
     ];
 
     /// `(version, file name, text)` of every migration.

@@ -40,8 +40,8 @@ SELECT \
   EXISTS (SELECT 1 FROM ledger_entries WHERE user_id = $1 AND kind = 'bailout' \
      AND grant_day = (now() AT TIME ZONE 'UTC')::date), \
   (SELECT (EXTRACT(EPOCH FROM now() - u.created_at) * 1000)::bigint FROM users u WHERE u.id = $1), \
-  (SELECT count(DISTINCT s.fight_id) FROM bet_settlements s \
-     WHERE s.user_id = $1 AND s.outcome <> 'refunded'), \
+  (SELECT count(DISTINCT fight_id) FROM bet_settlements \
+     WHERE user_id = $1 AND outcome <> 'refunded'), \
   (EXTRACT(EPOCH FROM ((now() AT TIME ZONE 'UTC')::date + 1)::timestamp \
      AT TIME ZONE 'UTC') * 1000)::bigint";
 

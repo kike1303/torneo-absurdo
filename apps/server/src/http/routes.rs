@@ -84,6 +84,8 @@ pub enum Handler {
     BonusClaim,
     BailoutClaim,
     Wallet,
+    Bet,
+    MyBets,
     #[cfg(feature = "dev-auth")]
     DevAuthorize,
     #[cfg(feature = "dev-auth")]
@@ -223,6 +225,18 @@ pub const ROUTES: &[RouteSpec] = &[
         effect: Effect::Read,
         handler: Handler::Wallet,
     },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/bets",
+        effect: Effect::Mutate,
+        handler: Handler::Bet,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/bets/mine",
+        effect: Effect::Read,
+        handler: Handler::MyBets,
+    },
     #[cfg(feature = "dev-auth")]
     RouteSpec {
         method: RouteMethod::Get,
@@ -337,6 +351,9 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         Handler::BonusClaim => on(filter, crate::bets::claims::bonus).layer(body),
         Handler::BailoutClaim => on(filter, crate::bets::claims::bailout).layer(body),
         Handler::Wallet => on(filter, crate::bets::wallet::handler),
+        // 012 RF25: over `MAX_FORM_BYTES`, `JsonRejection` gives 422 `bet.invalid_request`.
+        Handler::Bet => on(filter, crate::bets::api::place).layer(body),
+        Handler::MyBets => on(filter, crate::bets::api::mine),
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize => on(filter, auth::dev::authorize),
         #[cfg(feature = "dev-auth")]
