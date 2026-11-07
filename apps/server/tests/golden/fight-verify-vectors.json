@@ -1936,7 +1936,46 @@
     },
     "exception": false,
     "expected_id": 12,
-    "name": "secret_lost_without_a_spec",
+    "name": "secret_lost_without_spec_a",
+    "native": "err"
+  },
+  {
+    "browser": "mismatch:snapshot",
+    "detail": {
+      "fight": {
+        "a": {
+          "max_hp": 680,
+          "slug": "trickster"
+        },
+        "b": {
+          "max_hp": 860,
+          "slug": "tank"
+        },
+        "closes_at": "1800000450000",
+        "final": {
+          "kind": "voided",
+          "reason": "secret_lost"
+        },
+        "id": 12,
+        "live_at": "1800000480000",
+        "live_started_at": null,
+        "max_duration_ms": 90000,
+        "opens_at": "1800000000000",
+        "playback_delay_ms": 3500,
+        "ruleset_version": 1,
+        "seed_commit": "719fc5e59390d5e42666897f4646fe43ff85c8fc146e224c9a3f379c38a1c768",
+        "snapshot_sha256": "8cde85496b8ae90073035bd12dbaddacf4cec556294871ea9216edc7e15b5488",
+        "state": "settled",
+        "time_limit_ms": 86000
+      },
+      "log": null,
+      "seed": null,
+      "spec_a": "{\"slug\":\"trickster\",\"stats\":{\"hp\":45,\"attack\":50,\"defense\":40,\"speed\":95,\"special\":70},\"personality\":{\"aggression\":40,\"caution\":40,\"showmanship\":90},\"abilities\":[{\"id\":\"tidal_spin\",\"kind\":\"special\",\"power\":70,\"cooldown\":3,\"element\":\"water\"},{\"id\":\"quick_kick\",\"kind\":\"heavy\",\"power\":30,\"cooldown\":0,\"element\":\"air\"}],\"weaknesses\":[\"electric\",\"ice\"]}",
+      "spec_b": null
+    },
+    "exception": false,
+    "expected_id": 12,
+    "name": "secret_lost_without_spec_b",
     "native": "err"
   },
   {

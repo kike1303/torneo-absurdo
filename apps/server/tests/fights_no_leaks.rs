@@ -205,6 +205,7 @@ fn expected_status(handler: Handler, identity: &str) -> Option<u16> {
         Handler::Health
         | Handler::FightsList
         | Handler::FightsCurrent
+        | Handler::FightsVoidStats
         | Handler::FightDetail
         | Handler::AuthProviders => Some(200),
         Handler::Me if identity == "anonymous" => Some(401),

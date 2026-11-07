@@ -704,9 +704,16 @@ fn verify_vectors() -> Vec<Value> {
             "mismatch:snapshot",
         ),
         (
-            "secret_lost_without_a_spec",
+            "secret_lost_without_spec_a",
             &secret_lost,
             Box::new(|d| d["spec_a"] = Value::Null),
+            "err",
+            "mismatch:snapshot",
+        ),
+        (
+            "secret_lost_without_spec_b",
+            &secret_lost,
+            Box::new(|d| d["spec_b"] = Value::Null),
             "err",
             "mismatch:snapshot",
         ),
