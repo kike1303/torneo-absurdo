@@ -5,6 +5,7 @@ import type {
   Me,
   Provider,
   ReauthStatus,
+  VoidStats,
 } from '@torneo/protocol';
 import { apiRequest, type Api, type ApiResult } from './client.js';
 
@@ -35,6 +36,11 @@ export function getFightsPage(api: Api, before: number | null): Promise<ApiResul
 /** A fight (010 RF34). By number, like `getFightsPage`. */
 export function getFightDetail(api: Api, id: number): Promise<ApiResult<FightDetail>> {
   return apiRequest<FightDetail>(api, 'GET', `/api/fights/${id}`);
+}
+
+/** The public counter of the voided fights (012 RF23). */
+export function getVoidStats(api: Api): Promise<ApiResult<VoidStats>> {
+  return apiRequest<VoidStats>(api, 'GET', '/api/fights/void-stats');
 }
 
 export function getProviders(api: Api): Promise<ApiResult<Provider[]>> {

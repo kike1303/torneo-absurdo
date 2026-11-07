@@ -37,7 +37,7 @@ function label(verdict: Verdict): string {
 
 describe('the verification vectors', () => {
   it('are all there, so this never passes empty', () => {
-    expect(VECTORS).toHaveLength(64);
+    expect(VECTORS).toHaveLength(71);
     const names = VECTORS.map((vector) => vector.name);
     expect(new Set(names).size).toBe(names.length);
     for (const name of [

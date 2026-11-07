@@ -163,6 +163,17 @@ async function verifyVoided(detail: FightDetail, checkSnapshot: boolean, deps: V
   return matched('commit');
 }
 
+/**
+ * A voided fight whose seed was lost (012 RF21): its own result, never a step skipped. It has a
+ * commit and its snapshot, and neither a seed nor a log; there is nothing more to prove.
+ */
+async function verifySecretLost(detail: FightDetail, deps: VerifyDeps) {
+  if (detail.seed !== null || detail.fight.seed_commit === null) return mismatch('commit');
+  if (detail.log !== null) return mismatch('log');
+  if (!(await snapshotHolds(detail, deps))) return mismatch('snapshot');
+  return { status: 'not_applicable' } as const;
+}
+
 async function verifyCancelled(detail: FightDetail, checkSnapshot: boolean, deps: VerifyDeps) {
   if (detail.seed !== null || detail.fight.seed_commit !== null) return mismatch('commit');
   if (detail.log !== null) return mismatch('log');
@@ -194,6 +205,8 @@ async function verifyDetail(detail: FightDetail, deps: VerifyDeps): Promise<Verd
           return verifyVoided(detail, false, deps);
         case 'engine_error':
           return verifyVoided(detail, true, deps);
+        case 'secret_lost':
+          return verifySecretLost(detail, deps);
         default:
           return unknownFinal(reason);
       }

@@ -113,14 +113,17 @@
 //! send::<FinalLog>();
 //! ```
 
+use std::sync::Arc;
+
 use engine::{FightLog, Seed, canonical_json, simulate};
-use protocol::{CancelReason, FightEvent, FightFinal};
+use protocol::{CancelReason, FightEvent, FightFinal, VoidReason};
 use rand_core::{OsRng, TryRngCore};
 use sha2::{Digest, Sha256};
 use sqlx::{PgConnection, Row};
 
 use super::SETTLE_DELAY_MS;
-use super::snapshot::FightSnapshot;
+use super::hook::{SettlementError, SettlementHook, SettlingFight};
+use super::snapshot::{self, FightSnapshot};
 use super::store;
 
 /// The seed of a fight, read from its table and already checked against its commit.
@@ -451,6 +454,208 @@ pub async fn cancel_fight(
         .execute(&mut *conn)
         .await?;
     Ok(true)
+}
+
+/// What `void_fight` runs to know if the engine can rebuild the log. It only answers yes or no: the
+/// log goes no further than this call. A trait so a test can make it fail as a real binary hardly
+/// ever does; the CLI only builds [`RealCompute`] (`fights_source_guard.rs`).
+pub trait VoidCompute: Send + Sync {
+    /// # Errors
+    /// The seed, so a failure does not lose it, and the [`ComputeError`].
+    fn compute(
+        &self,
+        seed: SealedSeed,
+        snapshot: &FightSnapshot,
+        window: &ClosedWindow,
+    ) -> Result<(), (SealedSeed, ComputeError)>;
+}
+
+/// The engine of this binary.
+pub struct RealCompute;
+
+impl VoidCompute for RealCompute {
+    fn compute(
+        &self,
+        seed: SealedSeed,
+        snapshot: &FightSnapshot,
+        window: &ClosedWindow,
+    ) -> Result<(), (SealedSeed, ComputeError)> {
+        SealedLog::compute(seed, snapshot, window).map(|_| ())
+    }
+}
+
+/// What `server fight void` asks for. The reason is never here: it is deduced (012 RF16).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VoidRequest {
+    pub id: i32,
+    /// `--previous-binary` was declared (RF24).
+    pub previous_binary: bool,
+    /// `--backup-checked` was declared (RF24).
+    pub backup_checked: bool,
+}
+
+/// Why a fight is not voided: the rows of 012 RF17 after the first one, which is of `admin.rs`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VoidRefusal {
+    NotFound,
+    BadState,
+    /// [`Self::BadState`] on a fight already voided with its secret lost: the output repeats the
+    /// warning of RF24, which a `COMMIT` lost to the deadline never printed.
+    AlreadySecretLost,
+    VersionMissing,
+    SecretMismatch,
+    EmissionPossible,
+    BackupNotChecked,
+    BinaryProblem,
+    FightHealthy,
+    NoEnd,
+    PreviousBinaryNotTried,
+}
+
+impl VoidRefusal {
+    /// The code of the output and of the log.
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::NotFound => "void.not_found",
+            Self::BadState | Self::AlreadySecretLost => "void.bad_state",
+            Self::VersionMissing => "void.version_missing",
+            Self::SecretMismatch => "void.secret_mismatch",
+            Self::EmissionPossible => "void.emission_possible",
+            Self::BackupNotChecked => "void.backup_not_checked",
+            Self::BinaryProblem => "void.binary_problem",
+            Self::FightHealthy => "void.fight_healthy",
+            Self::NoEnd => "void.no_end",
+            Self::PreviousBinaryNotTried => "void.previous_binary_not_tried",
+        }
+    }
+}
+
+/// Why `void_fight` wrote nothing that will stay: the caller's transaction must revert.
+#[derive(Debug, thiserror::Error)]
+pub enum VoidError {
+    #[error("the fight was not voided")]
+    Refused(VoidRefusal),
+    #[error("the settlement failed")]
+    Settlement(#[from] SettlementError),
+    #[error("the database failed")]
+    Db(#[from] sqlx::Error),
+}
+
+impl From<VoidRefusal> for VoidError {
+    fn from(refusal: VoidRefusal) -> Self {
+        Self::Refused(refusal)
+    }
+}
+
+/// What the engine says of a healthy snapshot: rows 11 to 14 of 012 RF17 (with the amendments M6 and 2
+/// of 010 RF59). Only a failure a valid spec can give opens the void, and a panic is caught as in the
+/// runner, by the task. Any other code of the engine is refused by default.
+async fn engine_verdict(
+    conn: &mut PgConnection,
+    request: &VoidRequest,
+    commit: &[u8],
+    seed: SealedSeed,
+    snapshot: FightSnapshot,
+    window: ClosedWindow,
+    compute: Arc<dyn VoidCompute>,
+) -> Result<SealedSeed, VoidError> {
+    let computed =
+        tokio::task::spawn_blocking(move || compute.compute(seed, &snapshot, &window)).await;
+    let seed = match computed {
+        Ok(Ok(())) => return Err(VoidRefusal::FightHealthy.into()),
+        Ok(Err((_, ComputeError::NoEnd))) => return Err(VoidRefusal::NoEnd.into()),
+        Ok(Err((seed, ComputeError::Encode | ComputeError::Engine("event_limit")))) => seed,
+        Ok(Err((_, ComputeError::Engine(_)))) => return Err(VoidRefusal::BinaryProblem.into()),
+        // The seed died with the task: it is read again.
+        Err(_) => match SealedSeed::load(conn, request.id, commit).await {
+            Ok(seed) => seed,
+            Err(SecretError::Db(error)) => return Err(error.into()),
+            Err(SecretError::Missing | SecretError::Mismatch) => {
+                return Err(VoidRefusal::SecretMismatch.into());
+            }
+        },
+    };
+    if request.previous_binary {
+        Ok(seed)
+    } else {
+        Err(VoidRefusal::PreviousBinaryNotTried.into())
+    }
+}
+
+/// The exit of an unrecoverable fight (012 RF16 to RF18, 010 RF59), in the caller's transaction, which
+/// must have a `lock_timeout` and must revert on any error. Evaluates in the order of RF17 and deduces
+/// the reason, which nobody chooses. If one applies, it writes the final, publishes the seed and
+/// removes its row, unless the row is what was lost, and calls the hook, which refunds.
+///
+/// # Errors
+/// [`VoidError`].
+pub async fn void_fight(
+    conn: &mut PgConnection,
+    request: &VoidRequest,
+    compute: Arc<dyn VoidCompute>,
+    hook: &dyn SettlementHook,
+) -> Result<VoidReason, VoidError> {
+    let id = request.id;
+    let Some((row, window)) = store::lock_for_void(&mut *conn, id).await? else {
+        return Err(VoidRefusal::NotFound.into());
+    };
+    let Some(window) = window else {
+        let lost = row.void_reason.as_deref() == Some(VoidReason::SecretLost.as_str());
+        return Err(if lost {
+            VoidRefusal::AlreadySecretLost
+        } else {
+            VoidRefusal::BadState
+        }
+        .into());
+    };
+    if !snapshot::version_available(&row) {
+        return Err(VoidRefusal::VersionMissing.into());
+    }
+    // `fights_commit_ck`: from `betting_open` on there is always one.
+    let commit = row
+        .seed_commit
+        .as_deref()
+        .ok_or(VoidRefusal::SecretMismatch)?;
+    let (reason, seed) = match SealedSeed::load(&mut *conn, id, commit).await {
+        Ok(seed) if snapshot::stored_bytes_error(&row).is_some() => {
+            (VoidReason::SnapshotInvalid, Some(seed))
+        }
+        Ok(seed) => {
+            let snapshot = FightSnapshot::from_row(&row).map_err(|_| VoidRefusal::BinaryProblem)?;
+            let seed = engine_verdict(&mut *conn, request, commit, seed, snapshot, window, compute)
+                .await?;
+            (VoidReason::EngineError, Some(seed))
+        }
+        // A secret that does not match its commit is never `secret_lost`.
+        Err(SecretError::Mismatch) => return Err(VoidRefusal::SecretMismatch.into()),
+        Err(SecretError::Db(error)) => return Err(error.into()),
+        Err(SecretError::Missing) => {
+            if !store::secret_lost_due(&mut *conn, id).await? {
+                return Err(VoidRefusal::EmissionPossible.into());
+            }
+            if !request.backup_checked {
+                return Err(VoidRefusal::BackupNotChecked.into());
+            }
+            (VoidReason::SecretLost, None)
+        }
+    };
+    let bytes = seed.as_ref().map(|seed| seed.bytes.as_slice());
+    if !store::write_voided(&mut *conn, id, reason, bytes).await? {
+        return Err(VoidRefusal::BadState.into());
+    }
+    if seed.is_some() {
+        sqlx::query("DELETE FROM fight_secrets WHERE fight_id = $1")
+            .bind(id)
+            .execute(&mut *conn)
+            .await?;
+    }
+    let fight = SettlingFight {
+        id,
+        final_result: FightFinal::Voided { reason },
+        closes_at: row.closes_at,
+    };
+    hook.settle(&mut *conn, &fight).await?;
+    Ok(reason)
 }
 
 /// The events of the log of a `settled` row (RF38, for the hub of phase B).

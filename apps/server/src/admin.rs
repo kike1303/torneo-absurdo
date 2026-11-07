@@ -14,18 +14,30 @@
 //! `admin_account_cutoff` is in this file**, checked by the source test at the end. After a
 //! `grant`, one line of fixed text on stdout names the providers within the cutoff (RF17): not a
 //! log, and never an id.
+//!
+//! `server fight void <fight_id> --by <admin_user_id> [--previous-binary <tag>] [--backup-checked]`
+//! (012 RF16) lives here too: the same configuration, the same sort of connection and the only SQL of `admin_audit`.
+//! It does not revoke anything nor write any privileged column, and the decision is of
+//! `fights::sealed::void_fight`. The only caller of this is `cli.rs`: there is no endpoint.
 
 use std::ffi::OsString;
 use std::fmt;
 use std::io::Write as _;
+use std::sync::Arc;
 use std::time::Duration;
 
+use protocol::VoidReason;
 use sqlx::postgres::PgConnectOptions;
 use sqlx::{Connection, PgConnection, Row};
 use uuid::Uuid;
 
+use crate::bets::settle::refund_totals;
 use crate::config::{self, ConfigError};
+use crate::fights::hook::SettlementHook;
+use crate::fights::sealed::{self, VoidCompute, VoidError, VoidRefusal, VoidRequest};
+use crate::fights::store;
 use crate::sessions::{self, RevokeFilter};
+use crate::version_rule::is_valid_app_version;
 
 /// Longest `--reason`, in characters.
 pub const MAX_REASON_CHARS: usize = 500;
@@ -52,6 +64,13 @@ When to run `grant` again:
 Before running `grant`, review the linked providers in /account: everything linked until that
 moment starts giving admin. `grant` prints the providers within the cutoff. If it shows one you
 do not recognize, run `revoke`, remove it from /account and run `grant` again.
+
+server fight void <fight_id> --by <admin_user_id> [--previous-binary <tag>] [--backup-checked]
+  voids a fight that cannot end and refunds its bets. It reads only DATABASE_URL and RUST_LOG. The
+  reason is deduced, never chosen. It refuses a healthy fight, and every refusal writes nothing and
+  prints its code. --by is an attribution, it authorizes nothing. --previous-binary <vX.Y.Z|sha-abc1234>
+  declares that the previous binary fails too. --backup-checked declares that restoring from a backup
+  was tried. Both stay in the audit.
 ";
 
 /// Whether the arguments after `admin` ask for [`HELP`]: `--help` or `<action> --help`.
@@ -309,6 +328,269 @@ async fn execute(options: &PgConnectOptions, command: &AdminCommand) -> Result<(
         let _ = writeln!(std::io::stdout().lock(), "{}", providers_line(&providers));
     }
     Ok(())
+}
+
+/// The warning after a `secret_lost` (012 RF24). The command cannot check that it was done: the
+/// procedure is in `apps/server/README.md`.
+pub const REOPEN_ACCEPTANCE: &str = "void.reopen_acceptance this fight stays unverified: open an issue \
+     with its id and ask the owner to decide again on worry 1 of spec 010";
+
+/// How long `server fight void` waits for the row of a fight (012 RF16).
+pub const VOID_LOCK_TIMEOUT_MS: u64 = 5000;
+/// The longest the whole of `server fight void` can take: a database that stops answering in the
+/// middle of the transaction must end in a failure, not in a process that hangs. Twelve times the 10 s
+/// that RF15 gives to a settlement of 20 000 bets, and four times the `attempt_timeout` of the runner.
+pub const VOID_DEADLINE: Duration = Duration::from_secs(120);
+
+/// The tag of `--previous-binary` (012 RF24): `vX.Y.Z` or `sha-<7>`. A declaration, and it stays in
+/// `admin_audit`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinaryTag(String);
+
+impl BinaryTag {
+    /// In canonical form, so the audit has one way to say each tag: no `dev`, and no number with a
+    /// leading zero (`v01.002.3`).
+    pub fn parse(text: &str) -> Option<Self> {
+        let canonical = text.strip_prefix('v').is_none_or(|numbers| {
+            numbers
+                .split('.')
+                .all(|part| part == "0" || !part.starts_with('0'))
+        });
+        (text != "dev" && canonical && is_valid_app_version(text)).then(|| Self(text.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// `server fight void`. `Debug` shows neither the fight nor the admin (ADR-0012 A8).
+#[derive(Clone, PartialEq, Eq)]
+pub struct VoidCommand {
+    pub fight: i32,
+    pub by: Uuid,
+    pub previous_binary: Option<BinaryTag>,
+    pub backup_checked: bool,
+}
+
+impl fmt::Debug for VoidCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VoidCommand").finish_non_exhaustive()
+    }
+}
+
+/// A canonical decimal from 1 to `i32::MAX`: no sign, no leading zeros, no spaces.
+fn parse_fight_id(text: &str) -> Option<i32> {
+    let canonical = text
+        .bytes()
+        .next()
+        .is_some_and(|b| b.is_ascii_digit() && b != b'0')
+        && text.bytes().all(|b| b.is_ascii_digit());
+    canonical.then(|| text.parse().ok()).flatten()
+}
+
+/// Only the form `users.id` is written in: `Uuid::parse_str` also takes `urn:uuid:…`, braces, no
+/// hyphens and capitals, and what the operator typed should be what the audit says.
+fn parse_canonical_uuid(text: &str) -> Option<Uuid> {
+    Uuid::parse_str(text)
+        .ok()
+        .filter(|uuid| uuid.to_string() == text)
+}
+
+impl VoidCommand {
+    /// The arguments after `fight void`: the id, then the flags in any order and none repeated. Any
+    /// other flag is invalid: the reason is deduced, never chosen.
+    pub fn parse(args: &[OsString]) -> Option<Self> {
+        let words: Vec<&str> = args.iter().map(|a| a.to_str()).collect::<Option<_>>()?;
+        let (id, mut rest) = words.split_first()?;
+        let fight = parse_fight_id(id)?;
+        let (mut by, mut previous_binary, mut backup_checked) = (None, None, false);
+        while let Some((flag, tail)) = rest.split_first() {
+            match *flag {
+                "--by" if by.is_none() => {
+                    let (value, tail) = tail.split_first()?;
+                    by = Some(parse_canonical_uuid(value)?);
+                    rest = tail;
+                }
+                "--previous-binary" if previous_binary.is_none() => {
+                    let (value, tail) = tail.split_first()?;
+                    previous_binary = Some(BinaryTag::parse(value)?);
+                    rest = tail;
+                }
+                "--backup-checked" if !backup_checked => {
+                    backup_checked = true;
+                    rest = tail;
+                }
+                _ => return None,
+            }
+        }
+        Some(Self {
+            fight,
+            by: by?,
+            previous_binary,
+            backup_checked,
+        })
+    }
+}
+
+/// Why `server fight void` did not apply: a refusal, with its code, decided something; a failure of
+/// the database, of the connection or of the settlement decided nothing, and can be tried again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum VoidFailure {
+    #[error("the fight was not voided")]
+    Refused(&'static str),
+    /// A refusal on a fight already voided with its secret lost: it repeats the warning of RF24.
+    #[error("the fight was already voided")]
+    RefusedAfterSecretLost(&'static str),
+    #[error("the command failed")]
+    Failed(&'static str),
+}
+
+impl From<sqlx::Error> for VoidFailure {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Failed(crate::db::error_kind(&error))
+    }
+}
+
+impl From<VoidError> for VoidFailure {
+    fn from(error: VoidError) -> Self {
+        match error {
+            VoidError::Refused(refusal @ VoidRefusal::AlreadySecretLost) => {
+                Self::RefusedAfterSecretLost(refusal.code())
+            }
+            VoidError::Refused(refusal) => Self::Refused(refusal.code()),
+            VoidError::Settlement(error) => Self::Failed(error.kind),
+            VoidError::Db(error) => error.into(),
+        }
+    }
+}
+
+/// `server fight void` (012 RF16 to RF18): the final, the refund and the audit, in one transaction.
+/// One line of fixed text on stdout says what happened, with no seed and no data of the log, and the
+/// log only has its event and its code. `compute` and `hook` are parameters for the tests: `cli.rs`
+/// is the only caller, and always gives the real ones.
+///
+/// # Errors
+/// [`VoidFailure`].
+pub async fn run_fight_void(
+    options: &PgConnectOptions,
+    command: &VoidCommand,
+    compute: Arc<dyn VoidCompute>,
+    hook: &dyn SettlementHook,
+) -> Result<(), VoidFailure> {
+    run_fight_void_within(options, command, compute, hook, VOID_DEADLINE).await
+}
+
+/// [`run_fight_void`] with another deadline, for the tests. Past it, the transaction goes with the
+/// connection and the failure is `timeout`. If the deadline falls during the `COMMIT`, the void may have
+/// applied: running the command again refunds nothing twice, and `void_reason` and `admin_audit` say
+/// what happened (`apps/server/README.md`). `void.bad_state` alone only says that it is settled.
+///
+/// # Errors
+/// [`VoidFailure`].
+pub async fn run_fight_void_within(
+    options: &PgConnectOptions,
+    command: &VoidCommand,
+    compute: Arc<dyn VoidCompute>,
+    hook: &dyn SettlementHook,
+    deadline: Duration,
+) -> Result<(), VoidFailure> {
+    let outcome = tokio::time::timeout(deadline, apply_void(options, command, compute, hook))
+        .await
+        .unwrap_or(Err(VoidFailure::Failed("timeout")));
+    let mut stdout = std::io::stdout().lock();
+    match &outcome {
+        // Not `tracing`: as the line of a `grant`. The commit is done, so a failed write changes nothing.
+        Ok(reason) => {
+            let _ = writeln!(stdout, "void.applied {reason}");
+            if *reason == VoidReason::SecretLost.as_str() {
+                let _ = writeln!(stdout, "{REOPEN_ACCEPTANCE}");
+            }
+            tracing::info!(event = "fight.void_applied");
+        }
+        Err(VoidFailure::Refused(code)) => {
+            let _ = writeln!(stdout, "{code}");
+            tracing::error!(event = "fight.void_refused", error_kind = *code);
+        }
+        Err(VoidFailure::RefusedAfterSecretLost(code)) => {
+            let _ = writeln!(stdout, "{code}");
+            let _ = writeln!(stdout, "{REOPEN_ACCEPTANCE}");
+            tracing::error!(event = "fight.void_refused", error_kind = *code);
+        }
+        Err(VoidFailure::Failed(kind)) => {
+            tracing::error!(event = "fight.void_failed", error_kind = *kind);
+        }
+    }
+    outcome.map(|_| ())
+}
+
+async fn apply_void(
+    options: &PgConnectOptions,
+    command: &VoidCommand,
+    compute: Arc<dyn VoidCompute>,
+    hook: &dyn SettlementHook,
+) -> Result<&'static str, VoidFailure> {
+    let mut connection = tokio::time::timeout(CONNECT_TIMEOUT, PgConnection::connect_with(options))
+        .await
+        .map_err(|_| VoidFailure::Failed("timeout"))??;
+    let mut tx = connection.begin().await?;
+    let written = write_void(&mut tx, command, compute, hook).await;
+    let reason = match written {
+        Ok(reason) => {
+            tx.commit().await?;
+            reason
+        }
+        Err(failure) => {
+            // Without a `ROLLBACK` that arrives, the end of the connection reverts it too.
+            let _ = tx.rollback().await;
+            let _ = connection.close().await;
+            return Err(failure);
+        }
+    };
+    let _ = connection.close().await;
+    Ok(reason)
+}
+
+async fn write_void(
+    tx: &mut PgConnection,
+    command: &VoidCommand,
+    compute: Arc<dyn VoidCompute>,
+    hook: &dyn SettlementHook,
+) -> Result<&'static str, VoidFailure> {
+    store::set_lock_timeout(&mut *tx, VOID_LOCK_TIMEOUT_MS).await?;
+    let admin = sqlx::query("SELECT 1 FROM users WHERE id = $1 AND role = 'admin'")
+        .bind(command.by)
+        .fetch_optional(&mut *tx)
+        .await?;
+    if admin.is_none() {
+        return Err(VoidFailure::Refused("void.not_admin"));
+    }
+    let request = VoidRequest {
+        id: command.fight,
+        previous_binary: command.previous_binary.is_some(),
+        backup_checked: command.backup_checked,
+    };
+    let reason = sealed::void_fight(&mut *tx, &request, compute, hook).await?;
+    let (bets_refunded, coins_refunded) = refund_totals(&mut *tx, command.fight).await?;
+    let mut payload = serde_json::json!({
+        "reason": reason.as_str(),
+        "bets_refunded": bets_refunded,
+        "coins_refunded": coins_refunded,
+        "backup_checked": command.backup_checked,
+    });
+    if let Some(tag) = &command.previous_binary {
+        payload["previous_binary"] = serde_json::json!(tag.as_str());
+    }
+    sqlx::query(
+        "INSERT INTO admin_audit (actor, admin_id, action, target, payload) \
+         VALUES ('cli_attributed', $1, 'fight_void', $2, $3::jsonb)",
+    )
+    .bind(command.by)
+    .bind(command.fight.to_string())
+    .bind(payload.to_string())
+    .execute(&mut *tx)
+    .await?;
+    Ok(reason.as_str())
 }
 
 #[cfg(test)]
@@ -572,9 +854,65 @@ mod source_rules {
 
     /// The database barriers of 009 RF1 and RF3 (`TA005` and `TA004`), with the version of the
     /// migration that creates each one.
-    const GUARD_TRIGGERS: [(&str, i64); 2] = [
+    const GUARD_TRIGGERS: [(&str, i64); 18] = [
         ("users_privileged_guard", 20261029100000),
         ("oauth_accounts_identity_guard", 20261030000000),
+        // The ledger only grows, every entry balances, and a closed one takes nothing more (008).
+        ("ledger_entries_immutable", 20261028000000),
+        ("ledger_entries_no_truncate", 20261028000000),
+        ("ledger_postings_immutable", 20261028000000),
+        ("ledger_postings_no_truncate", 20261028000000),
+        ("ledger_entries_balanced", 20261028000000),
+        ("ledger_postings_balanced", 20261028000000),
+        ("ledger_postings_open_entry", 20261029000000),
+        ("ledger_accounts_immutable", 20261029000000),
+        // What only the bets may move, and that they only grow (012 RF2, RF4, RF6).
+        ("ledger_postings_rules", 20261102000000),
+        ("bets_open_guard", 20261102000000),
+        ("bets_immutable", 20261102000000),
+        ("bets_no_truncate", 20261102000000),
+        ("bet_settlements_immutable", 20261102000000),
+        ("bet_settlements_no_truncate", 20261102000000),
+        ("pool_settlements_immutable", 20261102000000),
+        ("pool_settlements_no_truncate", 20261102000000),
+    ];
+
+    /// The bodies of those triggers, when the function has another name: a `CREATE OR REPLACE` of one
+    /// with a `RETURN NEW` switches its trigger off without naming it.
+    const GUARD_FUNCTIONS: [&str; 4] = [
+        "ledger_posting_rules",
+        "ledger_immutable",
+        "ledger_entry_balanced",
+        "ledger_posting_open_entry",
+    ];
+
+    /// What ties a movement of coins to its fact (012 RF1, RF3, RF6). A `DROP CONSTRAINT` or a
+    /// `DROP INDEX` of one takes the barrier away without touching a trigger. Replacing one, as the
+    /// migration of 012 does with the two that 008 created, needs its line in
+    /// `GUARD_CHANGES_ALLOWED`.
+    const GUARD_CONSTRAINTS: [&str; 15] = [
+        "ledger_entries_kind_ck",
+        "ledger_entries_user_ck",
+        "ledger_entries_bet_refs_ck",
+        "ledger_entries_bet_kind_ck",
+        "ledger_entries_rake_fight_ck",
+        "ledger_entries_bet_owner_fk",
+        "ledger_postings_amount_ck",
+        "bets_owner_uq",
+        "bets_client_key_uq",
+        "bets_stake_ck",
+        "bet_settlements_owner_fk",
+        "bet_settlements_ranked_ck",
+        "bet_settlements_refunded_ck",
+        "bet_settlements_lost_ck",
+        "pool_settlements_refund_ck",
+    ];
+    const GUARD_INDEXES: [&str; 5] = [
+        "ledger_entries_grant_day_uq",
+        "ledger_entries_bailout_day_uq",
+        "ledger_entries_bet_stake_uq",
+        "ledger_entries_bet_settled_uq",
+        "ledger_entries_rake_uq",
     ];
 
     /// What takes a guard away when its statement names it.
@@ -655,13 +993,29 @@ mod source_rules {
         let mut found = Vec::new();
         for statement in migration_sql(sql).split(';') {
             let text = tokens(statement).join(" ") + " ";
-            for (guard, _) in GUARD_TRIGGERS {
+            let watched = GUARD_TRIGGERS
+                .iter()
+                .map(|(guard, _)| *guard)
+                .chain(GUARD_FUNCTIONS);
+            for guard in watched {
                 if text.contains(guard) {
                     for form in WEAKENS_A_NAMED_GUARD {
                         if text.contains(form) {
                             found.push((form, guard));
                         }
                     }
+                }
+            }
+            for constraint in GUARD_CONSTRAINTS {
+                if text.contains(&format!("drop constraint {constraint} "))
+                    || text.contains(&format!("drop constraint if exists {constraint} "))
+                {
+                    found.push(("drop constraint", constraint));
+                }
+            }
+            for index in GUARD_INDEXES {
+                if text.contains("drop index") && text.contains(index) {
+                    found.push(("drop index", index));
                 }
             }
             for form in WEAKENS_EVERY_GUARD {
@@ -677,13 +1031,16 @@ mod source_rules {
     /// Only 009: the guard also had to refuse `admin_account_cutoff`, which took a new body and,
     /// as `UPDATE OF` can not be altered, a drop and a create in the same migration, which runs in
     /// one transaction. A later migration needs its own line here, and a review.
-    const GUARD_CHANGES_ALLOWED: [(i64, &str, &str); 2] = [
+    const GUARD_CHANGES_ALLOWED: [(i64, &str, &str); 4] = [
         (
             20261030000000,
             "or replace function",
             "users_privileged_guard",
         ),
         (20261030000000, "drop trigger", "users_privileged_guard"),
+        // 012 RF1 widens the two, in the same statement that adds them back.
+        (20261102000000, "drop constraint", "ledger_entries_kind_ck"),
+        (20261102000000, "drop constraint", "ledger_entries_user_ck"),
     ];
 
     /// `(version, file name, text)` of every migration.
@@ -1020,7 +1377,8 @@ mod source_rules {
         };
         for (guard, created) in GUARD_TRIGGERS {
             assert!(
-                normalized(created).contains(&format!("create trigger {guard}")),
+                normalized(created).contains(&format!("create trigger {guard}"))
+                    || normalized(created).contains(&format!("create constraint trigger {guard}")),
                 "{guard} is not created in {created}"
             );
         }
@@ -1039,6 +1397,71 @@ mod source_rules {
     fn the_rule_of_the_guards_sees_every_form() {
         let (users, oauth) = ("users_privileged_guard", "oauth_accounts_identity_guard");
         for (sql, form, target) in [
+            (
+                "DROP TRIGGER ledger_postings_immutable ON ledger_postings;",
+                "drop trigger",
+                "ledger_postings_immutable",
+            ),
+            (
+                "ALTER TABLE ledger_entries DISABLE TRIGGER ledger_entries_immutable",
+                "disable trigger",
+                "ledger_entries_immutable",
+            ),
+            (
+                "ALTER TABLE ledger_entries DROP CONSTRAINT ledger_entries_bet_owner_fk",
+                "drop constraint",
+                "ledger_entries_bet_owner_fk",
+            ),
+            (
+                "alter table ledger_entries drop constraint if exists \"ledger_entries_bet_kind_ck\"",
+                "drop constraint",
+                "ledger_entries_bet_kind_ck",
+            ),
+            (
+                "ALTER TABLE ledger_entries ADD COLUMN x int, DROP CONSTRAINT ledger_entries_user_ck;",
+                "drop constraint",
+                "ledger_entries_user_ck",
+            ),
+            (
+                "ALTER TABLE bet_settlements DROP CONSTRAINT bet_settlements_owner_fk CASCADE",
+                "drop constraint",
+                "bet_settlements_owner_fk",
+            ),
+            (
+                "DROP INDEX public.ledger_entries_bet_settled_uq",
+                "drop index",
+                "ledger_entries_bet_settled_uq",
+            ),
+            (
+                "DROP TRIGGER ledger_postings_rules ON ledger_postings;",
+                "drop trigger",
+                "ledger_postings_rules",
+            ),
+            (
+                "ALTER TABLE bets DISABLE TRIGGER bets_open_guard",
+                "disable trigger",
+                "bets_open_guard",
+            ),
+            (
+                "DROP TRIGGER IF EXISTS pool_settlements_no_truncate ON pool_settlements",
+                "drop trigger",
+                "pool_settlements_no_truncate",
+            ),
+            (
+                "ALTER TABLE bet_settlements DISABLE TRIGGER bet_settlements_immutable",
+                "disable trigger",
+                "bet_settlements_immutable",
+            ),
+            (
+                "CREATE OR REPLACE FUNCTION ledger_posting_rules() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$;",
+                "or replace function",
+                "ledger_posting_rules",
+            ),
+            (
+                "CREATE OR REPLACE FUNCTION ledger_immutable() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$;",
+                "or replace function",
+                "ledger_immutable",
+            ),
             (
                 "DROP TRIGGER users_privileged_guard ON users;",
                 "drop trigger",

@@ -8,6 +8,7 @@
   import type { FighterDisplay } from '#lib/features/fight/live/fighter-names.js';
   import type { TextScene } from '#lib/features/fight/live/text-scene.js';
   import type { View } from '#lib/features/fight/live/view-state.js';
+  import type { VoidStats } from '#lib/features/fight/live/void-stats.js';
   import type { LiveSession } from '#lib/features/fight/live-session.js';
   import type { Locale } from '#lib/i18n/locale.js';
   import { m } from '#lib/paraglide/messages.js';
@@ -35,6 +36,8 @@
     onfailure: (code: RendererErrorCode) => void;
     display: (slug: string, locale: Locale) => FighterDisplay;
     debug: FightDebug | null;
+    /** The public counter of the voided fights, if it was read (012 RF22). */
+    voidStats?: VoidStats | null;
   }
 
   let {
@@ -52,6 +55,7 @@
     onfailure,
     display,
     debug,
+    voidStats = null,
   }: Props = $props();
 
   const locale = $derived(getLocale());
@@ -202,6 +206,7 @@
             replayHref={view.result.fight.state === 'settled'
               ? `/${locale}/fights/${view.result.fight.id}`
               : undefined}
+            {voidStats}
           />
         {/if}
       </div>

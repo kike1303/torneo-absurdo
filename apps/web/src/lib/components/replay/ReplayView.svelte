@@ -71,6 +71,17 @@
 
   let stage = $state<FightStage | null>(null);
   let phase = $state<FightStageState>('loading');
+
+  /**
+   * A lost seed shows neither the check nor the seed (012 RF22): its notice says it cannot be
+   * verified. Only data that does not hold, or a browser that could not check, still shows it.
+   */
+  const quietSecretLost = $derived(
+    load === 'ready' &&
+      detail?.fight.final?.kind === 'voided' &&
+      detail.fight.final.reason === 'secret_lost' &&
+      (verdict === null || verdict.status === 'not_applicable'),
+  );
 </script>
 
 <div
@@ -145,7 +156,7 @@
         </div>
       {/if}
     {/if}
-    {#if load === 'ready' || load === 'untrusted'}
+    {#if (load === 'ready' || load === 'untrusted') && !quietSecretLost}
       <ReplayVerdict
         {verdict}
         {action}

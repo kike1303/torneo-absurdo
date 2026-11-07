@@ -14,7 +14,7 @@ approvals:
 linear: TA-44
 depends_on: ["010", "003", "002"]
 created: 2026-11-02
-updated: 2026-11-06
+updated: 2026-11-07
 ---
 
 # Spec: Repeticiones y verificación en el navegador
@@ -297,13 +297,14 @@ Sale de la revisión de [plan.md](./plan.md), cuyos puntos conservan aquí su n�
 | Architect | Una respuesta sin forma solo da `mismatch(data)` | RF24 | Ni la spec ni el plan decían qué se dibuja en ese caso | security-reviewer |
 
 ## Enmienda (merge de main, 2026-11-06)
-Al traer `main` antes del PR cambiaron tres premisas. La spec sigue aprobada y ningún ADR cambia.
+Al traer `main` antes del PR cambiaron cuatro premisas. La spec sigue aprobada y ningún ADR cambia.
 
 | Qué cambia | Dónde | Por qué |
 |---|---|---|
 | La corrida sembrada (`playwright.replays.config.ts`) y todo `_e2e-fights-run` corren **solo en local**, con `just e2e`, y su salida va en el PR. Ya no hay job `e2e-fights` | "Estrategia de pruebas", preocupación 12, tabla de RF2 | TA-56 lo sacó de CI: sin GPU, el 3D por software lo volvía inestable. El caso B4.1 de `csp.spec.ts` (evidencia de ADR-0012 B6) queda también en local |
 | La repetición usa la vista 3D por defecto de `FightStage` (feature 013), sin cambios en `packages/renderer`. "Pixi solo por `import()`" se lee como "el renderer (Pixi o Three) y el modelo `.glb`" | RF5, RF18 | TA-50 hizo del 3D la vista por defecto |
 | El motor conoce el ruleset 2 (feature 016), así que el "ruleset desconocido" de los vectores, los tests y el e2e pasa a ser el 3. El verificador acepta cualquier versión de `Ruleset::for_version` | RF14 | El server sigue programando solo peleas v1 |
+| *(2026-11-07)* `voided(secret_lost)` deja de ser un final desconocido. `verifyFight` le da `not_applicable` solo si no hay semilla ni log, hay commit y la huella coincide, como el resultado propio de RF21 de 012; si no, `mismatch`. `/fights/{id}` muestra su aviso y no muestra la comprobación ni la semilla, salvo un `mismatch` o un `cannot_check`. El "motivo desconocido" de los vectores pasa a ser `meteor` | RF13, RF14, RF22 | TA-27 (012) agregó `secret_lost`, y su plan le deja a quien fusione después el estado en la repetición |
 
 ## Revisión
 ### architect — 2026-11-02 — Enmienda (revisión del plan)

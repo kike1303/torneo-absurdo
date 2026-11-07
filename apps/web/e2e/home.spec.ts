@@ -306,6 +306,79 @@ test.describe('in live (RF54, RF55)', () => {
     await expect(home(page)).toHaveAttribute('data-stage', 'none');
   });
 
+  // 012 RF22: its own text and the counter, read once it reaches the view by the socket, and nothing
+  // of a seed nor of a check.
+  test('a fight voided with its secret lost says that it cannot be verified', async ({ page }) => {
+    let reads = 0;
+    await page.route('**/api/fights/void-stats', (route) => {
+      reads++;
+      return route.fulfill({ json: { voided: 4, secret_lost: 2 } });
+    });
+    const { server, summary } = await watching(page, 5000, strikes(5000));
+    await expect(page.getByTestId('fight-live')).toBeVisible();
+    const lost: FightSummary = {
+      ...summary,
+      state: 'settled',
+      final: { kind: 'voided', reason: 'secret_lost' },
+    };
+    server.update(board({ last: lost }));
+    await expect(page.getByTestId('fight-result')).toHaveAttribute(
+      'data-result',
+      'voided_unverifiable',
+    );
+    await expect(page.getByTestId('fight-result-text')).toHaveText(
+      ES.fight_result_voided_unverifiable as string,
+    );
+    await expect(page.getByTestId('fight-result-void-count')).toHaveText(
+      (ES.fight_result_void_count as string).replace('{voided}', '4').replace('{secret_lost}', '2'),
+    );
+    expect(reads).toBe(1);
+    await expect(page.getByTestId('fight-result')).not.toContainText(/semilla|seed/i);
+    await expect(home(page)).toHaveAttribute('data-stage', 'none');
+  });
+
+  test('without the counter, it still says that it cannot be verified', async ({ page }) => {
+    await page.route('**/api/fights/void-stats', (route) => route.fulfill({ status: 503 }));
+    const { server, summary } = await watching(page, 5000, strikes(5000));
+    await expect(page.getByTestId('fight-live')).toBeVisible();
+    const failed = page.waitForResponse('**/api/fights/void-stats');
+    server.update(
+      board({
+        last: { ...summary, state: 'settled', final: { kind: 'voided', reason: 'secret_lost' } },
+      }),
+    );
+    await expect(page.getByTestId('fight-result-text')).toHaveText(
+      ES.fight_result_voided_unverifiable as string,
+    );
+    await failed;
+    await expect(page.getByTestId('fight-result-void-count')).toHaveCount(0);
+  });
+
+  test('a second one whose counter fails does not keep the number of the first', async ({
+    page,
+  }) => {
+    let reads = 0;
+    await page.route('**/api/fights/void-stats', (route) =>
+      ++reads === 1
+        ? route.fulfill({ json: { voided: 4, secret_lost: 2 } })
+        : route.fulfill({ status: 503 }),
+    );
+    const lost = (id: number) =>
+      fight(id, { state: 'settled', final: { kind: 'voided', reason: 'secret_lost' } });
+    const server = await fakeServer(page, () => board({ last: lost(1) }));
+    await open(page);
+    await expect(page.getByTestId('fight-result-void-count')).toBeVisible();
+    const failed = page.waitForResponse('**/api/fights/void-stats');
+    server.update(board({ last: lost(3) }));
+    // It stops showing at once, not only once the read fails.
+    await expect(page.getByTestId('fight-result-void-count')).toHaveCount(0);
+    await failed;
+    await expect(page.getByTestId('fight-result-void-count')).toHaveCount(0);
+    await expect(page.getByTestId('fight-result-text')).toHaveText(
+      ES.fight_result_voided_unverifiable as string,
+    );
+  });
+
   test('a late client far from its KO: the next fight does not take it, nor shows the result', async ({
     page,
   }) => {
@@ -780,6 +853,20 @@ const STATES: readonly State[] = [
       await fakeServer(page, () => board({ current: fight(2), last }));
     },
     ready: (page) => expect(page.getByTestId('fight-result')).toBeVisible(),
+  },
+  {
+    name: 'voided-unverifiable',
+    set: async (page) => {
+      await page.route('**/api/fights/void-stats', (route) =>
+        route.fulfill({ json: { voided: 4, secret_lost: 2 } }),
+      );
+      const last = fight(1, {
+        state: 'settled',
+        final: { kind: 'voided', reason: 'secret_lost' },
+      });
+      await fakeServer(page, () => board({ current: fight(2), last }));
+    },
+    ready: (page) => expect(page.getByTestId('fight-result-void-count')).toBeVisible(),
   },
   {
     name: 'halted',

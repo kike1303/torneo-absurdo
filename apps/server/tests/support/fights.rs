@@ -171,6 +171,8 @@ pub struct RawFight {
     pub max_hp_b: i32,
     pub matchup_round: i32,
     pub roster_sha256: Vec<u8>,
+    pub time_limit_ms: i32,
+    pub max_duration_ms: i32,
 }
 
 /// Like [`announce`], with `change` applied to the fields.
@@ -195,6 +197,8 @@ pub async fn announce_with(
         max_hp_b: i32::from(max_hp(&ruleset, b).unwrap()),
         matchup_round: 1,
         roster_sha256: vec![1; 32],
+        time_limit_ms: i32::try_from(ruleset.time_limit_ms()).unwrap(),
+        max_duration_ms: i32::try_from(max_duration_ms(&ruleset).unwrap()).unwrap(),
     };
     change(&mut raw);
     let (closes_at, live_at) = hours(opens_at);
@@ -212,8 +216,8 @@ pub async fn announce_with(
             slug_b: &raw.slug_b,
             max_hp_a: raw.max_hp_a,
             max_hp_b: raw.max_hp_b,
-            time_limit_ms: i32::try_from(ruleset.time_limit_ms()).unwrap(),
-            max_duration_ms: i32::try_from(max_duration_ms(&ruleset).unwrap()).unwrap(),
+            time_limit_ms: raw.time_limit_ms,
+            max_duration_ms: raw.max_duration_ms,
             matchup_round: raw.matchup_round,
             roster_sha256: &raw.roster_sha256,
         },
@@ -337,6 +341,104 @@ pub async fn replace_secret(pool: &PgPool, id: i32, seed: &[u8; 32]) {
         .await
         .unwrap();
     tx.commit().await.unwrap();
+}
+
+/// In the caller's transaction, where `now()` holds still: a fight whose deadline of `secret_lost` is
+/// `now() + deadline_in_ms` to the millisecond, in `betting_closed` (`live_at` rules) or `live`
+/// (`live_started_at` rules, with a `live_at` long past that would say otherwise). With `lose`, its
+/// secret is gone. Returns its id.
+pub async fn secret_lost_fixture(
+    tx: &mut sqlx::PgConnection,
+    slot: i32,
+    state: FightState,
+    deadline_in_ms: i64,
+    lose: bool,
+) -> i32 {
+    let vector = Vector::of(KO);
+    let ruleset = Ruleset::for_version(1).unwrap();
+    let spec_a = canonical_spec_json(&vector.a).unwrap();
+    let spec_b = canonical_spec_json(&vector.b).unwrap();
+    let max_ms = max_duration_ms(&ruleset).unwrap();
+    let total = i64::from(max_ms)
+        + i64::from(server::fights::SETTLE_DELAY_MS)
+        + i64::from(server::fights::SECRET_LOST_MARGIN_MS);
+    let base = deadline_in_ms - total;
+    let live_at = if state == FightState::Live {
+        base - 86_400_000
+    } else {
+        base
+    };
+    let id: i32 = sqlx::query_scalar(
+        "INSERT INTO fights (state, opens_at, closes_at, live_at, ruleset_version, spec_a, spec_b, \
+         snapshot_sha256, slug_a, slug_b, max_hp_a, max_hp_b, time_limit_ms, max_duration_ms, \
+         matchup_round, roster_sha256) \
+         VALUES ('scheduled', \
+         now() + ($1::bigint - 3600000 - $2::bigint * 7200000) * interval '1 millisecond', \
+         now() + ($1::bigint - 1000) * interval '1 millisecond', \
+         now() + $1::bigint * interval '1 millisecond', \
+         1, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1, $12) RETURNING id",
+    )
+    .bind(live_at)
+    .bind(i64::from(slot))
+    .bind(&spec_a)
+    .bind(&spec_b)
+    .bind(snapshot_sha256(1, &spec_a, &spec_b).as_slice())
+    .bind(&vector.a.slug)
+    .bind(&vector.b.slug)
+    .bind(i32::from(max_hp(&ruleset, &vector.a).unwrap()))
+    .bind(i32::from(max_hp(&ruleset, &vector.b).unwrap()))
+    .bind(i32::try_from(ruleset.time_limit_ms()).unwrap())
+    .bind(i32::try_from(max_ms).unwrap())
+    .bind(vec![1_u8; 32])
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO fight_secrets (fight_id, seed) VALUES ($1, $2)")
+        .bind(id)
+        .bind(vector.seed.as_slice())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE fights SET state = 'betting_open', seed_commit = $2, opened_at = now() WHERE id = $1",
+    )
+    .bind(id)
+    .bind(Sha256::digest(vector.seed).as_slice())
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE fights SET state = 'betting_closed', closed_at = now() WHERE id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    if state == FightState::Live {
+        sqlx::query(
+            "UPDATE fights SET state = 'live', \
+             live_started_at = now() + $2::bigint * interval '1 millisecond' WHERE id = $1",
+        )
+        .bind(id)
+        .bind(base)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+    if lose {
+        for statement in [
+            "ALTER TABLE fight_secrets DISABLE TRIGGER fight_secrets_guard",
+            "DELETE FROM fight_secrets WHERE fight_id = $1",
+            "ALTER TABLE fight_secrets ENABLE TRIGGER fight_secrets_guard",
+        ] {
+            let query = sqlx::query(statement);
+            let query = if statement.contains("$1") {
+                query.bind(id)
+            } else {
+                query
+            };
+            query.execute(&mut *tx).await.unwrap();
+        }
+    }
+    id
 }
 
 /// The times of a test: a lock and a retry that do not make it wait.

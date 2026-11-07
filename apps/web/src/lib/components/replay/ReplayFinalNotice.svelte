@@ -15,6 +15,7 @@
     }
     if (final.kind === 'voided') {
       if (reason === 'snapshot_invalid') return m.replay_final_snapshot_invalid();
+      if (reason === 'secret_lost') return m.replay_final_secret_lost();
       return reason === 'engine_error' ? m.replay_final_engine_error() : m.replay_final_voided();
     }
     return null;

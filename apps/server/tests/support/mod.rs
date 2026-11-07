@@ -3,6 +3,7 @@
 
 pub mod app;
 pub mod auth;
+pub mod bets;
 pub mod bin;
 pub mod config;
 pub mod db;

@@ -117,6 +117,34 @@ impl FightSnapshot {
     }
 }
 
+/// Whether this binary has the ruleset of the row (012 RF17, row 4).
+pub fn version_available(row: &FightRow) -> bool {
+    u16::try_from(row.ruleset_version)
+        .ok()
+        .and_then(Ruleset::for_version)
+        .is_some()
+}
+
+/// What proves on the stored bytes alone, without the types of the engine, that the snapshot is not
+/// the one announced (012 RF17, row 9): the hash of RF2, or a slug that differs from its spec, read as
+/// generic JSON. [`FightSnapshot::from_row`] cannot say this: it decodes first, and a failure to decode
+/// with an intact hash is a problem of the binary (row 10). Bytes that are not JSON, or have no slug
+/// as text, prove nothing here.
+pub fn stored_bytes_error(row: &FightRow) -> Option<SnapshotError> {
+    let version = u16::try_from(row.ruleset_version).ok()?;
+    if snapshot_sha256(version, &row.spec_a, &row.spec_b).as_slice() != row.snapshot_sha256 {
+        return Some(SnapshotError::Hash);
+    }
+    let differs = |bytes: &[u8], slug: &str| {
+        serde_json::from_slice::<serde_json::Value>(bytes)
+            .ok()
+            .and_then(|spec| spec.get("slug").and_then(|s| s.as_str()).map(|s| s != slug))
+            .unwrap_or(false)
+    };
+    (differs(&row.spec_a, &row.slug_a) || differs(&row.spec_b, &row.slug_b))
+        .then_some(SnapshotError::Slug)
+}
+
 fn decode(bytes: &[u8]) -> Result<CharacterSpec, SnapshotError> {
     let spec: CharacterSpec = serde_json::from_slice(bytes).map_err(|_| SnapshotError::Decode)?;
     let again = canonical_spec_json(&spec).map_err(|_| SnapshotError::Reserialize)?;

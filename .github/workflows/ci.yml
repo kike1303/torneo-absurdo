@@ -175,8 +175,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
-    # 011 D6: a run of main took 14 min 10 s, before installing wasm-bindgen-cli and building the wasm.
-    timeout-minutes: 25
+    # 011 D6 (wasm-bindgen-cli and the wasm) and TA-27 (the Postgres integration tests) set this limit.
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:

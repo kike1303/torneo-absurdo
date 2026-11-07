@@ -37,4 +37,5 @@ export type * from './generated/Theme.js';
 export type * from './generated/TimestampMs.js';
 export type * from './generated/UnlinkStatus.js';
 export type * from './generated/VoidReason.js';
+export type * from './generated/VoidStats.js';
 export type * from './generated/WsErrorCode.js';

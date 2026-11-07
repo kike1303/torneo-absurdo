@@ -80,6 +80,7 @@ pub enum Handler {
     MePreferences,
     FightsList,
     FightsCurrent,
+    FightsVoidStats,
     FightDetail,
     #[cfg(feature = "dev-auth")]
     DevAuthorize,
@@ -198,6 +199,12 @@ pub const ROUTES: &[RouteSpec] = &[
     },
     RouteSpec {
         method: RouteMethod::Get,
+        path: "/api/fights/void-stats",
+        effect: Effect::Read,
+        handler: Handler::FightsVoidStats,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
         path: "/api/fights/{id}",
         effect: Effect::Read,
         handler: Handler::FightDetail,
@@ -309,6 +316,8 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         // One bucket for both: a visitor reads the list and the detail (011 RF7).
         Handler::FightsList => fight_read(on(filter, fights::api::list), state),
         Handler::FightDetail => fight_read(on(filter, fights::api::detail), state),
+        // The same limit and the same cache as the detail (012 RF23).
+        Handler::FightsVoidStats => fight_read(on(filter, fights::void_stats::handler), state),
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize => on(filter, auth::dev::authorize),
         #[cfg(feature = "dev-auth")]

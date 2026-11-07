@@ -1,4 +1,4 @@
-import type { FightsCurrent } from '@torneo/protocol';
+import type { FightSummary, FightsCurrent, VoidStats } from '@torneo/protocol';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 010 RF53 and plan-d decision 14: a failure is a 200 with the error state, and `debug` only exists
@@ -26,6 +26,7 @@ type Load = (event: {
   setHeaders: (headers: Record<string, string>) => void;
 }) => Promise<{
   board: FightsCurrent | null;
+  voidStats: VoidStats | null;
   debug: boolean;
 }>;
 
@@ -53,19 +54,65 @@ beforeEach(() => {
 
 describe('the load of the home page', () => {
   it('gives the board', async () => {
-    expect(await run(() => json(BOARD))).toEqual({ board: BOARD, debug: false });
+    expect(await run(() => json(BOARD))).toEqual({
+      board: BOARD,
+      voidStats: null,
+      debug: false,
+    });
   });
 
   it('a 503 of the API is the error state, without throwing', async () => {
     expect(await run(() => json({ error: 'fight.unavailable' }, 503))).toEqual({
       board: null,
+      voidStats: null,
       debug: false,
     });
   });
 
   it('an API that does not answer is the error state, without throwing', async () => {
     const result = await run(() => Promise.reject(new Error('down')));
-    expect(result).toEqual({ board: null, debug: false });
+    expect(result).toEqual({ board: null, voidStats: null, debug: false });
+  });
+
+  // 012 RF22: the board comes from memory, on purpose. The counter touches the database, so only a
+  // last fight that needs it reads it, and its failure only leaves out one line.
+  const lastWith = (final: FightSummary['final']): FightsCurrent => ({
+    ...BOARD,
+    last: { final } as FightSummary,
+  });
+  const reads = (board: FightsCurrent, counter: () => Promise<Response>) =>
+    vi.fn((input: RequestInfo | URL) =>
+      String(input).endsWith('/void-stats') ? counter() : json(board),
+    );
+  const call = (fetchFn: unknown) =>
+    (load as unknown as Load)({
+      fetch: fetchFn as typeof fetch,
+      url: new URL('http://localhost/es/'),
+      setHeaders: () => {},
+    });
+
+  it('reads the counter only for a last fight voided with its secret lost', async () => {
+    const lost = lastWith({ kind: 'voided', reason: 'secret_lost' });
+    const stats = { voided: 4, secret_lost: 1 };
+    const fetchFn = reads(lost, () => json(stats));
+    expect((await call(fetchFn)).voidStats).toEqual(stats);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+
+    for (const board of [
+      BOARD,
+      lastWith({ kind: 'voided', reason: 'engine_error' }),
+      lastWith({ kind: 'cancelled', reason: 'missed_window' }),
+    ]) {
+      const other = reads(board, () => json(stats));
+      expect((await call(other)).voidStats).toBeNull();
+      expect(other).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('a counter that fails does not take the board with it', async () => {
+    const lost = lastWith({ kind: 'voided', reason: 'secret_lost' });
+    const result = await call(reads(lost, () => json({ error: 'fight.unavailable' }, 503)));
+    expect(result).toEqual({ board: lost, voidStats: null, debug: false });
   });
 
   it('is never cached: a stored board would show an old fight as the current one', async () => {

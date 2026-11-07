@@ -16,6 +16,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::auth::AuthState;
+use crate::bets::BetsHook;
 use crate::config::Config;
 use crate::db::{self, DbProbe, PgProbe, RetryConfig};
 use crate::fights::{self, FightSettings, FightsShared};
@@ -192,7 +193,11 @@ pub async fn serve(
     tracing::info!(event = "server.listening", port);
     // Only here: the tests in process do not program fights unless they ask (010 RF14).
     let stop_fights = CancellationToken::new();
-    let fight_settings = settings.fights.clone();
+    // 012 RF7: whatever the settings say, a server that runs settles its bets.
+    let fight_settings = FightSettings {
+        hook: Arc::new(BetsHook),
+        ..settings.fights.clone()
+    };
     #[cfg(feature = "dev-fights")]
     let fight_settings = FightSettings {
         script: config

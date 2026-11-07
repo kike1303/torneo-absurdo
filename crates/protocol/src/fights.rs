@@ -101,15 +101,29 @@ impl CancelReason {
 pub enum VoidReason {
     SnapshotInvalid,
     EngineError,
+    /// The row of the secret is gone: there is no seed to publish, and the fight stays unverified (012
+    /// RF19, amendment of ADR-0002).
+    SecretLost,
 }
 
 impl VoidReason {
+    /// The value of the `void_reason` column, the same string serde writes.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SnapshotInvalid => "snapshot_invalid",
+            Self::EngineError => "engine_error",
+            Self::SecretLost => "secret_lost",
+        }
+    }
+
     /// The value with exactly this name.
     #[must_use]
     pub fn parse(text: &str) -> Option<Self> {
         match text {
             "snapshot_invalid" => Some(Self::SnapshotInvalid),
             "engine_error" => Some(Self::EngineError),
+            "secret_lost" => Some(Self::SecretLost),
             _ => None,
         }
     }
@@ -176,6 +190,15 @@ pub struct FightDetail {
     pub spec_b: Option<String>,
     pub seed: Option<String>,
     pub log: Option<String>,
+}
+
+/// `GET /api/fights/void-stats` (012 RF23): how many fights were voided, `secret_lost` included, and
+/// how many of them stayed unverified. What it detects, it does not prevent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct VoidStats {
+    pub voided: u32,
+    pub secret_lost: u32,
 }
 
 /// `GET /api/fights/current` (RF35). `halted` is `null` while the server does not know.
@@ -307,6 +330,17 @@ mod tests {
     }
 
     #[test]
+    fn the_void_stats_have_the_exact_shape() {
+        let value = VoidStats {
+            voided: 3,
+            secret_lost: 1,
+        };
+        let json = r#"{"voided":3,"secret_lost":1}"#;
+        assert_eq!(serde_json::to_string(&value).unwrap(), json);
+        assert_eq!(serde_json::from_str::<VoidStats>(json).unwrap(), value);
+    }
+
+    #[test]
     fn finals_have_the_exact_shape() {
         let cases = [
             (
@@ -346,6 +380,12 @@ mod tests {
                     reason: VoidReason::EngineError,
                 },
                 r#"{"kind":"voided","reason":"engine_error"}"#,
+            ),
+            (
+                FightFinal::Voided {
+                    reason: VoidReason::SecretLost,
+                },
+                r#"{"kind":"voided","reason":"secret_lost"}"#,
             ),
         ];
         for (value, json) in cases {
@@ -387,6 +427,17 @@ mod tests {
             Some(VoidReason::EngineError)
         );
         assert_eq!(VoidReason::parse("other"), None);
+        for reason in [
+            VoidReason::SnapshotInvalid,
+            VoidReason::EngineError,
+            VoidReason::SecretLost,
+        ] {
+            assert_eq!(VoidReason::parse(reason.as_str()), Some(reason));
+            assert_eq!(
+                serde_json::to_string(&reason).unwrap(),
+                format!("\"{}\"", reason.as_str())
+            );
+        }
     }
 
     #[test]

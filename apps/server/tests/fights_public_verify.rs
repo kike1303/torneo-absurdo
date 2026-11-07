@@ -26,7 +26,7 @@ use support::fights::{
     self as f, CADENCE, DRAW, KO, T0, Vector, drive_to_settled, row, wait_state,
 };
 use support::http;
-use support::public_verifier::verify;
+use support::public_verifier::{Verification, verify};
 
 async fn detail(addr: SocketAddr, id: i32) -> FightDetail {
     let response = http::send(addr, "GET", &format!("/api/fights/{id}"), &[]).await;
@@ -70,7 +70,7 @@ async fn every_kind_of_final_verifies_with_public_data() {
     }
     for (id, vector) in &decided {
         let body = detail(app.addr, *id).await;
-        verify(&body).unwrap();
+        assert_eq!(verify(&body), Ok(Verification::Verified));
         assert_eq!(body.log.as_deref().unwrap().as_bytes(), vector.canonical());
     }
 
@@ -113,7 +113,7 @@ async fn every_kind_of_final_verifies_with_public_data() {
     f::void_by_sql(&mut tx, voided, &vector.seed, "engine_error").await;
     tx.commit().await.unwrap();
     let body = detail(app.addr, voided).await;
-    verify(&body).unwrap();
+    assert_eq!(verify(&body), Ok(Verification::Verified));
     assert_eq!(body.seed, Some(server::fights::hex(&vector.seed)));
 
     // A cancelled one has no seed and no log.
@@ -121,7 +121,7 @@ async fn every_kind_of_final_verifies_with_public_data() {
     clock.set(T0 + 4 * CADENCE + f::WINDOW);
     wait_state(&pool, cancelled, FightState::Settled).await;
     let body = detail(app.addr, cancelled).await;
-    verify(&body).unwrap();
+    assert_eq!(verify(&body), Ok(Verification::CancelledUnverifiable));
     assert_eq!(body.seed, None);
     assert_eq!(body.log, None);
     assert_eq!(row(&pool, cancelled).await.revealed_seed, None);
@@ -170,11 +170,14 @@ async fn a_fight_verifies_after_its_content_changed() {
     let runner = f::spawn_runner(&pool, &shared, f::config_on(&content), fight_settings);
     drive_to_settled(&pool, &clock, id).await;
     runner.stop().await;
-    verify(&detail(app.addr, id).await).unwrap();
+    assert_eq!(
+        verify(&detail(app.addr, id).await),
+        Ok(Verification::Verified)
+    );
 
     std::fs::remove_dir_all(&content).unwrap();
     let body = detail(app.addr, id).await;
-    verify(&body).unwrap();
+    assert_eq!(verify(&body), Ok(Verification::Verified));
     assert_eq!(body.spec_a.unwrap().as_bytes(), announced.spec_a);
 }
 
@@ -195,7 +198,7 @@ async fn a_voided_fight_with_a_bad_snapshot_still_proves_its_commit() {
     tx.commit().await.unwrap();
 
     let body = detail(app.addr, id).await;
-    verify(&body).unwrap();
+    assert_eq!(verify(&body), Ok(Verification::Verified));
 
     // The same bad hash with the other reason does not verify, and neither does another seed.
     let mut other_reason = body.clone();
@@ -345,6 +348,9 @@ fn verify_vectors() -> Vec<Value> {
     let bad_hash = "00".repeat(32);
     let mut voided_invalid = voided_detail(&seed_of_ko, VoidReason::SnapshotInvalid);
     voided_invalid["fight"]["snapshot_sha256"] = json!(bad_hash);
+    // 012 RF21: the commit stays, the seed and the log never come.
+    let mut secret_lost = voided_detail(&seed_of_ko, VoidReason::SecretLost);
+    secret_lost["seed"] = Value::Null;
     let missed = cancelled_detail(CancelReason::MissedWindow);
     let mut unrunnable = cancelled_detail(CancelReason::FightUnrunnable);
     unrunnable["fight"]["snapshot_sha256"] = json!(bad_hash);
@@ -359,6 +365,12 @@ fn verify_vectors() -> Vec<Value> {
             voided_invalid.clone(),
             "ok",
             "match:commit",
+        ),
+        vector_line(
+            "voided_secret_lost",
+            secret_lost.clone(),
+            "ok",
+            "not_applicable",
         ),
         vector_line(
             "cancelled_missed_window",
@@ -662,6 +674,49 @@ fn verify_vectors() -> Vec<Value> {
             "ok",
             "match:commit",
         ),
+        // A lost seed (012 RF21): a null seed is its own result, never a step skipped.
+        (
+            "secret_lost_with_a_seed",
+            &secret_lost,
+            Box::new(|d| d["seed"] = json!(hex_of(&Vector::of(KO).seed))),
+            "err",
+            "mismatch:commit",
+        ),
+        (
+            "secret_lost_without_a_commit",
+            &secret_lost,
+            Box::new(|d| d["fight"]["seed_commit"] = Value::Null),
+            "err",
+            "mismatch:commit",
+        ),
+        (
+            "secret_lost_with_a_log",
+            &secret_lost,
+            Box::new(|d| d["log"] = json!("{}")),
+            "err",
+            "mismatch:log",
+        ),
+        (
+            "secret_lost_with_a_bad_snapshot",
+            &secret_lost,
+            Box::new(|d| d["fight"]["snapshot_sha256"] = json!("00".repeat(32))),
+            "err",
+            "mismatch:snapshot",
+        ),
+        (
+            "secret_lost_without_a_spec",
+            &secret_lost,
+            Box::new(|d| d["spec_a"] = Value::Null),
+            "err",
+            "mismatch:snapshot",
+        ),
+        (
+            "engine_error_without_a_seed",
+            &secret_lost,
+            Box::new(|d| d["fight"]["final"]["reason"] = json!("engine_error")),
+            "err",
+            "mismatch:commit",
+        ),
         // A cancelled fight.
         (
             "cancelled_with_a_seed",
@@ -747,16 +802,16 @@ fn verify_vectors() -> Vec<Value> {
         (
             "unknown_voided_reason",
             &voided,
-            Box::new(|d| d["fight"]["final"]["reason"] = json!("secret_lost")),
+            Box::new(|d| d["fight"]["final"]["reason"] = json!("meteor")),
             "undeserializable",
             "cannot_check:unknown_final",
         ),
-        // RF22: TA-27 will add `secret_lost`, without a seed, and today it must not break.
+        // RF22: a reason of a later build, without a seed, does not break either.
         (
             "unknown_voided_reason_without_a_seed",
             &voided,
             Box::new(|d| {
-                d["fight"]["final"]["reason"] = json!("secret_lost");
+                d["fight"]["final"]["reason"] = json!("meteor");
                 d["seed"] = Value::Null;
             }),
             "undeserializable",
@@ -845,7 +900,7 @@ fn the_native_verifier_answers_what_the_vectors_say() {
         let got = match serde_json::from_value::<FightDetail>(vector["detail"].clone()) {
             Err(_) => "undeserializable",
             Ok(detail) => match verify(&detail) {
-                Ok(()) => {
+                Ok(_) => {
                     oks += 1;
                     "ok"
                 }
@@ -855,7 +910,7 @@ fn the_native_verifier_answers_what_the_vectors_say() {
         assert_eq!(got, vector["native"].as_str().unwrap(), "{name}");
     }
     // Otherwise this test passes in vacuum.
-    assert!(oks >= 7, "{oks}");
+    assert!(oks >= 8, "{oks}");
 }
 
 /// 011 RF14: the relation of the two verifiers: `Ok` is `match` or `not_applicable`, `Err` is
@@ -915,6 +970,7 @@ fn the_browser_column_keeps_the_frontier_of_the_spec() {
         "draw",
         "voided_engine_error",
         "voided_snapshot_invalid",
+        "voided_secret_lost",
         "cancelled_missed_window",
         "cancelled_fight_unrunnable",
     ] {
@@ -936,4 +992,65 @@ fn the_vectors_on_file_are_up_to_date() {
         "fight-verify-vectors.json is out of date: \
          UPDATE_GOLDEN=1 cargo test -p server --test fights_public_verify"
     );
+}
+
+/// 012 RF21: a fight voided with its secret lost, through the real route, has its own result, only
+/// with no seed and no log, and a null seed never passes as a step skipped in any other final.
+#[tokio::test]
+async fn a_lost_secret_is_its_own_result_and_a_null_seed_is_nothing_else() {
+    let db = TestDb::create().await;
+    let (app, pool, _shared) = f::start_app(&db, &[], &Settings::default()).await;
+    let vector = Vector::of(KO);
+    let now: i64 = sqlx::query_scalar("SELECT (extract(epoch FROM now()) * 1000)::bigint")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let opens = now - 100 * CADENCE;
+    let id = f::announce(&pool, opens, &vector.a, &vector.b).await;
+    f::open_with(&pool, id, &vector.seed, opens).await;
+    f::close_by_sql(&pool, id, opens + f::WINDOW).await;
+    f::lose_secret(&pool, id).await;
+    sqlx::query(
+        "UPDATE fights SET state = 'settled', settled_at = now(), void_reason = 'secret_lost' \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let body = detail(app.addr, id).await;
+    assert_eq!(body.seed, None);
+    assert_eq!(body.log, None);
+    assert_eq!(verify(&body), Ok(Verification::UnverifiableSecretLost));
+
+    // A lost secret with a seed, or a log, or without a commit, or whose snapshot lies.
+    let mut with_seed = body.clone();
+    with_seed.seed = Some(server::fights::hex(&vector.seed));
+    assert!(verify(&with_seed).is_err());
+    let mut with_log = body.clone();
+    with_log.log = Some("{}".to_owned());
+    assert!(verify(&with_log).is_err());
+    let mut no_commit = body.clone();
+    no_commit.fight.seed_commit = None;
+    assert!(verify(&no_commit).is_err());
+    let mut other_spec = body.clone();
+    other_spec.spec_a = other_spec.spec_b.clone();
+    assert!(verify(&other_spec).is_err());
+
+    // The same body under any other final is not verified: a null seed is not a step skipped.
+    for reason in [
+        protocol::VoidReason::SnapshotInvalid,
+        protocol::VoidReason::EngineError,
+    ] {
+        let mut other = body.clone();
+        other.fight.final_result = Some(FightFinal::Voided { reason });
+        assert!(verify(&other).is_err(), "{reason:?}");
+    }
+    let mut decided = body.clone();
+    decided.fight.final_result = Some(FightFinal::Decided {
+        winner: Some(protocol::Side::A),
+        reason: protocol::EndReason::Ko,
+    });
+    assert!(verify(&decided).is_err());
 }

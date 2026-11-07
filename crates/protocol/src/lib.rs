@@ -30,7 +30,7 @@ pub use error::{
 pub use fight::{AbilityKind, EndReason, FightEvent, FightLog, FighterInfo, MomentKind, Side};
 pub use fights::{
     CancelReason, FightDetail, FightFinal, FightState, FightSummary, FighterCard, FightsCurrent,
-    FightsPage, TimestampMs, VoidReason,
+    FightsPage, TimestampMs, VoidReason, VoidStats,
 };
 pub use health::HealthResponse;
 pub use me::{
