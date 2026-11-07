@@ -105,6 +105,7 @@ fn request_of(route: &RouteSpec, id: i32) -> (String, Vec<(&'static str, &'stati
         | Handler::AuthReauthStatus
         | Handler::Me
         | Handler::FightsCurrent
+        | Handler::FightsVoidStats
         | Handler::FightDetail => (vec![], String::new()),
         Handler::AuthCallback => (vec![], String::new()),
         Handler::AuthStart | Handler::AuthLink | Handler::AuthReauth => {

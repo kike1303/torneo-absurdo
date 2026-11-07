@@ -79,6 +79,7 @@ pub enum Handler {
     MeDisplayName,
     MePreferences,
     FightsCurrent,
+    FightsVoidStats,
     FightDetail,
     #[cfg(feature = "dev-auth")]
     DevAuthorize,
@@ -191,6 +192,12 @@ pub const ROUTES: &[RouteSpec] = &[
     },
     RouteSpec {
         method: RouteMethod::Get,
+        path: "/api/fights/void-stats",
+        effect: Effect::Read,
+        handler: Handler::FightsVoidStats,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
         path: "/api/fights/{id}",
         effect: Effect::Read,
         handler: Handler::FightDetail,
@@ -285,6 +292,16 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         Handler::MeDisplayName => on(filter, crate::profile::update::display_name).layer(body),
         Handler::MePreferences => on(filter, crate::profile::update::preferences).layer(body),
         Handler::FightsCurrent => on(filter, fights::api::current),
+        // The same limit and the same cache as the detail (012 RF23).
+        Handler::FightsVoidStats => on(filter, fights::void_stats::handler)
+            .layer::<_, std::convert::Infallible>(middleware::from_fn_with_state(
+                state.rate.fight_read_ip.clone(),
+                rate::http::layer,
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("no-store"),
+            )),
         Handler::FightDetail => on(filter, fights::api::detail)
             .layer::<_, std::convert::Infallible>(middleware::from_fn_with_state(
                 state.rate.fight_read_ip.clone(),

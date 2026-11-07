@@ -37,7 +37,8 @@ export interface ViewInput {
   readonly ssrFailed: boolean;
 }
 
-export type ResultKind = 'ko' | 'decision' | 'draw' | 'cancelled' | 'voided';
+export type ResultKind =
+  'ko' | 'decision' | 'draw' | 'cancelled' | 'voided' | 'voided_unverifiable';
 
 export interface FightResult {
   readonly fight: FightSummary;
@@ -105,7 +106,11 @@ export function adoptsCurrent(current: FightSummary | null, watched: Watched | n
 
 function resultOfFinal(fight: FightSummary, final: FightFinal): FightResult {
   if (final.kind === 'cancelled') return { fight, kind: 'cancelled', winner: null };
-  if (final.kind === 'voided') return { fight, kind: 'voided', winner: null };
+  if (final.kind === 'voided') {
+    // Its own result (012 RF22): it has no seed to publish, and it says so.
+    const kind = final.reason === 'secret_lost' ? 'voided_unverifiable' : 'voided';
+    return { fight, kind, winner: null };
+  }
   return { fight, kind: final.reason, winner: final.winner };
 }
 

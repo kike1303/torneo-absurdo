@@ -57,6 +57,8 @@ Scheduled ─▶ BettingOpen ─▶ BettingClosed ─▶ Live ─▶ Settled
 - La semilla se genera con un CSPRNG al abrir las apuestas y vive solo en el servidor hasta `Settled`.
 - Durante `Live`, cada evento se envía a su hora exacta, sin adelanto, y el cliente reproduce `playback_delay_ms` (3500 ms) por detrás. Quien entra tarde recibe los eventos ya ocurridos en páginas y sigue en vivo.
 - **Final cancelado:** una pelea `Scheduled` que pierde su ventana o no se puede correr termina en `Settled` con el final `cancelled`, sin semilla, sin log y sin apuestas. Con el commit publicado, el runner nunca termina una pelea sin resultado: se detiene hasta que se corrija (spec de 010, RF16).
+- **Final anulado (`voided`):** con el commit publicado, un fallo irrecuperable solo sale por `server fight void`, que reembolsa las apuestas. Revela la semilla salvo en `voided(secret_lost)`, sin semilla que publicar.
+- **Liquidación (feature 012):** el gancho `BetsHook` corre en la transacción del reveal. Reembolsa un empate, una anulada, una cancelada y un pozo con un lado vacío. Sin reparto todavía (fase B), un `decided` con los dos lados devuelve un error y lleva a la detención.
 - **Canales de `/ws`:** `self` con sesión, y `schedule` y `fight:{id}` sin ella. `schedule` da el tablero (`FightsCurrent`) en `schedule_update`. `fight:{id}` da el resumen en `fight_sync`, sin eventos, y los eventos en `fight_events`, por `from_index` y en páginas de 8 KiB como máximo.
 - **Sincronización:** todos reproducen `t = server_now − live_started_at − playback_delay_ms`. El cliente estima `server_now` con el máximo de `server_time − reloj monotónico` de lo recibido en esa conexión, que es la muestra de menor latencia, y lo que ve sale siempre de `t`, nunca de haber recibido un evento. La vista de `/` está en `apps/web/src/lib/features/fight/live/`.
 - Las repeticiones usan el log guardado, y cualquiera puede re-simularlo en el navegador con `engine-wasm` para verificarlo.
@@ -65,7 +67,7 @@ Scheduled ─▶ BettingOpen ─▶ BettingClosed ─▶ Live ─▶ Settled
 - `users`, `sessions`, `oauth_accounts`, `oauth_flows`, `auth_events`, `admin_audit` (feature 008, ver "Autenticación y monedas")
 - `ledger_accounts`, `ledger_entries`, `ledger_postings` (feature 008, ver "Autenticación y monedas")
 - `fights` (snapshot de personajes y `ruleset_version`, horarios, `seed_commit`, estado y final; `revealed_seed` y `log` solo en `settled`) y `fight_secrets` (la semilla, que no se revela hasta `Settled`). Ver la [spec de 010](features/010-scheduler-de-peleas/spec.md)
-- `bets`, `pools`
+- `bets`, `bet_settlements`, `pool_settlements` (feature 012, solo inserción). Ver "Ledger de doble entrada" y la [spec de 012](features/012-apuestas/spec.md)
 - `tournaments`, `tournament_rounds`
 - `character_ratings`, `seasons`, `season_stats`
 
@@ -79,13 +81,14 @@ Detalle en la [spec de 008](features/008-autenticacion/spec.md), en la [spec de 
 | `oauth_accounts` | Una cuenta por proveedor (`google`, `discord`, `dev`) e identidad: llave `(provider, provider_user_id)` y, como mucho, una de cada proveedor por usuario. `id` (`GENERATED ALWAYS AS IDENTITY`, único) es el orden de vínculo: un `id` menor es una cuenta vinculada antes. Nada lo reescribe: `oauth_accounts_identity_guard` (`TA005`) rechaza cambiar `id` o `user_id`. |
 | `oauth_flows` | Un flujo OAuth en curso (10 min): el `SHA-256` del id de la cookie del flujo, `state`, `code_verifier` (PKCE), `next`, el `purpose` (`login`, `link` o `reauth`) y, si es `link` o `reauth`, el usuario de la sesión que lo empezó (`link_user_id`). El callback lo consume con `DELETE … RETURNING`. |
 | `sessions` | El `SHA-256` del token de la cookie (nunca el token), usuario, expiración absoluta, última actividad, `ip_hash` (HMAC con `IP_HASH_KEY`), familia de navegador, y qué autenticó a la sesión: cuándo (`authenticated_at`), con qué cuenta (`auth_account_id`, FK a `oauth_accounts.id` con `ON DELETE SET NULL`, `NULL` después de un `unlink`, que consume la confirmación) y el mayor `oauth_accounts.id` del usuario en ese momento (`auth_link_seq`). Vincular copia los tres en la sesión rotada, sin alargar `expires_at`. |
-| `auth_events` | `login`, `link`, `unlink`, `grant` y `reauth`, con `ip_hash`; nunca la IP. |
-| `admin_audit` | Lo que hace la CLI de admin (`grant`, `revoke`, `ban`, `unban`), solo inserción. |
+| `auth_events` | `login`, `link`, `unlink`, `grant`, `reauth`, `bailout` y `bet`, con `ip_hash`; nunca la IP. |
+| `admin_audit` | Lo que hace la CLI de admin (`grant`, `revoke`, `ban`, `unban`) y `fight_void`, atribuido a un admin (`cli_attributed`), solo inserción. |
 
 ### Ledger de doble entrada
 - Las monedas se mueven solo con asientos: un `ledger_entries` y sus `ledger_postings` (cuenta e importe, nunca 0). La cuenta `issuance` es la contraparte de las monedas que se emiten (el `grant` diario).
 - **Solo inserción**: triggers impiden `UPDATE`, `DELETE` y `TRUNCATE` en asientos, movimientos y cuentas.
 - **Cuadre diferido**: un constraint trigger `DEFERRABLE INITIALLY DEFERRED` exige, al hacer `COMMIT`, al menos dos movimientos por asiento y suma cero. Un asiento solo acepta movimientos en la transacción que lo creó (`created_xact`), así que uno ya confirmado no se puede "completar" después.
+- **Apuestas (feature 012):** las cuentas fijas `bet_escrow` (lo que retienen las apuestas abiertas) y `rake_sink` (de donde nada sale) y los tipos `bailout`, `bet_stake`, `bet_payout`, `refund` y `rake`, con `fight_id` y `bet_id`. El trigger `ledger_postings_rules` (`TA008`) limita qué mueve cada asiento: `rake_sink` nunca se debita; `issuance` solo se debita en `grant` y `bailout`; solo `bet_stake` acredita `bet_escrow`, que solo se debita en `bet_payout`, `refund` y `rake`; y una cuenta de usuario pertenece al usuario del asiento. Índices únicos parciales dejan un asiento por hecho.
 - **El saldo es un `SUM`** de los movimientos de la cuenta del usuario; no hay columna de saldo que actualizar. Un `grant` por usuario y día (UTC) lo garantiza un índice único.
 
 ### Revocación entre procesos
@@ -116,6 +119,9 @@ Revocar una sesión (logout, logout-all, `unlink`, el ban de la CLI) hace `pg_no
 - después de vincular un proveedor nuevo como admin: no da admin hasta otro `grant`.
 
 Antes de correr `grant`, revisa los proveedores vinculados en `/account`: todo lo vinculado hasta ese momento pasa a dar admin. `grant` imprime por stdout, nunca en un log, los proveedores dentro del corte, en orden de vínculo y sin ids (`providers within the admin cutoff: google, dev`, o `none` si el usuario no tiene cuentas). Si muestra uno que no reconoces, corre `revoke`, quítalo desde `/account` y vuelve a correr `grant`.
+
+### Anulación por CLI (feature 012)
+`server fight void <fight_id> --by <admin_user_id>` es la salida de una pelea en `betting_closed` o `live` que no puede terminar. Lee solo `DATABASE_URL` y `RUST_LOG`, deduce la razón y se niega con un código si la pelea está sana. En una transacción con `lock_timeout` de 5 s bloquea la fila, escribe el final por `fights::sealed::void_fight`, publica la semilla, reembolsa por el gancho e inserta en `admin_audit`. El runner lo ve en su relectura de 60 s. `voided(secret_lost)` es el único final con commit y sin semilla: solo procede sin la fila del secreto y pasado su plazo, y queda sin verificar. `GET /api/fights/void-stats` es el contador público. Uso y salidas: [`apps/server/README.md`](../apps/server/README.md).
 
 ## Tipos compartidos
 `crates/protocol` define los mensajes WS, los DTOs del API y el log de pelea (`FightLog`, `FightEvent` y sus enums, feature 003) con serde. Es una librería pura: sin I/O, sin `tokio`, sin reloj y sin texto para humanos (ADR-0007).

@@ -101,3 +101,83 @@ providers within the admin cutoff: google, dev
 ```
 
 Si el usuario no tiene cuentas, la línea dice `none`. Si muestra un proveedor que no reconoces, corre `revoke`, quítalo desde `/account` y vuelve a correr `grant`.
+
+## Anular una pelea por CLI
+
+`server fight void` es la salida de una pelea que no puede terminar: reembolsa todo y la deja en `Settled` con el final `voided`. El runner nunca lo llama y no hay endpoint. Detalle en la [spec de 012](../../docs/features/012-apuestas/spec.md), RF16 a RF24.
+
+```
+server fight void <fight_id> --by <admin_user_id> [--previous-binary <vX.Y.Z|sha-abc1234>] [--backup-checked]
+```
+
+- En local: `cargo run -p server -- fight void 12 --by <admin_user_id>`. En la imagen: `docker exec <contenedor> /server fight void …`. Lee solo `DATABASE_URL` y `RUST_LOG`.
+- **La razón se deduce, nunca se elige.** `--by` tiene que ser un `admin`, pero solo atribuye: quien corre el comando ya tiene la credencial de la base.
+- Corre en una transacción, con el final, el reembolso y una fila de `admin_audit` (`action = 'fight_void'`), y bloquea la fila de la pelea con `lock_timeout` de 5 s.
+- Todo el comando tiene un plazo de 120 s: una base que deja de responder termina en `fight.void_failed` con `error_kind = timeout`, no en un proceso colgado. Una anulación de 20 000 apuestas tardó unos 4 s en local. Si el plazo cae durante el `COMMIT`, la anulación pudo aplicarse: sigue "Tras un `fight.void_failed`". Volver a correr el comando nunca reembolsa dos veces.
+
+**Salidas.** Una línea de texto fijo en stdout, sin semilla ni datos del log, y el evento con su código.
+
+| Exit | Salida | Evento | Qué significa |
+|---|---|---|---|
+| 0 | `void.applied <razón>` | `fight.void_applied` | Aplicó. Tras un `secret_lost`, además `void.reopen_acceptance …` |
+| 1 | El código de abajo | `fight.void_refused` | Decidió que no. No escribió nada |
+| 1 | Ninguna | `fight.void_failed`, con `error_kind` | No decidió nada: la base no respondió o se pasó el plazo (`timeout`), otra transacción retiene la fila (`lock_timeout`), o falló el reembolso. Se puede reintentar |
+| 2 | Ninguna | `cli.invalid` | La línea de comandos no se entiende |
+
+**Negativas, en este orden:**
+
+| Código | Qué pasa | Salida |
+|---|---|---|
+| `void.not_admin` | `--by` no existe o no es admin | Usa un admin (`server admin grant`) |
+| `void.not_found` | La pelea no existe | |
+| `void.bad_state` | No está en `betting_closed` ni en `live` | |
+| `void.version_missing` | Este binario no tiene su versión de reglas | Vuelve a la versión anterior |
+| `void.secret_mismatch` | La fila del secreto no coincide con el commit. **Nunca es `secret_lost`** | Investigar: alguien escribió esa fila |
+| `void.emission_possible` | No hay secreto, y aún puede haber una emisión en curso | Espera el plazo: `live_started_at` (o `live_at`) + duración máxima + 5 s + 120 s, 215 s con los valores por defecto |
+| `void.backup_not_checked` | No hay secreto, ya pasó el plazo y falta `--backup-checked` | Intenta restaurar desde un backup |
+| `void.binary_problem` | Hash y slugs bien, pero no decodifica, no pasa `validate` o difieren las columnas derivadas | Vuelve a la versión anterior |
+| `void.fight_healthy` | El motor reconstruye el log | No se anula. Una pelea que no puede liquidar tampoco sale por aquí |
+| `void.no_end` | El log no tiene `end` | Se niega por defecto: es un binario defectuoso |
+| `void.previous_binary_not_tried` | El motor falla, y falta `--previous-binary` | Pruébalo con la versión anterior |
+
+**Razones:** `snapshot_invalid` (hash o slugs distintos, sobre los bytes), `engine_error` (`EventLimit`, `encode_failed` o un pánico, con `--previous-binary`) y `secret_lost`. Las dos primeras publican la semilla.
+
+**Declaraciones (RF24).** Nada comprueba que sean ciertas: quedan en `admin_audit`, y con un solo operador es lo que se puede exigir.
+
+- `--previous-binary <tag>`: declara que el binario anterior también falla. Lo hace refutable que la semilla sale publicada y cualquiera puede resimular.
+- `--backup-checked`: declara que se intentó restaurar el secreto desde un backup. **No lo restaures mientras corres el comando:** un `INSERT` en `fight_secrets` en paralelo podría confirmar después, y dejar un secreto en una pelea anulada.
+
+### Tras un `fight.void_failed`
+
+El comando no sabe si su `COMMIT` llegó, y `void.bad_state` no lo responde: solo dice que la pelea ya está `settled`, también si la liquidó el runner. Lo que pasó está en la fila de la pelea y en su auditoría:
+
+```
+psql "$DATABASE_URL" -c "SELECT state, void_reason FROM fights WHERE id = <fight_id>" \
+  -c "SELECT action, payload FROM admin_audit WHERE target = '<fight_id>' AND action = 'fight_void'"
+```
+
+- Sin fila en `admin_audit` y sin `settled`: no aplicó. Vuelve a correr el comando.
+- Con fila en `admin_audit`: aplicó. Si `void_reason` es `secret_lost`, **sigue el apartado de abajo**: el aviso pudo no imprimirse nunca. Volver a correr el comando también lo repite.
+
+### Tras un `secret_lost`
+
+Esa anulación no se puede refutar nunca. El comando imprime un aviso, pero no puede comprobar que lo sigas:
+
+1. Abre un issue en Linear con el id de la pelea.
+2. Pídele al owner que vuelva a decidir sobre la preocupación 1 de la spec de 010.
+
+La pelea sale en el contador público `GET /api/fights/void-stats`, y la vista la muestra como "no se puede verificar".
+
+### Antes de volver a una imagen anterior
+
+La migración es compatible hacia atrás, pero **los datos no** (ADR-0006 D10, "El esquema no es todo"). Una imagen anterior a esta fase no entiende una fila con `void_reason = 'secret_lost'`: esa pelea deja de tener resumen, así que `GET /api/fights/{id}` responde 503, y si es la última liquidada, `last` del tablero queda en `null`, con `/api/health` y `verify` en verde. Antes de un rollback, compruébalo:
+
+```
+psql "$DATABASE_URL" -c "SELECT id FROM fights WHERE void_reason = 'secret_lost'"
+```
+
+Con alguna fila, no vuelvas a esa imagen sin decidir antes qué hacer con esas peleas: no se reescriben, porque una fila `settled` no admite `UPDATE`.
+
+### Nunca volver a un binario sin liquidación de apuestas
+
+`app::serve` construye `BetsHook`. `NoBets` queda solo para las pruebas del ciclo sin apuestas. **No vuelvas a un binario con `NoBets` si hay apuestas sin liquidar:** cerraría peleas sin sus asientos. Mientras no exista el reparto (fase B), un `decided` con apuestas en los dos lados devuelve un error y lleva a la detención, nunca a una pelea `settled` sin asientos. Ese caso no tiene camino sin la API, y solo se daría volviendo de B a A.

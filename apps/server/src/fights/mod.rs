@@ -22,6 +22,7 @@ pub mod sealed;
 pub mod snapshot;
 pub mod state;
 pub mod store;
+pub mod void_stats;
 
 use std::fmt;
 use std::future::Future;
@@ -38,6 +39,9 @@ pub const RULESET_VERSION: u16 = 1;
 pub const PLAYBACK_DELAY_MS: u32 = 3500;
 /// From `end` to `Settled`: long enough to have seen the closing pose (spec, "Margen").
 pub const SETTLE_DELAY_MS: u32 = 5000;
+/// What the deadline of `secret_lost` adds to the longest a fight can last and to its settle delay
+/// (012 RF19): 60 s of the reread of the runner and 60 s of the halt of a failed settlement.
+pub const SECRET_LOST_MARGIN_MS: u32 = 120_000;
 /// How long after `now` a late fight starts (RF15).
 pub const LATE_START_WAIT_MS: i64 = 10_000;
 /// Up to this long after `live_at`, a fight still starts at `live_at` (RF15).

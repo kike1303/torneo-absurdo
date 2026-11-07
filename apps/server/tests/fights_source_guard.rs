@@ -569,27 +569,98 @@ fn a_cancel_only_comes_from_next_action() {
     assert_eq!(code.matches("sealed::cancel_fight").count(), 1);
 }
 
-/// RF16 and RF59: nothing in the server writes `voided`, and the runner does not even name it.
-#[test]
-fn nothing_writes_a_voided_final() {
-    for (path, text) in sources() {
-        let sql: String = strip_comments(&text)
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        // As SQL writes it: with a parameter, a literal or a column on its right. A unit test of a
-        // `FightRow` assigns a Rust field, which reaches no database.
-        for form in [
-            "void_reason = $",
-            "void_reason = '",
-            "void_reason = EXCLUDED",
-        ] {
-            assert!(!sql.contains(form), "{}", path.display());
+/// What each write of `void_reason` in `text` gives it, without spaces, quotes or line continuations and
+/// in lowercase, so `void_reason=$2`, `"VOID_REASON"  =  $2` and `SET (state, void_reason) = …` are the
+/// same to this. A comparison (`==`) is not one, and neither is a unit test that assigns a Rust field
+/// of a `FightRow`, which reaches no database.
+fn void_reason_writes(text: &str) -> Vec<String> {
+    let code = compact(text).replace(['"', '\\'], "").to_lowercase();
+    let mut found: Vec<String> = code
+        .match_indices("void_reason=")
+        .map(|(at, matched)| &code[at + matched.len()..])
+        .filter(|value| {
+            !value.starts_with('=') && !value.starts_with("some(") && !value.starts_with("none")
+        })
+        .map(|value| value.chars().take(14).collect())
+        .collect();
+    // A list of columns: of an `UPDATE`, with its `=`, or of an `INSERT` of the table.
+    for (marker, needs_equals) in [("set(", true), ("intofights(", false)] {
+        for (at, matched) in code.match_indices(marker) {
+            let rest = &code[at + matched.len()..];
+            let Some(end) = rest.find(')') else {
+                continue;
+            };
+            let assigned = !needs_equals || rest[end + 1..].starts_with('=');
+            if assigned && rest[..end].contains("void_reason") {
+                found.push("a list of columns".to_owned());
+            }
         }
     }
-    let store = strip_comments(&std::fs::read_to_string(src().join("fights/store.rs")).unwrap());
-    // Read: once in the list of columns and once in its decoding, and nothing else.
-    assert_eq!(store.matches("void_reason").count(), 2, "{store}");
+    found
+}
+
+#[test]
+fn the_search_for_a_write_of_void_reason_sees_every_form() {
+    for text in [
+        "UPDATE fights SET void_reason = $2",
+        "UPDATE fights SET void_reason=$2",
+        "update fights set VOID_REASON\n  =  $2",
+        "SET void_reason = 'engine_error'",
+        "SET void_reason='engine_error'",
+        "DO UPDATE SET void_reason = EXCLUDED.void_reason",
+        "SET void_reason=COALESCE($2, 'x')",
+        "SET \"void_reason\" = $2",
+        "UPDATE fights SET (state, void_reason) = ('settled', $2)",
+        "update fights set(void_reason)=row($2)",
+        "UPDATE fights SET (state, void_reason) = (SELECT 'settled', $2)",
+        "INSERT INTO fights (id, void_reason) VALUES ($1, $2)",
+    ] {
+        assert_eq!(void_reason_writes(text).len(), 1, "{text}");
+    }
+    for text in [
+        "if row.void_reason == other {}",
+        "voided.void_reason = Some(reason);",
+        "row.void_reason = None;",
+        "void_reason: row.try_get(25)?,",
+        "// void_reason = $2",
+        "SELECT void_reason FROM fights WHERE void_reason IS NOT NULL",
+        "SELECT (void_reason) FROM fights",
+        "UPDATE fights SET (state, settled_at) = ($1, $2) RETURNING void_reason",
+        "INSERT INTO fights (id, state) VALUES ($1, $2) RETURNING void_reason",
+    ] {
+        assert!(void_reason_writes(text).is_empty(), "{text}");
+    }
+}
+
+/// RF16 and RF59: a `voided` final is written in one place, and the runner does not even name it (012
+/// RF18). The one read with a literal is in a file that writes nothing (012 RF23). Anything else fails.
+#[test]
+fn a_voided_final_is_only_written_in_one_place() {
+    let mut found = Vec::new();
+    for (path, text) in sources() {
+        for value in void_reason_writes(&text) {
+            found.push((relative(&path), value));
+        }
+    }
+    found.sort();
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(found[0].0, "fights/store.rs", "{found:?}");
+    assert!(found[0].1.starts_with('$'), "{found:?}");
+    assert_eq!(found[1].0, "fights/void_stats.rs", "{found:?}");
+    assert!(found[1].1.starts_with("'secret_lost'"), "{found:?}");
+    let stats = std::fs::read_to_string(src().join("fights/void_stats.rs")).unwrap();
+    assert!(
+        !tokens(&stats)
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case("update"))
+    );
+    let store = compact(&std::fs::read_to_string(src().join("fights/store.rs")).unwrap());
+    let inside = store
+        .split("asyncfnwrite_voided(")
+        .nth(1)
+        .and_then(|rest| rest.split("pub").next())
+        .unwrap();
+    assert!(inside.contains("void_reason=$"), "{inside}");
     let runner = std::fs::read_to_string(src().join("fights/runner.rs")).unwrap();
     for token in tokens(&runner) {
         assert_ne!(token.to_lowercase(), "voided");
@@ -597,20 +668,78 @@ fn nothing_writes_a_voided_final() {
     }
 }
 
-/// RF16: no route cancels, voids or reads a seed, and there is no such command.
+/// 012 RF16: the void has one way in, and it is the command line: no handler reaches it, and only
+/// the command line gives the real engine to it.
 #[test]
-fn neither_a_route_nor_a_command_cancels_voids_or_reads_a_seed() {
+fn a_void_only_comes_from_the_command_line() {
+    only_in("write_voided", &["fights/store.rs", "fights/sealed.rs"]);
+    only_in("lock_for_void", &["fights/store.rs", "fights/sealed.rs"]);
+    only_in("void_fight", &["fights/sealed.rs", "admin.rs"]);
+    only_in("run_fight_void", &["admin.rs", "cli.rs"]);
+    // 012 RF16: only the tests choose another deadline.
+    only_in("run_fight_void_within", &["admin.rs"]);
+    let admin = compact(&std::fs::read_to_string(src().join("admin.rs")).unwrap());
+    assert!(admin.contains("run_fight_void_within(options,command,compute,hook,VOID_DEADLINE)"));
+    only_in("RealCompute", &["fights/sealed.rs", "cli.rs"]);
+    let cli = strip_comments(&std::fs::read_to_string(src().join("cli.rs")).unwrap());
+    let code = cli.split("#[cfg(test)]").next().unwrap();
+    assert_eq!(code.matches("admin::run_fight_void(").count(), 1);
+    assert_eq!(code.matches("Arc::new(RealCompute)").count(), 1);
+    assert_eq!(code.matches("&BetsHook").count(), 1);
+}
+
+/// 012 RF7 and RF14: `serve` builds the real hook, `NoBets` is only for the tests of the cycle, and
+/// the settlement never reads anything that a user or a ban can change.
+#[test]
+fn the_server_settles_with_the_real_hook() {
+    let app = strip_comments(&std::fs::read_to_string(src().join("app.rs")).unwrap());
+    let serve = app
+        .split("pub async fn serve(")
+        .nth(1)
+        .and_then(|rest| rest.split("pub async fn run_until_shutdown").next())
+        .unwrap();
+    assert_eq!(serve.matches("hook: Arc::new(BetsHook)").count(), 1);
+    only_in("NoBets", &["fights/hook.rs", "fights/mod.rs"]);
+    let runner_callers: Vec<String> = sources()
+        .iter()
+        .filter(|(_, text)| strip_comments(text).contains("runner::run("))
+        .map(|(path, _)| relative(path))
+        .collect();
+    assert_eq!(runner_callers, ["app.rs"]);
+    let settle = std::fs::read_to_string(src().join("bets/settle.rs")).unwrap();
+    for name in ["banned_at", "users"] {
+        assert!(!has_token(&settle, name), "{name}");
+    }
+}
+
+/// RF16: no route cancels, voids or reads a seed, and no command does but the exact one of 012 RF16,
+/// which never takes a reason.
+#[test]
+fn neither_a_route_nor_a_command_cancels_or_reads_a_seed() {
     use server::http::routes::ROUTES;
+    use server::http::routes::{Effect, RouteMethod};
+    let mut counter = 0;
     for route in ROUTES {
         let path = route.path.to_lowercase();
+        // The public counter of 012 RF23 only reads: the one exact exception.
+        if path == "/api/fights/void-stats" {
+            assert_eq!(route.method, RouteMethod::Get);
+            assert_eq!(route.effect, Effect::Read);
+            counter += 1;
+            continue;
+        }
         for word in ["cancel", "void", "seed", "secret"] {
             assert!(!path.contains(word), "{}", route.path);
         }
     }
+    assert_eq!(counter, 1);
     use server::{Command, parse};
     let args = |list: &[&str]| parse(list.iter().map(std::ffi::OsString::from));
+    let admin_id = "0b3f5a6e-1c2d-4e5f-8a9b-0c1d2e3f4a5b";
     for line in [
         &["fight", "void", "1", "--by", "x"][..],
+        &["fight", "void", "1"],
+        &["fight", "void", "1", "--by", admin_id, "--reason", "x"],
         &["fight"],
         &["fight", "cancel", "1"],
         &["fight", "seed", "1"],
@@ -618,12 +747,22 @@ fn neither_a_route_nor_a_command_cancels_voids_or_reads_a_seed() {
     ] {
         assert_eq!(args(line), Command::Invalid, "{line:?}");
     }
+    assert!(matches!(
+        args(&["fight", "void", "1", "--by", admin_id]),
+        Command::FightVoid(_)
+    ));
     assert_eq!(args(&["admin", "--help"]), Command::AdminHelp);
     let cli = std::fs::read_to_string(src().join("cli.rs")).unwrap();
     let admin = std::fs::read_to_string(src().join("admin.rs")).unwrap();
     for text in [cli, admin] {
-        let text = text.to_lowercase();
-        assert!(!text.contains("fight"), "the help mentions fights");
+        let code = text.split("#[cfg(test)]").next().unwrap().to_lowercase();
+        for word in ["fight cancel", "fight seed"] {
+            assert!(!code.contains(word), "{word}");
+        }
+    }
+    let help = server::admin::HELP.to_lowercase();
+    for word in ["seed", "secret", "cancel"] {
+        assert!(!help.contains(word), "the help names {word}");
     }
 }
 

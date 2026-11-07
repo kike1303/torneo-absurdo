@@ -39,7 +39,8 @@ pub trait SettlementHook: Send + Sync {
     -> SettleFuture<'a>;
 }
 
-/// The hook until TA-27: no bets exist.
+/// A hook that pays nothing, only for the tests of the cycle without bets (012 RF7). `app::serve` and
+/// the CLI always build `bets::BetsHook`: never run a binary with this one with bets to settle.
 pub struct NoBets;
 
 impl SettlementHook for NoBets {

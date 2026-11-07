@@ -49,8 +49,18 @@ fn check_snapshot(detail: &FightDetail) -> Result<(), String> {
     Ok(())
 }
 
+/// What a fight that does not fail its checks is (012 RF21). `Err` is the fourth result, `invalid`. A
+/// `secret_lost` is not a verified fight with a step skipped: it has its own result, only with no seed
+/// and no log, and a null seed of any other final is `invalid`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verification {
+    Verified,
+    CancelledUnverifiable,
+    UnverifiableSecretLost,
+}
+
 /// Verifies a settled fight, or says why it does not verify.
-pub fn verify(detail: &FightDetail) -> Result<(), String> {
+pub fn verify(detail: &FightDetail) -> Result<Verification, String> {
     let fight = &detail.fight;
     if fight.state != FightState::Settled {
         return Err("not settled".to_owned());
@@ -70,7 +80,22 @@ pub fn verify(detail: &FightDetail) -> Result<(), String> {
             ) {
                 check_snapshot(detail)?;
             }
-            Ok(())
+            Ok(Verification::CancelledUnverifiable)
+        }
+        Some(FightFinal::Voided {
+            reason: VoidReason::SecretLost,
+        }) => {
+            if detail.seed.is_some() {
+                return Err("a lost secret with a seed".to_owned());
+            }
+            if detail.log.is_some() {
+                return Err("a voided fight with a log".to_owned());
+            }
+            if fight.seed_commit.is_none() {
+                return Err("no commit".to_owned());
+            }
+            check_snapshot(detail)?;
+            Ok(Verification::UnverifiableSecretLost)
         }
         Some(FightFinal::Voided { reason }) => {
             check_commit(detail)?;
@@ -80,7 +105,7 @@ pub fn verify(detail: &FightDetail) -> Result<(), String> {
             if reason != VoidReason::SnapshotInvalid {
                 check_snapshot(detail)?;
             }
-            Ok(())
+            Ok(Verification::Verified)
         }
         Some(FightFinal::Decided { winner, reason }) => {
             let seed = check_commit(detail)?;
@@ -125,7 +150,7 @@ pub fn verify(detail: &FightDetail) -> Result<(), String> {
             {
                 return Err("the bounds differ from the ruleset".to_owned());
             }
-            Ok(())
+            Ok(Verification::Verified)
         }
     }
 }

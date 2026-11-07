@@ -36,7 +36,11 @@ fn current_of(response: &Response) -> FightsCurrent {
 
 #[test]
 fn the_routes_only_read() {
-    for path in ["/api/fights/current", "/api/fights/{id}"] {
+    for path in [
+        "/api/fights/current",
+        "/api/fights/void-stats",
+        "/api/fights/{id}",
+    ] {
         let route = ROUTES.iter().find(|route| route.path == path).unwrap();
         assert_eq!(route.effect, Effect::Read);
         assert_eq!(route.method.http().as_str(), "GET");
