@@ -1,7 +1,9 @@
 //! The bets (feature 012): the hook of the settlement, the betting API, the daily grant, the bailout
 //! and the pools.
 
+pub mod facts;
 pub mod parimutuel;
+pub mod probation;
 pub mod settle;
 
 pub use settle::BetsHook;
