@@ -521,6 +521,73 @@ async fn a_settlement_that_dies_leaves_nothing_and_the_retry_leaves_it_once() {
     assert_eq!(ledger::balance(&pool, b).await.unwrap(), Coins(1000));
 }
 
+/// RF28: the hook takes no lock on a person, but the foreign keys of its entries wait on a user held
+/// `FOR UPDATE`. Held for 3 s, past the settlement's `lock_timeout`, the settlement retries and then
+/// commits once, with no halt.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_held_user_delays_the_settlement_and_never_halts_it() {
+    let (_db, pool) = database().await;
+    let vector = Vector::of(KO);
+    let id = f::open_vector(&pool, T0, &vector).await;
+    let (a, b, _) = sow(&pool, id, ["a", "a", "b"]).await;
+    let (settings, clock) = hook_settings(T0, Arc::new(BetsHook));
+    let (shared, _runner) = f::start(&pool, &settings);
+    let (closes_at, live_at) = f::hours(T0);
+    clock.set(closes_at);
+    wait_state(&pool, id, FightState::BettingClosed).await;
+    clock.set(live_at);
+    wait_state(&pool, id, FightState::Live).await;
+    let mut holder = pool.begin().await.unwrap();
+    sqlx::query("SELECT 1 FROM users WHERE id = ANY($1) FOR UPDATE")
+        .bind(vec![a, b])
+        .execute(&mut *holder)
+        .await
+        .unwrap();
+    clock.set(live_at + vector.end_t() + 10_000);
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    assert_eq!(row(&pool, id).await.state, FightState::Live);
+    holder.commit().await.unwrap();
+    f::wait_state_advancing(&pool, &clock, id, FightState::Settled).await;
+    assert_ne!(shared.current().halted, Some(true));
+    let pools: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM pool_settlements WHERE fight_id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(pools, 1);
+    assert_eq!(bets::escrow(&pool).await, 0);
+    assert_eq!(bets::total(&pool).await, 0);
+}
+
+/// RF14 with a split: a ban after betting writes the same entries as the same run without it.
+#[tokio::test]
+async fn a_ban_after_betting_does_not_change_the_split() {
+    let (_db, pool) = database().await;
+    let mut results = Vec::new();
+    for (slot, ban) in [(0_i64, false), (1, true)] {
+        let id =
+            f::open_vector_with_rake(&pool, T0 + slot * f::CADENCE, &Vector::of(KO), 500).await;
+        let (a, b, _) = sow(&pool, id, ["a", "a", "b"]).await;
+        if ban {
+            for user in [a, b] {
+                privileged(
+                    &pool,
+                    sqlx::query("UPDATE users SET banned_at = now() WHERE id = $1").bind(user),
+                )
+                .await;
+            }
+        }
+        call(&pool, id, KO_A).await.unwrap();
+        results.push((
+            pool_row(&pool, id).await,
+            ledger::balance(&pool, a).await.unwrap(),
+            ledger::balance(&pool, b).await.unwrap(),
+        ));
+    }
+    assert_eq!(results[0], results[1]);
+}
+
 /// RF10: the announcement writes the rake configured at that moment, and the hook pays with the
 /// fight's own: the runner that settles `the_runner_pays…` is configured with 0.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
