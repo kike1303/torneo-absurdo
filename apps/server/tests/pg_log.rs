@@ -64,9 +64,6 @@ async fn failing_statements_never_log_their_values() {
     // A ledger UPDATE refused by the trigger, with the canary in the statement's values.
     let (user, _) = support::app::user_with_session(&pool).await;
     let mut tx = pool.begin().await.unwrap();
-    server::ledger::create_user_account(&mut tx, user)
-        .await
-        .unwrap();
     server::ledger::grant(&mut tx, user, server::ledger::Coins(5))
         .await
         .unwrap();

@@ -81,6 +81,9 @@ pub enum Handler {
     FightsCurrent,
     FightsVoidStats,
     FightDetail,
+    BonusClaim,
+    BailoutClaim,
+    Wallet,
     #[cfg(feature = "dev-auth")]
     DevAuthorize,
     #[cfg(feature = "dev-auth")]
@@ -202,6 +205,24 @@ pub const ROUTES: &[RouteSpec] = &[
         effect: Effect::Read,
         handler: Handler::FightDetail,
     },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/bonus/claim",
+        effect: Effect::Mutate,
+        handler: Handler::BonusClaim,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/bailout/claim",
+        effect: Effect::Mutate,
+        handler: Handler::BailoutClaim,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/wallet",
+        effect: Effect::Read,
+        handler: Handler::Wallet,
+    },
     #[cfg(feature = "dev-auth")]
     RouteSpec {
         method: RouteMethod::Get,
@@ -312,6 +333,10 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
                 header::CACHE_CONTROL,
                 HeaderValue::from_static("no-store"),
             )),
+        // 012 RF29, RF30: no body extractor, and the limit anyway, as the spec asks.
+        Handler::BonusClaim => on(filter, crate::bets::claims::bonus).layer(body),
+        Handler::BailoutClaim => on(filter, crate::bets::claims::bailout).layer(body),
+        Handler::Wallet => on(filter, crate::bets::wallet::handler),
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize => on(filter, auth::dev::authorize),
         #[cfg(feature = "dev-auth")]

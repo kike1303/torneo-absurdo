@@ -88,6 +88,8 @@ pub struct AppState {
     pub rate: Arc<RateLimits>,
     pub auth: Arc<AuthState>,
     pub fights: Arc<FightsShared>,
+    /// `m`, `B`, `R` and the caps of the bets (012 RF40).
+    pub bets: crate::bets::BetsConfig,
 }
 
 impl AppState {
@@ -110,6 +112,7 @@ impl AppState {
             rate: Arc::new(RateLimits::new(&settings.rate)),
             auth: Arc::new(AuthState::from_config(config, settings)?),
             fights: Arc::new(FightsShared::new(settings.fights.clock.clone())),
+            bets: config.bets,
         })
     }
 
