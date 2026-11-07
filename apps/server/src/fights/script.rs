@@ -173,6 +173,7 @@ impl FightScript {
                 max_duration_ms: self.max_duration_ms,
                 matchup_round: 1,
                 roster_sha256: &self.sha256,
+                rake_bp: config.rake_bp,
             },
         )
         .await

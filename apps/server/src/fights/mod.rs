@@ -56,6 +56,9 @@ pub struct FightsConfig {
     pub window_ms: i64,
     pub pre_live_ms: i64,
     pub content_dir: PathBuf,
+    /// The rake of the fights announced from now on, in basis points (012 RF10, RF40, plan-b D5):
+    /// each fight keeps the value of its announcement.
+    pub rake_bp: i16,
 }
 
 impl FightsConfig {

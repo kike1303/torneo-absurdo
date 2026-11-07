@@ -16,6 +16,7 @@ use sqlx::postgres::PgConnectOptions;
 use tracing_subscriber::EnvFilter;
 use url::{Host, Url};
 
+use crate::bets::BetsConfig;
 use crate::fights::{self, FightsConfig};
 use crate::http::cookies::CookiePolicy;
 use crate::ledger::Coins;
@@ -131,11 +132,56 @@ fn secret(text: &str, dev_value: &str, loopback: bool) -> Option<(String, Vec<u8
 
 /// `DAILY_GRANT`: ASCII digits only (no sign, spaces or exponent), inside [`DAILY_GRANT_RANGE`].
 fn parse_daily_grant(text: &str) -> Option<Coins> {
+    parse_digits(text, DAILY_GRANT_RANGE).map(Coins)
+}
+
+/// ASCII digits only (no sign, spaces or exponent), at most five, inside `range`.
+fn parse_digits(text: &str, range: std::ops::RangeInclusive<i64>) -> Option<i64> {
     if text.is_empty() || text.len() > 5 || !text.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
     let value: i64 = text.parse().ok()?;
-    DAILY_GRANT_RANGE.contains(&value).then_some(Coins(value))
+    range.contains(&value).then_some(value)
+}
+
+/// The bets of 012 RF40, and the rake of the fights to announce. `1 ≤ m ≤ R`, so a bailout always
+/// allows a bet; with the default `m`, `DAILY_GRANT` must be at least 50.
+fn bets_from(
+    text: &impl Fn(&'static str) -> Result<Option<String>, ConfigError>,
+    grant: Coins,
+) -> Result<(BetsConfig, i16), ConfigError> {
+    const MIN: &str = "BET_MIN";
+    const RAKE: &str = "BET_RAKE_BP";
+    const CAP: &str = "BET_CAP_MULTIPLE";
+    // The default is checked too: `BET_MIN = 25` does not fit a `DAILY_GRANT` under 50.
+    let value = |var: &'static str, default: i64, range: std::ops::RangeInclusive<i64>| {
+        match text(var)? {
+            None => Some(default).filter(|v| range.contains(v)),
+            Some(value) => parse_digits(&value, range),
+        }
+        .ok_or(ConfigError::Invalid { var })
+    };
+    let bailout = grant.0 / 2;
+    let min_bet = value(MIN, BetsConfig::DEFAULT_MIN_BET, 1..=bailout.max(0))?;
+    let rake = value(
+        RAKE,
+        i64::from(BetsConfig::DEFAULT_RAKE_BP),
+        0..=i64::from(BetsConfig::MAX_RAKE_BP),
+    )?;
+    let rake_bp = i16::try_from(rake).map_err(|_| ConfigError::Invalid { var: RAKE })?;
+    let cap_multiple = value(
+        CAP,
+        BetsConfig::DEFAULT_CAP_MULTIPLE,
+        BetsConfig::CAP_MULTIPLE_RANGE,
+    )?;
+    Ok((
+        BetsConfig {
+            grant,
+            min_bet: Coins(min_bet),
+            cap_multiple,
+        },
+        rake_bp,
+    ))
 }
 
 /// The cookie policy (RF-B9): the development names only with the feature (whose gate already
@@ -267,8 +313,10 @@ pub struct Config {
     pub internal_secret: InternalSecret,
     /// HMAC key of `ip_hash` (ADR-0008 D8).
     pub ip_hash_key: IpHashKey,
-    /// Coins of the first-login `grant` (008 RF-B3).
+    /// Coins of the first-login `grant` (008 RF-B3), and `B` of the bets.
     pub daily_grant: Coins,
+    /// `m`, `R` and the caps of the bets (012 RF40).
+    pub bets: BetsConfig,
     /// Cookie names and attributes (RF-B9).
     pub cookies: CookiePolicy,
     /// Google and Discord (RF-C1): both always outside loopback.
@@ -293,6 +341,7 @@ impl fmt::Debug for Config {
             .field("internal_secret", &"<redacted>")
             .field("ip_hash_key", &"<redacted>")
             .field("daily_grant", &self.daily_grant.0)
+            .field("bets", &self.bets)
             .field("cookies", &self.cookies)
             .field("oauth", &self.oauth.configured())
             .field("fights", &self.fights)
@@ -347,6 +396,7 @@ fn fights_from(
         window_ms,
         pre_live_ms,
         content_dir: content_dir.into(),
+        rake_bp: crate::bets::BetsConfig::DEFAULT_RAKE_BP,
     })
 }
 
@@ -448,6 +498,7 @@ impl Config {
         const DAILY_GRANT: &str = "DAILY_GRANT";
         let daily_grant = parse_daily_grant(&required(DAILY_GRANT)?)
             .ok_or(ConfigError::Invalid { var: DAILY_GRANT })?;
+        let (bets, rake_bp) = bets_from(&text, daily_grant)?;
 
         // RF-C1 and plan-c decision 3: a provider with both variables is on, one with neither
         // is off (only on loopback: outside it the four are required), and a half pair is a
@@ -511,7 +562,10 @@ impl Config {
             }
         };
         let cookies = cookie_policy(loopback);
-        let fights = fights_from(&text)?;
+        let fights = FightsConfig {
+            rake_bp,
+            ..fights_from(&text)?
+        };
 
         Ok(Self {
             database,
@@ -525,6 +579,7 @@ impl Config {
             internal_secret,
             ip_hash_key,
             daily_grant,
+            bets,
             cookies,
             oauth,
             fights,
@@ -770,11 +825,16 @@ mod tests {
 
     #[test]
     fn daily_grant_is_an_integer_from_1_to_10000() {
-        for (value, coins) in [("1", 1), ("100", 100), ("10000", 10_000)] {
-            assert_eq!(
-                with(&[("DAILY_GRANT", value)]).unwrap().daily_grant,
-                Coins(coins)
-            );
+        // `1` and `2` only with a smaller `BET_MIN`: `1 ≤ m ≤ ⌊B / 2⌋` (012 RF40).
+        for (value, coins) in [("1", 1), ("2", 2), ("100", 100), ("10000", 10_000)] {
+            let min = if coins < 50 { "1" } else { "25" };
+            let config = with(&[("DAILY_GRANT", value), ("BET_MIN", min)]);
+            if coins == 1 {
+                // `R = 0`: no `m` fits, and it says `BET_MIN`.
+                assert_eq!(config.unwrap_err().var(), "BET_MIN");
+                continue;
+            }
+            assert_eq!(config.unwrap().daily_grant, Coins(coins));
         }
         for value in [
             "0",
@@ -793,6 +853,55 @@ mod tests {
                 with(&[("DAILY_GRANT", value)]).unwrap_err().var(),
                 "DAILY_GRANT",
                 "{value:?}"
+            );
+        }
+    }
+
+    /// 012 RF40: the defaults, each range and `1 ≤ m ≤ R`.
+    #[test]
+    fn the_bets_have_their_defaults_and_ranges() {
+        let config = with(&[("DAILY_GRANT", "500")]).unwrap();
+        assert_eq!(
+            config.bets,
+            BetsConfig {
+                grant: Coins(500),
+                min_bet: Coins(25),
+                cap_multiple: 5,
+            }
+        );
+        assert_eq!(config.fights.rake_bp, 0);
+        // The default `m` needs `B ≥ 50`.
+        assert_eq!(with(&[("DAILY_GRANT", "49")]).unwrap_err().var(), "BET_MIN");
+        assert_eq!(
+            with(&[("DAILY_GRANT", "50")]).unwrap().bets.min_bet,
+            Coins(25)
+        );
+        let ok = |vars: &[(&'static str, &'static str)]| with(vars).unwrap();
+        assert_eq!(ok(&[("BET_MIN", "1")]).bets.min_bet, Coins(1));
+        assert_eq!(ok(&[("BET_MIN", "50")]).bets.min_bet, Coins(50));
+        assert_eq!(ok(&[("BET_RAKE_BP", "0")]).fights.rake_bp, 0);
+        assert_eq!(ok(&[("BET_RAKE_BP", "2000")]).fights.rake_bp, 2000);
+        assert_eq!(ok(&[("BET_CAP_MULTIPLE", "1")]).bets.cap_multiple, 1);
+        assert_eq!(ok(&[("BET_CAP_MULTIPLE", "20")]).bets.cap_multiple, 20);
+        for (var, value) in [
+            ("BET_MIN", "0"),
+            ("BET_MIN", "51"),
+            ("BET_MIN", "-1"),
+            ("BET_MIN", ""),
+            ("BET_MIN", "2.5"),
+            ("BET_RAKE_BP", "2001"),
+            ("BET_RAKE_BP", "-1"),
+            ("BET_RAKE_BP", "5%"),
+            ("BET_CAP_MULTIPLE", "0"),
+            ("BET_CAP_MULTIPLE", "21"),
+            ("BET_CAP_MULTIPLE", " 5"),
+        ] {
+            assert_eq!(
+                with(&[("DAILY_GRANT", "100"), (var, value)])
+                    .unwrap_err()
+                    .var(),
+                var,
+                "{var}={value:?}"
             );
         }
     }
@@ -877,7 +986,7 @@ mod tests {
             "\nINTERNAL_API_SECRET={DEV_INTERNAL_API_SECRET}\n"
         )));
         assert!(example.contains(&format!("\nIP_HASH_KEY={DEV_IP_HASH_KEY}\n")));
-        assert!(example.contains("\nDAILY_GRANT=100\n"));
+        assert!(example.contains("\nDAILY_GRANT=500\n"));
         // The example must itself be a valid development config.
         for line in example
             .lines()
