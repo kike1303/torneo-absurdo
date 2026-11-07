@@ -170,7 +170,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # TA-27: the Postgres integration tests put a warm run at 18-20 min, right at the old limit.
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
