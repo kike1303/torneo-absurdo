@@ -255,7 +255,20 @@ pub async fn open_with(pool: &PgPool, id: i32, seed: &[u8; 32], at: i64) {
 
 /// A fight of `vector`, open with its seed.
 pub async fn open_vector(pool: &PgPool, opens_at: i64, vector: &Vector) -> i32 {
-    let id = announce(pool, opens_at, &vector.a, &vector.b).await;
+    open_vector_with_rake(pool, opens_at, vector, 0).await
+}
+
+/// Like [`open_vector`], announced with this rake (012 RF10: it never changes after that).
+pub async fn open_vector_with_rake(
+    pool: &PgPool,
+    opens_at: i64,
+    vector: &Vector,
+    rake_bp: i16,
+) -> i32 {
+    let id = announce_with(pool, opens_at, &vector.a, &vector.b, |raw| {
+        raw.rake_bp = rake_bp;
+    })
+    .await;
     open_with(pool, id, &vector.seed, opens_at).await;
     id
 }

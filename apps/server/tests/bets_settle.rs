@@ -1,5 +1,5 @@
-//! 012 RF7, RF8, RF9, RF13 and RF14 in their refund part: the hook with sown bets, called directly
-//! and from the runner.
+//! 012 RF7 to RF14: the hook with sown bets, called directly and from the runner, with its refunds
+//! and its split.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod support;
@@ -12,13 +12,12 @@ use proptest::strategy::ValueTree;
 use proptest::test_runner::TestRunner;
 use protocol::{CancelReason, EndReason, FightFinal, FightState, Side, VoidReason};
 use server::bets::BetsHook;
-use server::bets::settle::PAYOUT_UNAVAILABLE;
 use server::fights::FightSettings;
 use server::fights::hook::{SettleFuture, SettlementError, SettlementHook, SettlingFight};
 use server::ledger::{self, Coins};
 use sqlx::{PgConnection, PgPool, Row};
 use support::bets::{self, written};
-use support::db::{TestDb, privileged};
+use support::db::{TestDb, begin_privileged, privileged};
 use support::fights::{self as f, DRAW, KO, T0, Vector, row, wait_for, wait_state};
 use uuid::Uuid;
 
@@ -152,16 +151,181 @@ async fn each_final_that_refunds_gives_everything_back() {
     }
 }
 
-/// RF7: a decided fight with both sides is an error in phase A, and it writes nothing.
+/// The row of `bet_settlements` of a bet: `(outcome, payout, net, ranked_profit)`.
+async fn result_of(pool: &PgPool, bet: Uuid) -> (String, i64, i64, i64) {
+    let row = sqlx::query(
+        "SELECT outcome, payout, net, ranked_profit FROM bet_settlements WHERE bet_id = $1",
+    )
+    .bind(bet)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    (row.get(0), row.get(1), row.get(2), row.get(3))
+}
+
+/// `(outcome, rake_bp, rake, residue)` of a pool.
+async fn pool_row(pool: &PgPool, id: i32) -> (String, i32, i64, i64) {
+    let row = sqlx::query(
+        "SELECT outcome, rake_bp, rake, residue FROM pool_settlements WHERE fight_id = $1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    (row.get(0), row.get(1), row.get(2), row.get(3))
+}
+
+/// The coins of the rake sink.
+async fn sink(pool: &PgPool) -> i64 {
+    sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount), 0)::bigint FROM ledger_postings WHERE account_id = $1",
+    )
+    .bind(ledger::RAKE_SINK_ACCOUNT)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// RF9 `paid` and RF10: the example of the spec, 7 and 5 on A against 9 on B with 500 bp. A wins:
+/// payouts 11 and 8, rake 1, residue 1, and 2 to the sink, with one entry each.
 #[tokio::test]
-async fn a_decided_fight_with_both_sides_has_no_split_yet() {
+async fn a_decided_fight_with_both_sides_is_split() {
     let (_db, pool) = database().await;
-    let id = f::open_vector(&pool, T0, &Vector::of(KO)).await;
-    sow(&pool, id, ["a", "a", "b"]).await;
-    let before = written(&pool).await;
-    let error = call(&pool, id, KO_A).await.unwrap_err();
-    assert_eq!(error.kind, PAYOUT_UNAVAILABLE);
-    assert_eq!(written(&pool).await, before);
+    let id = f::open_vector_with_rake(&pool, T0, &Vector::of(KO), 500).await;
+    let (a, b, placed) = sow(&pool, id, ["a", "a", "b"]).await;
+    call(&pool, id, KO_A).await.unwrap();
+    assert_eq!(pool_row(&pool, id).await, ("paid".to_owned(), 500, 1, 1));
+    assert_eq!(
+        result_of(&pool, placed[0].0).await,
+        ("won".to_owned(), 11, 4, 4)
+    );
+    assert_eq!(
+        result_of(&pool, placed[1].0).await,
+        ("won".to_owned(), 8, 3, 3)
+    );
+    assert_eq!(
+        result_of(&pool, placed[2].0).await,
+        ("lost".to_owned(), 0, -9, -9)
+    );
+    assert_eq!(ledger::balance(&pool, a).await.unwrap(), Coins(1007));
+    assert_eq!(ledger::balance(&pool, b).await.unwrap(), Coins(991));
+    assert_eq!(sink(&pool).await, 2);
+    assert_eq!(bets::escrow(&pool).await, 0);
+    assert_eq!(bets::total(&pool).await, 0);
+    let entries: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT kind, count(*) FROM ledger_entries WHERE fight_id = $1 GROUP BY kind ORDER BY kind",
+    )
+    .bind(id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        entries,
+        [
+            ("bet_payout".to_owned(), 2),
+            ("bet_stake".to_owned(), 3),
+            ("rake".to_owned(), 1)
+        ]
+    );
+}
+
+/// RF9 and RF10: 500 against 10 with 500 bp: the cap leaves the winner whole (rake 10, payout 500,
+/// net 0). And with `r = 0` there is no `rake` entry, because nothing goes to the sink.
+#[tokio::test]
+async fn the_rake_stops_at_the_losing_side_and_a_zero_rake_writes_no_entry() {
+    let (_db, pool) = database().await;
+    let capped = f::open_vector_with_rake(&pool, T0, &Vector::of(KO), 500).await;
+    let (a, b) = (
+        bets::funded_user(&pool, 1000).await,
+        bets::funded_user(&pool, 1000).await,
+    );
+    let big = bets::seed_bet(&pool, capped, a, "a", 500).await;
+    bets::seed_bet(&pool, capped, b, "b", 10).await;
+    call(&pool, capped, KO_A).await.unwrap();
+    assert_eq!(
+        pool_row(&pool, capped).await,
+        ("paid".to_owned(), 500, 10, 0)
+    );
+    assert_eq!(result_of(&pool, big).await, ("won".to_owned(), 500, 0, 0));
+    assert_eq!(sink(&pool).await, 10);
+
+    let free = f::open_vector(&pool, T0 + f::CADENCE, &Vector::of(KO)).await;
+    let winner = bets::seed_bet(&pool, free, a, "a", 10).await;
+    bets::seed_bet(&pool, free, b, "b", 10).await;
+    call(&pool, free, KO_A).await.unwrap();
+    assert_eq!(pool_row(&pool, free).await, ("paid".to_owned(), 0, 0, 0));
+    assert_eq!(
+        result_of(&pool, winner).await,
+        ("won".to_owned(), 20, 10, 10)
+    );
+    let rakes: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM ledger_entries WHERE kind = 'rake' AND fight_id = $1",
+    )
+    .bind(free)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rakes, 0);
+    assert_eq!(bets::escrow(&pool).await, 0);
+    assert_eq!(bets::total(&pool).await, 0);
+}
+
+/// Test 25 (a), (b) and (c): `RankedProfit` follows `ranked_stake` of the losing side. (a) a losing
+/// side only of accounts in probation gives 0; (b) half of it, with an odd `d`, rounds down.
+#[tokio::test]
+async fn ranked_profit_follows_the_ranked_part_of_the_losing_side() {
+    let (_db, pool) = database().await;
+    let (a, b, c) = (
+        bets::funded_user(&pool, 1000).await,
+        bets::funded_user(&pool, 1000).await,
+        bets::funded_user(&pool, 1000).await,
+    );
+    let none_ranked = f::open_vector(&pool, T0, &Vector::of(KO)).await;
+    let winner = bets::seed_bet(&pool, none_ranked, a, "a", 30).await;
+    let loser = bets::seed_bet(&pool, none_ranked, b, "b", 15).await;
+    unrank(&pool, loser).await;
+    call(&pool, none_ranked, KO_A).await.unwrap();
+    assert_eq!(
+        result_of(&pool, winner).await,
+        ("won".to_owned(), 45, 15, 0)
+    );
+    // A losing bet of an account in probation still loses its stake in the ranking.
+    assert_eq!(
+        result_of(&pool, loser).await,
+        ("lost".to_owned(), 0, -15, -15)
+    );
+
+    let half = f::open_vector(&pool, T0 + f::CADENCE, &Vector::of(KO)).await;
+    let winner = bets::seed_bet(&pool, half, a, "a", 30).await;
+    bets::seed_bet(&pool, half, b, "b", 8).await;
+    let unranked = bets::seed_bet(&pool, half, c, "b", 7).await;
+    unrank(&pool, unranked).await;
+    call(&pool, half, KO_A).await.unwrap();
+    // `d = 15`, `L_c / L = 8 / 15`: ⌊15 · 8 / 15⌋ = 8.
+    assert_eq!(
+        result_of(&pool, winner).await,
+        ("won".to_owned(), 45, 15, 8)
+    );
+}
+
+/// `ranked_stake = false`, as a bet of an account in probation is born (RF5). `bets` is insert-only,
+/// so the row is recreated with the trigger off, before anything settles it.
+async fn unrank(pool: &PgPool, bet: Uuid) {
+    let mut tx = begin_privileged(pool).await;
+    for sql in [
+        "ALTER TABLE bets DISABLE TRIGGER USER",
+        "UPDATE bets SET ranked_stake = false WHERE id = $1",
+        "ALTER TABLE bets ENABLE TRIGGER USER",
+    ] {
+        let query = sqlx::query(sql);
+        let query = if sql.contains("$1") {
+            query.bind(bet)
+        } else {
+            query
+        };
+        query.execute(&mut *tx).await.unwrap();
+    }
+    tx.commit().await.unwrap();
 }
 
 /// RF8: twice, in the same transaction and after a commit, leaves the same. A fight without bets
@@ -242,43 +406,33 @@ async fn the_runner_refunds_a_real_draw_and_a_real_one_sided_pool() {
     assert_eq!(bets::escrow(&pool).await, 0);
 }
 
-/// RF7: by the runner, a decided fight with both sides never settles without its entries: it retries
-/// and ends in a halt.
+/// RF7: by the runner, a decided fight with both sides ends paid: the winner of the real vector
+/// collects, with the fight's own rake.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_runner_halts_on_a_decided_fight_with_both_sides() {
+async fn the_runner_pays_a_decided_fight_with_both_sides() {
     let (_db, pool) = database().await;
     let vector = Vector::of(KO);
-    let id = f::open_vector(&pool, T0, &vector).await;
-    sow(&pool, id, ["a", "a", "b"]).await;
-    let entries_before: i64 = sqlx::query_scalar("SELECT count(*) FROM ledger_entries")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let id = f::open_vector_with_rake(&pool, T0, &vector, 500).await;
     let (settings, clock) = hook_settings(T0, Arc::new(BetsHook));
-    let (shared, _runner) = f::start(&pool, &settings);
-    let (closes_at, live_at) = f::hours(T0);
-    clock.set(closes_at);
-    wait_state(&pool, id, FightState::BettingClosed).await;
-    clock.set(live_at);
-    wait_state(&pool, id, FightState::Live).await;
-    clock.set(live_at + vector.end_t() + 10_000);
-    wait_for("the halt", || async {
-        clock.advance(2000);
-        shared.current().halted == Some(true)
-    })
-    .await;
-    assert_eq!(row(&pool, id).await.state, FightState::Live);
-    assert_eq!(row(&pool, id).await.revealed_seed, None);
-    let entries: i64 = sqlx::query_scalar("SELECT count(*) FROM ledger_entries")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(entries, entries_before);
-    let pools: i64 = sqlx::query_scalar("SELECT count(*) FROM pool_settlements")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(pools, 0);
+    let (_shared, _runner) = f::start(&pool, &settings);
+    let (a, b) = (
+        bets::funded_user(&pool, 1000).await,
+        bets::funded_user(&pool, 1000).await,
+    );
+    bets::seed_bet(&pool, id, a, "a", 100).await;
+    bets::seed_bet(&pool, id, b, "b", 100).await;
+    f::drive_to_settled(&pool, &clock, id).await;
+    let winner = match row(&pool, id).await.winner.as_deref() {
+        Some("a") => a,
+        Some("b") => b,
+        other => panic!("the vector of a KO has a winner: {other:?}"),
+    };
+    // `T = 200`, `rake = 10`, `N = 190`.
+    assert_eq!(pool_row(&pool, id).await, ("paid".to_owned(), 500, 10, 0));
+    assert_eq!(ledger::balance(&pool, winner).await.unwrap(), Coins(1090));
+    assert_eq!(sink(&pool).await, 10);
+    assert_eq!(bets::escrow(&pool).await, 0);
+    assert_eq!(bets::total(&pool).await, 0);
 }
 
 /// RF7: `app::serve` builds the real hook, with no hook of a test, whatever its settings say: a
@@ -367,6 +521,33 @@ async fn a_settlement_that_dies_leaves_nothing_and_the_retry_leaves_it_once() {
     assert_eq!(ledger::balance(&pool, b).await.unwrap(), Coins(1000));
 }
 
+/// RF10: the announcement writes the rake configured at that moment, and the hook pays with the
+/// fight's own: the runner that settles `the_runner_pays…` is configured with 0.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_announcement_writes_the_configured_rake() {
+    let (_db, pool) = database().await;
+    let (settings, _clock) = f::settings_at(T0);
+    let shared = Arc::new(server::fights::FightsShared::new(settings.clock.clone()));
+    let config = server::fights::FightsConfig {
+        rake_bp: 300,
+        ..f::config()
+    };
+    let _runner = f::spawn_runner(&pool, &shared, config, settings);
+    wait_for("an announced fight", || async {
+        let rakes: Vec<i16> = sqlx::query_scalar("SELECT rake_bp FROM fights")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        !rakes.is_empty()
+    })
+    .await;
+    let rakes: Vec<i16> = sqlx::query_scalar("SELECT DISTINCT rake_bp FROM fights")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rakes, [300]);
+}
+
 /// One fight of the property: who bets what, and how it ends, or that it stays open.
 #[derive(Debug, Clone)]
 struct Round {
@@ -381,8 +562,8 @@ fn rounds() -> impl Strategy<Value = Vec<Round>> {
     prop::collection::vec(round, 1..8)
 }
 
-/// RF13, in its refund part (phase B adds the split): at every step the movements add up to 0 and the
-/// escrow holds exactly the stakes of the fights without a settlement. After settling, what came in
+/// RF13: at every step the movements add up to 0 and the escrow holds exactly the stakes of the fights
+/// without a settlement, through refunds and splits with any rake. After settling, what came in
 /// through a fight went out through it.
 #[tokio::test]
 async fn the_coins_are_conserved_through_any_sequence_of_refunds() {
@@ -401,22 +582,22 @@ async fn the_coins_are_conserved_through_any_sequence_of_refunds() {
         let sequence = rounds().new_tree(&mut runner).unwrap().current();
         for round in sequence {
             slot += 1;
-            let id = f::open_vector(&pool, T0 + slot * f::CADENCE, &vector).await;
+            // Each split with its own rake, from none to the most RF40 allows.
+            let rake_bp = [0, 500, 2000][usize::try_from(slot % 3).unwrap()];
+            let id =
+                f::open_vector_with_rake(&pool, T0 + slot * f::CADENCE, &vector, rake_bp).await;
             let mut staked = 0_i64;
-            let sides: Vec<bool> = round.bets.iter().map(|bet| bet.1).collect();
             for (user, side, stake) in &round.bets {
                 let side = if *side { "a" } else { "b" };
                 bets::seed_bet(&pool, id, users[*user], side, *stake).await;
                 staked += stake;
             }
-            // A decided fight only with one side: both are the split of phase B.
             let final_result = match round.ending {
                 0 => None,
                 1 => Some(VOIDED),
                 2 => Some(A_DRAW),
                 3 => Some(CANCELLED),
-                _ if sides.iter().all(|side| *side) => Some(KO_A),
-                _ => Some(VOIDED),
+                _ => Some(KO_A),
             };
             open_stakes += staked;
             if let Some(final_result) = final_result {
