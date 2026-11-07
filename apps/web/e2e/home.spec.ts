@@ -190,6 +190,37 @@ test.describe('the states of the view (RF54)', () => {
   });
 });
 
+test.describe('how to get to the replays (011 RF26)', () => {
+  test('the home page links to the list', async ({ page }) => {
+    await open(page);
+    await expect(page.getByTestId('fight-home-replays')).toHaveAttribute('href', '/es/fights');
+  });
+
+  test('the result of a settled fight links to its replay', async ({ page }) => {
+    await fakeServer(page, () => board({ next: fight(2), last: LAST }));
+    await open(page);
+    await expect(page.getByTestId('fight-result')).toBeVisible();
+    await expect(page.getByTestId('fight-result-replay')).toHaveAttribute(
+      'href',
+      `/es/fights/${LAST.id}`,
+    );
+  });
+
+  test('the result of a fight that has not settled does not', async ({ page }) => {
+    await watching(page, KO_AT + 12_000, koFight(KO_AT));
+    await expect(page.getByTestId('fight-result')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('fight-result-replay')).toHaveCount(0);
+  });
+
+  test('the notice without a live connection links to the list', async ({ page }) => {
+    await page.routeWebSocket('**/ws', (socket) => socket.close({ code: 1011 }));
+    await open(page);
+    const notice = page.getByTestId('fight-notice-degraded-link');
+    await expect(notice).toBeVisible({ timeout: 20_000 });
+    await expect(notice).toHaveAttribute('href', '/es/fights');
+  });
+});
+
 test.describe('in live (RF54, RF55)', () => {
   test('live: the stage, the label and the clock, without a progress bar', async ({ page }) => {
     await watching(page, 10_000, strikes(10_000));
@@ -559,7 +590,10 @@ test.describe('reconnection and capacity (RF57)', () => {
     server.block();
     await open(page);
     const notice = page.getByTestId('fight-notice-degraded');
-    await expect(notice).toHaveText(ES.fight_notice_degraded as string, { timeout: 20_000 });
+    // The notice and its link to the past fights (011 RF26), and nothing else.
+    await expect(notice).toHaveText(`${ES.fight_notice_degraded} ${ES.replay_degraded_link}`, {
+      timeout: 20_000,
+    });
     await expect(notice).toHaveCount(1);
     await expect(notice).toHaveAttribute('role', 'status');
     await expect(home(page)).toHaveAttribute('data-connection', 'degraded');

@@ -34,6 +34,7 @@ export const JOB_PERMISSIONS = {
     'ci-ok': {},
   },
   'release.yml': {
+    'wasm-artifact': READ,
     build: { contents: 'read', packages: 'write' },
     deploy: {},
     verify: {},
@@ -681,6 +682,115 @@ function checkReleaseServer(jobs, file, problems, workflowDefaults) {
 /**
  * @param {Set<string>} local names of the composite actions present under .github/actions/
  */
+const WASM_JOB = 'wasm-artifact';
+const WASM_ON_A_TAG = "github.event_name == 'push'";
+const WASM_CHECK = 'just _check-wasm-artifact';
+const WASM_FORBIDDEN_USES = [
+  'Swatinem/rust-cache@',
+  'actions/cache@',
+  'actions/cache/restore@',
+  'docker/login-action@',
+];
+const DOCKER_LOGIN = /\bdocker\s+login\b/;
+const JOB_TOKEN = /github\s*\.\s*token|GITHUB_TOKEN/i;
+const WASM_DIR_GLOB = 'apps/web/src/lib/features/replay/engine-wasm/**';
+const VECTORS_FILE = 'apps/server/tests/golden/fight-verify-vectors.json';
+
+/**
+ * release.yml, 011 RF2: the committed wasm is checked on a tag, in a job that cannot publish. It
+ * compiles and runs `cargo install`, with build scripts of crates that crate-age and deny do not
+ * see, so it gets nothing to steal: no write permission, no cache, no login, no token. It has no
+ * `if:` and neither does `build`: a skipped job in the chain of `needs` would also skip `deploy`
+ * and `verify` on a rollback, so every step has the condition instead.
+ */
+function checkWasmArtifact(jobs, file, problems) {
+  const rule = 'wasm-artifact';
+  const job = jobs[WASM_JOB];
+  if (!isMap(job)) return; // permissions-job already says it is missing.
+  for (const id of [WASM_JOB, 'build']) {
+    if (isMap(jobs[id]) && 'if' in jobs[id]) {
+      problems.push(`${file}: ${rule}: jobs.${id} must not have an if:`);
+    }
+  }
+  const needs = jobs.build?.needs;
+  if (!(Array.isArray(needs) ? needs : [needs]).includes(WASM_JOB)) {
+    problems.push(`${file}: ${rule}: jobs.build must need ${WASM_JOB}`);
+  }
+  const steps = Array.isArray(job.steps) ? job.steps.filter(isMap) : [];
+  steps.forEach((step, i) => {
+    const at = `jobs.${WASM_JOB}.steps[${i}]${step.name ? ` (${step.name})` : ''}`;
+    if (String(step.if ?? '').trim() !== WASM_ON_A_TAG) {
+      problems.push(`${file}: ${rule}: ${at} must have if: ${WASM_ON_A_TAG}`);
+    }
+    if ('continue-on-error' in step) {
+      problems.push(`${file}: ${rule}: ${at} must not declare continue-on-error`);
+    }
+    const uses = typeof step.uses === 'string' ? step.uses : '';
+    for (const action of WASM_FORBIDDEN_USES) {
+      if (uses.toLowerCase().startsWith(action.toLowerCase())) {
+        problems.push(`${file}: ${rule}: ${at} must not use ${action}`);
+      }
+    }
+    if (CHECKOUT.test(uses) && isMap(step.with) && 'ref' in step.with) {
+      problems.push(`${file}: ${rule}: ${at} must check out the commit of the run, without ref:`);
+    }
+    if (typeof step.run === 'string' && DOCKER_LOGIN.test(step.run)) {
+      problems.push(`${file}: ${rule}: ${at} must not log in`);
+    }
+    if (JOB_TOKEN.test(JSON.stringify({ env: step.env, with: step.with, run: step.run }))) {
+      problems.push(`${file}: ${rule}: ${at} must not read the token`);
+    }
+  });
+  const checks = steps
+    .map((step, i) => ({ step, i }))
+    .filter(
+      ({ step }) => typeof step.run === 'string' && step.run.includes('_check-wasm-artifact'),
+    );
+  if (checks.length !== 1) {
+    problems.push(
+      `${file}: ${rule}: exactly one step of jobs.${WASM_JOB} must run ${WASM_CHECK}, found ${checks.length}`,
+    );
+  }
+  for (const { step, i } of checks) {
+    if (step.run.trim() !== WASM_CHECK) {
+      problems.push(
+        `${file}: ${rule}: jobs.${WASM_JOB}.steps[${i}]${step.name ? ` (${step.name})` : ''} must run exactly ${WASM_CHECK}`,
+      );
+    }
+  }
+}
+
+/** The patterns of a filter of dorny/paths-filter, with those it takes from an alias. */
+function filterPatterns(filters, name) {
+  const value = filters?.[name];
+  return (Array.isArray(value) ? value : [value]).flat(Infinity).map(String);
+}
+
+/**
+ * ci.yml, 011 RF2 and RF14: a PR that only changes the binary runs the check of its bytes, and one
+ * that only changes the vectors runs the verifier of the browser.
+ */
+function checkWasmFilters(jobs, file, problems) {
+  const rule = 'wasm-artifact';
+  const steps = Array.isArray(jobs.changes?.steps) ? jobs.changes.steps : [];
+  const filter = steps.find((step) => isMap(step) && typeof step.with?.filters === 'string');
+  /** @type {any} */
+  let filters = null;
+  if (filter) {
+    const parsed = parseDocument(filter.with.filters);
+    if (parsed.errors.length === 0) filters = parsed.toJS();
+  }
+  for (const [name, pattern] of [
+    ['rust', WASM_DIR_GLOB],
+    ['rust', 'justfile'],
+    ['web', VECTORS_FILE],
+  ]) {
+    if (!filterPatterns(filters, name).includes(pattern)) {
+      problems.push(`${file}: ${rule}: the filter ${name} of jobs.changes must have ${pattern}`);
+    }
+  }
+}
+
 function checkUses(uses, at, file, problems, local) {
   if (uses.startsWith('.')) {
     const match = LOCAL_ACTION.exec(uses);
@@ -775,8 +885,12 @@ function checkWorkflow(doc, name, file, problems, local, tree) {
   if (name === 'ci.yml') {
     checkE2e(jobs, file, problems, tree);
     checkBinaryChecks(jobs, file, problems, doc.defaults);
+    checkWasmFilters(jobs, file, problems);
   }
-  if (name === 'release.yml') checkReleaseServer(jobs, file, problems, doc.defaults);
+  if (name === 'release.yml') {
+    checkReleaseServer(jobs, file, problems, doc.defaults);
+    checkWasmArtifact(jobs, file, problems);
+  }
 
   if (name === 'ci.yml') {
     // RF-C12: policy always runs; ci-ok (the only required check) waits for every other job.

@@ -1,6 +1,5 @@
-import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
-import { CHROMIUM_FLAGS, stackServers } from './e2e/support/stack.js';
+import { CHROMIUM_FLAGS, NO_ROSTER, stackServers } from './e2e/support/stack.js';
 import { EGRESS_PROXY, PUBLIC_ORIGIN } from './e2e/support/topology.js';
 
 // e2e against `node build` and the server (RF-C10, ADR-0009 D5 amended, 008 RF-D7 and plan-d
@@ -14,13 +13,13 @@ import { EGRESS_PROXY, PUBLIC_ORIGIN } from './e2e/support/topology.js';
 // `just _e2e-run` generates the secrets once per run and passes them in the environment:
 // e2e/support/stack.ts only reads them, because Playwright evaluates this again in every worker.
 const AUTH = 'auth/*.spec.ts';
-/** A roster that does not load: `/` has no fights, always, whatever the clock says (010 plan-d). */
-const NO_ROSTER = path.join(import.meta.dirname, 'e2e', 'support', 'no-roster');
 
 export default defineConfig({
   testDir: './e2e',
-  // Runs against `just dev` with playwright.dev.config.ts, and with playwright.fights.config.ts.
-  testIgnore: ['dev-status.spec.ts', 'fights.spec.ts'],
+  // Runs against `just dev` with playwright.dev.config.ts, with playwright.fights.config.ts and with
+  // playwright.replays.config.ts, which also takes the cases tagged @replays of the other specs.
+  testIgnore: ['dev-status.spec.ts', 'fights.spec.ts', 'replays.spec.ts'],
+  grepInvert: /@replays/,
   outputDir: './test-results/artifacts',
   fullyParallel: false,
   workers: 1,
@@ -41,7 +40,12 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'], launchOptions: CHROMIUM_FLAGS },
       // Covered by arena.spec.ts in Chromium (005 plan decision 11).
-      testIgnore: ['dev-status.spec.ts', 'arena-webkit.spec.ts', 'fights.spec.ts'],
+      testIgnore: [
+        'dev-status.spec.ts',
+        'arena-webkit.spec.ts',
+        'fights.spec.ts',
+        'replays.spec.ts',
+      ],
     },
     {
       name: 'webkit',
@@ -54,6 +58,7 @@ export default defineConfig({
         'arena-webkit.spec.ts',
         'egress.spec.ts',
         'home.spec.ts',
+        'fights-list.spec.ts',
       ],
     },
     {
@@ -70,7 +75,7 @@ export default defineConfig({
     },
     {
       name: 'webkit-mobile',
-      use: { ...devices['iPhone 13 mini'] },
+      use: { ...devices['iPhone 13 Mini'] },
       testMatch: [AUTH],
     },
   ],

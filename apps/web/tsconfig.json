@@ -12,5 +12,12 @@
     "esModuleInterop": true
   },
   "include": ["src", "tests", "e2e", "vite", "*.ts", "*.js"],
-  "exclude": ["node_modules", "build", ".svelte-kit", "src/lib/paraglide", "src/service-worker"]
+  "exclude": [
+    "node_modules",
+    "build",
+    ".svelte-kit",
+    "src/lib/paraglide",
+    "src/service-worker",
+    "src/lib/features/replay/engine-wasm/engine_wasm.js"
+  ]
 }

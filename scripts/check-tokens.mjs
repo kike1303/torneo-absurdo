@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // ADR-0009 D1 and D6, RF-A13: no loose colors outside the tokens. Scans .svelte, .ts, .css and
 // .svg under apps/web/src, except src/lib/theme/tokens.css, src/lib/theme/theme-color.ts and the
-// generated src/lib/paraglide/**. Prints `file:line: message` and exits 1 on any problem.
+// generated src/lib/paraglide/** and src/lib/features/replay/engine-wasm/**. Prints `file:line: message` and exits 1 on any problem.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXTENSIONS = new Set(['.svelte', '.ts', '.css', '.svg']);
 const EXEMPT = ['lib/theme/tokens.css', 'lib/theme/theme-color.ts'];
-const SKIP_DIRS = new Set(['paraglide', 'node_modules']);
+const SKIP_DIRS = new Set(['paraglide', 'engine-wasm', 'node_modules']);
 
 const PALETTE_NAMES =
   'slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|black|white';

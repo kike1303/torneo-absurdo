@@ -28,9 +28,18 @@ fn snapshot_of(version: u16, a: &str, b: &str) -> String {
     hex(&Sha256::digest(text.as_bytes()))
 }
 
+/// Exactly what 011 RF13 asks the browser for: 64 lowercase digits. `from_str_radix` alone also takes
+/// upper case and a `+` (011 D2), and the server only ever writes this.
+fn is_seed_text(text: &str) -> bool {
+    text.len() == 64 && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
 fn check_commit(detail: &FightDetail) -> Result<[u8; 32], String> {
     let seed = detail.seed.as_deref().ok_or("no seed")?;
     let commit = detail.fight.seed_commit.as_deref().ok_or("no commit")?;
+    if !is_seed_text(seed) {
+        return Err("a seed that is not 64 lowercase digits".to_owned());
+    }
     let bytes = hex_decode(seed)?;
     if hex(&Sha256::digest(&bytes)) != commit {
         return Err("the seed does not match the commit".to_owned());

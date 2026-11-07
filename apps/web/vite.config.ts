@@ -27,7 +27,8 @@ export default defineConfig({
         mode: 'auto',
         directives: {
           'default-src': ['self'],
-          'script-src': ['self'],
+          // ADR-0012 B4.1: the verification of a fight compiles engine-wasm (011 RF6). Nothing else.
+          'script-src': ['self', 'wasm-unsafe-eval'],
           'style-src': ['self', 'unsafe-inline'],
           'img-src': ['self', 'data:', 'blob:'],
           'font-src': ['self'],

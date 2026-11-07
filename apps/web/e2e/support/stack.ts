@@ -17,6 +17,9 @@ import { assertE2eTarget } from './db.mjs';
 const INTERNAL_API_URL = `http://${LOOPBACK}:${SERVER_PORT}`;
 const LOGS = path.join(import.meta.dirname, '..', '..', 'test-results', 'logs');
 
+/** A roster that does not load: `/` has no fights, always, whatever the clock says (010 plan-d). */
+export const NO_ROSTER = path.join(import.meta.dirname, 'no-roster');
+
 function required(name: string): string {
   const value = process.env[name];
   if (!value) {

@@ -42,7 +42,8 @@ updated: 2026-11-01
 | Carencia | `Probation` | Periodo inicial de una cuenta (menos de 7 días o de 10 apuestas liquidadas, es decir, ganadas o perdidas; los reembolsos no cuentan): tope por pelea reducido, no sale en el leaderboard y sus stakes perdidos no dan `RankedProfit` a nadie (ADR-0008 D8). |
 | Rating | `Rating` | Fuerza estimada de un personaje (Glicko-2). |
 | Narrador | `Narrator` | Sistema de frases con plantillas que comenta la pelea según el contexto. |
-| Repetición | `Replay` | Reproducir una pelea pasada a partir de su log o su semilla. |
+| Repetición | `Replay` | Reproducir una pelea pasada a partir de su log. |
+| Veredicto | `Verdict` | Lo que el navegador comprobó de una pelea terminada con los datos publicados: coincide (`match`), no coincide (`mismatch`), no se pudo comprobar (`cannot_check`, un fallo del navegador, que no dice nada de la pelea) o nada que comprobar (`not_applicable`). No prueba que el sello sea anterior a la pelea ni que la semilla saliera al azar (spec de 011, RF12 y RF16). |
 | Timeline del renderer | `Timeline` | Lista de *cues* que reproduce `@torneo/renderer` (formato propio y versionado, `timeline_version`). No es el `FightLog`: un adaptador del lado de `apps/web` traduce uno a la otra (spec de 002). |
 | Cue | `Cue` | Momento de la `Timeline` (`intro`, `strike`, `knockdown`, `ko`, `win` y, en la `timeline_version` 2, `time_up` y `draw`) con su `at_ms`; en un `strike`, `at_ms` es el instante del impacto. `time_up` marca el fin del tiempo, y lo cierra un `win` (decisión) o un `draw` (empate). |
 | Set de sprites | `SpriteSet` | Carpeta `content/sprites/<id>/` con `manifest.json`, sus hojas y `provenance.json`; un personaje la enlaza con `"sprites": "<id>"` (feature 007). |

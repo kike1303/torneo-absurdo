@@ -6,9 +6,11 @@ import {
   assertA9Apply,
   assertE2eTarget,
   maintenanceUrl,
+  REPLAY_ROWS,
   reset,
   userId,
   seedOauthAccount,
+  seedReplays,
 } from '../e2e/support/db.mjs';
 
 // 008 plan-d decision 10: the guards of the e2e database (change 6 of devops, 5 of architect).
@@ -157,6 +159,26 @@ describe('the A9 parameters come from infra/compose.dev.yml', () => {
   it('a value changed in the file changes what is checked', () => {
     expect(a9Parameters('      - log_statement=all\n      - shared_buffers=1GB\n')).toEqual([
       ['log_statement', 'all'],
+    ]);
+  });
+});
+
+describe('seedReplays (011)', () => {
+  it('goes through the same guard: never another database', async () => {
+    await expect(seedReplays(url('127.0.0.1', 'torneo'))).rejects.toThrow(/torneo_e2e/);
+    await expect(seedReplays(url('db.example.com', 'torneo_e2e'))).rejects.toThrow(/point at/);
+    await expect(seedReplays(undefined)).rejects.toThrow(/required/);
+  });
+
+  it('has a row of each ending, with its fights in the order replays.spec.ts asks for', () => {
+    expect(REPLAY_ROWS.map((row) => row.name)).toEqual([
+      'ko',
+      'decision',
+      'draw',
+      'voided',
+      'missed_window',
+      'fight_unrunnable',
+      'scheduled',
     ]);
   });
 });

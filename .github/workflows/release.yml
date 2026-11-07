@@ -7,6 +7,7 @@
 #   - The server binary never carries dev-auth (008 RF-D9): the image is built twice with the
 #     same inputs, checked between the two builds, and the pushed config digest must be the
 #     checked one before the retention (and so before deploy). check-workflows enforces the shape.
+#   - The committed wasm comes from this commit (011 RF2): ci-ok protects the PR, not the tag.
 # No secret besides the job token: the tag and every input reach run: through env: only.
 name: release
 
@@ -28,7 +29,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # 011 RF2. Not inside build: it compiles and runs `cargo install`, with build scripts of crates that
+  # crate-age and deny do not see, and build has packages: write and the GHCR token on disk. No cache
+  # and no login. It has no if: and neither does build, because a skipped job in the chain of needs
+  # would skip deploy and verify on a rollback: each step has the condition instead, so a rollback
+  # compiles nothing and the job ends in success. check-workflows enforces the shape.
+  wasm-artifact:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'push'
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-just
+        if: github.event_name == 'push'
+      - name: Rust toolchain of rust-toolchain.toml
+        if: github.event_name == 'push'
+        run: rustup toolchain install --no-self-update
+      # The runner's Node, no setup-js: compare-trees uses Node built-ins only.
+      - name: The committed wasm comes from this commit (011 RF2)
+        if: github.event_name == 'push'
+        run: just _check-wasm-artifact
+
   build:
+    needs: wasm-artifact
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -306,12 +333,12 @@ jobs:
           server=("$nosniff" "$hsts"
             'cross-origin-resource-policy=same-origin'
             "content-security-policy=default-src 'none'; frame-ancestors 'none'")
-          # ADR-0012 B1 plus B4.6 (the 2026-10-30 amendment: the two authorize endpoints in
+          # ADR-0012 B1 plus B4.1 ('wasm-unsafe-eval', 011 RF6) and B4.6 (the 2026-10-30 amendment: the two authorize endpoints in
           # form-action) as Kit emits it; `B1` as a value compares with this (nonce normalized,
           # directive and source order ignored). A B4 extension changes this line in its own PR,
           # with the b1= of images in ci.yml: check-workflows wants both identical byte for byte
           # (B6.4 item 7).
-          b1="default-src 'self'; script-src 'self' 'nonce-*'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com/o/oauth2/v2/auth https://discord.com/oauth2/authorize; frame-ancestors 'none'"
+          b1="default-src 'self'; script-src 'self' 'nonce-*' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com/o/oauth2/v2/auth https://discord.com/oauth2/authorize; frame-ancestors 'none'"
           csp_norm() {
             tr -d '\r' | sed -E "s/'nonce-[A-Za-z0-9+/_=-]+'/'nonce-*'/g" | tr ';' '\n' |
               while read -r name rest; do
@@ -323,7 +350,7 @@ jobs:
           headers="$(mktemp)"
           trap 'rm -f "$headers"' EXIT
           # check <path> <status> <name=value>...: `-` requires the header to be absent and `B1`
-          # compares it with $b1 (B1 plus B4.6); any other value must match exactly, once.
+          # compares it with $b1 (B1 plus B4.1 and B4.6); any other value must match exactly, once.
           check() {
             local path="$1" want="$2" url="https://$PUBLIC_HOST$1" status pair name value got count
             shift 2
@@ -348,7 +375,7 @@ jobs:
                 fail=1
               elif [ "$value" = B1 ]; then
                 if ! diff <(csp_norm <<<"$b1") <(csp_norm <<<"$got") >/dev/null; then
-                  echo "$path sends $name: $got, expected ADR-0012 B1 plus B4.6" >&2
+                  echo "$path sends $name: $got, expected ADR-0012 B1 plus B4.1 and B4.6" >&2
                   fail=1
                 fi
               elif [ "$got" != "$value" ]; then

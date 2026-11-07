@@ -20,6 +20,7 @@ export type * from './generated/FightSummary.js';
 export type * from './generated/FighterCard.js';
 export type * from './generated/FighterInfo.js';
 export type * from './generated/FightsCurrent.js';
+export type * from './generated/FightsPage.js';
 export type * from './generated/HealthResponse.js';
 export type * from './generated/Locale.js';
 export type * from './generated/Me.js';
