@@ -7,6 +7,7 @@ pub mod claims;
 pub mod facts;
 mod http;
 pub mod parimutuel;
+pub mod pool;
 pub mod probation;
 pub mod settle;
 pub mod wallet;

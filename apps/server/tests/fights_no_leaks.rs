@@ -108,7 +108,8 @@ fn request_of(route: &RouteSpec, id: i32) -> (String, Vec<(&'static str, &'stati
         | Handler::FightsVoidStats
         | Handler::FightDetail
         | Handler::Wallet => (vec![], String::new()),
-        Handler::MyBets => (vec![], String::new()),
+        Handler::MyBets | Handler::FightPool => (vec![], String::new()),
+        Handler::BetQuote => (vec![], String::new()),
         // 012 RF25: a bet on the fight of the case, which the window may refuse.
         Handler::Bet => (
             vec![json],

@@ -86,6 +86,8 @@ pub enum Handler {
     Wallet,
     Bet,
     MyBets,
+    FightPool,
+    BetQuote,
     #[cfg(feature = "dev-auth")]
     DevAuthorize,
     #[cfg(feature = "dev-auth")]
@@ -237,6 +239,18 @@ pub const ROUTES: &[RouteSpec] = &[
         effect: Effect::Read,
         handler: Handler::MyBets,
     },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/fights/{id}/pool",
+        effect: Effect::Read,
+        handler: Handler::FightPool,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/fights/{id}/quote",
+        effect: Effect::Read,
+        handler: Handler::BetQuote,
+    },
     #[cfg(feature = "dev-auth")]
     RouteSpec {
         method: RouteMethod::Get,
@@ -354,6 +368,17 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         // 012 RF25: over `MAX_FORM_BYTES`, `JsonRejection` gives 422 `bet.invalid_request`.
         Handler::Bet => on(filter, crate::bets::api::place).layer(body),
         Handler::MyBets => on(filter, crate::bets::api::mine),
+        // 012 RF34: the limit and the cache of the detail.
+        Handler::FightPool => on(filter, crate::bets::pool::pool)
+            .layer::<_, std::convert::Infallible>(middleware::from_fn_with_state(
+                state.rate.fight_read_ip.clone(),
+                rate::http::layer,
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("no-store"),
+            )),
+        Handler::BetQuote => on(filter, crate::bets::pool::quote),
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize => on(filter, auth::dev::authorize),
         #[cfg(feature = "dev-auth")]

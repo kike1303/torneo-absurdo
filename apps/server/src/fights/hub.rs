@@ -14,7 +14,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use axum::extract::ws::Utf8Bytes;
-use protocol::{FightEvent, FightState, FightSummary, FightsCurrent, ServerMessage, TimestampMs};
+use protocol::{
+    FightEvent, FightPool, FightState, FightSummary, FightsCurrent, ServerMessage, TimestampMs,
+};
 use tokio::sync::watch;
 
 use super::FightClock;
@@ -137,7 +139,12 @@ struct HubState {
     next_version: u64,
     schedule: Schedule,
     fights: BTreeMap<i32, FightEntry>,
+    /// The last `pool_update` of each fight (012 RF35): its version and the message, serialized once.
+    pools: BTreeMap<i32, (u64, Utf8Bytes)>,
 }
+
+/// The pools kept: an open window or two, and the last value of the ones that just closed.
+pub const MAX_POOLS: usize = 8;
 
 impl HubState {
     const fn version(&mut self) -> u64 {
@@ -200,6 +207,7 @@ impl FightHub {
                     cached: None,
                 },
                 fights: BTreeMap::new(),
+                pools: BTreeMap::new(),
             }),
             changes: watch::Sender::new(0),
         }
@@ -279,6 +287,47 @@ impl FightHub {
             text: text.clone(),
         });
         Some(text)
+    }
+
+    /// A pool changed (012 RF35): every socket on `schedule` gets its last value. The oldest goes
+    /// when more than [`MAX_POOLS`] are kept.
+    pub fn publish_pool(&self, pool: &FightPool) {
+        let Some(text) = encode(&ServerMessage::PoolUpdate {
+            pool: Box::new(pool.clone()),
+        }) else {
+            return;
+        };
+        let Ok(id) = i32::try_from(pool.fight_id) else {
+            return;
+        };
+        {
+            let mut state = self.write();
+            let version = state.version();
+            state.pools.insert(id, (version, text));
+            while state.pools.len() > MAX_POOLS {
+                let oldest = state
+                    .pools
+                    .iter()
+                    .min_by_key(|(_, (version, _))| *version)
+                    .map(|(id, _)| *id);
+                let Some(oldest) = oldest else { break };
+                state.pools.remove(&oldest);
+            }
+        }
+        self.notify();
+    }
+
+    /// The next `pool_update` this position has not seen: the one with the lowest version above it,
+    /// so a slow socket skips to each pool's last value, with no queue. `0` sees every one kept.
+    pub fn next_pool(&self, seen: &mut u64) -> Option<Utf8Bytes> {
+        let state = self.read();
+        let (version, text) = state
+            .pools
+            .values()
+            .filter(|(version, _)| *version > *seen)
+            .min_by_key(|(version, _)| *version)?;
+        *seen = *version;
+        Some(text.clone())
     }
 
     /// The `fight_sync` of a socket that subscribes, and its position: at the start, so
@@ -471,11 +520,66 @@ impl EventSink for FightHub {
 
 #[cfg(test)]
 mod tests {
-    use protocol::{Channel, FighterCard};
+    use protocol::{Channel, CoinAmount, FighterCard, PoolSide};
 
     use super::super::FightsShared;
     use super::super::board::BoardUpdate;
     use super::*;
+
+    fn pool(id: u32, stake_a: i64) -> FightPool {
+        let side = |stake: i64| PoolSide {
+            stake: CoinAmount::new(stake).unwrap(),
+            bets: 20_000,
+            payout_bp: Some(u32::MAX),
+        };
+        FightPool {
+            fight_id: id,
+            a: side(stake_a),
+            b: side(i64::from(u32::MAX)),
+            rake_bp: 2000,
+            server_time: TimestampMs::from_ms(i64::MAX),
+            settlement: None,
+        }
+    }
+
+    /// 012 RF35: every socket reads the same text; a slow one skips to each pool's last value; a new
+    /// one reads what is kept; and the largest message is under 8 KiB.
+    #[test]
+    fn pools_are_last_values_with_no_queue() {
+        let hub = FightHub::new(FightClock::manual(0));
+        let (mut fast, mut slow, mut new) = (0, 0, 0);
+        hub.publish_pool(&pool(7, 10));
+        let first = hub.next_pool(&mut fast).unwrap();
+        assert!(first.as_str().starts_with(r#"{"type":"pool_update""#));
+        assert!(first.len() < 8 * 1024, "{}", first.len());
+        hub.publish_pool(&pool(7, 20));
+        hub.publish_pool(&pool(7, 30));
+        hub.publish_pool(&pool(8, 5));
+        // The fast one reads 7 at 30 and then 8; the slow one, the same, skipping 7 at 10 and 20.
+        let fast_reads: Vec<_> = std::iter::from_fn(|| hub.next_pool(&mut fast)).collect();
+        let slow_reads: Vec<_> = std::iter::from_fn(|| hub.next_pool(&mut slow)).collect();
+        assert_eq!(fast_reads, slow_reads);
+        assert_eq!(slow_reads.len(), 2);
+        assert!(
+            slow_reads[0]
+                .as_str()
+                .contains(r#""fight_id":7,"a":{"stake":30"#)
+        );
+        assert!(hub.next_pool(&mut slow).is_none());
+        assert_eq!(std::iter::from_fn(|| hub.next_pool(&mut new)).count(), 2);
+    }
+
+    #[test]
+    fn only_the_last_pools_are_kept() {
+        let hub = FightHub::new(FightClock::manual(0));
+        for id in 0..20 {
+            hub.publish_pool(&pool(id, 10));
+        }
+        let mut seen = 0;
+        let kept: Vec<_> = std::iter::from_fn(|| hub.next_pool(&mut seen)).collect();
+        assert_eq!(kept.len(), MAX_POOLS);
+        assert!(kept[0].as_str().contains(r#""fight_id":12"#));
+    }
 
     fn summary(id: u32, state: FightState) -> FightSummary {
         let card = |slug: &str| FighterCard {

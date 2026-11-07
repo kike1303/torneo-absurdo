@@ -120,6 +120,8 @@ async fn serve(
     // Where this socket is in each public channel: all its state, at most 8 entries (RF43).
     let mut hub_changes = hub.watch();
     let mut schedule: Option<u64> = None;
+    // The pools this socket has seen, only while on `schedule` (012 RF35).
+    let mut pools: Option<u64> = None;
     let mut fights: BTreeMap<i32, Cursor> = BTreeMap::new();
     // Whether a channel may still have something to send.
     let mut pending = false;
@@ -269,6 +271,8 @@ async fn serve(
                                                         Channel::Schedule => {
                                                             let (seen, text) = hub.subscribe_schedule();
                                                             schedule = Some(seen);
+                                                            // The pools of now, after the board.
+                                                            pools = Some(0);
                                                             initial = text;
                                                         }
                                                         Channel::Fight(id) => {
@@ -292,7 +296,10 @@ async fn serve(
                                             Ok(channel) => {
                                                 match channel {
                                                     Channel::SelfChannel => self_subscription = None,
-                                                    Channel::Schedule => schedule = None,
+                                                    Channel::Schedule => {
+                                                        schedule = None;
+                                                        pools = None;
+                                                    }
                                                     Channel::Fight(id) => {
                                                         if let Ok(id) = i32::try_from(id.get()) {
                                                             fights.remove(&id);
@@ -327,6 +334,7 @@ async fn serve(
                 let next = schedule
                     .as_mut()
                     .and_then(|seen| hub.next_schedule(seen))
+                    .or_else(|| pools.as_mut().and_then(|seen| hub.next_pool(seen)))
                     .or_else(|| {
                         fights
                             .iter_mut()
