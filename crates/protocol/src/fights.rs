@@ -1,7 +1,7 @@
 //! The public shape of a scheduled fight (010): its state, its final and the two read models of
 //! the API. Contract: no human-readable text, no 64-bit integers (hours are [`TimestampMs`]), and
-//! neither [`FightSummary`] nor [`FightsCurrent`] has a seed or a log. [`FightDetail`] has them
-//! only for the server to fill on a settled fight (RF26, RF34).
+//! neither [`FightSummary`], [`FightsCurrent`] nor [`FightsPage`] has a seed or a log.
+//! [`FightDetail`] has them only for the server to fill on a settled fight (RF26, RF34).
 use serde::{Deserialize, Serialize};
 
 use crate::fight::{EndReason, Side};
@@ -212,6 +212,15 @@ pub struct FightsCurrent {
     pub last: Option<FightSummary>,
 }
 
+/// `GET /api/fights` (011 RF7): one page of settled fights, the most recent id first. `next_before`
+/// is the `before` of the next page, `null` on the last one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct FightsPage {
+    pub fights: Vec<FightSummary>,
+    pub next_before: Option<u32>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,6 +308,25 @@ mod tests {
         );
         assert_eq!(serde_json::to_string(&value).unwrap(), json);
         assert_eq!(serde_json::from_str::<FightDetail>(&json).unwrap(), value);
+    }
+
+    #[test]
+    fn a_page_has_the_exact_shape() {
+        let value = FightsPage {
+            fights: vec![summary()],
+            next_before: Some(7),
+        };
+        let json = format!(r#"{{"fights":[{SUMMARY}],"next_before":7}}"#);
+        assert_eq!(serde_json::to_string(&value).unwrap(), json);
+        assert_eq!(serde_json::from_str::<FightsPage>(&json).unwrap(), value);
+
+        let last = FightsPage {
+            fights: vec![],
+            next_before: None,
+        };
+        let json = r#"{"fights":[],"next_before":null}"#;
+        assert_eq!(serde_json::to_string(&last).unwrap(), json);
+        assert_eq!(serde_json::from_str::<FightsPage>(json).unwrap(), last);
     }
 
     #[test]

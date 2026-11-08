@@ -30,3 +30,7 @@ apps/web/project.inlang/*
 packages/renderer/placeholders/*/manifest.json
 # The reference export of the sprite importer: written by its gen:fixture script (007 RF-B8)
 tools/sprite-importer/fixtures/
+# Written by `just gen-wasm` and compared byte by byte (011 RF2)
+apps/web/src/lib/features/replay/engine-wasm/
+# Written by the test of fights_public_verify.rs with UPDATE_GOLDEN=1 (011 RF14)
+apps/server/tests/golden/fight-verify-vectors.json

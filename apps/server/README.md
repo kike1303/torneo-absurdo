@@ -54,6 +54,10 @@ Con dos cuentas de Google o de Discord a mano:
 4. Vincular una cuenta que ya es de otro usuario. El desvincular del paso 3 consumió la confirmación, así que `/account` muestra otra vez el panel en lugar de los botones de vincular: confirma tu identidad y vincula. Resultado: `/login?error=auth.already_linked`, sin fusión.
 5. Volver a `/account`, empezar a vincular y cancelar en la pantalla del proveedor: `/login?error=auth.provider_error`. El intento fallido del paso 4 no consume la confirmación: los botones siguen ahí mientras la confirmación tenga menos de 10 minutos. Si ya pasaron, la web vuelve a pedirla.
 
+## Lista de peleas terminadas
+
+`GET /api/fights` da `{ fights, next_before }`: hasta 20 peleas `settled`, de `id` mayor a menor (spec de 011, RF7). `fights` son `FightSummary`, sin semilla ni log, y `next_before` es el `id` de la última si hay más, o `null`. `?before=<id>` da la página siguiente; un valor que no sea un `id` válido da 404 `fight.not_found`. El tamaño de página es fijo. Sin sesión, con `Cache-Control: no-store` y la misma cuota por IP que `GET /api/fights/{id}` (`FIGHT_READ_IP`).
+
 ## Verificar una pelea con datos públicos
 
 Cualquiera puede comprobar una pelea terminada solo con `GET /api/fights/{id}` (ADR-0002, RF7 de la spec de 010), que da `fight`, `spec_a`, `spec_b`, `seed` y `log`:

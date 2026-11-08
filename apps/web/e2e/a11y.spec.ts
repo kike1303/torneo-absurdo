@@ -34,6 +34,38 @@ test.describe('test 4: axe without serious or critical violations', () => {
   }
 });
 
+// 011: the pages of a replay, with seeded fights (playwright.replays.config.ts).
+test.describe(
+  'the replays, axe without serious or critical violations',
+  { tag: '@replays' },
+  () => {
+    for (const theme of ['light', 'dark'] as const) {
+      test(`/fights and the page of a fight, theme=${theme}`, async ({ page }) => {
+        await page.context().addCookies([{ name: 'theme', value: theme, url: ORIGIN }]);
+        await page.goto('/es/fights');
+        await expect(page.getByTestId('fight-list-row').first()).toBeVisible();
+        expect(await seriousViolations(page), '/es/fights').toEqual([]);
+        // KO, a cancelled one and one that has not ended.
+        for (const [id, status] of [
+          [1, 'match'],
+          [5, 'match'],
+        ] as const) {
+          await page.goto(`/en/fights/${id}`);
+          await expect(page.getByTestId('replay-verdict')).toHaveAttribute('data-status', status, {
+            timeout: 30_000,
+          });
+          // The controls come from `disabled`, and their opacity has a transition.
+          await page.waitForTimeout(500);
+          expect(await seriousViolations(page), `/en/fights/${id}`).toEqual([]);
+        }
+        await page.goto('/es/fights/7');
+        await expect(page.getByTestId('fight-pending')).toBeVisible();
+        expect(await seriousViolations(page), '/es/fights/7').toEqual([]);
+      });
+    }
+  },
+);
+
 test('RF-A17: translated 404 page', async ({ page }) => {
   const res = await page.goto('/es/no-existe');
   expect(res?.status()).toBe(404);

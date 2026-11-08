@@ -129,6 +129,44 @@ async function verify(request: APIRequestContext, id: number, kind: FightKind): 
   expect(createHash('sha256').update(seed).digest('hex')).toBe(detail.fight.seed_commit);
 }
 
+/** While it is live: "not yet", with who fights and nothing else, and the notice (011 RF23, RF26). */
+async function notYet(context: BrowserContext, id: number): Promise<void> {
+  const page = await context.newPage();
+  await page.goto(`/es/fights/${id}`);
+  await expect(page.getByTestId('fight-pending')).toBeVisible();
+  await expect(page.getByTestId('replay-live-notice')).toBeVisible();
+  await expect(page.getByTestId('fight-stage')).toHaveCount(0);
+  await expect(page.getByTestId('replay-verdict')).toHaveCount(0);
+  await page.close();
+}
+
+/** Once settled, the real fight matches and ends with the published result (011, the real case). */
+async function replayMatches(
+  context: BrowserContext,
+  id: number,
+  result: 'ko' | 'draw',
+): Promise<void> {
+  const page = await context.newPage();
+  await page.goto(`/es/fights/${id}`);
+  await expect(page.getByTestId('replay-verdict')).toHaveAttribute('data-status', 'match', {
+    timeout: 30_000,
+  });
+  await expect(page.getByTestId('fight-result')).toHaveCount(0);
+  const end = page.getByTestId('replay-end');
+  const noAnimation = page.getByTestId('fight-notice-no-animation');
+  await expect(end.or(noAnimation)).toBeVisible({ timeout: 30_000 });
+  if (await noAnimation.isVisible()) {
+    // WebKit on Linux has no WebGL (010 preocupacion 10).
+    await page.getByTestId('replay-show-result').click();
+  } else {
+    await expect(end).toBeEnabled({ timeout: 30_000 });
+    await end.click();
+    await expect(page.getByTestId('fight-stage')).toHaveAttribute('data-state', 'finished');
+  }
+  await expect(page.getByTestId('fight-result')).toHaveAttribute('data-result', result);
+  await page.close();
+}
+
 test('the same real fights in every project', async ({ browser, request }, info) => {
   test.setTimeout(RUN_LIMIT_MS);
   const contexts: BrowserContext[] = [];
@@ -150,6 +188,7 @@ test('the same real fights in every project', async ({ browser, request }, info)
     const start = await startOf(request, id);
     await expect(home(main)).toHaveAttribute('data-view', 'live', { timeout: 30_000 });
     await expect(main.getByTestId('fight-live-badge')).toBeVisible();
+    await notYet(await opened(), id);
 
     // B: coming in at 20 s of `t`.
     await untilServerTime(request, start + 3500 + 20_000);
@@ -178,6 +217,7 @@ test('the same real fights in every project', async ({ browser, request }, info)
     await expect(main.getByTestId('fight-billboard')).toBeVisible({ timeout: 30_000 });
     await expect(main.getByTestId('fight-result')).toHaveAttribute('data-result', 'ko');
     await verify(request, id, 'ko');
+    await replayMatches(await opened(), id, 'ko');
     await neverDegraded(main);
     await neverDegraded(late);
   };
@@ -243,6 +283,7 @@ test('the same real fights in every project', async ({ browser, request }, info)
     await expect(home(cut)).toHaveAttribute('data-event-digest', digest, { timeout: 15_000 });
 
     await verify(request, id, 'draw');
+    await replayMatches(await opened(), id, 'draw');
     for (const page of [sessionPage, anon, cut, window]) await neverDegraded(page);
     // DP-B7: one `fight_sync` asked for per fight and socket. The fights of this page are few.
     expect(await subscribes(sessionPage)).toBeLessThanOrEqual(3);
