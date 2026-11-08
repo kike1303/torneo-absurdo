@@ -88,6 +88,7 @@ check-rust:
     cargo clippy -p server --features dev-auth,dev-fights --all-targets --locked -- -D warnings
     {{just_executable()}} _check-engine
     {{just_executable()}} _check-wasm
+    {{just_executable()}} _check-wasm-artifact
     {{just_executable()}} db-up
     {{just_executable()}} _test-rust
     {{just_executable()}} _check-gen
@@ -224,6 +225,11 @@ _e2e-fights-run: _web-prepare
     node apps/web/e2e/support/reset-run.mjs
     node apps/web/e2e/support/fight-script.mjs
     pnpm --filter web exec playwright test -c playwright.fights.config.ts
+    # The seeded replays (011): a new torneo_e2e, without a roster, so that no other fight appears.
+    node apps/web/e2e/support/db.mjs reset
+    node apps/web/e2e/support/db.mjs a9 --check
+    node apps/web/e2e/support/reset-run.mjs
+    pnpm --filter web exec playwright test -c playwright.replays.config.ts
 
 # Local only, like the fights (TA-56): the bets on three real fights (012 plan-c C8), with what
 # `_e2e-run` needs. E2E_WEB_BUILT=1 skips the build when `just e2e` has just made it.
@@ -350,6 +356,58 @@ _check-wasm:
     cargo clippy -p engine -p engine-wasm --target wasm32-unknown-unknown --locked -- -D warnings
     CARGO_TARGET_WASM32_WASIP1_RUNNER="node --disable-warning=ExperimentalWarning {{justfile_directory()}}/scripts/wasi-runner.mjs" \
         cargo test -p engine --test golden --target wasm32-wasip1 --locked -- --nocapture
+
+# Compiles engine-wasm and writes the four files of wasm-bindgen into `out` (011 RF1)
+_wasm-generate out:
+    bash scripts/wasm-generate.sh "{{out}}"
+
+# Run it when crates/engine, engine-wasm, protocol, a crate of their graph or the toolchain changes,
+# and commit the result. On a conflict in the binary, regenerate: never merge it by hand. Off the
+# reference host it runs in the rust image of apps/server/Dockerfile under linux/amd64 (011 worry 2),
+# with Docker volumes for its target/ and the registry; on a Mac that needs Rosetta in Colima.
+# Regenerate the wasm the browser verifies with (011 RF1)
+gen-wasm:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=apps/web/src/lib/features/replay/engine-wasm
+    mkdir -p "$out"
+    rm -f "$out"/*
+    host="$(rustc -vV | sed -n 's/^host: //p')"
+    if [ "$host" = x86_64-unknown-linux-gnu ]; then
+        {{just_executable()}} _wasm-generate "{{justfile_directory()}}/$out"
+        exit 0
+    fi
+    image="$(sed -n 's/^FROM --platform=\$BUILDPLATFORM \(rust:[^ ]*\) AS chef$/\1/p' apps/server/Dockerfile)"
+    if [ -z "$image" ]; then
+        echo "gen-wasm: no rust image in apps/server/Dockerfile" >&2
+        exit 1
+    fi
+    echo "gen-wasm: $host is not the reference host, generating in $image (linux/amd64)" >&2
+    docker run --rm --platform linux/amd64 \
+        -v "{{justfile_directory()}}:/src:ro" -v "{{justfile_directory()}}/$out:/src/$out" \
+        -v torneo-wasm-target:/src/target -v torneo-wasm-registry:/usr/local/cargo/registry \
+        -w /src "$image" bash scripts/wasm-generate.sh "/src/$out"
+
+# Only the reference host, the one of CI: the Mac stopped giving its bytes after TA-58 and TA-27, and
+# linux/arm64 never did (011 worry 2). Another host skips it, except in CI, which never passes in vacuum.
+# Freshness of the committed wasm, byte by byte, without touching it (011 RF2)
+_check-wasm-artifact:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    host="$(rustc -vV | sed -n 's/^host: //p')"
+    if [ "$host" != x86_64-unknown-linux-gnu ]; then
+        if [ -n "${CI:-}" ]; then
+            echo "check-wasm-artifact: $host is not the reference host" >&2
+            exit 1
+        fi
+        echo "check-wasm-artifact: skipped on $host (the reference is x86_64-unknown-linux-gnu)"
+        exit 0
+    fi
+    fresh="$(mktemp -d)"
+    trap 'rm -rf "${fresh:?}"' EXIT
+    {{just_executable()}} _wasm-generate "$fresh"
+    node scripts/compare-trees.mjs apps/web/src/lib/features/replay/engine-wasm "$fresh" \
+        --name engine-wasm --command "just gen-wasm"
 
 # RF-B3: ts-rs never in the server's normal graph; protocol without features has no ts-rs nor tokio.
 # 003: neither in engine, engine-wasm, content nor sim (they depend on protocol without `ts`).

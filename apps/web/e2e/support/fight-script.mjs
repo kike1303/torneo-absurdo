@@ -24,6 +24,16 @@ export const VECTORS = {
   draw: { log: 'log-draw.json', a: 'turtle', b: 'turtle', seed: 118 },
 };
 
+/**
+ * The decided fights the seeded replays need (011): a KO, a decision and a draw. Apart from `VECTORS`,
+ * which `fightScript()` walks whole: one more there would change the run of the real fights.
+ */
+export const REPLAY_VECTORS = {
+  ko: VECTORS.ko,
+  decision: { log: 'log-decision-a.json', a: 'tank', b: 'turtle', seed: 0 },
+  draw: VECTORS.draw,
+};
+
 /** `derive_seed`: the root with the index in XOR, little endian. */
 export function deriveSeed(/** @type {number} */ index) {
   const seed = Buffer.from(ROOT_SEED, 'ascii');
@@ -46,6 +56,16 @@ export function betsScript() {
   const rows = fightScript();
   const byKind = { ko: rows[0], draw: rows[1] };
   return BETS_ORDER.map((kind) => byKind[kind]);
+}
+
+/** The canonical text of a golden spec, without the final newline of the file. */
+export function goldenSpecText(/** @type {string} */ name) {
+  return readFileSync(path.join(GOLDEN, `spec-${name}.json`), 'utf8').replace(/\n$/, '');
+}
+
+/** The canonical text of a golden log, by its file, without the final newline. */
+export function goldenLogText(/** @type {string} */ file) {
+  return readFileSync(path.join(GOLDEN, file), 'utf8').replace(/\n$/, '');
 }
 
 /** The exact bytes of a golden, without the final newline of the file. */

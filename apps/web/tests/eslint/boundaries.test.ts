@@ -35,6 +35,21 @@ const DYNAMIC = 'torneo/no-restricted-dynamic-imports';
 describe('import boundaries that fail', () => {
   it.each([
     [
+      'the generated engine outside its loader',
+      'src/lib/features/replay/verify.ts',
+      "import init from './engine-wasm/engine_wasm.js';\nexport const x = init;\n",
+    ],
+    [
+      'the generated engine by alias in a route',
+      'src/routes/fights/+page.ts',
+      "import init from '#lib/features/replay/engine-wasm/engine_wasm.js';\nexport const x = init;\n",
+    ],
+    [
+      'the generated engine in a component',
+      'src/lib/components/replay/X.svelte',
+      svelte("  import init from '#lib/features/replay/engine-wasm/engine_wasm.js';\n  init;"),
+    ],
+    [
       'renderer value outside FightStage',
       'src/lib/components/fight/FightHud.svelte',
       svelte("  import { createRenderer } from '@torneo/renderer';\n  createRenderer;"),

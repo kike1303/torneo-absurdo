@@ -1,5 +1,6 @@
 <script lang="ts">
   // How a fight ended (010 RF54): the fight just seen, or the previous one next to what comes.
+  import { Button } from '#lib/components/ui/button/index.js';
   import * as Card from '#lib/components/ui/card/index.js';
   import type { FighterDisplay } from '#lib/features/fight/live/fighter-names.js';
   import type { FightResult } from '#lib/features/fight/live/view-state.js';
@@ -14,11 +15,13 @@
     previous: boolean;
     display: (slug: string, locale: Locale) => FighterDisplay;
     locale: Locale;
+    /** The replay of this fight: only once it is settled, and never on the replay itself (011 RF26). */
+    replayHref?: string;
     /** The public counter (012 RF23), with a fight that cannot be verified. */
     voidStats?: VoidStats | null;
   }
 
-  let { result, previous, display, locale, voidStats = null }: Props = $props();
+  let { result, previous, display, locale, replayHref, voidStats = null }: Props = $props();
 
   const nameA = $derived(display(result.fight.a.slug, locale).name);
   const nameB = $derived(display(result.fight.b.slug, locale).name);
@@ -57,6 +60,13 @@
           secret_lost: formatInteger(voidStats.secret_lost, locale),
         })}
       </p>
+    {/if}
+    {#if replayHref !== undefined}
+      <div class="pt-1">
+        <Button variant="outline" href={replayHref} data-testid="fight-result-replay">
+          {m.replay_result_link()}
+        </Button>
+      </div>
     {/if}
   </Card.Content>
 </Card.Root>

@@ -24,7 +24,13 @@ jobs:
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d
         with:
           filters: |
-            web: ['apps/web/**']
+            common: &common
+              - justfile
+            rust:
+              - *common
+              - apps/web/src/lib/features/replay/engine-wasm/**
+              - scripts/wasm-generate.sh
+            web: ['apps/web/**', 'apps/server/tests/golden/fight-verify-vectors.json']
             e2e: ['apps/web/**', 'apps/server/**']
   policy:
     runs-on: ubuntu-24.04

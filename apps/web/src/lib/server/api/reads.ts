@@ -1,6 +1,8 @@
 import type {
+  FightDetail,
   FightPool,
   FightsCurrent,
+  FightsPage,
   Me,
   MyFightBets,
   Provider,
@@ -20,6 +22,23 @@ export function getMe(api: Api): Promise<ApiResult<Me>> {
 /** What is on now (010 RF35): from the memory of the server, without a session. */
 export function getFightsCurrent(api: Api): Promise<ApiResult<FightsCurrent>> {
   return apiRequest<FightsCurrent>(api, 'GET', '/api/fights/current');
+}
+
+/**
+ * A page of settled fights (011 RF7). By number, never a text of the URL: `handleFetch` adds the
+ * internal secret to whatever path this builds (RF18).
+ */
+export function getFightsPage(api: Api, before: number | null): Promise<ApiResult<FightsPage>> {
+  return apiRequest<FightsPage>(
+    api,
+    'GET',
+    before === null ? '/api/fights' : `/api/fights?before=${before}`,
+  );
+}
+
+/** A fight (010 RF34). By number, like `getFightsPage`. */
+export function getFightDetail(api: Api, id: number): Promise<ApiResult<FightDetail>> {
+  return apiRequest<FightDetail>(api, 'GET', `/api/fights/${id}`);
 }
 
 /** The public counter of the voided fights (012 RF23). */

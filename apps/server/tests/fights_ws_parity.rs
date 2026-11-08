@@ -1,6 +1,7 @@
 //! 010 RF41: nothing delates before `Live`. Two fights with the same specs and two seeds that give a
 //! different result or duration produce, on a manual clock, the same messages and the same bodies of
-//! the two `GET` until `live_started_at`, except the `id`, the `seed_commit` and the hours.
+//! the `GET` routes until `live_started_at`, except the `id`, the `seed_commit` and the hours. 011 RF9
+//! extends it to `GET /api/fights`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod support;
@@ -69,6 +70,7 @@ async fn read_channel(client: &mut ws::Client, out: &mut Vec<String>) {
 
 async fn read_routes(addr: SocketAddr, id: i32, out: &mut Vec<String>) {
     for path in [
+        "/api/fights".to_owned(),
         "/api/fights/current".to_owned(),
         format!("/api/fights/{id}"),
     ] {

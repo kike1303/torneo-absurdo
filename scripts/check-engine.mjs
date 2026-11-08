@@ -18,7 +18,9 @@
 // - crates/engine-wasm/src contains the token `unsafe`; mentions `unsafe_code` anywhere outside
 //   comments and a `deny`/`forbid` lint list (so any allow/expect/warn, direct, crate-level,
 //   inside cfg_attr or produced by a macro, fails closed); or contains `include!` or a `path`
-//   attribute, which would pull in code this check does not read;
+//   attribute, which would pull in code this check does not read; or contains `extern` outside
+//   comments, because the bindings do not import anything of the host (011 RF3);
+// - the normal graph of engine-wasm alone contains js-sys or web-sys (011 RF3);
 // - crates/engine-wasm/Cargo.toml does not inherit the workspace lints (`[lints] workspace =
 //   true`, so unsafe_code = "forbid") or has a [lints.*] table of its own.
 // The functions are pure over text, so the tests feed them fixtures.
@@ -155,6 +157,27 @@ export function checkServerGraph(tree) {
   return problems;
 }
 
+/** Crates that would let the bindings reach the browser (011 RF3). */
+export const WASM_FORBIDDEN_CRATES = Object.freeze(['js-sys', 'web-sys']);
+
+/**
+ * @param {{ packages: Set<string> }} tree `cargo tree -p engine-wasm -e normal,features`
+ * @returns {string[]} problems
+ */
+export function checkWasmGraph(tree) {
+  /** @type {string[]} */
+  const problems = [];
+  if (!tree.packages.has('engine-wasm')) problems.push('engine-wasm: not in the cargo tree output');
+  for (const name of WASM_FORBIDDEN_CRATES) {
+    if (tree.packages.has(name)) {
+      problems.push(
+        `${name}: in the normal graph of engine-wasm (011 RF3: it must not reach the DOM)`,
+      );
+    }
+  }
+  return problems;
+}
+
 function cargoMetadata() {
   return JSON.parse(
     execFileSync('cargo', ['metadata', '--format-version', '1', '--no-deps', '--locked'], {
@@ -193,6 +216,7 @@ const UNSAFE_CODE = /\bunsafe_code\b/g;
 const STRICT_LIST = /\b(deny|forbid)\s*\(([^()]*)\)/g;
 const INCLUDE = /\binclude\s*!/g;
 const PATH_ATTR = /#\s*!?\s*\[\s*path\b|\bcfg_attr\s*\([^\]]*\bpath\s*=/g;
+const EXTERN = /\bextern\b/;
 
 /**
  * Replaces the comments of Rust source (`//...`, nested `/* ... *\/`) with spaces, keeping
@@ -273,6 +297,8 @@ export function checkWasmSources(sources) {
     INCLUDE.lastIndex = 0;
     if (PATH_ATTR.test(code)) problems.push(`${file}: uses a #[path] attribute (RF19)`);
     PATH_ATTR.lastIndex = 0;
+    if (EXTERN.test(code))
+      problems.push(`${file}: uses extern (011 RF3: it must not reach the host)`);
   }
   return problems;
 }
@@ -375,6 +401,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       ? checkEngineGraph(parseCargoTree(cargoTree(consumers)), { roots: consumers })
       : []),
     ...checkServerGraph(parseCargoTree(cargoTree(['server'], 'normal,build,dev'))),
+    ...checkWasmGraph(parseCargoTree(cargoTree(['engine-wasm']))),
     ...checkWasmSources(rustSources(path.join(ROOT, 'crates/engine-wasm/src'))),
     ...checkWasmLints(read('Cargo.toml'), read('crates/engine-wasm/Cargo.toml')),
   ];

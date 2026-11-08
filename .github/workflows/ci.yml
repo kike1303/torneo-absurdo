@@ -70,6 +70,11 @@ jobs:
               # Run by _check-engine and _check-wasm inside check-rust (003).
               - scripts/check-engine.mjs
               - scripts/wasi-runner.mjs
+              # Compared byte by byte with what _check-wasm-artifact generates (011 RF2). A PR that
+              # only changes the binary has to run that check; check-workflows requires this line.
+              - apps/web/src/lib/features/replay/engine-wasm/**
+              # What _check-wasm-artifact generates with; check-workflows requires this line too.
+              - scripts/wasm-generate.sh
               # Embedded by apps/server/src/config.rs with include_str! (008 RF-B18).
               - scripts/__fixtures__/loopback-origins.json
               # Run on the musl binary (008 RF-D9).
@@ -85,6 +90,8 @@ jobs:
               # The 3D botarga the web bundles (013).
               - content/models/**
               - crates/content/tests/golden/**
+              # The verifier of the browser reads them (011 RF14).
+              - apps/server/tests/golden/fight-verify-vectors.json
               - docs/guides/**
               - crates/protocol/**
               - crates/engine/**
@@ -170,7 +177,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
-    # TA-27: the Postgres integration tests put a warm run at 18-20 min, right at the old limit.
+    # 011 D6 (wasm-bindgen-cli and the wasm) and TA-27 (the Postgres integration tests) set this limit.
     timeout-minutes: 30
     permissions:
       contents: read
@@ -582,7 +589,7 @@ jobs:
           once http://127.0.0.1:3000/es/ 200 x-content-type-options referrer-policy \
             strict-transport-security cross-origin-opener-policy permissions-policy \
             content-security-policy
-          # ADR-0012 B1 plus B4.6 (the 2026-10-30 amendment: the two authorize endpoints in
+          # ADR-0012 B1 plus B4.1 ('wasm-unsafe-eval', 011 RF6) and B4.6 (the 2026-10-30 amendment: the two authorize endpoints in
           # form-action), as this image emits it (nonce normalized; directive and source order
           # ignored). A B4 extension changes this line in its own PR, and the b1= of verify in
           # release.yml with it: check-workflows wants both identical byte for byte (B6.4 item 7).
@@ -593,11 +600,11 @@ jobs:
                 printf '%s %s\n' "$name" "$(tr ' ' '\n' <<<"$rest" | grep -v '^$' | sort | paste -sd ' ' -)"
               done | sort
           }
-          b1="default-src 'self'; script-src 'self' 'nonce-*'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com/o/oauth2/v2/auth https://discord.com/oauth2/authorize; frame-ancestors 'none'"
+          b1="default-src 'self'; script-src 'self' 'nonce-*' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com/o/oauth2/v2/auth https://discord.com/oauth2/authorize; frame-ancestors 'none'"
           csp="$(curl -sS -I http://127.0.0.1:3000/es/ | grep -i '^content-security-policy:' |
             sed 's/^[^:]*:[[:space:]]*//')"
           if ! diff <(csp_norm <<<"$b1") <(csp_norm <<<"$csp"); then
-            echo "/es/ CSP is not ADR-0012 B1 plus B4.6: $csp" >&2
+            echo "/es/ CSP is not ADR-0012 B1 plus B4.1 and B4.6: $csp" >&2
             exit 1
           fi
           server_headers=(x-content-type-options strict-transport-security

@@ -10,19 +10,39 @@ use sqlx::{PgConnection, PgPool, Row};
 use super::sealed::ClosedWindow;
 use super::state::FightRow;
 
+/// The columns [`decode`] reads, in its order. What goes in the positions of the specs and of the
+/// reveal is the only difference between a whole row and the row of a list.
+macro_rules! columns_with {
+    ($specs:literal, $reveal:literal) => {
+        concat!(
+            "id, state, \
+             (extract(epoch FROM opens_at) * 1000)::bigint, \
+             (extract(epoch FROM closes_at) * 1000)::bigint, \
+             (extract(epoch FROM live_at) * 1000)::bigint, \
+             ruleset_version, ",
+            $specs,
+            ", snapshot_sha256, slug_a, slug_b, max_hp_a, max_hp_b, \
+             time_limit_ms, max_duration_ms, matchup_round, roster_sha256, seed_commit, \
+             (extract(epoch FROM opened_at) * 1000)::bigint, \
+             (extract(epoch FROM closed_at) * 1000)::bigint, \
+             (extract(epoch FROM live_started_at) * 1000)::bigint, \
+             (extract(epoch FROM settled_at) * 1000)::bigint, \
+             winner, end_reason, cancel_reason, void_reason, ",
+            $reveal
+        )
+    };
+}
+
 macro_rules! columns {
     () => {
-        "id, state, \
-         (extract(epoch FROM opens_at) * 1000)::bigint, \
-         (extract(epoch FROM closes_at) * 1000)::bigint, \
-         (extract(epoch FROM live_at) * 1000)::bigint, \
-         ruleset_version, spec_a, spec_b, snapshot_sha256, slug_a, slug_b, max_hp_a, max_hp_b, \
-         time_limit_ms, max_duration_ms, matchup_round, roster_sha256, seed_commit, \
-         (extract(epoch FROM opened_at) * 1000)::bigint, \
-         (extract(epoch FROM closed_at) * 1000)::bigint, \
-         (extract(epoch FROM live_started_at) * 1000)::bigint, \
-         (extract(epoch FROM settled_at) * 1000)::bigint, \
-         winner, end_reason, cancel_reason, void_reason, revealed_seed, log"
+        columns_with!("spec_a, spec_b", "revealed_seed, log")
+    };
+}
+
+/// For a list (011 RF8): it cannot bring a seed nor a log, and Postgres does not read their TOAST.
+macro_rules! summary_columns {
+    () => {
+        columns_with!("''::bytea, ''::bytea", "NULL::bytea, NULL::bytea")
     };
 }
 
@@ -146,6 +166,46 @@ pub async fn by_id_bounded(
         .await?;
     tx.commit().await?;
     row.as_ref().map(decode).transpose()
+}
+
+/// The fights of a page of `GET /api/fights` (011 RF7).
+pub const PAGE_SIZE: usize = 20;
+
+/// A row of a page. Its `id` apart: where the next page starts does not depend on the rest decoding.
+pub struct PageRow {
+    pub id: i32,
+    pub row: Result<FightRow, sqlx::Error>,
+}
+
+/// Up to `PAGE_SIZE + 1` settled fights below `before`, the highest id first (011 RF8). Without
+/// `before`, from the top: `i32::MAX` itself has to enter too, with one single query. It walks the
+/// primary key backwards and only discards the unsettled rows, which are few.
+pub async fn settled_page(
+    pool: &PgPool,
+    before: Option<i32>,
+    lock_timeout_ms: u64,
+) -> Result<Vec<PageRow>, sqlx::Error> {
+    let below = before.map_or(i64::from(i32::MAX) + 1, i64::from);
+    let mut tx = pool.begin().await?;
+    set_lock_timeout(&mut tx, lock_timeout_ms).await?;
+    let rows = sqlx::query(concat!(
+        "SELECT ",
+        summary_columns!(),
+        " FROM fights WHERE state = 'settled' AND id < $1::bigint ORDER BY id DESC LIMIT $2"
+    ))
+    .bind(below)
+    .bind(i64::try_from(PAGE_SIZE + 1).unwrap_or(i64::MAX))
+    .fetch_all(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    rows.iter()
+        .map(|row| {
+            Ok(PageRow {
+                id: row.try_get(0)?,
+                row: decode(row),
+            })
+        })
+        .collect()
 }
 
 /// The fight with this id.

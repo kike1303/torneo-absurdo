@@ -29,3 +29,25 @@ test('data-hydrated appears only once the client has mounted', async ({ page }) 
   await waitForHydration(page);
   await expect(page.locator('html')).toHaveAttribute('data-hydrated', '');
 });
+
+// 011 RF17: the same text on both sides at first, in UTC and with its zone, and local from `onMount`.
+test.describe('the date of a past fight', { tag: '@replays' }, () => {
+  test.use({ timezoneId: 'America/Mexico_City', locale: 'es-MX' });
+
+  test('UTC in the SSR, local once mounted, without an error', async ({ page, request }) => {
+    const html = await (await request.get('/es/fights')).text();
+    expect(html).toContain('UTC');
+
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error') errors.push(message.text());
+    });
+    await page.goto('/es/fights');
+    await waitForHydration(page);
+    const date = page.getByTestId('fight-date').first();
+    await expect(date).toHaveAttribute('data-local', '');
+    await expect(date).not.toContainText('UTC');
+    expect(errors).toEqual([]);
+  });
+});

@@ -9,10 +9,12 @@
 //   node e2e/support/db.mjs a9 --check   fail if a parameter differs (always)
 //
 // The URL comes from E2E_DATABASE_URL.
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import postgres from 'postgres';
+import { REPLAY_VECTORS, deriveSeed, goldenLogText, goldenSpecText } from './fight-script.mjs';
 
 export const E2E_DATABASE = 'torneo_e2e';
 const ALLOWED_HOSTS = ['127.0.0.1', 'localhost', '[::1]', 'postgres'];
@@ -270,6 +272,109 @@ export async function seedYesterdayUser(identity, coins, url = process.env.E2E_D
         VALUES (${entry.id}, '00000000-0000-0000-0000-000000000001', ${-coins}),
                (${entry.id}, ${account.id}, ${coins})`;
     });
+  } finally {
+    await sql.end({ timeout: 1 });
+  }
+}
+
+const sha256 = (/** @type {Buffer | string} */ value) =>
+  createHash('sha256').update(value).digest();
+const HOUR_MS = 3_600_000;
+const DAY_MS = 24 * HOUR_MS;
+
+/**
+ * The rows of the seeded replays (011 "Estrategia de pruebas"), in `id` order on a new database.
+ * Real data: the specs and logs of the goldens. The keys are what replays.spec.ts asks for.
+ */
+export const REPLAY_ROWS = /** @type {const} */ ([
+  { name: 'ko', vector: 'ko', ending: 'decided' },
+  { name: 'decision', vector: 'decision', ending: 'decided' },
+  { name: 'draw', vector: 'draw', ending: 'decided' },
+  { name: 'voided', vector: 'ko', ending: 'voided', reason: 'engine_error' },
+  { name: 'missed_window', vector: 'decision', ending: 'cancelled', reason: 'missed_window' },
+  { name: 'fight_unrunnable', vector: 'draw', ending: 'cancelled', reason: 'fight_unrunnable' },
+  { name: 'scheduled', vector: 'ko', ending: 'none' },
+]);
+
+/**
+ * Each row in one transaction, along the legal transitions of RF4 and RF9: the triggers allow it, and
+ * the runner never sees a state in between. Needs the server already migrated (Playwright starts
+ * `webServer` before `globalSetup`).
+ * @param {string | undefined} [url]
+ * @returns {Promise<{ ids: number[], secrets: string[] }>} the ids, and what must never reach a log
+ */
+export async function seedReplays(url = process.env.E2E_DATABASE_URL) {
+  const target = assertE2eTarget(url);
+  const sql = connect(target.toString());
+  const now = Date.now();
+  /** @type {number[]} */
+  const ids = [];
+  /** @type {string[]} */
+  const secrets = [];
+  const at = (/** @type {number} */ ms) => new Date(ms).toISOString();
+  try {
+    for (const [index, row] of REPLAY_ROWS.entries()) {
+      const vector = REPLAY_VECTORS[row.vector];
+      const specA = goldenSpecText(vector.a);
+      const specB = goldenSpecText(vector.b);
+      const logText = goldenLogText(vector.log);
+      const log = JSON.parse(logText);
+      const end = log.events.findLast((/** @type {{ type: string }} */ e) => e.type === 'end');
+      const seedHex = deriveSeed(vector.seed);
+      const seed = Buffer.from(seedHex, 'hex');
+      const commit = sha256(seed);
+      const snapshot = sha256(`{"ruleset_version":1,"a":${specA},"b":${specB}}`);
+      // The settled ones are in the past; `scheduled` is far from any window of the run.
+      const opens = row.ending === 'none' ? now + 7 * DAY_MS : now - DAY_MS + index * HOUR_MS;
+      const closes = opens + 450_000;
+      const liveAt = opens + 480_000;
+      const settled = liveAt + 100_000;
+      const id = await sql.begin(async (tx) => {
+        const [inserted] = await tx`
+          INSERT INTO fights (state, opens_at, closes_at, live_at, ruleset_version, spec_a, spec_b,
+            snapshot_sha256, slug_a, slug_b, max_hp_a, max_hp_b, time_limit_ms, max_duration_ms,
+            matchup_round, roster_sha256)
+          VALUES ('scheduled', ${at(opens)}::timestamptz, ${at(closes)}::timestamptz,
+            ${at(liveAt)}::timestamptz, 1, ${Buffer.from(specA)}, ${Buffer.from(specB)},
+            ${snapshot}, ${log.a.slug}, ${log.b.slug}, ${log.a.max_hp}, ${log.b.max_hp}, 86000,
+            90000, 1, ${sha256('e2e-replays')})
+          RETURNING id`;
+        const fightId = Number(inserted?.id);
+        if (row.ending === 'none') return fightId;
+        if (row.ending === 'cancelled') {
+          await tx`
+            UPDATE fights SET state = 'settled', settled_at = ${at(settled)}::timestamptz,
+              cancel_reason = ${row.reason} WHERE id = ${fightId}`;
+          return fightId;
+        }
+        await tx`INSERT INTO fight_secrets (fight_id, seed) VALUES (${fightId}, ${seed})`;
+        await tx`
+          UPDATE fights SET state = 'betting_open', seed_commit = ${commit},
+            opened_at = ${at(opens)}::timestamptz WHERE id = ${fightId}`;
+        await tx`
+          UPDATE fights SET state = 'betting_closed', closed_at = ${at(closes)}::timestamptz
+          WHERE id = ${fightId}`;
+        if (row.ending === 'voided') {
+          await tx`
+            UPDATE fights SET state = 'settled', settled_at = ${at(settled)}::timestamptz,
+              void_reason = ${row.reason}, revealed_seed = ${seed} WHERE id = ${fightId}`;
+        } else {
+          await tx`
+            UPDATE fights SET state = 'live', live_started_at = ${at(liveAt)}::timestamptz
+            WHERE id = ${fightId}`;
+          await tx`
+            UPDATE fights SET state = 'settled', settled_at = ${at(settled)}::timestamptz,
+              winner = ${end.winner}, end_reason = ${end.reason}, revealed_seed = ${seed},
+              log = ${Buffer.from(logText)} WHERE id = ${fightId}`;
+        }
+        await tx`DELETE FROM fight_secrets WHERE fight_id = ${fightId}`;
+        return fightId;
+      });
+      ids.push(id);
+      if (row.ending !== 'none' && row.ending !== 'cancelled') secrets.push(seedHex);
+      if (row.ending === 'decided') secrets.push(JSON.stringify(log.events.slice(1, 3)));
+    }
+    return { ids, secrets };
   } finally {
     await sql.end({ timeout: 1 });
   }

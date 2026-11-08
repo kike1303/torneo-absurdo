@@ -4,6 +4,7 @@ import {
   NOT_ENGINE_CONSUMERS,
   checkEngineGraph,
   checkServerGraph,
+  checkWasmGraph,
   engineConsumers,
   checkWasmLints,
   checkWasmSources,
@@ -199,6 +200,23 @@ describe('checkServerGraph (ADR-0002)', () => {
   });
 });
 
+describe('checkWasmGraph (011 RF3)', () => {
+  it('passes with the real graph of the consumers, which holds engine-wasm', () => {
+    expect(checkWasmGraph(parseCargoTree(TREE_CONSUMERS_OK))).toEqual([]);
+  });
+  it.each(['js-sys v0.3.99', 'web-sys v0.3.99'])('fails with %s in the graph', (line) => {
+    const name = line.split(' ')[0];
+    expect(checkWasmGraph(parseCargoTree(`engine-wasm v0.1.0\n${line}\n`))).toEqual([
+      `${name}: in the normal graph of engine-wasm (011 RF3: it must not reach the DOM)`,
+    ]);
+  });
+  it('fails if engine-wasm is missing from the output, so it never passes empty', () => {
+    expect(checkWasmGraph(parseCargoTree('serde v1.0.0\n'))).toEqual([
+      'engine-wasm: not in the cargo tree output',
+    ]);
+  });
+});
+
 describe('checkWasmSources (RF19)', () => {
   const exported = '#[wasm_bindgen]\npub fn simulate() {}\n';
   const check = (text) => checkWasmSources([{ file: 'lib.rs', text }]);
@@ -267,6 +285,19 @@ describe('checkWasmSources (RF19)', () => {
     expect(
       check(`/* a /* nested */ still a comment */ #[allow(unsafe_code)]\n${exported}`),
     ).toEqual([expect.stringMatching(RELAXED)]);
+  });
+  it.each([
+    ['a block', 'extern "C" {\n    fn f();\n}\n'],
+    ['a block without an ABI', 'extern {\n    fn f();\n}\n'],
+    ['a function', 'pub extern "C" fn f() {}\n'],
+    ['a crate', 'extern crate alloc;\n'],
+    ['a bound block', '#[wasm_bindgen]\nextern "C" {\n    fn alert(s: &str);\n}\n'],
+  ])('fails with extern in %s (011 RF3)', (_, text) => {
+    expect(check(text)).toEqual(['lib.rs: uses extern (011 RF3: it must not reach the host)']);
+  });
+  it('ignores extern in a comment or a longer word, and fails closed in a string (011 RF3)', () => {
+    expect(check('// extern "C"\n/* extern */\nfn external() {}\n')).toEqual([]);
+    expect(check('const S: &str = "extern";\n')).toHaveLength(1);
   });
   it('checks every file', () => {
     expect(

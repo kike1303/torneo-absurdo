@@ -489,6 +489,67 @@ fn the_test_of_the_gate_of_dev_fights_exists_and_runs() {
     );
 }
 
+/// The text of `macro_rules! name`, up to the next item that is not its body. Empty if there is none.
+fn macro_text<'a>(code: &'a str, name: &str) -> &'a str {
+    let Some(start) = code.find(&format!("macro_rules! {name} {{")) else {
+        return "";
+    };
+    let rest = &code[start..];
+    let end = rest.find("\n}\n").unwrap_or(rest.len());
+    &rest[..end]
+}
+
+/// The column of the secret, or of what is heavy and has no reason to be read by a list, that this SQL
+/// reads.
+fn reads_what_a_list_does_not(sql: &str) -> Option<String> {
+    tokens(sql)
+        .into_iter()
+        .find(|token| ["revealed_seed", "log", "spec_a", "spec_b"].contains(&token.as_str()))
+}
+
+#[test]
+fn the_search_for_the_columns_of_a_list_catches_every_form() {
+    for sql in [
+        "\"id, revealed_seed, log\"",
+        "\"id, log\"",
+        "\"x, log::bytea\"",
+        "\"spec_a,spec_b\"",
+        "\"(spec_b)\"",
+    ] {
+        assert!(reads_what_a_list_does_not(sql).is_some(), "{sql}");
+    }
+    for sql in [
+        "\"NULL::bytea, ''::bytea\"",
+        "\"seed_commit, max_duration_ms, slug_a\"",
+        "\"id, login, spec_abc\"",
+    ] {
+        assert_eq!(reads_what_a_list_does_not(sql), None, "{sql}");
+    }
+}
+
+/// 011 RF8: the columns of the list cannot bring a seed nor a log: neither its macro nor what it shares
+/// with the whole row names them, and the page uses that macro, not the other.
+#[test]
+fn the_list_does_not_read_the_seed_nor_the_log() {
+    let code = strip_comments(&std::fs::read_to_string(src().join("fights/store.rs")).unwrap());
+    for name in ["summary_columns", "columns_with"] {
+        let text = macro_text(&code, name);
+        assert!(text.contains("bytea") || name == "columns_with", "{name}");
+        assert!(!text.is_empty(), "{name}");
+        assert_eq!(reads_what_a_list_does_not(text), None, "{name}: {text}");
+    }
+    // The shape that makes the two macros above enough: `columns!` is the only one that names them.
+    let whole = macro_text(&code, "columns");
+    assert!(whole.contains("revealed_seed, log"), "{whole}");
+
+    let start = code.find("pub async fn settled_page(").unwrap();
+    let rest = &code[start..];
+    let page = &rest[..rest.find("\n}\n").unwrap()];
+    assert!(tokens(page).iter().any(|token| token == "summary_columns"));
+    assert!(!tokens(page).iter().any(|token| token == "columns"));
+    assert_eq!(reads_what_a_list_does_not(page), None, "{page}");
+}
+
 /// RF23: `sealed.rs` cannot write a log line.
 #[test]
 fn the_sealed_module_has_no_tracing() {

@@ -78,6 +78,7 @@ pub enum Handler {
     Me,
     MeDisplayName,
     MePreferences,
+    FightsList,
     FightsCurrent,
     FightsVoidStats,
     FightDetail,
@@ -190,6 +191,12 @@ pub const ROUTES: &[RouteSpec] = &[
         effect: Effect::Mutate,
         handler: Handler::MePreferences,
     },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/fights",
+        effect: Effect::Read,
+        handler: Handler::FightsList,
+    },
     // The static segment wins over the parameter (010 RF34, RF35).
     RouteSpec {
         method: RouteMethod::Get,
@@ -301,6 +308,20 @@ pub fn check_manifest(routes: &[RouteSpec]) -> Result<(), RouteSpec> {
     Ok(())
 }
 
+/// A read of the database by anyone: `FIGHT_READ_IP`.
+fn fight_read(route: MethodRouter<AppState>, state: &AppState) -> MethodRouter<AppState> {
+    route
+        .layer::<_, std::convert::Infallible>(middleware::from_fn_with_state(
+            state.rate.fight_read_ip.clone(),
+            rate::http::layer,
+        ))
+        // Outside the limiter, so its 429 says `no-store` too (RF34).
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store"),
+        ))
+}
+
 /// The method router of a manifest entry, with its per-route layers.
 fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
     use crate::auth;
@@ -341,26 +362,11 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         Handler::MeDisplayName => on(filter, crate::profile::update::display_name).layer(body),
         Handler::MePreferences => on(filter, crate::profile::update::preferences).layer(body),
         Handler::FightsCurrent => on(filter, fights::api::current),
+        // One bucket for both: a visitor reads the list and the detail (011 RF7).
+        Handler::FightsList => fight_read(on(filter, fights::api::list), state),
+        Handler::FightDetail => fight_read(on(filter, fights::api::detail), state),
         // The same limit and the same cache as the detail (012 RF23).
-        Handler::FightsVoidStats => on(filter, fights::void_stats::handler)
-            .layer::<_, std::convert::Infallible>(middleware::from_fn_with_state(
-                state.rate.fight_read_ip.clone(),
-                rate::http::layer,
-            ))
-            .layer(SetResponseHeaderLayer::overriding(
-                header::CACHE_CONTROL,
-                HeaderValue::from_static("no-store"),
-            )),
-        Handler::FightDetail => on(filter, fights::api::detail)
-            .layer::<_, std::convert::Infallible>(middleware::from_fn_with_state(
-                state.rate.fight_read_ip.clone(),
-                rate::http::layer,
-            ))
-            // Outside the limiter, so its 429 says `no-store` too (RF34).
-            .layer(SetResponseHeaderLayer::overriding(
-                header::CACHE_CONTROL,
-                HeaderValue::from_static("no-store"),
-            )),
+        Handler::FightsVoidStats => fight_read(on(filter, fights::void_stats::handler), state),
         // 012 RF29, RF30: no body extractor, and the limit anyway, as the spec asks.
         Handler::BonusClaim => on(filter, crate::bets::claims::bonus).layer(body),
         Handler::BailoutClaim => on(filter, crate::bets::claims::bailout).layer(body),
@@ -369,15 +375,7 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         Handler::Bet => on(filter, crate::bets::api::place).layer(body),
         Handler::MyBets => on(filter, crate::bets::api::mine),
         // 012 RF34: the limit and the cache of the detail.
-        Handler::FightPool => on(filter, crate::bets::pool::pool)
-            .layer::<_, std::convert::Infallible>(middleware::from_fn_with_state(
-                state.rate.fight_read_ip.clone(),
-                rate::http::layer,
-            ))
-            .layer(SetResponseHeaderLayer::overriding(
-                header::CACHE_CONTROL,
-                HeaderValue::from_static("no-store"),
-            )),
+        Handler::FightPool => fight_read(on(filter, crate::bets::pool::pool), state),
         Handler::BetQuote => on(filter, crate::bets::pool::quote),
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize => on(filter, auth::dev::authorize),

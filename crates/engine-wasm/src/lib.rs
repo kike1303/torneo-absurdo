@@ -1,5 +1,5 @@
-//! WASM bindings of the fight engine (003 RF19). One exported function, [`simulate`], over
-//! the pure [`run`], which the native tests exercise.
+//! WASM bindings of the fight engine (003 RF19, 011 RF4). Two exported functions, [`simulate`] and
+//! [`ruleset_bounds`], over the pure [`run`] and [`bounds`], which the native tests exercise.
 //!
 //! Untrusted input (JSON from the client): every text argument is rejected above 8 KiB before
 //! parsing, specs must be exactly the engine shape (`deny_unknown_fields`), and errors carry
@@ -108,6 +108,20 @@ pub fn run(
     String::from_utf8(bytes).map_err(|_| WasmError::LogEncodeFailed)
 }
 
+/// The bounds of a ruleset as `{"time_limit_ms":N,"max_duration_ms":M}`, the same sum the native
+/// verifier does, so the browser does not copy data of the engine (011 RF4).
+///
+/// # Errors
+/// [`WasmError::RulesetUnknown`] with a version the engine does not know.
+pub fn bounds(ruleset_version: u16) -> Result<String, WasmError> {
+    let ruleset = Ruleset::for_version(ruleset_version).ok_or(WasmError::RulesetUnknown)?;
+    let time_limit_ms = ruleset.time_limit_ms();
+    let max_duration_ms = time_limit_ms + ruleset.end_ms();
+    Ok(format!(
+        r#"{{"time_limit_ms":{time_limit_ms},"max_duration_ms":{max_duration_ms}}}"#
+    ))
+}
+
 /// Simulates a fight and returns its canonical JSON; on error, a `JsError` whose message is
 /// only the code (RF19).
 ///
@@ -121,4 +135,13 @@ pub fn simulate(
     ruleset_version: u16,
 ) -> Result<String, JsError> {
     run(seed_hex, a_json, b_json, ruleset_version).map_err(|error| JsError::new(&error.code()))
+}
+
+/// The bounds of a ruleset as JSON; on error, a `JsError` whose message is only the code (011 RF4).
+///
+/// # Errors
+/// See [`bounds`].
+#[wasm_bindgen]
+pub fn ruleset_bounds(ruleset_version: u16) -> Result<String, JsError> {
+    bounds(ruleset_version).map_err(|error| JsError::new(&error.code()))
 }
