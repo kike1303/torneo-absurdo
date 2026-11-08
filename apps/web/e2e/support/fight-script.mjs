@@ -3,7 +3,7 @@
 // vectors of two engine goldens, a KO and a draw, built from the golden specs and the seed of each
 // vector, so regenerating the goldens keeps it valid. It is written, never committed.
 //
-//   node apps/web/e2e/support/fight-script.mjs
+//   node apps/web/e2e/support/fight-script.mjs [--bets]
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,9 @@ import { fileURLToPath } from 'node:url';
 const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const GOLDEN = path.resolve(WEB, '../../crates/engine/tests/golden');
 export const FIGHT_SCRIPT = path.join(WEB, 'test-results', 'fight-script.json');
+/** The bets run (012 plan-c C8): a KO with both sides, a draw, and a KO with one side only. */
+export const BETS_SCRIPT = path.join(WEB, 'test-results', 'bets-script.json');
+export const BETS_ORDER = /** @type {const} */ (['ko', 'draw', 'ko']);
 
 /** `crates/engine/tests/common/mod.rs`. */
 const ROOT_SEED = 'torneo-absurdo-engine-golden-v1!';
@@ -39,6 +42,12 @@ export function fightScript() {
   }));
 }
 
+export function betsScript() {
+  const rows = fightScript();
+  const byKind = { ko: rows[0], draw: rows[1] };
+  return BETS_ORDER.map((kind) => byKind[kind]);
+}
+
 /** The exact bytes of a golden, without the final newline of the file. */
 export function goldenLog(/** @type {keyof typeof VECTORS} */ name) {
   return readFileSync(path.join(GOLDEN, VECTORS[name].log), 'utf8').replace(/\n$/, '');
@@ -46,5 +55,6 @@ export function goldenLog(/** @type {keyof typeof VECTORS} */ name) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   mkdirSync(path.dirname(FIGHT_SCRIPT), { recursive: true });
-  writeFileSync(FIGHT_SCRIPT, JSON.stringify(fightScript()));
+  if (process.argv[2] === '--bets') writeFileSync(BETS_SCRIPT, JSON.stringify(betsScript()));
+  else writeFileSync(FIGHT_SCRIPT, JSON.stringify(fightScript()));
 }

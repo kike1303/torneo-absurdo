@@ -24,7 +24,15 @@ const BOARD: FightsCurrent = {
 function html(voidStats: { voided: number; secret_lost: number } | null): string {
   overwriteGetLocale(() => 'es');
   return render(Page, {
-    props: { data: { board: BOARD, voidStats, debug: false } },
+    props: {
+      data: {
+        board: BOARD,
+        voidStats,
+        debug: false,
+        betting: { signedIn: false, wallet: null, mine: {}, pool: null, clientKey: 'k' },
+      },
+      form: null,
+    },
   } as never).body;
 }
 

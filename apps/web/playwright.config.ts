@@ -19,8 +19,9 @@ const NO_ROSTER = path.join(import.meta.dirname, 'e2e', 'support', 'no-roster');
 
 export default defineConfig({
   testDir: './e2e',
-  // Runs against `just dev` with playwright.dev.config.ts, and with playwright.fights.config.ts.
-  testIgnore: ['dev-status.spec.ts', 'fights.spec.ts'],
+  // Runs against `just dev` with playwright.dev.config.ts, and with playwright.fights.config.ts and
+  // playwright.bets.config.ts.
+  testIgnore: ['dev-status.spec.ts', 'fights.spec.ts', 'bets.spec.ts'],
   outputDir: './test-results/artifacts',
   fullyParallel: false,
   workers: 1,
@@ -41,7 +42,7 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'], launchOptions: CHROMIUM_FLAGS },
       // Covered by arena.spec.ts in Chromium (005 plan decision 11).
-      testIgnore: ['dev-status.spec.ts', 'arena-webkit.spec.ts', 'fights.spec.ts'],
+      testIgnore: ['dev-status.spec.ts', 'arena-webkit.spec.ts', 'fights.spec.ts', 'bets.spec.ts'],
     },
     {
       name: 'webkit',
