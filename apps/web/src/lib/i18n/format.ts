@@ -20,6 +20,13 @@ export function formatDecimal(n: number, locale: Locale, digits: number): string
   }).format(n);
 }
 
+/** A share from 0 to 1 as a percent, with up to two decimals (the rake of a pool). */
+export function formatPercent(share: number, locale: Locale): string {
+  return new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 2 }).format(
+    share,
+  );
+}
+
 export function formatDate(
   date: Date,
   locale: Locale,

@@ -27,7 +27,8 @@ const UNAVAILABLE = { ok: false, unavailable: true } as const;
 
 /**
  * One request to the internal API. 2xx and 3xx are success (a form action's 303 included; the
- * redirect is never followed); a 2xx body that is not JSON counts as unavailable. Any other
+ * redirect is never followed). A 200 or a 201 carries a JSON body, and one that is not JSON counts
+ * as unavailable; any other success has no body. Any other
  * status gives `{ status, code }`, where `code` is the `error` of the body only if the protocol
  * knows it. Network errors and the timeout give `{ unavailable: true }`.
  */
@@ -54,7 +55,7 @@ export async function apiRequest<T>(
   }
   const { status } = response;
   if (status >= 200 && status < 400) {
-    if (status !== 200) {
+    if (status !== 200 && status !== 201) {
       await response.body?.cancel().catch(() => undefined);
       return { ok: true, status, data: undefined as T };
     }

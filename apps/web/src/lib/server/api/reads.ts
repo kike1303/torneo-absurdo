@@ -1,4 +1,13 @@
-import type { FightsCurrent, Me, Provider, ReauthStatus, VoidStats } from '@torneo/protocol';
+import type {
+  FightPool,
+  FightsCurrent,
+  Me,
+  MyFightBets,
+  Provider,
+  ReauthStatus,
+  VoidStats,
+  Wallet,
+} from '@torneo/protocol';
 import { apiRequest, type Api, type ApiResult } from './client.js';
 
 // Reads only (008 plan-d decisions 3 and 8): `GET`, usable from hooks and `load` functions.
@@ -24,4 +33,19 @@ export function getProviders(api: Api): Promise<ApiResult<Provider[]>> {
 
 export function getReauthStatus(api: Api): Promise<ApiResult<ReauthStatus>> {
   return apiRequest<ReauthStatus>(api, 'GET', '/api/auth/reauth-status');
+}
+
+/** The wallet of the session's user (012 RF32). */
+export function getWallet(api: Api): Promise<ApiResult<Wallet>> {
+  return apiRequest<Wallet>(api, 'GET', '/api/wallet');
+}
+
+/** The session's own bets on one fight (012 RF33). */
+export function getMyBets(api: Api, fightId: number): Promise<ApiResult<MyFightBets>> {
+  return apiRequest<MyFightBets>(api, 'GET', `/api/bets/mine?fight_id=${fightId}`);
+}
+
+/** The public pool of one fight (012 RF34). */
+export function getPool(api: Api, fightId: number): Promise<ApiResult<FightPool>> {
+  return apiRequest<FightPool>(api, 'GET', `/api/fights/${fightId}/pool`);
 }
