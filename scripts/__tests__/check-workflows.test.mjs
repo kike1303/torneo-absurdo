@@ -226,6 +226,11 @@ const CASES = [
     /wasm-artifact: the filter rust of jobs\.changes must have apps\/web\/src\/lib\/features\/replay\/engine-wasm\/\*\*/,
   ],
   [
+    'the filter of rust loses the script that generates the wasm',
+    { [CI]: [['              - scripts/wasm-generate.sh\n', '']] },
+    /wasm-artifact: the filter rust of jobs\.changes must have scripts\/wasm-generate\.sh/,
+  ],
+  [
     'the filter of rust loses the justfile',
     { [CI]: [['              - *common\n', '']] },
     /wasm-artifact: the filter rust of jobs\.changes must have justfile/,

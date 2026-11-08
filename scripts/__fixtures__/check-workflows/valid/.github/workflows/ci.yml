@@ -29,6 +29,7 @@ jobs:
             rust:
               - *common
               - apps/web/src/lib/features/replay/engine-wasm/**
+              - scripts/wasm-generate.sh
             web: ['apps/web/**', 'apps/server/tests/golden/fight-verify-vectors.json']
             e2e: ['apps/web/**', 'apps/server/**']
   policy:

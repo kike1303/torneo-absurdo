@@ -330,65 +330,52 @@ _check-wasm:
     CARGO_TARGET_WASM32_WASIP1_RUNNER="node --disable-warning=ExperimentalWarning {{justfile_directory()}}/scripts/wasi-runner.mjs" \
         cargo test -p engine --test golden --target wasm32-wasip1 --locked -- --nocapture
 
-# Uses the network once per target/: the CLI is outside Cargo.lock, so crate-age and deny do not see
-# its dependencies (011 worry 4). Without the RUSTFLAGS of _wasm-generate, which are not for this.
-# Prints the path of wasm-bindgen-cli, in the exact version of wasm-bindgen in Cargo.lock (011 RF1)
-_wasm-cli:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    version="$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)"
-    if [ -z "$version" ]; then
-        echo "wasm-bindgen is not in Cargo.lock" >&2
-        exit 1
-    fi
-    root="{{justfile_directory()}}/target/wasm-tools/$version"
-    if [ ! -x "$root/bin/wasm-bindgen" ]; then
-        env -u RUSTFLAGS -u CARGO_TARGET_DIR \
-            cargo install wasm-bindgen-cli --version "=$version" --locked --root "$root" >&2
-    fi
-    echo "$root/bin/wasm-bindgen"
-
-# The remap keeps the home of whoever generates out of the binary, and the repo is public. Its own
-# target directory: other RUSTFLAGS would rebuild the rest of target/ every time.
 # Compiles engine-wasm and writes the four files of wasm-bindgen into `out` (011 RF1)
 _wasm-generate out:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cli="$({{just_executable()}} _wasm-cli)"
-    RUSTFLAGS="--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}/registry/src=/cargo --remap-path-prefix=$PWD=/src" \
-        CARGO_TARGET_DIR=target/wasm-artifact \
-        cargo build -p engine-wasm --target wasm32-unknown-unknown --release --locked
-    "$cli" --target web --omit-default-module-path --out-dir "{{out}}" \
-        target/wasm-artifact/wasm32-unknown-unknown/release/engine_wasm.wasm
+    bash scripts/wasm-generate.sh "{{out}}"
 
 # Run it when crates/engine, engine-wasm, protocol, a crate of their graph or the toolchain changes,
-# and commit the result. On a conflict in the binary, regenerate: never merge it by hand.
+# and commit the result. On a conflict in the binary, regenerate: never merge it by hand. Off the
+# reference host it runs in the rust image of apps/server/Dockerfile under linux/amd64 (011 worry 2),
+# with Docker volumes for its target/ and the registry; on a Mac that needs Rosetta in Colima.
 # Regenerate the wasm the browser verifies with (011 RF1)
 gen-wasm:
     #!/usr/bin/env bash
     set -euo pipefail
-    mkdir -p apps/web/src/lib/features/replay/engine-wasm
-    rm -f apps/web/src/lib/features/replay/engine-wasm/*
-    {{just_executable()}} _wasm-generate "{{justfile_directory()}}/apps/web/src/lib/features/replay/engine-wasm"
+    out=apps/web/src/lib/features/replay/engine-wasm
+    mkdir -p "$out"
+    rm -f "$out"/*
+    host="$(rustc -vV | sed -n 's/^host: //p')"
+    if [ "$host" = x86_64-unknown-linux-gnu ]; then
+        {{just_executable()}} _wasm-generate "{{justfile_directory()}}/$out"
+        exit 0
+    fi
+    image="$(sed -n 's/^FROM --platform=\$BUILDPLATFORM \(rust:[^ ]*\) AS chef$/\1/p' apps/server/Dockerfile)"
+    if [ -z "$image" ]; then
+        echo "gen-wasm: no rust image in apps/server/Dockerfile" >&2
+        exit 1
+    fi
+    echo "gen-wasm: $host is not the reference host, generating in $image (linux/amd64)" >&2
+    docker run --rm --platform linux/amd64 \
+        -v "{{justfile_directory()}}:/src:ro" -v "{{justfile_directory()}}/$out:/src/$out" \
+        -v torneo-wasm-target:/src/target -v torneo-wasm-registry:/usr/local/cargo/registry \
+        -w /src "$image" bash scripts/wasm-generate.sh "/src/$out"
 
-# Only the hosts that give the bytes of the reference: linux/arm64 gives another binary, for a reason
-# nobody knows (011 worry 2). Another host skips it, except in CI, which never passes in vacuum.
+# Only the reference host, the one of CI: the Mac stopped giving its bytes after TA-58 and TA-27, and
+# linux/arm64 never did (011 worry 2). Another host skips it, except in CI, which never passes in vacuum.
 # Freshness of the committed wasm, byte by byte, without touching it (011 RF2)
 _check-wasm-artifact:
     #!/usr/bin/env bash
     set -euo pipefail
     host="$(rustc -vV | sed -n 's/^host: //p')"
-    case "$host" in
-        x86_64-unknown-linux-gnu | aarch64-apple-darwin) ;;
-        *)
-            if [ -n "${CI:-}" ]; then
-                echo "check-wasm-artifact: $host is not a reference host" >&2
-                exit 1
-            fi
-            echo "check-wasm-artifact: skipped on $host"
-            exit 0
-            ;;
-    esac
+    if [ "$host" != x86_64-unknown-linux-gnu ]; then
+        if [ -n "${CI:-}" ]; then
+            echo "check-wasm-artifact: $host is not the reference host" >&2
+            exit 1
+        fi
+        echo "check-wasm-artifact: skipped on $host (the reference is x86_64-unknown-linux-gnu)"
+        exit 0
+    fi
     fresh="$(mktemp -d)"
     trap 'rm -rf "${fresh:?}"' EXIT
     {{just_executable()}} _wasm-generate "$fresh"

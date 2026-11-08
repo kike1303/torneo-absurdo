@@ -73,6 +73,8 @@ jobs:
               # Compared byte by byte with what _check-wasm-artifact generates (011 RF2). A PR that
               # only changes the binary has to run that check; check-workflows requires this line.
               - apps/web/src/lib/features/replay/engine-wasm/**
+              # What _check-wasm-artifact generates with; check-workflows requires this line too.
+              - scripts/wasm-generate.sh
               # Embedded by apps/server/src/config.rs with include_str! (008 RF-B18).
               - scripts/__fixtures__/loopback-origins.json
               # Run on the musl binary (008 RF-D9).

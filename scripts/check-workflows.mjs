@@ -767,8 +767,8 @@ function filterPatterns(filters, name) {
 }
 
 /**
- * ci.yml, 011 RF2 and RF14: a PR that only changes the binary runs the check of its bytes, and one
- * that only changes the vectors runs the verifier of the browser.
+ * ci.yml, 011 RF2 and RF14: a PR that only changes the binary, or the script that generates it, runs
+ * the check of its bytes, and one that only changes the vectors runs the verifier of the browser.
  */
 function checkWasmFilters(jobs, file, problems) {
   const rule = 'wasm-artifact';
@@ -783,6 +783,7 @@ function checkWasmFilters(jobs, file, problems) {
   for (const [name, pattern] of [
     ['rust', WASM_DIR_GLOB],
     ['rust', 'justfile'],
+    ['rust', 'scripts/wasm-generate.sh'],
     ['web', VECTORS_FILE],
   ]) {
     if (!filterPatterns(filters, name).includes(pattern)) {
