@@ -524,15 +524,15 @@ const CASES = [
   ],
   [
     'DAILY_GRANT missing',
-    { [C]: [["      DAILY_GRANT: '100'\n", '']] },
+    { [C]: [["      DAILY_GRANT: '500'\n", '']] },
     /services\.server: env: DAILY_GRANT is required/,
   ],
-  ...['0', '10001', '1.5', '+5', '1e3', 'abc', '${DAILY_GRANT:?x}'].map(
+  ...['0', '1', '49', '10001', '1.5', '+5', '1e3', 'abc', '${DAILY_GRANT:?x}'].map(
     (value) =>
       /** @type {const} */ ([
         `DAILY_GRANT ${value}`,
-        { [C]: [["      DAILY_GRANT: '100'\n", `      DAILY_GRANT: '${value}'\n`]] },
-        /services\.server: daily-grant: DAILY_GRANT must be an integer from 1 to 10000/,
+        { [C]: [["      DAILY_GRANT: '500'\n", `      DAILY_GRANT: '${value}'\n`]] },
+        /services\.server: daily-grant: DAILY_GRANT must be an integer from 50 to 10000/,
       ]),
   ),
   [

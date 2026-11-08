@@ -41,6 +41,21 @@ export const ERROR_TEXT = {
   'profile.display_name_taken': 'error_profile_display_name_taken',
   'fight.not_found': 'error_fight_not_found',
   'fight.unavailable': 'error_fight_unavailable',
+  'bet.invalid_request': 'error_bet_invalid_request',
+  'bet.key_reused': 'error_bet_key_reused',
+  'bet.window_closed': 'error_bet_window_closed',
+  'bet.below_minimum': 'error_bet_below_minimum',
+  'bet.side_locked': 'error_bet_side_locked',
+  'bet.too_many_bets': 'error_bet_too_many_bets',
+  'bet.pool_full': 'error_bet_pool_full',
+  'bet.fight_cap_exceeded': 'error_bet_fight_cap_exceeded',
+  'bet.insufficient_balance': 'error_bet_insufficient_balance',
+  'bet.unavailable': 'error_bet_unavailable',
+  'bonus.already_claimed': 'error_bonus_already_claimed',
+  'bailout.grant_available': 'error_bailout_grant_available',
+  'bailout.not_eligible': 'error_bailout_not_eligible',
+  'bailout.already_claimed': 'error_bailout_already_claimed',
+  'wallet.unavailable': 'error_wallet_unavailable',
 } as const satisfies { readonly [K in ErrorCode]: MessageKey };
 
 /** The closed list of `/login?error=` (ADR-0008, amendment 2026-10-28). */

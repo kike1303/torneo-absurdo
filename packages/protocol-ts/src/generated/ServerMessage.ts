@@ -3,6 +3,7 @@
 import type { Channel } from './Channel.js';
 import type { ErrorCode } from './ErrorCode.js';
 import type { FightEvent } from './FightEvent.js';
+import type { FightPool } from './FightPool.js';
 import type { FightSummary } from './FightSummary.js';
 import type { FightsCurrent } from './FightsCurrent.js';
 import type { SelfEvent } from './SelfEvent.js';
@@ -25,4 +26,5 @@ export type ServerMessage =
       from_index: number;
       events: Array<FightEvent>;
       server_time: TimestampMs;
-    };
+    }
+  | { type: 'pool_update'; pool: FightPool };

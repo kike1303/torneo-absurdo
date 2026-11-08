@@ -42,6 +42,7 @@ pub fn config() -> FightsConfig {
         window_ms: WINDOW,
         pre_live_ms: PRE_LIVE,
         content_dir: repo_root().join("content/characters"),
+        rake_bp: 0,
     }
 }
 
@@ -173,6 +174,7 @@ pub struct RawFight {
     pub roster_sha256: Vec<u8>,
     pub time_limit_ms: i32,
     pub max_duration_ms: i32,
+    pub rake_bp: i16,
 }
 
 /// Like [`announce`], with `change` applied to the fields.
@@ -199,6 +201,7 @@ pub async fn announce_with(
         roster_sha256: vec![1; 32],
         time_limit_ms: i32::try_from(ruleset.time_limit_ms()).unwrap(),
         max_duration_ms: i32::try_from(max_duration_ms(&ruleset).unwrap()).unwrap(),
+        rake_bp: 0,
     };
     change(&mut raw);
     let (closes_at, live_at) = hours(opens_at);
@@ -220,6 +223,7 @@ pub async fn announce_with(
             max_duration_ms: raw.max_duration_ms,
             matchup_round: raw.matchup_round,
             roster_sha256: &raw.roster_sha256,
+            rake_bp: raw.rake_bp,
         },
     )
     .await
@@ -251,7 +255,20 @@ pub async fn open_with(pool: &PgPool, id: i32, seed: &[u8; 32], at: i64) {
 
 /// A fight of `vector`, open with its seed.
 pub async fn open_vector(pool: &PgPool, opens_at: i64, vector: &Vector) -> i32 {
-    let id = announce(pool, opens_at, &vector.a, &vector.b).await;
+    open_vector_with_rake(pool, opens_at, vector, 0).await
+}
+
+/// Like [`open_vector`], announced with this rake (012 RF10: it never changes after that).
+pub async fn open_vector_with_rake(
+    pool: &PgPool,
+    opens_at: i64,
+    vector: &Vector,
+    rake_bp: i16,
+) -> i32 {
+    let id = announce_with(pool, opens_at, &vector.a, &vector.b, |raw| {
+        raw.rake_bp = rake_bp;
+    })
+    .await;
     open_with(pool, id, &vector.seed, opens_at).await;
     id
 }

@@ -82,6 +82,13 @@ pub enum Handler {
     FightsCurrent,
     FightsVoidStats,
     FightDetail,
+    BonusClaim,
+    BailoutClaim,
+    Wallet,
+    Bet,
+    MyBets,
+    FightPool,
+    BetQuote,
     #[cfg(feature = "dev-auth")]
     DevAuthorize,
     #[cfg(feature = "dev-auth")]
@@ -209,6 +216,48 @@ pub const ROUTES: &[RouteSpec] = &[
         effect: Effect::Read,
         handler: Handler::FightDetail,
     },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/bonus/claim",
+        effect: Effect::Mutate,
+        handler: Handler::BonusClaim,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/bailout/claim",
+        effect: Effect::Mutate,
+        handler: Handler::BailoutClaim,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/wallet",
+        effect: Effect::Read,
+        handler: Handler::Wallet,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/bets",
+        effect: Effect::Mutate,
+        handler: Handler::Bet,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/bets/mine",
+        effect: Effect::Read,
+        handler: Handler::MyBets,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/fights/{id}/pool",
+        effect: Effect::Read,
+        handler: Handler::FightPool,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/fights/{id}/quote",
+        effect: Effect::Read,
+        handler: Handler::BetQuote,
+    },
     #[cfg(feature = "dev-auth")]
     RouteSpec {
         method: RouteMethod::Get,
@@ -318,6 +367,16 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         Handler::FightDetail => fight_read(on(filter, fights::api::detail), state),
         // The same limit and the same cache as the detail (012 RF23).
         Handler::FightsVoidStats => fight_read(on(filter, fights::void_stats::handler), state),
+        // 012 RF29, RF30: no body extractor, and the limit anyway, as the spec asks.
+        Handler::BonusClaim => on(filter, crate::bets::claims::bonus).layer(body),
+        Handler::BailoutClaim => on(filter, crate::bets::claims::bailout).layer(body),
+        Handler::Wallet => on(filter, crate::bets::wallet::handler),
+        // 012 RF25: over `MAX_FORM_BYTES`, `JsonRejection` gives 422 `bet.invalid_request`.
+        Handler::Bet => on(filter, crate::bets::api::place).layer(body),
+        Handler::MyBets => on(filter, crate::bets::api::mine),
+        // 012 RF34: the limit and the cache of the detail.
+        Handler::FightPool => fight_read(on(filter, crate::bets::pool::pool), state),
+        Handler::BetQuote => on(filter, crate::bets::pool::quote),
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize => on(filter, auth::dev::authorize),
         #[cfg(feature = "dev-auth")]

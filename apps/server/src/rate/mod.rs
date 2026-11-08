@@ -26,7 +26,8 @@ use tokio_util::sync::CancellationToken;
 
 pub use clock::ServerClock;
 pub use quotas::{
-    AUTH_IP, FIGHT_READ_IP, FULL_RETRY_AFTER_SECS, MAX_KEYS, MUTATION_IP, MUTATION_USER,
+    AUTH_IP, BET_IP, BET_USER, CLAIM_IP, CLAIM_USER, FIGHT_READ_IP, FULL_RETRY_AFTER_SECS,
+    MAX_KEYS, MUTATION_IP, MUTATION_USER, QUOTE_IP, QUOTE_USER, WALLET_READ_IP, WALLET_READ_USER,
     WS_ANON_UPGRADE_IP, WS_SESSION_UPGRADE_IP, WS_SESSION_UPGRADE_USER,
 };
 use store::CappedStore;
@@ -197,6 +198,15 @@ pub struct RateLimits {
     pub ws_session_ip: Arc<KeyedLimiter>,
     /// `GET /api/fights/{id}` (010 RF34).
     pub fight_read_ip: Arc<KeyedLimiter>,
+    /// The bets (012 RF25, RF29, RF30, RF37): one pair of buckets per row of the quotas.
+    pub bet_user: Arc<KeyedLimiter<Uuid>>,
+    pub bet_ip: Arc<KeyedLimiter>,
+    pub claim_user: Arc<KeyedLimiter<Uuid>>,
+    pub claim_ip: Arc<KeyedLimiter>,
+    pub wallet_read_user: Arc<KeyedLimiter<Uuid>>,
+    pub wallet_read_ip: Arc<KeyedLimiter>,
+    pub quote_user: Arc<KeyedLimiter<Uuid>>,
+    pub quote_ip: Arc<KeyedLimiter>,
 }
 
 impl RateLimits {
@@ -209,6 +219,14 @@ impl RateLimits {
             ws_session_user: Arc::new(KeyedLimiter::new(WS_SESSION_UPGRADE_USER, settings)),
             ws_session_ip: Arc::new(KeyedLimiter::new(WS_SESSION_UPGRADE_IP, settings)),
             fight_read_ip: Arc::new(KeyedLimiter::new(FIGHT_READ_IP, settings)),
+            bet_user: Arc::new(KeyedLimiter::new(BET_USER, settings)),
+            bet_ip: Arc::new(KeyedLimiter::new(BET_IP, settings)),
+            claim_user: Arc::new(KeyedLimiter::new(CLAIM_USER, settings)),
+            claim_ip: Arc::new(KeyedLimiter::new(CLAIM_IP, settings)),
+            wallet_read_user: Arc::new(KeyedLimiter::new(WALLET_READ_USER, settings)),
+            wallet_read_ip: Arc::new(KeyedLimiter::new(WALLET_READ_IP, settings)),
+            quote_user: Arc::new(KeyedLimiter::new(QUOTE_USER, settings)),
+            quote_ip: Arc::new(KeyedLimiter::new(QUOTE_IP, settings)),
         }
     }
 
@@ -220,6 +238,14 @@ impl RateLimits {
         self.ws_session_user.sweep();
         self.ws_session_ip.sweep();
         self.fight_read_ip.sweep();
+        self.bet_user.sweep();
+        self.bet_ip.sweep();
+        self.claim_user.sweep();
+        self.claim_ip.sweep();
+        self.wallet_read_user.sweep();
+        self.wallet_read_ip.sweep();
+        self.quote_user.sweep();
+        self.quote_ip.sweep();
     }
 }
 

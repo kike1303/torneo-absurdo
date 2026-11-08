@@ -51,11 +51,12 @@ async fn account(pool: &PgPool, user: Uuid) -> Uuid {
 }
 
 /// A bet of `who`, by SQL: the table has its own rules, whatever writes it.
+/// A bet of 5: the amount every entry of these tests moves, as phase B's `bet_stake` requires.
 async fn bet(pool: &PgPool, fight: i32, who: Uuid) -> Uuid {
     let id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO bets (id, fight_id, user_id, side, stake, ranked_stake, client_key) \
-         VALUES ($1, $2, $3, 'a', 10, true, $4)",
+         VALUES ($1, $2, $3, 'a', 5, true, $4)",
     )
     .bind(id)
     .bind(fight)
@@ -448,6 +449,47 @@ async fn each_rule_of_the_postings_refuses_with_its_code() {
     }
 }
 
+/// RF2 and area of concern 21, phase B: a `bet_stake` moves exactly its bet's stake (5), from its
+/// owner to the escrow, and nothing else. Its first posting already fails, inside `insert`.
+#[tokio::test]
+async fn a_stake_moves_exactly_the_stake_of_its_bet() {
+    let w = world().await;
+    let other = user(&w.pool).await;
+    let other_account = account(&w.pool, other).await;
+    let cases: Vec<(&str, Vec<(Uuid, i64)>)> = vec![
+        ("another amount", vec![(w.account, -7), (ESCROW_ACCOUNT, 7)]),
+        (
+            "less than the stake",
+            vec![(w.account, -1), (ESCROW_ACCOUNT, 1)],
+        ),
+        (
+            "the sign the other way",
+            vec![(ESCROW_ACCOUNT, -5), (w.account, 5)],
+        ),
+        (
+            "another account than the escrow",
+            vec![(w.account, -5), (RAKE_SINK_ACCOUNT, 5)],
+        ),
+        (
+            "another user's account",
+            vec![(other_account, -5), (ESCROW_ACCOUNT, 5)],
+        ),
+    ];
+    for (rule, postings) in &cases {
+        let error = insert(&w.pool, &w.entry("bet_stake", postings))
+            .await
+            .unwrap_err();
+        assert_eq!(sqlstate(&error).as_deref(), Some("TA008"), "{rule}");
+    }
+    // The stake itself is accepted, once.
+    insert(
+        &w.pool,
+        &w.entry("bet_stake", &[(w.account, -5), (ESCROW_ACCOUNT, 5)]),
+    )
+    .await
+    .unwrap();
+}
+
 /// RF3: a second entry of each class fails, by the database.
 #[tokio::test]
 async fn one_entry_per_fact() {
@@ -548,7 +590,7 @@ async fn a_bet_needs_an_open_window() {
     let attempt = |pool: PgPool| async move {
         sqlx::query(
             "INSERT INTO bets (id, fight_id, user_id, side, stake, ranked_stake, client_key) \
-             VALUES ($1, $2, $3, 'a', 10, true, $4)",
+             VALUES ($1, $2, $3, 'a', 5, true, $4)",
         )
         .bind(Uuid::new_v4())
         .bind(id)

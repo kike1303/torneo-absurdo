@@ -131,6 +131,32 @@ pub async fn bet_stake(
     Ok(entry)
 }
 
+/// The `rake` of a fight (012 RF10): escrow −`amount`, rake sink +`amount`, with no user, once per
+/// fight (RF3). `amount` is `rake + residue`, and must be positive (`ledger_postings_amount_ck`).
+pub async fn rake(
+    tx: &mut PgConnection,
+    fight_id: i32,
+    amount: Coins,
+) -> Result<Uuid, sqlx::Error> {
+    let entry = Uuid::new_v4();
+    sqlx::query("INSERT INTO ledger_entries (id, kind, fight_id) VALUES ($1, 'rake', $2)")
+        .bind(entry)
+        .bind(fight_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "INSERT INTO ledger_postings (entry_id, account_id, amount) VALUES ($1, $2, $3), ($1, $4, $5)",
+    )
+    .bind(entry)
+    .bind(ESCROW_ACCOUNT)
+    .bind(-amount.0)
+    .bind(RAKE_SINK_ACCOUNT)
+    .bind(amount.0)
+    .execute(&mut *tx)
+    .await?;
+    Ok(entry)
+}
+
 /// Rows of each batch of [`settle_batch`] (012 RF2).
 pub const SETTLE_BATCH_ROWS: usize = 1000;
 

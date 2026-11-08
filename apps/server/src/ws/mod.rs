@@ -105,6 +105,8 @@ pub struct WsState {
     public_origin: String,
     echo: bool,
     permits: Arc<Semaphore>,
+    /// The permits kept for accounts out of probation (ADR-0008 D6, 012 RF39): a fifth of the cap.
+    reserve: usize,
     ip_slots: Arc<IpSlots>,
     session_ip_slots: Arc<Slots<IpKey>>,
     user_slots: Arc<Slots<uuid::Uuid>>,
@@ -123,6 +125,7 @@ impl WsState {
             public_origin,
             echo,
             permits: Arc::new(Semaphore::new(permits)),
+            reserve: permits / 5,
             ip_slots: Arc::new(IpSlots::new(WS_ANON_PER_IP)),
             session_ip_slots: Arc::new(Slots::new(WS_SESSION_PER_IP)),
             user_slots: Arc::new(Slots::new(WS_PER_USER)),
@@ -181,6 +184,11 @@ impl WsState {
     /// Tracks every upgraded socket (`close()` then `wait()` at shutdown).
     pub fn tracker(&self) -> TaskTracker {
         self.tracker.clone()
+    }
+
+    /// The reserve of RF39: with fewer free permits than this, only accounts out of probation enter.
+    pub const fn reserve(&self) -> usize {
+        self.reserve
     }
 
     /// Free permits of the global socket cap.

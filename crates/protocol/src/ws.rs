@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::{ErrorCode, FightEvent, FightSummary, FightsCurrent, TimestampMs};
+use crate::{ErrorCode, FightEvent, FightPool, FightSummary, FightsCurrent, TimestampMs};
 
 /// Message from the client over `/ws` (RF-B5).
 ///
@@ -99,7 +99,8 @@ impl<'de> Deserialize<'de> for Channel {
     }
 }
 
-/// Events of the `self` channel. The first balance event arrives with TA-27.
+/// Events of the `self` channel. Balances never travel here: after a fight the client reads
+/// `wallet` and `bets/mine` again (012 RF36).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -148,6 +149,11 @@ pub enum ServerMessage {
         from_index: u32,
         events: Vec<FightEvent>,
         server_time: TimestampMs,
+    },
+    /// The pool of a fight in its window, on `schedule`, only when it changed (012 RF35). The last
+    /// value per socket, no queue.
+    PoolUpdate {
+        pool: Box<FightPool>,
     },
 }
 
@@ -321,7 +327,31 @@ mod tests {
             next: None,
             last: None,
         };
+        let empty = crate::PoolSide {
+            stake: crate::CoinAmount::ZERO,
+            bets: 0,
+            payout_bp: None,
+        };
+        let pool = crate::FightPool {
+            fight_id: 7,
+            a: crate::PoolSide {
+                stake: crate::CoinAmount::new(25).unwrap(),
+                bets: 1,
+                payout_bp: None,
+            },
+            b: empty,
+            rake_bp: 0,
+            server_time: TimestampMs::from_ms(9),
+            settlement: None,
+        };
         let cases = [
+            (
+                // 012 RF35.
+                ServerMessage::PoolUpdate {
+                    pool: Box::new(pool),
+                },
+                r#"{"type":"pool_update","pool":{"fight_id":7,"a":{"stake":25,"bets":1,"payout_bp":null},"b":{"stake":0,"bets":0,"payout_bp":null},"rake_bp":0,"server_time":"9","settlement":null}}"#.to_owned(),
+            ),
             (
                 ServerMessage::ScheduleUpdate {
                     board: Box::new(board),
