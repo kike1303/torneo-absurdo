@@ -109,7 +109,7 @@ fn request_of(route: &RouteSpec, id: i32) -> (String, Vec<(&'static str, &'stati
         | Handler::FightsVoidStats
         | Handler::FightDetail
         | Handler::Wallet => (vec![], String::new()),
-        Handler::MyBets | Handler::FightPool => (vec![], String::new()),
+        Handler::MyBets | Handler::BetHistory | Handler::FightPool => (vec![], String::new()),
         Handler::BetQuote => (vec![], String::new()),
         // 012 RF25: a bet on the fight of the case, which the window may refuse.
         Handler::Bet => (
@@ -239,6 +239,7 @@ fn expected_status(handler: Handler, identity: &str) -> Option<u16> {
         | Handler::BailoutClaim
         | Handler::Bet
         | Handler::MyBets
+        | Handler::BetHistory
         | Handler::FightPool
         | Handler::BetQuote => None,
         #[cfg(feature = "dev-auth")]
@@ -507,6 +508,12 @@ fn prefix(vector: &Vector, elapsed: i64) -> Vec<FightEvent> {
 async fn nothing_leaks_in_any_state_with_any_identity() {
     let db = TestDb::create().await;
     let (fight_settings, clock): (_, FightClock) = f::settings_at(T0 - 1);
+    // The hook of production: a settled fight with bets has their results, or the history of 019
+    // refuses it as a broken invariant.
+    let fight_settings = server::fights::FightSettings {
+        hook: Arc::new(server::bets::BetsHook),
+        ..fight_settings
+    };
     let settings = Settings {
         fights: fight_settings.clone(),
         ..Settings::default()

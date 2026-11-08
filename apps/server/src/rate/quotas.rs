@@ -38,7 +38,7 @@ pub const BET_IP: Quota = Quota::per_minute(nonzero(120));
 pub const CLAIM_USER: Quota = Quota::per_minute(nonzero(5));
 pub const CLAIM_IP: Quota = Quota::per_minute(nonzero(60));
 
-/// `wallet` and `bets/mine`, one bucket for both (012 RF37): 60/min per user and 600/min per IP.
+/// `wallet`, `bets/mine` and `bets/history`, one bucket for all (012 RF37, 019): 60/min per user and 600/min per IP.
 pub const WALLET_READ_USER: Quota = Quota::per_minute(nonzero(60));
 pub const WALLET_READ_IP: Quota = Quota::per_minute(nonzero(600));
 

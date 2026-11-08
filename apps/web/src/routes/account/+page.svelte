@@ -79,10 +79,13 @@
       <Card.Header>
         <Card.Title><h2>{m.account_balance_heading()}</h2></Card.Title>
       </Card.Header>
-      <Card.Content>
+      <Card.Content class="flex flex-col items-start gap-3">
         <p class="text-2xl font-semibold tabular-nums" data-testid="account-balance">
           {m.coins_amount({ amount: formatCoins(data.balance, locale) })}
         </p>
+        <Button variant="outline" href={`/${locale}/bets`} data-testid="account-bet-history">
+          {m.bet_history_link()}
+        </Button>
       </Card.Content>
     </Card.Root>
 

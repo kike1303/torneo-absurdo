@@ -87,6 +87,7 @@ pub enum Handler {
     Wallet,
     Bet,
     MyBets,
+    BetHistory,
     FightPool,
     BetQuote,
     #[cfg(feature = "dev-auth")]
@@ -248,6 +249,12 @@ pub const ROUTES: &[RouteSpec] = &[
     },
     RouteSpec {
         method: RouteMethod::Get,
+        path: "/api/bets/history",
+        effect: Effect::Read,
+        handler: Handler::BetHistory,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
         path: "/api/fights/{id}/pool",
         effect: Effect::Read,
         handler: Handler::FightPool,
@@ -374,6 +381,8 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         // 012 RF25: over `MAX_FORM_BYTES`, `JsonRejection` gives 422 `bet.invalid_request`.
         Handler::Bet => on(filter, crate::bets::api::place).layer(body),
         Handler::MyBets => on(filter, crate::bets::api::mine),
+        // 019: the quota and the cache of `bets/mine`.
+        Handler::BetHistory => on(filter, crate::bets::history::handler),
         // 012 RF34: the limit and the cache of the detail.
         Handler::FightPool => fight_read(on(filter, crate::bets::pool::pool), state),
         Handler::BetQuote => on(filter, crate::bets::pool::quote),
