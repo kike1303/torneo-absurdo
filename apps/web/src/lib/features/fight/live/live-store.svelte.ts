@@ -1,4 +1,10 @@
-import type { FightEvent, FightSummary, FightsCurrent, ServerMessage } from '@torneo/protocol';
+import type {
+  FightEvent,
+  FightPool,
+  FightSummary,
+  FightsCurrent,
+  ServerMessage,
+} from '@torneo/protocol';
 import type { LiveSession, StageErrorCode, StageSnapshot } from '../live-session.js';
 import { createClockSync } from './clock-sync.js';
 import { createEventBuffer, type EventBuffer } from './event-buffer.js';
@@ -54,6 +60,8 @@ function digestOf(events: readonly FightEvent[]): string {
 
 export class FightStore {
   board = $state.raw<FightsCurrent | null>(null);
+  /** The newest pool of each fight that sent one (012 RF35): only for the betting panel. */
+  pools = $state.raw<Readonly<Record<number, FightPool>>>({});
   serverNow = $state(0);
   degraded = $state(false);
   private readonly ssrFailed: boolean;
@@ -259,8 +267,24 @@ export class FightStore {
     });
   }
 
+  /** Keeps the newest pool by its `server_time`; the view does not change for it. */
+  notePool(pool: FightPool): void {
+    const known = this.pools[pool.fight_id];
+    if (known !== undefined && Number(known.server_time) > Number(pool.server_time)) return;
+    // Only the fights of the board, so a long session does not keep every pool it saw.
+    const board = this.board;
+    const keep = [pool.fight_id, board?.current?.id, board?.next?.id, board?.last?.id];
+    const pools: Record<number, FightPool> = { [pool.fight_id]: pool };
+    for (const [id, kept] of Object.entries(this.pools)) {
+      if (keep.includes(Number(id)) && Number(id) !== pool.fight_id) pools[Number(id)] = kept;
+    }
+    this.pools = pools;
+  }
+
   private onMessage(message: ServerMessage): void {
-    if (message.type === 'schedule_update') {
+    if (message.type === 'pool_update') {
+      this.notePool(message.pool);
+    } else if (message.type === 'schedule_update') {
       this.applyBoard(message.board);
     } else if (message.type === 'fight_sync') {
       this.sampleOf(message.server_time);

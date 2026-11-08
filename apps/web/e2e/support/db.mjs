@@ -231,6 +231,52 @@ export async function ageSession(identity, minutes, url = process.env.E2E_DATABA
   }
 }
 
+/**
+ * A `dev` identity whose account exists since yesterday, with yesterday's grant of `coins` and none
+ * today (012 RF42: the bonus shows with a balance). A first login would grant today's coins, so the
+ * user is written before it. Only the insert of the entry skips its triggers (the one that stamps
+ * today on every entry), with `session_replication_role` in this transaction; every rule of the
+ * postings still runs.
+ * @param {string} identity
+ * @param {number} coins
+ * @param {string | undefined} [url]
+ */
+export async function seedYesterdayUser(identity, coins, url = process.env.E2E_DATABASE_URL) {
+  const target = assertE2eTarget(url);
+  const sql = connect(target.toString());
+  try {
+    await sql.begin(async (tx) => {
+      const [user] = await tx`
+        INSERT INTO users (id, display_name, display_name_key, display_name_is_generated, created_at)
+        VALUES (gen_random_uuid(), ${`Ayer${identity.slice(-6)}`}, ${`ayer${identity.slice(-6)}`},
+                false, now() - interval '1 day')
+        RETURNING id`;
+      if (!user) throw new Error('seedYesterdayUser: no user');
+      await tx`
+        INSERT INTO oauth_accounts (provider, provider_user_id, user_id)
+        VALUES ('dev', ${identity}, ${user.id})`;
+      const [account] = await tx`
+        INSERT INTO ledger_accounts (id, kind, user_id) VALUES (gen_random_uuid(), 'user', ${user.id})
+        RETURNING id`;
+      if (!account) throw new Error('seedYesterdayUser: no account');
+      await tx`SET LOCAL session_replication_role = replica`;
+      const [entry] = await tx`
+        INSERT INTO ledger_entries (id, kind, user_id, grant_day, created_at)
+        VALUES (gen_random_uuid(), 'grant', ${user.id},
+                ((now() AT TIME ZONE 'UTC')::date - 1), now() - interval '1 day')
+        RETURNING id`;
+      if (!entry) throw new Error('seedYesterdayUser: no entry');
+      await tx`SET LOCAL session_replication_role = origin`;
+      await tx`
+        INSERT INTO ledger_postings (entry_id, account_id, amount)
+        VALUES (${entry.id}, '00000000-0000-0000-0000-000000000001', ${-coins}),
+               (${entry.id}, ${account.id}, ${coins})`;
+    });
+  } finally {
+    await sql.end({ timeout: 1 });
+  }
+}
+
 const sha256 = (/** @type {Buffer | string} */ value) =>
   createHash('sha256').update(value).digest();
 const HOUR_MS = 3_600_000;

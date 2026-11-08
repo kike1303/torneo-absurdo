@@ -1,4 +1,12 @@
-import type { DisplayNameRequest, Me, PreferencesRequest, Provider } from '@torneo/protocol';
+import type {
+  BetPlaced,
+  BetRequest,
+  DisplayNameRequest,
+  Me,
+  PreferencesRequest,
+  Provider,
+  Wallet,
+} from '@torneo/protocol';
 import { apiRequest, type Api, type ApiResult } from './client.js';
 
 // Mutations (008 plan-d decisions 3 and 8): only the `actions` of a `+page.server.ts` may call
@@ -17,4 +25,17 @@ export function putPreferences(api: Api, body: PreferencesRequest): Promise<ApiR
 /** The server answers 303 on success (RF-C3); the action never follows it. */
 export function postUnlink(api: Api, provider: Provider): Promise<ApiResult<undefined>> {
   return apiRequest<undefined>(api, 'POST', `/api/auth/unlink/${provider}`);
+}
+
+/** 201 for a new bet, 200 for a repeated `client_key` (012 RF25): both carry `BetPlaced`. */
+export function postBet(api: Api, body: BetRequest): Promise<ApiResult<BetPlaced>> {
+  return apiRequest<BetPlaced>(api, 'POST', '/api/bets', { body });
+}
+
+export function postBonusClaim(api: Api): Promise<ApiResult<Wallet>> {
+  return apiRequest<Wallet>(api, 'POST', '/api/bonus/claim');
+}
+
+export function postBailoutClaim(api: Api): Promise<ApiResult<Wallet>> {
+  return apiRequest<Wallet>(api, 'POST', '/api/bailout/claim');
 }

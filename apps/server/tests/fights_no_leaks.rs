@@ -586,6 +586,12 @@ async fn nothing_leaks_in_any_state_with_any_identity() {
 
     // The test puts the seed of its vector on the legal route, so its canaries are the real ones.
     f::open_with(&pool, id, &vector.seed, T0).await;
+    // 012: a pool with both sides, so the pool, the quote and the bets of each state have something
+    // to say, and say it without the seed or the log.
+    for side in ["a", "b"] {
+        let bettor = support::bets::funded_user(&pool, 1000).await;
+        support::bets::seed_bet(&pool, id, bettor, side, 40).await;
+    }
     clock.set(T0);
     wait_for("the board", || async {
         let current = shared.current().current;

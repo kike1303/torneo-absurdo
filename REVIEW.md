@@ -16,6 +16,9 @@ Algo que rompe comportamiento, filtra datos o resultados, permite crear o duplic
 ## Regla de RF6 (spec de 010)
 Cambiar o quitar una entrada de la tabla de `apps/server/tests/ruleset_freeze.rs` es **bloqueante**: rompería la verificación de las peleas pasadas de esa versión. Un cambio de reglas lleva una versión nueva.
 
+## Regla de las liquidaciones (spec de 012)
+Una liquidación nueva, o un cambio al gancho de `apps/server/src/bets/settle.rs`, nunca lee `users` ni `banned_at`: un baneo no cambia lo que se paga ni se reembolsa (RF14). Si lo hace, es **Important**.
+
 ## Límite de nits
 Máximo 5 por review. El resto se resume como un conteo.
 

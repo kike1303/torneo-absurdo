@@ -165,6 +165,9 @@ e2e: db-up
     E2E_DATABASE_URL='postgres://torneo:torneo_dev@127.0.0.1:{{pg_port}}/torneo_e2e' \
         E2E_SERVER_BIN='{{justfile_directory()}}/target/debug/server' \
         E2E_WEB_BUILT=1 {{just_executable()}} _e2e-fights-run
+    E2E_DATABASE_URL='postgres://torneo:torneo_dev@127.0.0.1:{{pg_port}}/torneo_e2e' \
+        E2E_SERVER_BIN='{{justfile_directory()}}/target/debug/server' \
+        E2E_WEB_BUILT=1 {{just_executable()}} _e2e-bets-run
 
 # Without Docker (the CI job `e2e` runs it with its own Postgres service and the server binary
 # of `e2e-server`). Needs E2E_DATABASE_URL and an absolute E2E_SERVER_BIN built with both features;
@@ -227,6 +230,30 @@ _e2e-fights-run: _web-prepare
     node apps/web/e2e/support/db.mjs a9 --check
     node apps/web/e2e/support/reset-run.mjs
     pnpm --filter web exec playwright test -c playwright.replays.config.ts
+
+# Local only, like the fights (TA-56): the bets on three real fights (012 plan-c C8), with what
+# `_e2e-run` needs. E2E_WEB_BUILT=1 skips the build when `just e2e` has just made it.
+# The bets on real fights: torneo_e2e from zero, the bets script and Playwright
+_e2e-bets-run: _web-prepare
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${E2E_DATABASE_URL:?E2E_DATABASE_URL is required}"
+    : "${E2E_SERVER_BIN:?E2E_SERVER_BIN is required}"
+    case "$E2E_SERVER_BIN" in
+        /*) ;;
+        *) echo "E2E_SERVER_BIN must be an absolute path (Playwright runs in apps/web)" >&2; exit 1 ;;
+    esac
+    node scripts/check-release-binary.mjs --expect-dev "$E2E_SERVER_BIN"
+    secret() { node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))"; }
+    E2E_INTERNAL_API_SECRET="$(secret)"
+    E2E_IP_HASH_KEY="$(secret)"
+    export E2E_INTERNAL_API_SECRET E2E_IP_HASH_KEY E2E_DATABASE_URL E2E_SERVER_BIN
+    if [ "${E2E_WEB_BUILT:-}" != 1 ]; then pnpm --filter web build; fi
+    node apps/web/e2e/support/db.mjs reset
+    node apps/web/e2e/support/db.mjs a9 --check
+    node apps/web/e2e/support/reset-run.mjs
+    node apps/web/e2e/support/fight-script.mjs --bets
+    pnpm --filter web exec playwright test -c playwright.bets.config.ts
 
 # HOST is fixed to 127.0.0.1 (never read from the environment): adapter-node listens on 0.0.0.0 by
 # default, and SOCKET_PATH and LISTEN_FDS, which it prefers over HOST, are cleared. On Android,

@@ -27,23 +27,43 @@ pub struct Facts {
     pub day_resets_at_ms: i64,
 }
 
+/// The age of the account, in ms by the database's `now()`: `NULL` if the user does not exist.
+macro_rules! age_ms_sql {
+    () => {
+        "(SELECT (EXTRACT(EPOCH FROM now() - u.created_at) * 1000)::bigint FROM users u \
+           WHERE u.id = $1)"
+    };
+}
+
+/// Distinct fights with a bet won or lost (RF27), by the partial index.
+macro_rules! settled_fights_sql {
+    () => {
+        "(SELECT count(DISTINCT fight_id) FROM bet_settlements \
+           WHERE user_id = $1 AND outcome <> 'refunded')"
+    };
+}
+
 /// The single statement. Every sub-select runs in the same snapshot, and `now()` is the one of the
 /// transaction.
-const FACTS_SQL: &str = "\
-SELECT \
-  (SELECT COALESCE(SUM(p.amount), 0)::bigint FROM ledger_postings p \
-     JOIN ledger_accounts a ON a.id = p.account_id WHERE a.user_id = $1), \
-  (SELECT COALESCE(SUM(b.stake), 0)::bigint FROM bets b \
-     JOIN fights f ON f.id = b.fight_id WHERE b.user_id = $1 AND f.state <> 'settled'), \
-  EXISTS (SELECT 1 FROM ledger_entries WHERE user_id = $1 AND kind = 'grant' \
-     AND grant_day = (now() AT TIME ZONE 'UTC')::date), \
-  EXISTS (SELECT 1 FROM ledger_entries WHERE user_id = $1 AND kind = 'bailout' \
-     AND grant_day = (now() AT TIME ZONE 'UTC')::date), \
-  (SELECT (EXTRACT(EPOCH FROM now() - u.created_at) * 1000)::bigint FROM users u WHERE u.id = $1), \
-  (SELECT count(DISTINCT fight_id) FROM bet_settlements \
-     WHERE user_id = $1 AND outcome <> 'refunded'), \
-  (EXTRACT(EPOCH FROM ((now() AT TIME ZONE 'UTC')::date + 1)::timestamp \
-     AT TIME ZONE 'UTC') * 1000)::bigint";
+const FACTS_SQL: &str = concat!(
+    "SELECT \
+      (SELECT COALESCE(SUM(p.amount), 0)::bigint FROM ledger_postings p \
+         JOIN ledger_accounts a ON a.id = p.account_id WHERE a.user_id = $1), \
+      (SELECT COALESCE(SUM(b.stake), 0)::bigint FROM bets b \
+         JOIN fights f ON f.id = b.fight_id WHERE b.user_id = $1 AND f.state <> 'settled'), \
+      EXISTS (SELECT 1 FROM ledger_entries WHERE user_id = $1 AND kind = 'grant' \
+         AND grant_day = (now() AT TIME ZONE 'UTC')::date), \
+      EXISTS (SELECT 1 FROM ledger_entries WHERE user_id = $1 AND kind = 'bailout' \
+         AND grant_day = (now() AT TIME ZONE 'UTC')::date), ",
+    age_ms_sql!(),
+    ", ",
+    settled_fights_sql!(),
+    ", (EXTRACT(EPOCH FROM ((now() AT TIME ZONE 'UTC')::date + 1)::timestamp \
+         AT TIME ZONE 'UTC') * 1000)::bigint"
+);
+
+/// Only what probation needs, with the same fragments as [`FACTS_SQL`], so the two never disagree.
+const PROBATION_SQL: &str = concat!("SELECT ", age_ms_sql!(), ", ", settled_fights_sql!());
 
 /// The facts of `user_id`, or `None` if the user does not exist.
 ///
@@ -77,15 +97,10 @@ pub async fn probation_of(
     conn: &mut PgConnection,
     user_id: Uuid,
 ) -> Result<Option<Option<Probation>>, sqlx::Error> {
-    let row = sqlx::query(
-        "SELECT (SELECT (EXTRACT(EPOCH FROM now() - created_at) * 1000)::bigint FROM users \
-           WHERE id = $1), \
-         (SELECT count(DISTINCT fight_id) FROM bet_settlements \
-           WHERE user_id = $1 AND outcome <> 'refunded')",
-    )
-    .bind(user_id)
-    .fetch_one(&mut *conn)
-    .await?;
+    let row = sqlx::query(PROBATION_SQL)
+        .bind(user_id)
+        .fetch_one(&mut *conn)
+        .await?;
     let Some(age_ms) = row.try_get::<Option<i64>, _>(0)? else {
         return Ok(None);
     };

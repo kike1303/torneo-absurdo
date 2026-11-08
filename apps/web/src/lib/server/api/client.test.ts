@@ -37,6 +37,15 @@ describe('apiRequest', () => {
     expect(seen[0]?.method).toBe('GET');
   });
 
+  it('reads the body of a 201 (012 RF25: a new bet)', async () => {
+    const { api: a } = api(() => Response.json({ placed: true }, { status: 201 }));
+    expect(await apiRequest(a, 'POST', '/api/bets')).toEqual({
+      ok: true,
+      status: 201,
+      data: { placed: true },
+    });
+  });
+
   it('treats a 303 as success, without following it', async () => {
     const { api: a } = api(() => new Response(null, { status: 303, headers: { location: '/' } }));
     expect(await apiRequest(a, 'POST', '/api/auth/unlink/google')).toEqual({

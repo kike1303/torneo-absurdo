@@ -1,6 +1,7 @@
 <script lang="ts">
   // The home page of the live fights (010 RF54, plan-d decision 14). Data by props: the state and
   // its decisions live in lib/features/fight/live (ADR-0009 D4).
+  import type { Snippet } from 'svelte';
   import type { RendererErrorCode, RendererSnapshot, Side } from '@torneo/renderer';
   import { Badge } from '#lib/components/ui/badge/index.js';
   import { Button } from '#lib/components/ui/button/index.js';
@@ -38,6 +39,8 @@
     debug: FightDebug | null;
     /** The public counter of the voided fights, if it was read (012 RF22). */
     voidStats?: VoidStats | null;
+    /** The betting panel (012 RF41): in the second zone, under the stage on a phone. */
+    panel?: Snippet;
   }
 
   let {
@@ -56,6 +59,7 @@
     display,
     debug,
     voidStats = null,
+    panel,
   }: Props = $props();
 
   const locale = $derived(getLocale());
@@ -210,6 +214,7 @@
           />
         {/if}
       </div>
+      {@render panel?.()}
       {#if view.kind !== 'live'}
         <p class="max-w-prose text-muted-foreground">{m.home_lead()}</p>
       {/if}

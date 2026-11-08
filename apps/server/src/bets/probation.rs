@@ -14,7 +14,8 @@ const DAY_MS: i64 = 86_400_000;
 /// `fights` its distinct fights with a bet won or lost.
 #[must_use]
 pub fn of(age_ms: i64, fights: i64) -> Option<Probation> {
-    let ms_left = PROBATION_MS.saturating_sub(age_ms).max(0);
+    // A clock of the database that went back makes a new account look younger than new: it is new.
+    let ms_left = PROBATION_MS.saturating_sub(age_ms.max(0)).max(0);
     let fights_left = PROBATION_FIGHTS.saturating_sub(fights).max(0);
     if ms_left == 0 && fights_left == 0 {
         return None;
@@ -70,11 +71,18 @@ mod tests {
         assert_eq!(
             of(-5, -3),
             Some(Probation {
-                days_left: 8,
+                days_left: 7,
                 fights_left: 13
             })
         );
         assert_eq!(of(i64::MAX, i64::MAX), None);
-        assert_eq!(of(i64::MIN, 0).map(|p| p.days_left), Some(u16::MAX));
+        assert_eq!(of(i64::MIN, 0).map(|p| p.days_left), Some(7));
+    }
+
+    /// A clock that steps back between the account's creation and the read gives a negative age:
+    /// still the 7 days of a new account, never 8.
+    #[test]
+    fn a_negative_age_is_a_new_account() {
+        assert_eq!(of(-DAY_MS / 2, 0).map(|p| p.days_left), Some(7));
     }
 }

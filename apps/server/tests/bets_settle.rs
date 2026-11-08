@@ -688,3 +688,70 @@ async fn the_coins_are_conserved_through_any_sequence_of_refunds() {
     }
     assert!(slot > 16, "{slot}");
 }
+
+/// The real hook, and then a wait past the attempt's limit, until the test says so.
+struct SlowAfterWriting {
+    slow: AtomicBool,
+    attempts: std::sync::atomic::AtomicUsize,
+}
+
+impl SettlementHook for SlowAfterWriting {
+    fn settle<'a>(
+        &'a self,
+        tx: &'a mut PgConnection,
+        fight: &'a SettlingFight,
+    ) -> SettleFuture<'a> {
+        Box::pin(async move {
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            BetsHook.settle(&mut *tx, fight).await?;
+            if self.slow.load(Ordering::SeqCst) {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+            Ok(())
+        })
+    }
+}
+
+/// RF14 and S2: a hook slower than `attempt_timeout` is a failure the runner reaches. Each attempt is
+/// cut, its transaction reverts with everything it wrote, and once the hook is quick again the retry
+/// settles the pool once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_hook_slower_than_the_attempt_timeout_leaves_nothing_and_the_retry_settles() {
+    let (_db, pool) = database().await;
+    let vector = Vector::of(DRAW);
+    let id = f::open_vector(&pool, T0, &vector).await;
+    let (a, b, placed) = sow(&pool, id, ["a", "a", "b"]).await;
+    let hook = Arc::new(SlowAfterWriting {
+        slow: AtomicBool::new(true),
+        attempts: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let (mut settings, clock) = hook_settings(T0, hook.clone());
+    settings.timings.attempt_timeout_ms = 300;
+    let (_shared, _runner) = f::start(&pool, &settings);
+    let (closes_at, live_at) = f::hours(T0);
+    clock.set(closes_at);
+    wait_state(&pool, id, FightState::BettingClosed).await;
+    clock.set(live_at);
+    wait_state(&pool, id, FightState::Live).await;
+    clock.set(live_at + vector.end_t() + 10_000);
+    wait_for("two attempts cut by the timeout", || async {
+        clock.advance(2000);
+        hook.attempts.load(Ordering::SeqCst) >= 2
+    })
+    .await;
+    // Whatever the cut attempts wrote went back with them.
+    let pools: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM pool_settlements WHERE fight_id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(pools, 0);
+    assert_eq!(bets::escrow(&pool).await, 21);
+    assert_eq!(row(&pool, id).await.state, FightState::Live);
+    hook.slow.store(false, Ordering::SeqCst);
+    f::wait_state_advancing(&pool, &clock, id, FightState::Settled).await;
+    assert_refunded(&pool, id, &placed, "refund_draw").await;
+    assert_eq!(ledger::balance(&pool, a).await.unwrap(), Coins(1000));
+    assert_eq!(ledger::balance(&pool, b).await.unwrap(), Coins(1000));
+}

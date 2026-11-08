@@ -24,14 +24,16 @@ updated: 2026-11-01
 | Estado de la pelea | `FightState` | `scheduled`, `betting_open`, `betting_closed`, `live` o `settled`. |
 | Final de la pelea | `FightFinal` | Cómo terminó una pelea `settled`: exactamente uno entre `decided`, `cancelled` y `voided`. |
 | Cancelada | `cancelled` | Final de una pelea que no llegó a abrir: sin semilla, sin log y sin apuestas. |
-| Anulada | `voided` | Final manual de una pelea con commit que no se puede terminar: revela la semilla y reembolsa. No tiene log. |
+| Anulada | `voided` | Final manual de una pelea con commit que no se puede terminar: reembolsa y no tiene log. Revela la semilla, salvo con `secret_lost`, que no la tiene (012). |
+| Anulada no verificable | `voided` con `secret_lost` | Anulada sin la semilla, que se perdió: reembolsa, y nadie puede comprobar el commit. La vista lo dice, y el contador público la cuenta (012 RF21 a RF23). |
 | Parada segura | `fights.safe_stop` | Una pelea en `betting_closed` o `live` cuyo log no se puede reconstruir queda detenida, sin inventar un final. |
 | Detención | `halted` | Mientras dura, no se abren ventanas ni se crean peleas nuevas, y las ventanas abiertas no aceptan apuestas. El server lo publica sin causa. |
 | Retraso de reproducción | `playback_delay_ms` | Lo que el cliente reproduce por detrás del server (3500 ms): el margen para conocer el impacto y el cierre antes de mostrarlos. |
 | Log de eventos | `FightLog` | Secuencia ordenada de `FightEvent` con offset de tiempo; el renderizador la reproduce. |
 | Ventana de apuestas | `BettingWindow` | Periodo en que se aceptan apuestas, antes de que empiece la pelea. |
 | Pozo (parimutuel) | `Pool` | Suma de lo apostado por lado; las ganancias se reparten proporcionalmente entre los ganadores. |
-| Comisión | `Rake` | % del pozo que se destruye como sumidero de monedas (puede ser 0). |
+| Comisión | `Rake` | % del pozo, con tope en el lado perdedor, que se destruye como sumidero de monedas (puede ser 0). El residuo del redondeo también va al sumidero (012 RF10). |
+| Pozo reembolsado | `refund_*` | Un pozo que devuelve a cada uno lo apostado: empate, un lado vacío al cierre, anulada o cancelada. No da `RankedProfit` ni cuenta para salir de carencia (012 RF9). |
 | Monedas | `Coins` | Moneda ficticia para apostar. No se compra ni se retira. |
 | Bono diario | `DailyGrant` | Monedas gratis por entrar cada día. |
 | Rescate | `Bailout` | Monedas gratis cuando el saldo está en (casi) cero. |
@@ -39,7 +41,7 @@ updated: 2026-11-01
 | Temporada | `Season` | Periodo del ranking de apostadores; al terminar se reinicia el ranking (no las monedas). |
 | Ganancia neta | `NetProfit` | Lo ganado en apuestas menos lo apostado; no incluye bonos ni rescates. |
 | Ganancia clasificable | `RankedProfit` | La parte de `NetProfit` que cuenta para el leaderboard: las pérdidas cuentan completas y las ganancias solo acreditan la parte que sale de stakes perdedores de **apuestas hechas** fuera de carencia (cuenta la foto al apostar, no el estado actual de la cuenta). Nunca es mayor que `NetProfit` (ADR-0008 D8). No cambia el ledger ni los pagos. |
-| Carencia | `Probation` | Periodo inicial de una cuenta (menos de 7 días o de 10 apuestas liquidadas, es decir, ganadas o perdidas; los reembolsos no cuentan): tope por pelea reducido, no sale en el leaderboard y sus stakes perdidos no dan `RankedProfit` a nadie (ADR-0008 D8). |
+| Carencia | `Probation` | Periodo inicial de una cuenta (menos de 7 días o de 10 peleas con una apuesta ganada o perdida; los reembolsos no cuentan): tope por pelea reducido, no sale en el leaderboard y sus stakes perdidos no dan `RankedProfit` a nadie (ADR-0008 D8). |
 | Rating | `Rating` | Fuerza estimada de un personaje (Glicko-2). |
 | Narrador | `Narrator` | Sistema de frases con plantillas que comenta la pelea según el contexto. |
 | Repetición | `Replay` | Reproducir una pelea pasada a partir de su log. |

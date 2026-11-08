@@ -16,9 +16,9 @@ const AUTH = 'auth/*.spec.ts';
 
 export default defineConfig({
   testDir: './e2e',
-  // Runs against `just dev` with playwright.dev.config.ts, with playwright.fights.config.ts and with
-  // playwright.replays.config.ts, which also takes the cases tagged @replays of the other specs.
-  testIgnore: ['dev-status.spec.ts', 'fights.spec.ts', 'replays.spec.ts'],
+  // Runs against `just dev` with playwright.dev.config.ts, with playwright.fights.config.ts, with
+  // playwright.bets.config.ts and with playwright.replays.config.ts, which also takes the cases tagged @replays of the other specs.
+  testIgnore: ['dev-status.spec.ts', 'fights.spec.ts', 'replays.spec.ts', 'bets.spec.ts'],
   grepInvert: /@replays/,
   outputDir: './test-results/artifacts',
   fullyParallel: false,
@@ -45,6 +45,7 @@ export default defineConfig({
         'arena-webkit.spec.ts',
         'fights.spec.ts',
         'replays.spec.ts',
+        'bets.spec.ts',
       ],
     },
     {
