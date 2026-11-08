@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { BetQuote } from '@torneo/protocol';
-import { QUOTE_DEBOUNCE_MS, createQuoteClient, type QuoteState } from './quote-client.js';
+import {
+  QUOTE_DEBOUNCE_MS,
+  QUOTE_RETRY_MS,
+  createQuoteClient,
+  type QuoteState,
+} from './quote-client.js';
 
 // 012 RF47, plan-c C4.
 function quote(amount: number, side: 'a' | 'b' = 'a'): BetQuote {
@@ -101,6 +106,37 @@ describe('the quote', () => {
     expect(h.last()?.status).toBe('stale');
   });
 
+  it('a window the cache does not know yet is asked once more, after a refresh', async () => {
+    let calls = 0;
+    const h = harness(() =>
+      ++calls === 1
+        ? Promise.resolve(Response.json({ error: 'bet.window_closed' }, { status: 409 }))
+        : ok(quote(25)),
+    );
+    h.client.request({ fightId: 2, side: 'a', amount: 25 });
+    h.fire();
+    await flush();
+    expect(h.last()?.status).toBe('loading');
+    h.fire();
+    await flush();
+    expect(h.urls).toHaveLength(2);
+    expect(h.last()?.status).toBe('ready');
+    expect(QUOTE_RETRY_MS).toBeGreaterThan(2000);
+  });
+
+  it('a window still closed after the retry: no estimate', async () => {
+    const h = harness(() =>
+      Promise.resolve(Response.json({ error: 'bet.window_closed' }, { status: 409 })),
+    );
+    h.client.request({ fightId: 2, side: 'a', amount: 25 });
+    h.fire();
+    await flush();
+    h.fire();
+    await flush();
+    expect(h.urls).toHaveLength(2);
+    expect(h.last()?.status).toBe('unavailable');
+  });
+
   it('a 422 below the minimum is a hint, not a refusal', async () => {
     const h = harness(() =>
       Promise.resolve(Response.json({ error: 'bet.below_minimum' }, { status: 422 })),
@@ -114,7 +150,7 @@ describe('the quote', () => {
   it.each([
     [
       'an error',
-      () => Promise.resolve(Response.json({ error: 'bet.window_closed' }, { status: 409 })),
+      () => Promise.resolve(Response.json({ error: 'bet.invalid_request' }, { status: 422 })),
     ],
     ['a 429', () => Promise.resolve(new Response('', { status: 429 }))],
     ['the network', () => Promise.reject(new Error('down'))],

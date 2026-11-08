@@ -6,6 +6,11 @@ import type { BetQuote, Side } from '@torneo/protocol';
 // shown. With an error, a 429 or no JS, there is no estimate, and the bet still goes.
 
 export const QUOTE_DEBOUNCE_MS = 300;
+/**
+ * The server answers from its cache of pools, refreshed every 2 s (012 RF35): right after a window
+ * opens it does not know the fight yet and says `bet.window_closed`. One retry after a refresh.
+ */
+export const QUOTE_RETRY_MS = 2500;
 
 export interface QuoteInput {
   readonly fightId: number;
@@ -84,7 +89,7 @@ export function createQuoteClient(deps: QuoteDeps): QuoteClient {
     timer = null;
   };
 
-  const fetchQuote = async (input: QuoteInput): Promise<void> => {
+  const fetchQuote = async (input: QuoteInput, retried: boolean): Promise<void> => {
     const path = `/api/fights/${input.fightId}/quote?side=${input.side}&amount=${input.amount}`;
     let next: QuoteState;
     try {
@@ -97,10 +102,21 @@ export function createQuoteClient(deps: QuoteDeps): QuoteClient {
         next = isQuote(body, input)
           ? { status: 'ready', input, quote: body }
           : { status: 'unavailable', input };
-      } else if (response.status === 422 && (await errorCode(response)) === 'bet.below_minimum') {
-        next = { status: 'below_minimum', input };
       } else {
-        next = { status: 'unavailable', input };
+        const code = await errorCode(response);
+        if (response.status === 422 && code === 'bet.below_minimum') {
+          next = { status: 'below_minimum', input };
+        } else if (response.status === 409 && code === 'bet.window_closed' && !retried) {
+          if (wanted !== null && same(wanted, input)) {
+            timer = deps.setTimer(() => {
+              timer = null;
+              void fetchQuote(input, true);
+            }, QUOTE_RETRY_MS);
+          }
+          return;
+        } else {
+          next = { status: 'unavailable', input };
+        }
       }
     } catch {
       next = { status: 'unavailable', input };
@@ -117,7 +133,7 @@ export function createQuoteClient(deps: QuoteDeps): QuoteClient {
   const start = (input: QuoteInput): void => {
     movedWhileLoading = false;
     set({ status: 'loading', input });
-    void fetchQuote(input);
+    void fetchQuote(input, false);
   };
 
   return {
