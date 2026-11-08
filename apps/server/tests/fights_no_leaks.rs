@@ -221,8 +221,8 @@ fn expected_status(handler: Handler, identity: &str) -> Option<u16> {
         | Handler::FightsVoidStats
         | Handler::FightDetail
         | Handler::AuthProviders => Some(200),
-        Handler::Me if identity == "anonymous" => Some(401),
-        Handler::Me => Some(200),
+        Handler::Me | Handler::Wallet if identity == "anonymous" => Some(401),
+        Handler::Me | Handler::Wallet => Some(200),
         Handler::Ws
         | Handler::AuthStart
         | Handler::AuthLink
@@ -233,7 +233,14 @@ fn expected_status(handler: Handler, identity: &str) -> Option<u16> {
         | Handler::Logout
         | Handler::LogoutAll
         | Handler::MeDisplayName
-        | Handler::MePreferences => None,
+        | Handler::MePreferences
+        // 012: they depend on the state of the fight, the wallet and what is sent.
+        | Handler::BonusClaim
+        | Handler::BailoutClaim
+        | Handler::Bet
+        | Handler::MyBets
+        | Handler::FightPool
+        | Handler::BetQuote => None,
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize | Handler::DevToken | Handler::DevUserinfo => None,
     }
