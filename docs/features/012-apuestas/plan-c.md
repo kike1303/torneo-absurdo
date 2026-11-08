@@ -2,7 +2,7 @@
 id: "012"
 title: "Apuestas, fase C: panel en la home, form actions, e2e y cierre"
 type: plan
-status: in-progress
+status: in-review
 risk: high
 author: frontend-engineer
 reviewers: [reviewer, security-reviewer]
@@ -44,9 +44,8 @@ updated: 2026-11-08
 | `apps/web/src/lib/features/bets/{target,panel-state,presentation,quote-client,reread,form}.ts` y tests | Nuevos, puros | 2 |
 | `apps/web/src/lib/features/fight/live/live-store.svelte.ts` y test | Guarda `pool_update` | 3 |
 | `apps/web/src/routes/+page.server.ts`, `+page.svelte` | `load` con C1 y C2, y las tres acciones | 4 |
-| `apps/web/src/lib/components/fight/{BetPanel,BetForm,BetResult,BonusClaim,BetExplainer,PoolBar}.svelte`, `FightHome.svelte` | El panel en la segunda zona | 5 |
+| `apps/web/src/lib/components/bets/{BetPanel,BetForm,BetPool}.svelte`, `presentation.ts`, `apps/web/src/lib/components/fight/FightHome.svelte` | El panel en la segunda zona (E2, E3) | 5 |
 | `apps/web/messages/{en,es}.json` | Textos del panel | 5 |
-| `apps/web/src/routes/dev/components/_sections/BetSection.svelte` | El panel en el catálogo, con cada estado | 5 |
 | `apps/web/playwright.bets.config.ts`, `apps/web/e2e/bets.spec.ts`, `justfile` | C8 | 6 |
 | `docs/glossary.md`, `docs/features/010-*/spec.md`, `CLAUDE.md`, `REVIEW.md`, `apps/server/.env.example` | Trabajo de cierre de la spec | 7 |
 
@@ -84,4 +83,14 @@ Lo que lista "Trabajo de cierre (fase C)" de la spec y aún falta tras B. Linear
 - **Cuota de lectura:** cada `invalidate` cuesta 1 a 4 lecturas. La relectura es una por pelea, y una acción, otra.
 
 ## Desviaciones durante la implementación
-_(se completa al implementar)_
+| # | Plan | Lo que se hizo | Por qué |
+|---|---|---|---|
+| E1 | C5: `invalidate('app:bets')` y `depends` | `refreshAll()` de Kit | El header lee el saldo del layout: una invalidación solo de la página lo dejaba viejo. Cuesta además la lectura del tablero, que es de memoria |
+| E2 | Componentes en `lib/components/fight/` | `lib/components/bets/` | CLAUDE.md: los componentes de dominio van en `lib/components/<dominio>/` |
+| E3 | C6: `presentation.ts` en `lib/features/bets/` | En `lib/components/bets/`, con `lostAmount` y `rakeShare` | ADR-0009 D4: un componente solo importa tipos de `features/`. Sigue siendo el único archivo con aritmética, y el test de RF43 lo comprueba |
+| E4 | C1: releer al abrirse otra ventana | `load` devuelve `target`, y la página relee si la objetivo cambió | Las apuestas leídas antes de abrirse una ventana tienen `max_stake = 0`. Lo encontró el e2e |
+| E5 | C2: la llave cambia con cada lectura | La página guarda la llave y solo toma la nueva tras una apuesta hecha o "Recargar" | Un rechazo relee `wallet` y `mine`, y una llave nueva rompería el reintento de `bet.unavailable` |
+| E6 | RF45 e2e con cliente atrasado | Vitest de `panelState` (solo muestra el resultado que la vista muestra) y la relectura, que espera a la vista | Atrasar un cliente real exige cortar su socket a medida. Queda para cuando 010 tenga ese soporte en el e2e |
+| E7 | Bono e2e | Un usuario sembrado con el bono de ayer (`seedYesterdayUser`) | El alta ya da el bono del día, así que una cuenta nueva nunca lo ve disponible |
+| E8 | Ventana de 45 s, cadencia de 153 s | 40 s y 148 s, tres peleas (KO, empate, KO) | Un empate gana a un lado vacío como motivo de reembolso: el lado vacío pide una tercera pelea |
+| E9 | Paso 0: carencia en un fragmento | `concat!` con dos macros en `facts.rs` | Una constante no puede formar parte de otra en `concat!` |
