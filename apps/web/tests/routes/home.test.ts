@@ -38,6 +38,7 @@ const SIGNED_OUT = {
   wallet: null,
   mine: {},
   pool: null,
+  target: null,
   clientKey: expect.stringMatching(
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
   ),
@@ -206,6 +207,7 @@ describe('the load of the home page with a session', () => {
       wallet: { balance: 100 },
       mine: { 1: mine(1), 3: mine(3) },
       pool: { fight_id: 3 },
+      target: 3,
       clientKey: expect.any(String),
     });
     const paths = fetchFn.mock.calls.map(([input]) => new URL(String(input)).pathname);

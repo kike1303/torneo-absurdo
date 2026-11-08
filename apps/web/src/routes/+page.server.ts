@@ -51,6 +51,9 @@ export const load: PageServerLoad = async ({ fetch, url, setHeaders, locals }) =
       wallet: wallet?.ok ? wallet.data : null,
       mine: bets,
       pool: pool?.ok ? pool.data : null,
+      // The fight these reads were for: a window that opens later needs its own (`max_stake` is 0
+      // while it is closed).
+      target: target?.id ?? null,
       // RF44, plan-c C2: one key per read of the page, so posting the same form again never bets
       // twice, with or without JS.
       clientKey: crypto.randomUUID(),

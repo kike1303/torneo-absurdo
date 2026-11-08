@@ -29,7 +29,7 @@ function html(voidStats: { voided: number; secret_lost: number } | null): string
         board: BOARD,
         voidStats,
         debug: false,
-        betting: { signedIn: false, wallet: null, mine: {}, pool: null, clientKey: 'k' },
+        betting: { signedIn: false, wallet: null, mine: {}, pool: null, target: null, clientKey: 'k' },
       },
       form: null,
     },

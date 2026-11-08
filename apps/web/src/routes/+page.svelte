@@ -128,7 +128,7 @@
   });
   $effect(() => {
     if (!betting.signedIn || target === null) return;
-    targetReader.due(target.id, !mine.has(target.id));
+    targetReader.due(target.id, betting.target !== target.id);
   });
 
   // RF47, plan-c C4: the estimate.

@@ -112,13 +112,15 @@ async function myBets(request: APIRequestContext, id: number): Promise<MyFightBe
 }
 
 async function shot(page: Page, info: TestInfo, name: string): Promise<void> {
+  // The theme is a cookie of the account, not the system's: the attribute it resolves to, for each.
+  const before = await page.evaluate(() => document.documentElement.dataset.theme ?? '');
   for (const scheme of ['light', 'dark'] as const) {
-    await page.emulateMedia({ colorScheme: scheme });
+    await page.evaluate((value) => (document.documentElement.dataset.theme = value), scheme);
     await panel(page).screenshot({
       path: `${SHOTS}/bets-${info.project.name}-${name}-${scheme}.png`,
     });
   }
-  await page.emulateMedia({ colorScheme: null });
+  await page.evaluate((value) => (document.documentElement.dataset.theme = value), before);
 }
 
 test('bets on the same real fights in every project', async ({ browser, request }, info) => {
