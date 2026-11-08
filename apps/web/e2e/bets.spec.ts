@@ -278,10 +278,14 @@ test('bets on the same real fights in every project', async ({ browser, request 
 
     // The result, once the view shows it, and the payout by reading again (RF36, RF45).
     const result = (page: Page) => page.getByTestId('bet-result');
-    await expect(result(bob)).toHaveAttribute('data-outcome', 'won', { timeout: 150_000 });
-    await expect(result(alice)).toHaveAttribute('data-outcome', 'lost', { timeout: 15_000 });
+    // The view first; the payout follows within the reread's wait plus the settlement (RF36).
+    await expect(bob.getByTestId('fight-result')).toHaveAttribute('data-result', 'ko', {
+      timeout: 150_000,
+    });
+    await expect(result(bob)).toHaveAttribute('data-outcome', 'won', { timeout: 8000 });
+    await expect(result(alice)).toHaveAttribute('data-outcome', 'lost', { timeout: 8000 });
     await expect(result(alice)).toHaveText(t('bet_result_lost', { amount: coins(locale, 25) }));
-    await expect(result(eve)).toHaveAttribute('data-outcome', 'lost', { timeout: 15_000 });
+    await expect(result(eve)).toHaveAttribute('data-outcome', 'lost', { timeout: 8000 });
     await expect(bob.getByTestId('header-balance')).not.toHaveText(coins(locale, 50));
     await shot(bob, info, 'won');
 
