@@ -88,6 +88,9 @@ export const actions: Actions = {
       amount: typeof typed === 'string' ? typed.slice(0, 20) : '',
       side: isSide(side) ? side : null,
       fight: bet?.fight_id ?? null,
+      // RF42: a retry of `bet.unavailable` is the same bet, also without JS, where the page that
+      // answers this refusal comes with a new key of its own.
+      client_key: bet?.client_key ?? null,
     };
     if (!locals.user) {
       if (locals.session === 'none') redirect(303, loginPath(url.pathname));

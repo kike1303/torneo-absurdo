@@ -71,6 +71,8 @@ export function createQuoteClient(deps: QuoteDeps): QuoteClient {
   let state: QuoteState = { status: 'idle' };
   let wanted: QuoteInput | null = null;
   let timer: unknown = null;
+  /** A `pool_update` arrived while asking: the answer is already stale when it comes. */
+  let movedWhileLoading = false;
 
   const set = (next: QuoteState): void => {
     state = next;
@@ -104,10 +106,16 @@ export function createQuoteClient(deps: QuoteDeps): QuoteClient {
       next = { status: 'unavailable', input };
     }
     // Out of order: only the answer for what is on screen now.
-    if (wanted !== null && same(wanted, input)) set(next);
+    if (wanted === null || !same(wanted, input)) return;
+    if (next.status === 'ready' && movedWhileLoading) {
+      next = { status: 'stale', input, quote: next.quote };
+    }
+    movedWhileLoading = false;
+    set(next);
   };
 
   const start = (input: QuoteInput): void => {
+    movedWhileLoading = false;
     set({ status: 'loading', input });
     void fetchQuote(input);
   };
@@ -129,6 +137,8 @@ export function createQuoteClient(deps: QuoteDeps): QuoteClient {
     poolChanged(fightId) {
       if (state.status === 'ready' && state.input.fightId === fightId) {
         set({ status: 'stale', input: state.input, quote: state.quote });
+      } else if (state.status === 'loading' && state.input.fightId === fightId) {
+        movedWhileLoading = true;
       }
     },
     refresh() {

@@ -37,16 +37,19 @@ export interface BetFormFailure {
   readonly amount: string;
   readonly side: Side | null;
   readonly fight: number | null;
+  /** The key that was posted, to post it again on a retry. */
+  readonly clientKey: string | null;
 }
 
 /** The refusal of `?/bet` in the `form` of the page, or `null` for any other result. */
 export function betFailureOf(form: unknown): BetFormFailure | null {
   if (typeof form !== 'object' || form === null || !('amount' in form)) return null;
-  const { code, amount, side, fight } = form as Record<string, unknown>;
+  const { code, amount, side, fight, client_key: key } = form as Record<string, unknown>;
   return {
     code: isErrorCode(code) ? code : null,
     amount: typeof amount === 'string' ? amount : '',
     side: isSide(side) ? side : null,
     fight: typeof fight === 'number' && Number.isSafeInteger(fight) ? fight : null,
+    clientKey: typeof key === 'string' && UUID.test(key) ? key : null,
   };
 }

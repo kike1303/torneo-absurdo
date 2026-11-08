@@ -90,6 +90,17 @@ describe('the quote', () => {
     expect(h.last()?.status).toBe('ready');
   });
 
+  it('a pool_update while asking makes the answer stale when it arrives', async () => {
+    let release: (r: Response) => void = () => undefined;
+    const h = harness(() => new Promise((resolve) => (release = resolve)));
+    h.client.request({ fightId: 2, side: 'a', amount: 25 });
+    h.fire();
+    h.client.poolChanged(2);
+    release(Response.json(quote(25)));
+    await flush();
+    expect(h.last()?.status).toBe('stale');
+  });
+
   it('a 422 below the minimum is a hint, not a refusal', async () => {
     const h = harness(() =>
       Promise.resolve(Response.json({ error: 'bet.below_minimum' }, { status: 422 })),

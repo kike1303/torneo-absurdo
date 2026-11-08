@@ -35,6 +35,7 @@ describe('the fight zone', () => {
   it('loading or a failed read: the pool if there is one, never an invented balance', () => {
     expect(panelState(input({ wallet: null })).fight).toEqual({
       kind: 'unavailable',
+      fight: OPEN,
       pool: pool(2, 100, 50),
     });
     expect(panelState(input({ mine: new Map() })).fight.kind).toBe('unavailable');
@@ -88,7 +89,7 @@ describe('the fight zone', () => {
   it('balance at the minimum and nothing more to add: "cannot add more"', () => {
     const capped = mine(2, { side: 'b', staked: 500, max_stake: 0 });
     const state = panelState(input({ wallet: wallet({ balance: 25 }), mine: bets(capped) }));
-    expect(state.fight).toEqual({ kind: 'capped', mine: capped });
+    expect(state.fight).toEqual({ kind: 'capped', fight: OPEN, mine: capped });
   });
 
   it('a full pool without own bets is "cannot add more" too', () => {
@@ -195,7 +196,12 @@ describe('a refusal', () => {
   });
 
   it('shows on the open form, with what was typed kept by the caller', () => {
-    const failure = { code: 'bet.side_locked' as ErrorCode, amount: '40', side: 'b' as const };
+    const failure = {
+      code: 'bet.side_locked' as ErrorCode,
+      amount: '40',
+      side: 'b' as const,
+      clientKey: null,
+    };
     const fight = panelState(input({ mine: bets(room), failure })).fight;
     expect(fight.kind === 'open' && fight.rejection).toEqual({
       code: 'bet.side_locked',

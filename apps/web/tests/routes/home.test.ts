@@ -260,7 +260,7 @@ describe('the actions of the panel', () => {
     const { run: send } = post(fields, { id: 'u' }, () => json({ error: 'bet.side_locked' }, 409));
     expect(await send(bet)).toMatchObject({
       status: 409,
-      data: { code: 'bet.side_locked', amount: '40', side: 'a', fight: 3 },
+      data: { code: 'bet.side_locked', amount: '40', side: 'a', fight: 3, client_key: KEY },
     });
   });
 

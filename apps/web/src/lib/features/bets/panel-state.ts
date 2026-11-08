@@ -33,6 +33,8 @@ export interface BetFailure {
   readonly code: ErrorCode | null;
   readonly amount: string;
   readonly side: Side | null;
+  /** The key that was posted (RF42: a retry is the same bet). */
+  readonly clientKey: string | null;
 }
 
 export interface PanelInput {
@@ -67,7 +69,11 @@ export type FightZone =
       readonly fight: FightSummary | null;
       readonly pool: FightPool | null;
     }
-  | { readonly kind: 'unavailable'; readonly pool: FightPool | null }
+  | {
+      readonly kind: 'unavailable';
+      readonly fight: FightSummary | null;
+      readonly pool: FightPool | null;
+    }
   | OpenFight
   | {
       readonly kind: 'broke';
@@ -76,7 +82,7 @@ export type FightZone =
       /** The target fight and its bet, if it has one. */
       readonly placed: { readonly fight: FightSummary; readonly mine: MyFightBets } | null;
     }
-  | { readonly kind: 'capped'; readonly mine: MyFightBets };
+  | { readonly kind: 'capped'; readonly fight: FightSummary; readonly mine: MyFightBets };
 
 /** The bet on the `current` once its window closed: in `betting_closed`, live or halted. */
 export interface Placed {
@@ -146,16 +152,16 @@ function fightZone(input: PanelInput): FightZone {
       ? { kind: 'none' }
       : { kind: 'signed_out', fight: target, pool: targetPool };
   }
-  if (wallet === null) return { kind: 'unavailable', pool: targetPool };
+  if (wallet === null) return { kind: 'unavailable', fight: target, pool: targetPool };
   if (target !== null && board?.halted !== true) {
     const mine = input.mine.get(target.id);
-    if (mine === undefined) return { kind: 'unavailable', pool: targetPool };
+    if (mine === undefined) return { kind: 'unavailable', fight: target, pool: targetPool };
     // Always before "cannot add more" (RF42).
     if (wallet.balance < wallet.min_bet) {
       const placed = placedOn(mine) ? { fight: target, mine } : null;
       return { kind: 'broke', bailout: wallet.bailout, wallet, placed };
     }
-    if (mine.max_stake === 0) return { kind: 'capped', mine };
+    if (mine.max_stake === 0) return { kind: 'capped', fight: target, mine };
     const oneSided = targetPool === null || targetPool.a.stake === 0 || targetPool.b.stake === 0;
     const failure = input.failure;
     return {

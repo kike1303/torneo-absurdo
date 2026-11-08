@@ -119,7 +119,10 @@
     <BetPool pool={open.pool} {names} {locale} />
   {/if}
 
-  <fieldset class="flex flex-col gap-2">
+  <fieldset
+    class="flex flex-col gap-2"
+    aria-describedby={rejection?.exit === 'side' ? errorId : undefined}
+  >
     <legend class="mb-2 text-sm font-medium">{m.bet_side_label()}</legend>
     <div class="grid grid-cols-2 gap-2">
       {#each sides as option (option)}

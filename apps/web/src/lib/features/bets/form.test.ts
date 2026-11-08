@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseAmount, parseBetForm } from './form.js';
+import { betFailureOf, parseAmount, parseBetForm } from './form.js';
 
 // 012 RF44: only the shape of what is posted.
 const KEY = '0f8fad5b-d9cb-469f-a165-70867728950e';
@@ -35,5 +35,22 @@ describe('the bet form', () => {
     for (const bad of ['', '1.5', '-3', '1e3', '١٢', '9999999999999999', null]) {
       expect(parseAmount(bad)).toBeNull();
     }
+  });
+});
+
+describe('the refusal of the bet action', () => {
+  it('keeps what was typed and the key that was posted, checked again', () => {
+    expect(
+      betFailureOf({ code: 'bet.unavailable', amount: '40', side: 'a', fight: 3, client_key: KEY }),
+    ).toEqual({ code: 'bet.unavailable', amount: '40', side: 'a', fight: 3, clientKey: KEY });
+    expect(
+      betFailureOf({ code: 'nope', amount: 7, side: 'c', fight: '3', client_key: 'x' }),
+    ).toEqual({ code: null, amount: '', side: null, fight: null, clientKey: null });
+  });
+
+  it('anything that is not a refusal of a bet is none', () => {
+    expect(betFailureOf(null)).toBeNull();
+    expect(betFailureOf({ placed: true })).toBeNull();
+    expect(betFailureOf({ code: 'bonus.already_claimed' })).toBeNull();
   });
 });

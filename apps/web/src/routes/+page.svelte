@@ -124,7 +124,12 @@
   $effect(() => {
     const shown = store.view.result?.fight.id;
     if (shown === undefined) return;
-    payoutReader.due(shown, (mine.get(shown)?.staked ?? 0) > 0);
+    // The view can show the end a moment before the settlement commits: the board says it is
+    // settled only after the `COMMIT`, so a read before that would find no result, and never retry.
+    // A result that came with the page needs no read.
+    const settled = store.board?.last?.id === shown && store.board.last.final !== null;
+    const bets = mine.get(shown);
+    payoutReader.due(shown, settled && (bets?.staked ?? 0) > 0 && bets?.result === null);
   });
   $effect(() => {
     if (!betting.signedIn || target === null) return;
@@ -195,7 +200,7 @@
       display={fighterDisplay}
       {locale}
       {signInHref}
-      {clientKey}
+      clientKey={failure?.clientKey ?? clientKey}
       keptAmount={failure?.amount ?? null}
       keptSide={failure?.side ?? null}
       {quote}
