@@ -88,6 +88,10 @@ pub struct AppState {
     pub rate: Arc<RateLimits>,
     pub auth: Arc<AuthState>,
     pub fights: Arc<FightsShared>,
+    /// `m`, `B`, `R` and the caps of the bets (012 RF40).
+    pub bets: crate::bets::BetsConfig,
+    /// The pools of the open windows (012 RF35), filled by the task of `serve`.
+    pub pools: Arc<crate::bets::pool::PoolCache>,
 }
 
 impl AppState {
@@ -110,6 +114,8 @@ impl AppState {
             rate: Arc::new(RateLimits::new(&settings.rate)),
             auth: Arc::new(AuthState::from_config(config, settings)?),
             fights: Arc::new(FightsShared::new(settings.fights.clock.clone())),
+            bets: config.bets,
+            pools: Arc::new(crate::bets::pool::PoolCache::default()),
         })
     }
 
@@ -211,6 +217,14 @@ pub async fn serve(
         state.fights.clone(),
         config.fights.clone(),
         fight_settings,
+        stop_fights.clone(),
+    ));
+    // 012 RF35, plan-b D9: next to the runner, never in `serve_listener`, so the tests in process that
+    // have no database for it do not run it; they start it by hand.
+    tokio::spawn(crate::bets::pool::run(
+        state.db.clone(),
+        state.pools.clone(),
+        state.fights.clone(),
         stop_fights.clone(),
     ));
     let shutdown = async move {

@@ -56,6 +56,9 @@ pub struct FightsConfig {
     pub window_ms: i64,
     pub pre_live_ms: i64,
     pub content_dir: PathBuf,
+    /// The rake of the fights announced from now on, in basis points (012 RF10, RF40, plan-b D5):
+    /// each fight keeps the value of its announcement.
+    pub rake_bp: i16,
 }
 
 impl FightsConfig {
@@ -63,6 +66,21 @@ impl FightsConfig {
     pub const DEFAULT_SECS: (u32, u32, u32) = (600, 450, 30);
     /// The default `CONTENT_DIR`, relative to the root of the repo.
     pub const DEFAULT_CONTENT_DIR: &'static str = "content/characters";
+}
+
+/// A fight id as a path or query segment (plan-b D7): decimal, no sign, no leading zero, and inside
+/// `i32`. Anything else is not a fight. `api.rs` keeps its own copy until TA-44 is merged.
+#[must_use]
+pub fn canonical_id(segment: &str) -> Option<i32> {
+    let canonical = segment
+        .bytes()
+        .next()
+        .is_some_and(|b| b.is_ascii_digit() && b != b'0')
+        && segment.bytes().all(|b| b.is_ascii_digit());
+    if !canonical {
+        return None;
+    }
+    segment.parse().ok()
 }
 
 /// A pause, for the race tests (test code only, never an environment variable).
@@ -186,6 +204,26 @@ pub fn hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_canonical_id_has_one_form() {
+        assert_eq!(super::canonical_id("7"), Some(7));
+        assert_eq!(super::canonical_id("2147483647"), Some(i32::MAX));
+        for bad in [
+            "",
+            "0",
+            "07",
+            "+7",
+            "-7",
+            " 7",
+            "7 ",
+            "7.0",
+            "2147483648",
+            "x",
+        ] {
+            assert_eq!(super::canonical_id(bad), None, "{bad:?}");
+        }
+    }
+
     use super::*;
 
     #[test]

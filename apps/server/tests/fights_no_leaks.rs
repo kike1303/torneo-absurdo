@@ -106,7 +106,20 @@ fn request_of(route: &RouteSpec, id: i32) -> (String, Vec<(&'static str, &'stati
         | Handler::Me
         | Handler::FightsCurrent
         | Handler::FightsVoidStats
-        | Handler::FightDetail => (vec![], String::new()),
+        | Handler::FightDetail
+        | Handler::Wallet => (vec![], String::new()),
+        Handler::MyBets | Handler::FightPool => (vec![], String::new()),
+        Handler::BetQuote => (vec![], String::new()),
+        // 012 RF25: a bet on the fight of the case, which the window may refuse.
+        Handler::Bet => (
+            vec![json],
+            format!(
+                r#"{{"fight_id":{id},"side":"a","amount":25,"client_key":"{}"}}"#,
+                uuid::Uuid::new_v4()
+            ),
+        ),
+        // 012 RF29, RF30: no body.
+        Handler::BonusClaim | Handler::BailoutClaim => (vec![form], String::new()),
         Handler::AuthCallback => (vec![], String::new()),
         Handler::AuthStart | Handler::AuthLink | Handler::AuthReauth => {
             (vec![form], "next=%2F".to_owned())

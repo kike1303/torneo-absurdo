@@ -25,11 +25,13 @@ approvals:
     date: 2026-10-30
   - by: security-reviewer
     date: 2026-11-02
+  - by: owner
+    date: 2026-11-07
 supersedes: null
 linear: TA-5
 depends_on: ["0002", "0003", "0005", "0006", "0007"]
 created: 2026-10-20
-updated: 2026-11-02
+updated: 2026-11-07
 ---
 
 # ADR-0008: Autenticación y sesiones
@@ -374,8 +376,8 @@ Viene del hallazgo de security-reviewer en la revisión de 008 (TA-29). Con la l
   34. Tras un `unlink` exitoso, la misma sesión no puede vincular ni volver a desvincular sin reautenticarse.
 - **Riesgo residual (el owner lo aceptó el 2026-10-30, ver "Decisiones" del intent de 009; no lo crea esta enmienda).** Un atacante que vinculó X sigue entrando con X, con acceso de usuario y nunca de admin, hasta que la víctima lo vea en `/account` y lo quite. Con esta enmienda, vincular X exige una sesión de los 10 min posteriores a un login real o a una reautenticación. Con esa sola sesión hace una de dos cosas: quitar una identidad de la víctima (nunca la última) o vincular X, porque un `unlink` exitoso consume la confirmación. Si además consigue otra sesión reciente de la víctima (un segundo robo), puede quitar el proveedor de la víctima: es el mismo riesgo de convivencia, y lo cierra lo mismo. Aparte, el proveedor más antiguo es la raíz de la cuenta: quien pierde el control de él no lo puede quitar, y quien lo controla puede quitar los demás. Antes de esta enmienda era peor, y no lo resuelve ninguna regla. Esta feature tampoco cierra el navegador desatendido con el proveedor V abierto: quien lo use consigue, sin segundo robo, la toma de cuenta completa de TA-29 (reautenticarse con V, vincular X, reautenticarse con V y quitar V), y la víctima queda fuera para siempre. "Nunca de admin" vale con solo X: las excepciones están en el Área 12 de la spec de 009. Lo detalla la spec de 009 ("Áreas de preocupación", 2 a 4, 12 y 13).
 
-## Notas propuestas 2026-11-02: tope del rake y carencia por peleas
-**Estado: `proposed`. No están en vigor.** D8 rige sin cambios hasta el OK explícito del owner (gate de ADRs de [`docs/process.md`](../process.md)) y la revisión de security-reviewer y game-designer. Vienen de la [spec de 012](../features/012-apuestas/spec.md), RF10, RF11, RF27 y preocupaciones 1, 2 y 4. Las escogió quien coordina esa feature.
+## Notas 2026-11-02: tope del rake y carencia por peleas
+**Estado: `approved`, en vigor desde 2026-11-07.** El owner dio su OK explícito en chat el 2026-11-07, y security-reviewer y game-designer las aprobaron con la spec de 012 el 2026-11-02. Donde contradicen la letra de D8 y de "Números fijados", rigen estas notas. Vienen de la [spec de 012](../features/012-apuestas/spec.md), RF10, RF11, RF27 y preocupaciones 1, 2 y 4. Las escogió quien coordina esa feature.
 
 **Nota 1: el rake tiene tope en el lado perdedor.**
 - **Qué cambia:** `rake = min(⌊r · T⌋, L)`, con `T` el pozo y `L` el lado perdedor. Como `T − rake ≥ W`, cada apuesta ganadora cobra al menos su stake: acertar nunca hace perder monedas.

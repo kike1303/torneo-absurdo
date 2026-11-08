@@ -164,3 +164,34 @@ async fn a_ban_during_a_rename_or_a_preference_change_stops_it() {
         assert_eq!(after.get::<Option<String>, _>(2), None, "{path}");
     }
 }
+
+/// 012 RF31: a ban that commits while a claim waits on the user's lock stops the claim, with
+/// nothing written. Without today's grant the bonus would be given, and broke the bailout would.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_ban_during_a_claim_stops_it() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    for path in ["/api/bonus/claim", "/api/bailout/claim"] {
+        let (user, token) = support::app::user_with_session(&pool).await;
+        if path == "/api/bailout/claim" {
+            let mut tx = pool.begin().await.unwrap();
+            server::ledger::grant(&mut tx, user, server::ledger::Coins(1))
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+        }
+        let entries = || async {
+            let count: i64 = sqlx::query("SELECT count(*) FROM ledger_entries WHERE user_id = $1")
+                .bind(user)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+                .get(0);
+            count
+        };
+        let before = entries().await;
+        let response = with_a_ban_in_between(&app, &pool, user, "POST", path, &token, "").await;
+        assert_unauthenticated(&response);
+        assert_eq!(entries().await, before, "{path}");
+    }
+}

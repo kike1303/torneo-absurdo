@@ -123,6 +123,13 @@ Antes de correr `grant`, revisa los proveedores vinculados en `/account`: todo l
 ### Anulación por CLI (feature 012)
 `server fight void <fight_id> --by <admin_user_id>` es la salida de una pelea en `betting_closed` o `live` que no puede terminar. Lee solo `DATABASE_URL` y `RUST_LOG`, deduce la razón y se niega con un código si la pelea está sana. En una transacción con `lock_timeout` de 5 s bloquea la fila, escribe el final por `fights::sealed::void_fight`, publica la semilla, reembolsa por el gancho e inserta en `admin_audit`. El runner lo ve en su relectura de 60 s. `voided(secret_lost)` es el único final con commit y sin semilla: solo procede sin la fila del secreto y pasado su plazo, y queda sin verificar. `GET /api/fights/void-stats` es el contador público. Uso y salidas: [`apps/server/README.md`](../apps/server/README.md).
 
+### Apuestas (feature 012, fase B)
+- **Rutas:** `POST /api/bets`, `POST /api/bonus/claim`, `POST /api/bailout/claim`, `GET /api/wallet`, `GET /api/bets/mine`, `GET /api/fights/{id}/pool` (sin sesión) y `GET /api/fights/{id}/quote`. Una apuesta es una transacción: bloquea al usuario, lee el reloj, toma la pelea `FOR SHARE` con `lock_open_for_bet` y escribe la apuesta, su `bet_stake` y su `auth_events`. Saldo, stakes abiertos, bono, rescate y carencia salen de una sola sentencia (`bets::facts`), la misma para leer y para decidir.
+- **Reparto:** en el gancho, dentro de la transacción del reveal. Una función pura (`bets::parimutuel`, `i128`, división hacia abajo) calcula pagos, rake con tope en el lado perdedor y residuo; se comprueba en memoria que todo suma el pozo, y solo entonces se escribe, empezando por `pool_settlements`. `rake + residuo` van a `rake_sink` en un asiento `rake`. Cada pelea guarda su `rake_bp` al anunciarse.
+- **Pozo en vivo:** una tarea junto al runner lee cada 2 s los pozos de las peleas en `betting_open` en una sola consulta, y manda `pool_update` por el canal `schedule` solo si cambió y tiene apuestas, más un último valor tras el cierre. El hub guarda el último por pelea, serializado una vez, y un socket lento salta al último. `quote` estima desde esa caché.
+- **Reserva de sockets:** el último quinto de `WS_MAX_CONNECTIONS` es para cuentas fuera de carencia. La carencia solo se consulta cuando se llega a la reserva.
+- **Custodia:** `bet_stake` está atado en la base al `stake` de su apuesta (migración `20261103000000`). `refund` y `bet_payout` no; la consulta de custodia del README del server lo detecta.
+
 ## Tipos compartidos
 `crates/protocol` define los mensajes WS, los DTOs del API y el log de pelea (`FightLog`, `FightEvent` y sus enums, feature 003) con serde. Es una librería pura: sin I/O, sin `tokio`, sin reloj y sin texto para humanos (ADR-0007).
 
@@ -284,7 +291,7 @@ Son los cambios en el proxy compartido que el owner aprobó el 2026-10-21. Se ha
 > - **"Reset configuration to default" del proxy en Coolify quita `torneo-edge` y la IP `10.250.0.2`.** Después de un reset, de reiniciar el proxy o de actualizar Coolify, se repite el paso 2 y la verificación 15 de ADR-0006.
 
 ### Prerrequisitos del primer despliegue a producción (bloquean; RF-C18)
-Ninguno se cumple en la feature 001. Los puntos 1 a 4 se siguen en Linear (TA-8, bloqueado por la feature de auth y por TA-6), el 5 en TA-13, el 6 en la feature 002 y del 7 al 11 en TA-8.
+Ninguno se cumple en la feature 001. Los puntos 1 a 4 se siguen en Linear (TA-8, bloqueado por la feature de auth y por TA-6), el 5 en TA-13, el 6 en la feature 002 y del 7 al 12 en TA-8.
 
 1. **Límites anónimos de ADR-0008 D6 y D7 en `/ws`, implementados y probados:** como máximo 50 sockets simultáneos por `ip_key`, y upgrade a 30/min con ráfaga de 10 por IP, con `TRUSTED_PROXIES=10.250.0.2/32` (ADR-0006 D2).
 2. **Las verificaciones de ADR-0006 que no se hicieron en el cierre de 001** (RF-C19), más dos comprobaciones con el stack desplegado:
@@ -309,3 +316,4 @@ Ninguno se cumple en la feature 001. Los puntos 1 a 4 se siguen en Linear (TA-8,
 9. **El Postgres de producción no registra parámetros de sentencias (spec de 010).** El `INSERT` en `fight_secrets` escribiría la semilla en el log. Se comprueba con la consulta del punto 2 (ADR-0012 A9), en el recurso de Coolify.
 10. **Repetir los escenarios A a F de `fights_fanout.rs` (spec de 010, DP-B9).** En Linux amd64, con el `mem_limit` real y detrás de Traefik. El criterio es `memory.peak` del cgroup ≤ 200 MiB y ningún OOM kill, y F mide el enlace real de salida. Si no se cumple, bajar `WS_MAX_CONNECTIONS` por defecto o subir el `mem_limit` pasa por el gate de ADRs. También se revisa ahí `ORDER BY settled_at` sin índice.
 11. **`wss://` en WebKit (ADR-0012 B4.4 y trabajo 14).** Contra producción, una página `https` abre `wss://` del mismo host en WebKit sin violación de CSP. Si falla, se agrega el origen exacto `wss://<host>` en `handle`, nunca el esquema suelto.
+12. **Medición del gancho de apuestas en el VPS (RF15 de la spec de 012).** `cargo test --release -p server --test bets_load -- --ignored --nocapture` en el VPS: la liquidación de 20 000 apuestas, reembolso y reparto, cabe en ≤ 10 s con el pool real. Si no, se baja `BETS_MAX_PER_FIGHT`.

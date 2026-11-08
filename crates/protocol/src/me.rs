@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-/// Largest integer a JavaScript number holds exactly (2^53 − 1). `Me.balance` is exported as
-/// `number`, so the server refuses to send anything outside `±MAX_SAFE_INTEGER` (008 plan-b,
-/// question 2).
+use crate::coins::CoinAmount;
+
+/// Largest integer a JavaScript number holds exactly (2^53 − 1). Coins are exported as `number`,
+/// so [`CoinAmount`] refuses anything outside `±MAX_SAFE_INTEGER` (008 plan-b, question 2).
 pub const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 
 /// `GET /api/me` (008 RF-B12). No `user_id`, no session id and nothing from the provider.
@@ -11,10 +12,8 @@ pub const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 pub struct Me {
     pub display_name: String,
     pub role: Role,
-    /// Coins (`SUM` of the ledger). The only 64-bit field of the protocol: exported as `number`
-    /// and bounded by [`MAX_SAFE_INTEGER`] on the server.
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub balance: i64,
+    /// Coins (`SUM` of the ledger).
+    pub balance: CoinAmount,
     pub providers: Vec<Provider>,
     pub locale: Option<Locale>,
     pub theme: Option<Theme>,
@@ -154,7 +153,7 @@ mod tests {
         let me = Me {
             display_name: "TigreVeloz42".to_owned(),
             role: Role::User,
-            balance: 100,
+            balance: CoinAmount::new(100).unwrap(),
             providers: vec![Provider::Dev],
             locale: None,
             theme: Some(Theme::Light),
@@ -283,7 +282,7 @@ mod tests {
 
     /// The single declared exception to "no 64-bit integers in exported types" (lib.rs).
     #[test]
-    fn only_me_balance_overrides_its_ts_type() {
+    fn only_coin_amount_overrides_its_ts_type() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut hits = 0;
         for entry in std::fs::read_dir(dir).unwrap() {
@@ -292,6 +291,6 @@ mod tests {
             let needle = ["ts(type", " = "].concat();
             hits += text.matches(&needle).count();
         }
-        assert_eq!(hits, 1, "only Me.balance may override its TypeScript type");
+        assert_eq!(hits, 1, "only CoinAmount may override its TypeScript type");
     }
 }

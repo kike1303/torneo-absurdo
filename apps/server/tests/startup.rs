@@ -98,7 +98,8 @@ async fn the_port_opens_only_after_the_database_and_the_migrations() {
             20_261_030_000_000,
             20_261_031_000_000,
             20_261_102_000_000,
-            20_261_102_000_100
+            20_261_102_000_100,
+            20_261_103_000_000
         ]
     );
     assert!(rows.iter().all(|r| r.get::<bool, _>("success")));
@@ -275,6 +276,10 @@ async fn phase_b_variables_are_config_invalid_without_the_value() {
     for (vars, var) in [
         (vec![("DAILY_GRANT", "10001")], "DAILY_GRANT"),
         (vec![("DAILY_GRANT", "0")], "DAILY_GRANT"),
+        // 012 RF40: the default `BET_MIN` does not fit a bailout of 20, and each range.
+        (vec![("DAILY_GRANT", "40")], "BET_MIN"),
+        (vec![("BET_RAKE_BP", "2001")], "BET_RAKE_BP"),
+        (vec![("BET_CAP_MULTIPLE", "21")], "BET_CAP_MULTIPLE"),
         (vec![("IP_HASH_KEY", "c2hvcnQtY2FuYXJ5")], "IP_HASH_KEY"),
         // The public development secret outside a loopback http origin.
         (

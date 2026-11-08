@@ -575,7 +575,14 @@ async fn setup(db: &TestDb, config: WsConfig) -> Ctx {
         ws: config,
         ..Settings::default()
     };
-    let (app, pool, shared, sockets) = f::start_app_ws(db, &[TRUST_LOOPBACK], &app_settings).await;
+    // 012 RF39: the last fifth of the cap is for accounts out of probation, so 2000 anonymous sockets
+    // need a cap of 2500 to measure the same; the socket 2001 still finds it full (`ws.capacity`).
+    let (app, pool, shared, sockets) = f::start_app_ws(
+        db,
+        &[TRUST_LOOPBACK, ("WS_MAX_CONNECTIONS", "2500")],
+        &app_settings,
+    )
+    .await;
     // On air, with its start far ahead: its own release stays silent (R4).
     let opens_at = now_ms() - 3_600_000;
     let id = f::open_vector(&pool, opens_at, &vector).await;

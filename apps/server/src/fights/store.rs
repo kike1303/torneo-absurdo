@@ -94,6 +94,7 @@ pub struct NewFight<'a> {
     pub max_duration_ms: i32,
     pub matchup_round: i32,
     pub roster_sha256: &'a [u8],
+    pub rake_bp: i16,
 }
 
 /// Announces a fight. `None` if its slot already has one (`UNIQUE (opens_at)`, RF12).
@@ -101,12 +102,12 @@ pub async fn insert(pool: &PgPool, fight: &NewFight<'_>) -> Result<Option<i32>, 
     let row = sqlx::query(
         "INSERT INTO fights (state, opens_at, closes_at, live_at, ruleset_version, spec_a, spec_b, \
          snapshot_sha256, slug_a, slug_b, max_hp_a, max_hp_b, time_limit_ms, max_duration_ms, \
-         matchup_round, roster_sha256) \
+         matchup_round, roster_sha256, rake_bp) \
          VALUES ('scheduled', \
          timestamptz 'epoch' + $1::bigint * interval '1 millisecond', \
          timestamptz 'epoch' + $2::bigint * interval '1 millisecond', \
          timestamptz 'epoch' + $3::bigint * interval '1 millisecond', \
-         $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) \
+         $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) \
          ON CONFLICT ON CONSTRAINT fights_opens_at_key DO NOTHING RETURNING id",
     )
     .bind(fight.opens_at)
@@ -124,6 +125,7 @@ pub async fn insert(pool: &PgPool, fight: &NewFight<'_>) -> Result<Option<i32>, 
     .bind(fight.max_duration_ms)
     .bind(fight.matchup_round)
     .bind(fight.roster_sha256)
+    .bind(fight.rake_bp)
     .fetch_optional(pool)
     .await?;
     row.map(|row| row.try_get(0)).transpose()

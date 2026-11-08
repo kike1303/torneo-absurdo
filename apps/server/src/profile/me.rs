@@ -5,7 +5,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
-use protocol::{Locale, MAX_SAFE_INTEGER, Me, Provider, Role, Theme};
+use protocol::{CoinAmount, Locale, Me, Provider, Role, Theme};
 use sqlx::Row;
 
 use crate::app::AppState;
@@ -23,13 +23,6 @@ pub async fn handler(State(state): State<AppState>, headers: HeaderMap) -> Respo
         Ok(None) => session::unauthenticated(&state),
         Err(()) => session::try_again(),
     }
-}
-
-/// The balance as the protocol's `number` (008 plan-b question 2): never truncated, and never
-/// above what a JavaScript number holds exactly.
-pub fn wire_balance(coins: ledger::Coins) -> Option<i64> {
-    // `unsigned_abs`, not `abs`: `i64::MIN` has no positive counterpart.
-    (coins.0.unsigned_abs() <= MAX_SAFE_INTEGER.unsigned_abs()).then_some(coins.0)
 }
 
 pub(crate) async fn me(state: &AppState, user_id: uuid::Uuid) -> Result<Option<Me>, ()> {
@@ -59,7 +52,9 @@ pub(crate) async fn me(state: &AppState, user_id: uuid::Uuid) -> Result<Option<M
         } else {
             Role::User
         },
-        balance: wire_balance(balance).ok_or(())?,
+        // Never truncated, and never above what a JavaScript number holds exactly: the cases are
+        // `CoinAmount::new`'s tests in `protocol`.
+        balance: CoinAmount::new(balance.0).ok_or(())?,
         providers: providers
             .iter()
             .filter_map(|r| r.try_get::<&str, _>(0).ok().and_then(Provider::parse))
@@ -77,24 +72,4 @@ pub(crate) async fn me(state: &AppState, user_id: uuid::Uuid) -> Result<Option<M
         }),
         display_name_is_generated: row.try_get(4).map_err(|_| ())?,
     }))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_balance_guard_never_truncates() {
-        assert_eq!(wire_balance(ledger::Coins(100)), Some(100));
-        assert_eq!(
-            wire_balance(ledger::Coins(MAX_SAFE_INTEGER)),
-            Some(MAX_SAFE_INTEGER)
-        );
-        assert_eq!(
-            wire_balance(ledger::Coins(-MAX_SAFE_INTEGER)),
-            Some(-MAX_SAFE_INTEGER)
-        );
-        assert_eq!(wire_balance(ledger::Coins(MAX_SAFE_INTEGER + 1)), None);
-        assert_eq!(wire_balance(ledger::Coins(i64::MIN)), None);
-    }
 }

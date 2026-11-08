@@ -180,4 +180,65 @@ Con alguna fila, no vuelvas a esa imagen sin decidir antes qué hacer con esas p
 
 ### Nunca volver a un binario sin liquidación de apuestas
 
-`app::serve` construye `BetsHook`. `NoBets` queda solo para las pruebas del ciclo sin apuestas. **No vuelvas a un binario con `NoBets` si hay apuestas sin liquidar:** cerraría peleas sin sus asientos. Mientras no exista el reparto (fase B), un `decided` con apuestas en los dos lados devuelve un error y lleva a la detención, nunca a una pelea `settled` sin asientos. Ese caso no tiene camino sin la API, y solo se daría volviendo de B a A.
+`app::serve` construye `BetsHook`. `NoBets` queda solo para las pruebas del ciclo sin apuestas. **No vuelvas a un binario con `NoBets` si hay apuestas sin liquidar:** cerraría peleas sin sus asientos. Tampoco a una imagen de la fase A con apuestas de dos lados abiertas: esa imagen no reparte, devuelve `payout_unavailable` y detiene las peleas.
+
+## Apuestas
+
+Las apuestas (feature 012) son solo con monedas ficticias (ADR-0005). Los valores están en RF40: `DAILY_GRANT` es `B`, y `BET_MIN`, `BET_RAKE_BP` y `BET_CAP_MULTIPLE` son opcionales (ver `.env.example`). El compose de producción no pasa `BET_*`.
+
+### Comprobar la custodia
+
+Una consulta de solo lectura, en **una sola sentencia** para que una liquidación a medias no dé un falso positivo (RF13). Sana, `escrow` y `open_stakes` coinciden, y las otras tres dan 0. La consulta está en [`sql/custody.sql`](sql/custody.sql), y un test la ejecuta tal cual (`tests/bets_custody.rs`).
+
+```sh
+psql "$DATABASE_URL" -f apps/server/sql/custody.sql
+```
+
+**Si no da limpia:** no la corrijas con SQL. Detén el server, guarda la salida y la hora, y abre un issue en Linear con lo que diga cada columna. `escrow` distinto de `open_stakes` con las otras en 0 apunta a un pago de más o de menos en una liquidación; `bets_without_stake` o `wrong_refunds` distintos de 0, a una escritura que no pasó por la API ni por el gancho. Quien tiene `DATABASE_URL` también podría haberlo hecho (preocupación 21 de la spec).
+
+### Atasco de una liquidación (RF15)
+
+El gancho corre dentro de la transacción del reveal, con un `attempt_timeout` de 30 s. Si no cabe, reintenta, y tras 60 s de fallos el runner detiene todo, mientras `fight void` responde `fight_healthy`. En una detención la ventana no acepta apuestas, así que el pozo ya no crece. Salida:
+
+1. Quita la contención (otros procesos sobre la base) y reinicia el server.
+2. Si no basta, despliega un binario con un `attempt_timeout` mayor.
+
+### Métrica del rake (RF40)
+
+El rake empieza en 0. Su objetivo es 500 pb, con esta métrica por debajo del 10 % en 7 días móviles, y se revisa a los 90 días de la primera apuesta en producción aunque no se cumpla:
+
+```sql
+SELECT count(*) FILTER (WHERE outcome = 'refund_one_sided')::float
+       / NULLIF(count(*) FILTER (WHERE outcome IN ('paid', 'refund_one_sided')), 0) AS one_sided
+FROM pool_settlements WHERE settled_at > now() - interval '7 days';
+```
+
+**Activar el rake** es decisión del owner, con un PR que agrega `BET_RAKE_BP` al compose y a `check-compose`. Rige para las peleas que se anuncien después: cada pelea guarda el suyo al anunciarse.
+
+### Probar en local con dos clientes HTTP
+
+Con `just dev` y una rejilla corta en `apps/server/.env` (RF11 de 010 la acepta):
+
+```
+FIGHT_CADENCE_SECS=180
+FIGHT_BETTING_WINDOW_SECS=60
+FIGHT_PRE_LIVE_SECS=10
+```
+
+Dos cuentas con el proveedor `dev`, cada una con su archivo de cookies, por el proxy de Vite:
+
+```sh
+BASE=http://localhost:5173
+for who in alice bob; do
+  curl -sS -L -o /dev/null -c $who.jar -b $who.jar -H "Origin: $BASE" \
+    -d "dev_identity=$who&next=/es/" "$BASE/api/auth/dev/start"
+done
+```
+
+Después, con `-b <quien>.jar -H "Origin: $BASE"`:
+
+1. `GET /api/wallet`: saldo `B` y el bono ya reclamado por el login.
+2. `GET /api/fights/current`: el `id` de la pelea en `betting_open`.
+3. `POST /api/bets` con `{"fight_id":…,"side":"a","amount":100,"client_key":"<uuidgen en minúsculas>"}` para alice y `"side":"b"` para bob.
+4. `GET /api/fights/{id}/quote?side=a&amount=100` y `GET /api/fights/{id}/pool`.
+5. Esperar `settled` y leer `GET /api/bets/mine?fight_id={id}` y `/api/wallet` en las dos cuentas: pago y pérdida, o reembolso si fue empate.

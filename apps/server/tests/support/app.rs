@@ -140,13 +140,18 @@ pub async fn start_db_ws(
 /// A user with a ledger account and a valid session; returns the user id and the token.
 pub async fn user_with_session(pool: &sqlx::PgPool) -> (uuid::Uuid, String) {
     let user = uuid::Uuid::new_v4();
+    let mut tx = pool.begin().await.unwrap();
     sqlx::query("INSERT INTO users (id, display_name, display_name_key) VALUES ($1, $2, $3)")
         .bind(user)
         .bind(format!("Test{}", user.simple()))
         .bind(format!("test{}", user.simple()))
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .unwrap();
+    server::ledger::create_user_account(&mut tx, user)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
     (user, session_for(pool, user).await)
 }
 
@@ -190,6 +195,10 @@ pub async fn user_with_dev_account(pool: &sqlx::PgPool) -> (uuid::Uuid, String) 
     .map(|row| sqlx::Row::get(&row, 0))
     .unwrap();
     let mut tx = pool.begin().await.unwrap();
+    // A login creates the ledger account with the user (008 RF-B3).
+    server::ledger::create_user_account(&mut tx, user)
+        .await
+        .unwrap();
     let issued = server::sessions::issue(
         &mut tx,
         user,

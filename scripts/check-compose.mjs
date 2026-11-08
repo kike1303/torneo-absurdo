@@ -492,8 +492,10 @@ function checkProduction(doc, webHeaderLabels, problems) {
     }
     if (svc === 'server' && env.has('DAILY_GRANT')) {
       const grant = String(env.get('DAILY_GRANT') ?? '');
-      if (!/^[1-9][0-9]{0,4}$/.test(grant) || Number(grant) > 10000) {
-        problems.push(`${at}: daily-grant: DAILY_GRANT must be an integer from 1 to 10000`);
+      // 012 RF40: the compose passes no BET_MIN, and its default of 25 needs a bailout of
+      // DAILY_GRANT / 2 >= 25, or the server refuses to start.
+      if (!/^[1-9][0-9]{0,4}$/.test(grant) || Number(grant) < 50 || Number(grant) > 10000) {
+        problems.push(`${at}: daily-grant: DAILY_GRANT must be an integer from 50 to 10000`);
       }
     }
     if (env.has('RUST_LOG') && /\b(debug|trace)\b/i.test(env.get('RUST_LOG') ?? '')) {
