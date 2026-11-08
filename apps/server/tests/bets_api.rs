@@ -715,3 +715,88 @@ async fn my_bets_carry_the_result_once_settled() {
         + server::ledger::balance(&w.pool, bob).await.unwrap().0;
     assert_eq!(total, 2 * B);
 }
+
+/// 012 RF28 and S5: the settlement of one fight while its own bettors bet on the next, claim and read,
+/// in parallel. Every lock is taken in the same order (user, then fight), so nothing deadlocks: no
+/// request gets a 5xx, the pool settles once and nothing halts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn bets_and_claims_in_parallel_with_a_settlement_never_deadlock() {
+    let w = Arc::new(world().await);
+    let (alice, alice_token) = w.bettor(B).await;
+    let (bob, bob_token) = w.bettor(B).await;
+    placed(&w.bet(&alice_token, "a", 40).await, 201);
+    placed(&w.bet(&bob_token, "b", 40).await, 201);
+    // The next fight, open while this one settles.
+    let next = f::open_vector(&w.pool, T0 + 300_000, &Vector::of(f::DRAW)).await;
+    w.clock.set(T0 + 300_000);
+    let settled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let traffic = |token: String, side: &'static str| {
+        let (w, settled) = (w.clone(), settled.clone());
+        tokio::spawn(async move {
+            let cookie = support::oauth::session_cookie(&token);
+            let headers = [
+                ("origin", ORIGIN),
+                ("cookie", cookie.as_str()),
+                ("content-type", "application/json"),
+            ];
+            let mut statuses = Vec::new();
+            let mut after = 0;
+            while after < 3 && statuses.len() < 400 {
+                if settled.load(std::sync::atomic::Ordering::SeqCst) {
+                    after += 1;
+                }
+                // Past every quota of D7 and RF37: this test is about locks, not limits.
+                w.rate.advance(Duration::from_secs(30));
+                let bet = w
+                    .bet_with(&token, i64::from(next), side, 25, Uuid::new_v4())
+                    .await;
+                statuses.push(("bet", bet.status));
+                for path in ["/api/bonus/claim", "/api/bailout/claim"] {
+                    let response = http::send_body(w.app.addr, "POST", path, &headers, "").await;
+                    statuses.push((path, response.status));
+                }
+                for path in [
+                    "/api/wallet".to_owned(),
+                    format!("/api/bets/mine?fight_id={next}"),
+                ] {
+                    let response =
+                        http::send(w.app.addr, "GET", &path, &[("cookie", cookie.as_str())]).await;
+                    statuses.push(("read", response.status));
+                }
+            }
+            statuses
+        })
+    };
+    let (a, b) = (traffic(alice_token, "a"), traffic(bob_token, "b"));
+    f::drive_to_settled(&w.pool, &w.clock, w.fight).await;
+    settled.store(true, std::sync::atomic::Ordering::SeqCst);
+    for statuses in [a.await.unwrap(), b.await.unwrap()] {
+        assert!(statuses.len() >= 15, "{statuses:?}");
+        for (what, status) in statuses {
+            assert!(
+                status.as_u16() < 500 && status.as_u16() != 429,
+                "{what}: {status}"
+            );
+        }
+    }
+    assert_ne!(w.shared.current().halted, Some(true));
+    let pools: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM pool_settlements WHERE fight_id = $1")
+            .bind(w.fight)
+            .fetch_one(&w.pool)
+            .await
+            .unwrap();
+    assert_eq!(pools, 1);
+    // What stays in custody is exactly what went to the next fight.
+    let next_stakes: i64 =
+        sqlx::query_scalar("SELECT COALESCE(SUM(stake), 0)::bigint FROM bets WHERE fight_id = $1")
+            .bind(next)
+            .fetch_one(&w.pool)
+            .await
+            .unwrap();
+    assert!(next_stakes > 0);
+    assert_eq!(bets::escrow(&w.pool).await, next_stakes);
+    let total: i64 = server::ledger::balance(&w.pool, alice).await.unwrap().0
+        + server::ledger::balance(&w.pool, bob).await.unwrap().0;
+    assert_eq!(total + next_stakes, 2 * B);
+}
