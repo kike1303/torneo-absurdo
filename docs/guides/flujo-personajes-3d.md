@@ -1,0 +1,111 @@
+---
+id: "flujo-personajes-3d"
+title: Flujo de un personaje 3D, de la malla al GLB animado
+type: guide
+status: draft
+risk: low
+author: claude
+linear: null
+depends_on: []
+created: 2026-11-08
+updated: 2026-11-08
+---
+
+# Flujo de un personaje 3D, de la malla al GLB animado
+
+Pasos para llevar a un luchador nuevo desde la malla de Tripo hasta un GLB con textura, esqueleto y los clips comunes, listo para verlo en el navegador. El orden importa: **primero la geometría, después la textura y al final el rig**. Los pesos del rig van por vértice, así que si la malla cambia después del rig, el rig se rehace. La textura no mueve vértices, pero va antes del rig para revisar las deformaciones con el personaje ya pintado.
+
+Los archivos de Blender, los FBX, las imágenes y los scripts viven fuera del repo, en `~/Documents/Blender/`. Los scripts están en `scripts/personajes/` (el flujo) y en `scripts/botargas/` (rig y clips). La historia de cada personaje va en la [bitácora](bitacora-personajes-3d.md).
+
+## Entrada
+
+En la carpeta del personaje (por ejemplo `clown/`), dos archivos con el mismo nombre:
+
+| Archivo | Requisitos |
+| --- | --- |
+| `final-<slug>.fbx` | Malla de Tripo en pose T, de pie, mirando al frente. Brazos horizontales y separados del torso, piernas separadas desde la entrepierna. |
+| `final-<slug>.png` | Lámina de tres vistas sobre fondo blanco, en este orden: frente, perfil (con la cara hacia la derecha) y espalda. La misma pose T y el personaje entero en cada vista. |
+
+La carpeta se llama igual que el slug (`clown/final-clown.png`), en minúsculas. Las vistas sueltas se sacan de la lámina con `scripts/personajes/split_views.py`, que corta por el centro del blanco entre vistas, sin escalar, y escribe `final-<slug>-frente.png`, `-perfil.png` y `-espalda.png`. Lo que deja de usarse (láminas y mallas viejas, versiones previas del rig, respaldos `.blend1`) va a `_anterior/` dentro de la misma carpeta.
+
+```
+Blender -b --factory-startup --python scripts/personajes/split_views.py -- <carpeta>/final-<slug>.png
+```
+
+La lámina es la fuente de la textura, así que el modelo de Tripo debe salir de ella. Si la lámina y la malla difieren mucho (por ejemplo, un accesorio que solo está en una de las dos), ese accesorio queda mal pintado.
+
+## Un solo comando
+
+```
+~/Documents/Blender/scripts/personajes/personaje.sh <carpeta> final-<slug> <Nombre>
+```
+
+Por ejemplo, `personaje.sh clown final-clown Payaso`. Corre los cinco pasos en Blender sin interfaz y escribe todo en la misma carpeta. Imprime una línea `RESULT` por paso, con las medidas que hay que revisar. Cada paso también se puede correr suelto.
+
+## Pasos
+
+### 1. Malla (`prep.py`) → `final-<slug>-malla.blend`
+
+- Deja solo la malla del personaje. Los FBX de Tripo traen además el cubo, la cámara y la luz de la escena por defecto.
+- Une vértices duplicados, quita caras degeneradas, cierra los huecos y recalcula las normales.
+- Normaliza: alto 1.0, pies en Z=0, origen entre los pies, mirando a -Y y con las transformaciones aplicadas.
+- Divide las aristas de brazos y piernas que miden más de 3 cm (`--max-edge`). Los triángulos largos se pliegan en el codo y la rodilla y dejan ver el interior. Con las cuatro primeras mallas, el total pasó de unos 10 500 a entre 11 800 y 14 600 triángulos.
+- `--sym` refleja el lado +X sobre el -X. Solo sirve para personajes simétricos: no se usa con la rata (cola y orejas distintas), el fontanero (tubo de un lado) ni el payaso (conos).
+
+Qué revisar en el informe: `nonmanifold_e` y `boundary_e` deberían quedar en 0 o cerca. Si quedan muchos, la malla tiene zonas enredadas de Tripo; el paso 4 lo tolera, pero conviene mirar dónde están. `islands` lista las piezas sueltas (ojos, dientes, conos), que son normales.
+
+### 1b. Arreglos de malla (`meshfix.py`, opcional) → el mismo `final-<slug>-malla.blend`
+
+Si en la carpeta hay un `mesh-fixes.json`, el flujo aplica sus operaciones a la malla antes de la textura. Hoy existe `mirror`: copia la pieza suelta más cercana a un punto reflejada en un plano, con escala y desplazamiento opcionales. Sirve para lo que Tripo no modeló y la lámina sí tiene (los dientes de arriba del payaso salen de reflejar los de abajo sobre el centro de la boca). Como cambia la malla, va antes del rig.
+
+### 2. UV y textura (`zonetex.py`) → `final-<slug>-texturizado.blend`
+
+Pinta colores planos por pieza. No copia los píxeles de la lámina: el dibujo nunca calza exacto con la malla, y copiarlo corría la nariz a los ojos y embarraba cejas, costados y piernas (fue el primer método, `projtex.py`, que quedó descartado).
+
+- Desdobla con Smart UV Project en un atlas de 2048 × 2048.
+- Las pinturas salen de `paints.json`, en la carpeta del personaje: `{"piel": ["#fdb785", "#e48b57", ...], "cono": [...]}`. El primer color de cada pintura es el que se pinta; los demás son sus tonos con luz y con sombra en la lámina, y cada píxel va a la pintura del tono más cercano. Sin el archivo, el script agrupa colores parecidos él solo, pero con láminas como la del payaso (piel y conos del mismo tono) parte la piel en dos o la junta con los conos; por eso la paleta se escribe a mano, a partir de los 16 colores más frecuentes de la lámina.
+- Dos llaves opcionales de `paints.json` dan la estructura que la lámina no dice sola. `_big` lista las pinturas que pueden caer sobre las piezas grandes (cuerpo, cabeza); las otras (conos, blanco de ojos, dientes) solo existen en piezas sueltas y sus votos sobre el cuerpo se descartan, porque el dibujo de un cono siempre se pasa unos píxeles sobre la cabeza. `_spikes` describe las puntas con franjas: las dos pinturas, el perfil de base a punta (`"aaaaaaaaaabbbaaaabbbaaaa"`) y los rangos de largo y radio en metros; todas las piezas lisas (pliegue de 50°) de ese tamaño se pintan con el perfil, estén sueltas o pegadas a la cabeza. La lengua no se pinta de cono porque sus votos no tienen esa pintura.
+- Ajusta cada vista a la silueta (`fit`, entre 0.87 y 0.95 es normal) y después la corrige por zonas: compara los bordes del modelo con los del dibujo en cuadros de 40 px y corre cada cuadro lo que haga falta (`shift_px`, hasta unos 20 px).
+- Corta la malla en piezas por sus pliegues (`--crease`, 20° por defecto) y por las partes sueltas. Cada pieza toma la pintura que más votos recibe de las vistas que la ven de frente. Las piezas grandes con más de una pintura (cuerpo y short, cabeza y parches) se pintan punto por punto, sin las pinturas con menos del 3 % de sus votos; después se borran las manchas de menos de 2 × 2 cm (`blobs_removed`, ruido de desalineación), un desenfoque gaussiano de 1 cm sobre las etiquetas redondea los bordes (sin escalones de vóxel) y se repite la limpieza de manchas (`blobs_removed_2`).
+- Más llaves opcionales de `paints.json` para los casos que lo anterior no resuelve. `_min_blob` da el tamaño mínimo en m² por pintura (`{"spot": 0.0007, "fur": 0.003}`): sube el del pelo para que las manchas no tengan huecos del color del cuerpo y baja el de la mancha para conservar flores pequeñas. `_fine` (número de triángulos) une a las piezas mixtas de su isla las piezas pequeñas que salen de una superficie rugosa (los bultos del pelo del ogro), para que una mancha dibujada corra por encima de ellos en vez de pintarse bulto a bulto; **no sirve en personajes lisos**: en la rata borra el borde de la boca y de las orejas. `_close` aplica un cierre morfológico (radio en metros) a una pintura rota en trozos. `_band` lista las pinturas que son una banda de alturas alrededor del cuerpo (por defecto `shorts`, si existe): por cada azimut se busca el intervalo de alturas que mejor explica las etiquetas, se suavizan sus bordes alrededor y el short queda con una cintura y unas boca-piernas continuas (`band` en el informe, con las alturas medias). Solo actúa cuando el short comparte pieza con el cuerpo; si es pieza propia, `band` sale `null`.
+- Las piezas sueltas pequeñas (cejas, dientes, lengua, hasta el 2 % de los triángulos) se pintan enteras con la pintura que más votos recibe: pintarlas punto por punto dejaba que el blanco del ojo o la piel se colaran en sus bordes.
+- `_bumps` (`{"size": 0.03, "paint": "#e9a070"}`): las piezas sueltas de hasta `size` metros pegadas a una pieza grande (las costuras de la cara) toman esa pintura, un nombre de la paleta o un color hex propio que ningún píxel de la lámina vota. Sus propios votos son ruido: una costura mide unos píxeles en la lámina. Las pupilas, que flotan sobre el ojo y no sobre la cabeza, no cuentan.
+- Con `_spikes`, un cono que es pieza suelta se pinta entero por su eje, anillo de la base y tapa incluidos; si una pieza suelta tiene dos conos, cada texel va al cono más cercano. La loma de cabeza sobre la que se apoya también es base: lo que sobresale más de 1 cm de la esfera ajustada a la cabeza, cerca del cono y conectado a él, más la grieta de 4 mm donde el cono toca la cabeza. Un umbral menor mancha la cabeza (la cabeza no es una esfera), así que las lomas que se escapan se agregan a mano en `_spikes.mounds` (`[[x, y, z, r], ...]`, en metros). En un cono que nace de la cabeza, su pieza a 50° entera es cono, el bulto de la base incluido (Tripo modela la base del cono como un bulto, y en el diseño es del color del cono), igual que las piezas chicas a 20° que la tocan (el anillo de la base, la tapa). La cabeza es una pieza grande y no se toca.
+- La boca: una pintura `mouth` con el rojo muy oscuro del fondo de la boca (y sus tonos casi negros), en `_big`, para que el fondo visible desde el frente vote boca y no negro, y `_cavity` (`{"paint": "mouth", "box": [[x0, y0, z0], [x1, y1, z1]]}`, en metros) para el piso y los lados, que las vistas no ven y tomaban la piel de al lado. La caja se mide en la malla: el perfil frontal de la cabeza dice dónde abre la boca.
+- Ojos: entre las piezas blancas con algo oscuro que miran al frente, las dos con más blanco son los ojos (`MAX_EYES`), aunque estén hundidas en la cabeza como un casquete. Si sobre la bola hay una pieza suelta chica (el bulto de la pupila que dejó el modelador), la pupila va ahí y esa pieza se pinta oscura; si no, hacia donde el dibujo tiene lo oscuro.
+- Lo que ninguna vista ve toma la pintura de su vecino.
+- Arma un material con el mapa de color y rugosidad 0.6.
+
+El informe trae las pinturas (`paints`, con sus nombres en `paint_names`), cuántos ojos y franjas encontró (`eyes`, `spikes`) y las manchas borradas (`blobs_removed`). Las vistas de Workbench se ven más oscuras que la lámina; en el visor la exposición está subida para que los colores planos se lean como en el dibujo.
+
+### 3. Vistas (`views.py`) → `final-<slug>-vistas.png`
+
+Frente, perfil, espalda y tres cuartos del modelo texturizado, debajo de la lámina original. **Revisar antes de seguir**: caras o rasgos repetidos en los costados, manchas de otro color en accesorios de un solo lado, bordes blancos y la parte de arriba de la cabeza. El render de Workbench se ve más oscuro que el GLB en el navegador.
+
+### 4. Rig (`autorig.py`) → `final-<slug>-rig.blend` y `final-<slug>-rig.json`
+
+Crea los 25 huesos `mixamorig:*` de Mixamo "No Fingers" a partir de la silueta, sin pasar por Mixamo, y los pesa con _bone heat_. Detalle del método en el README de `scripts/botargas/` y en la bitácora. Si el pesado falla, usa una copia remallada con vóxeles. Si también falla en esa copia, la rehace con vóxeles más gruesos.
+
+Qué revisar en el informe: `warnings` vacío, y en `skin`, `proxy_unweighted` en 0. `unweighted_by_heat` alto es normal en mallas de Tripo con piezas sueltas.
+
+Si el personaje tiene cola o accesorios en el lado izquierdo (+X), pasa `--side right` al final del comando para que mida el otro lado.
+
+### 5. Clips (`bake_glb.py`) → `final-<slug>.glb`
+
+Carga los 22 clips de `animations/` en el rig y exporta un GLB con la malla, el skin (como máximo 4 influencias por vértice), la textura y todos los clips como acciones a 30 fps.
+
+## Revisión en el navegador
+
+```
+cd ~/Documents/Blender && python3 -m http.server 8765 --bind 127.0.0.1
+```
+
+Abrir `http://127.0.0.1:8765/visor/`. Para agregar un personaje, sumarlo a `CHARS` en `visor/index.html`. El visor tiene selector de clip, velocidad, pausa, cuadro a cuadro, huesos y pose T. Mirar sobre todo `attack_heavy_*`, `special_*`, `block` y `ko_*` a 0.3× y cuadro a cuadro, en hombros, panza, rodillas y la unión entre cabeza y cuello.
+
+## Después del flujo
+
+Lo que el flujo no hace y se decide por personaje:
+
+- **Brazos cortos.** Los clips de Mixamo están pensados para brazos humanos. Con brazos cortos y manos grandes, los puños se meten en la cara y el pecho. En la botarga se alargó el brazo ×2.1 (`stretch.py` y `armtube.py`) y se corrigieron los clips con IK (`ikfix.py`). Cambia las proporciones, así que lo decide Jesús.
+- **Pesos finos.** Si en el visor se ve un hombro, la panza o una rodilla mal, se corrige con `fixw.py` y `smoothw.py`, adaptados a las medidas del personaje.
+- **Textura a mano.** Si la proyección deja una zona mal, se retoca el mapa `<Nombre> · Color` en Blender (Texture Paint) dentro de `final-<slug>-rig.blend` y se repite solo el paso 5. Los retoques de textura no tocan el rig.
