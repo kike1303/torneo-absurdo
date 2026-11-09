@@ -18,6 +18,9 @@ const options = {
       ],
     },
   ],
+  // Paraglide 3 defaults the Vite plugin to virtual modules (`virtual:paraglide/...`), which only
+  // Vite resolves: one physical layout for the plugin and for compile-paraglide.js instead.
+  outputStructure: 'message-modules',
   emitGitIgnore: false,
   emitPrettierIgnore: false,
   emitReadme: false,
