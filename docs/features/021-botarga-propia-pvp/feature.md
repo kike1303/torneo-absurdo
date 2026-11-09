@@ -2,7 +2,7 @@
 id: "021"
 title: Botarga propia y PvP asíncrono
 type: feature
-status: draft
+status: approved
 risk: high
 author: claude
 linear: TA-60
@@ -96,7 +96,7 @@ Propuesta del `game-designer` (2026-11-09), con enteros y división hacia abajo.
 
 **Señales de `farm-report`** (etiquetas opacas como en 020, `ip_hash` como señal y nunca prueba): pareja repetida (10 o más peleas entre las mismas cuentas en la temporada, o la pareja es la mitad de las peleas del atacante); saco de boxeo (nunca ataca, pierde el 90 % de 8 o más defensas, el 80 % contra la misma cuenta); cuenta nueva unidireccional (menos de 7 días o 30 peleas, pierde el 90 % contra una cuenta y gana el 40 % contra el resto); concentración de rating ganado a las 5 contrapartes principales, en especial del mismo grupo de `ip_hash`; hundimiento y repunte (cae más de 200 en 30 peleas y luego gana el 80 % de las 30 siguientes); monedas PvP de una cuenta que apuesta siempre contra una misma cuenta del top 20; racha contra el torneo (la mitad o más de las peleas del mes, informativa).
 
-**Pendientes del owner al revisar:** (a) `PVP_WIN_COINS = 15` o 0 al inicio, por la revisión del rake; (b) el tope de 3 peleas por pareja y día; (c) la carencia PvP (sin rating ni monedas mientras la cuenta tenga menos de 7 días o menos de 10 peleas como atacante), que pidió el `security-reviewer` y frena la experiencia de ranking del jugador nuevo, aunque no su nivel ni su XP.
+**Aprobado por el owner (chat, 2026-11-09):** (a) `PVP_WIN_COINS = 15` o 0 al inicio, por la revisión del rake; (b) el tope de 3 peleas por pareja y día; (c) la carencia PvP (sin rating ni monedas mientras la cuenta tenga menos de 7 días o menos de 10 peleas como atacante), que pidió el `security-reviewer` y frena la experiencia de ranking del jugador nuevo, aunque no su nivel ni su XP.
 
 ## Fases
 Una issue por fase en el proyecto de Linear "Fase 3 — Juego propio". Cada una es un PR con `just check` en verde; las de monedas y rating pasan por el `security-reviewer`.
