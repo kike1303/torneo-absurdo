@@ -1,7 +1,9 @@
 //! The retention job (ADR-0008 D8, 008 RF-B16): one pass at startup and then every 24 hours.
-//! Each pass, in its own transaction, deletes the `auth_events` older than 30 days (the floor
-//! of D8 until the seasons feature), the expired `oauth_flows` and the expired sessions; these
-//! through `sessions::revoke`, so their sockets close too. Logs only a failure, by code.
+//! Each pass, in its own transaction, deletes the `auth_events` older than 38 days (D8:
+//! `max(30 days, season + 7 days)`, with a season of up to 31 days, feature 020), the expired
+//! `oauth_flows` and the expired sessions; these through `sessions::revoke`, so their sockets close
+//! too. Then it sums in their season the settled fights without a mark (`seasons::reconcile`). Logs
+//! only a failure, by code.
 
 use std::time::Duration;
 
@@ -15,7 +17,7 @@ pub const RETENTION_INTERVAL: Duration = Duration::from_secs(24 * 3600);
 
 pub async fn retention_pass(pool: &PgPool) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
-    sqlx::query("DELETE FROM auth_events WHERE created_at < now() - interval '30 days'")
+    sqlx::query("DELETE FROM auth_events WHERE created_at < now() - interval '38 days'")
         .execute(&mut *tx)
         .await?;
     sqlx::query("DELETE FROM oauth_flows WHERE expires_at < now()")
@@ -40,6 +42,7 @@ pub async fn run(pool: PgPool, stop: CancellationToken) {
                         error_kind = crate::db::error_kind(&error)
                     );
                 }
+                crate::seasons::reconcile_logged(&pool).await;
             }
         }
     }

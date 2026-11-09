@@ -88,6 +88,8 @@ pub enum Handler {
     Bet,
     MyBets,
     BetHistory,
+    Leaderboard,
+    Seasons,
     FightPool,
     BetQuote,
     #[cfg(feature = "dev-auth")]
@@ -255,6 +257,18 @@ pub const ROUTES: &[RouteSpec] = &[
     },
     RouteSpec {
         method: RouteMethod::Get,
+        path: "/api/leaderboard",
+        effect: Effect::Read,
+        handler: Handler::Leaderboard,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/seasons",
+        effect: Effect::Read,
+        handler: Handler::Seasons,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
         path: "/api/fights/{id}/pool",
         effect: Effect::Read,
         handler: Handler::FightPool,
@@ -383,6 +397,9 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         Handler::MyBets => on(filter, crate::bets::api::mine),
         // 019: the quota and the cache of `bets/mine`.
         Handler::BetHistory => on(filter, crate::bets::history::handler),
+        // 020: public reads, with the limit and the cache of the list of fights.
+        Handler::Leaderboard => fight_read(on(filter, crate::seasons::api::leaderboard), state),
+        Handler::Seasons => fight_read(on(filter, crate::seasons::api::list), state),
         // 012 RF34: the limit and the cache of the detail.
         Handler::FightPool => fight_read(on(filter, crate::bets::pool::pool), state),
         Handler::BetQuote => on(filter, crate::bets::pool::quote),

@@ -115,7 +115,15 @@ async fn placed_bets(
         .collect()
 }
 
+/// The pool, then the season (020): `seasons::tally` sums the results just written in the season of
+/// the fight, in this same transaction, and marks the fight so nothing sums it twice.
 async fn settle(tx: &mut PgConnection, fight: &SettlingFight) -> Result<(), SettlementError> {
+    settle_pool(&mut *tx, fight).await?;
+    crate::seasons::tally(tx, fight.id).await?;
+    Ok(())
+}
+
+async fn settle_pool(tx: &mut PgConnection, fight: &SettlingFight) -> Result<(), SettlementError> {
     let bets = placed_bets(&mut *tx, fight.id).await?;
     if bets.is_empty() {
         return Ok(());
