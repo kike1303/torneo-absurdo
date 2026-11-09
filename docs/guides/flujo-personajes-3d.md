@@ -91,9 +91,17 @@ Qué revisar en el informe: `warnings` vacío, y en `skin`, `proxy_unweighted` e
 
 Si el personaje tiene cola o accesorios en el lado izquierdo (+X), pasa `--side right` al final del comando para que mida el otro lado.
 
-### 5. Clips (`bake_glb.py`) → `final-<slug>.glb`
+### 4b. Piezas rígidas (`rigidparts_rig.py`) → el mismo `final-<slug>-rig.blend`
 
-Carga los 22 clips de `animations/` en el rig y exporta un GLB con la malla, el skin (como máximo 4 influencias por vértice), la textura y todos los clips como acciones a 30 fps.
+Las piezas sueltas chicas (costuras, dientes, ojos, botones) copian los pesos de la pieza grande a la que pertenecen, elegida por su hueso dominante, y la cabeza se queda solo con `Head` y `Neck`. Sin esto, el pesado por calor reparte una costura de la mejilla entre la cabeza, el cuello y el hombro y se alarga al mover la cabeza.
+
+### 4c. Brazos (`stretch_rig.py`, opcional) y 4d. ajuste IK de los clips (`ikfix_rig.py`)
+
+Los clips de Mixamo están pensados para brazos humanos: con cabezas grandes y brazos cortos, los puños se meten en la cara y el pecho. `ikfix_rig.py` carga los 22 clips, saca las manos de la cabeza, el pecho y la panza cuadro a cuadro con IK de dos huesos (las elipsoides salen de la malla) y guarda los originales como `<clip>_mixamo`. Si además hace falta alargar el brazo, `arms.json` en la carpeta del personaje (`{"stretch": 1.3}`) lo hace antes del ajuste; cambia las proporciones, así que el factor lo decide Jesús. Solo el payaso lo necesitó (su cabeza es más ancha que los hombros); el fontanero, la rata y el ogro quedaron sin alargar. `collide_rig.py out.json` cuenta antes y después los cuadros con la mano dentro de la cabeza o del torso, y `frames_sheet.py out.png clip:cuadro,...` renderiza los cuadros que marque.
+
+### 5. Clips (`bake_glb_actions.py`) → `final-<slug>.glb`
+
+Exporta un GLB con la malla, el skin (como máximo 4 influencias por vértice), la textura y los 22 clips ya corregidos como acciones a 30 fps (sin los `_mixamo`).
 
 ### 6. Compresión (`gltfpack`) → el GLB que va a `content/models/`
 
@@ -117,6 +125,5 @@ Abrir `http://127.0.0.1:8765/visor/`. Para agregar un personaje, sumarlo a `CHAR
 
 Lo que el flujo no hace y se decide por personaje:
 
-- **Brazos cortos y manos en la cara.** Los clips de Mixamo están pensados para brazos humanos. Con cabezas grandes y brazos cortos, los puños se meten en la cara y el pecho. Se corrige en dos pasos sobre `final-<slug>-rig.blend`, con los scripts generalizados de `scripts/botargas/` (toman las regiones de los grupos de vértices, sin medir nada a mano): `stretch_rig.py out.blend K` alarga el brazo ×K (cambia las proporciones, así que el factor lo decide Jesús; en el payaso fue ×1.3) e `ikfix_rig.py out.blend` saca las manos de la cabeza y el torso cuadro a cuadro con IK de dos huesos y guarda los originales como `<clip>_mixamo`. `collide_rig.py out.json` cuenta antes y después los cuadros con la mano dentro de la cabeza o del torso, y `frames_sheet.py out.png clip:cuadro,...` renderiza los cuadros que marque. Como el archivo ya trae los clips corregidos, el GLB se exporta con `bake_glb_actions.py out.glb` en vez del paso 5. Detalle y cifras del payaso en la [bitácora](bitacora-personajes-3d.md).
 - **Pesos finos.** Si en el visor se ve un hombro, la panza o una rodilla mal, se corrige con `fixw.py` y `smoothw.py`, adaptados a las medidas del personaje.
 - **Textura a mano.** Si la proyección deja una zona mal, se retoca el mapa `<Nombre> · Color` en Blender (Texture Paint) dentro de `final-<slug>-rig.blend` y se repite solo el paso 5. Los retoques de textura no tocan el rig.

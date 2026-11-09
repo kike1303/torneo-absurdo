@@ -226,6 +226,22 @@ Se adoptó **×1.3**: es el cambio de proporción más chico que deja la cabeza 
 
 Para los demás personajes, el mismo orden: `stretch_rig.py` (si hace falta), `ikfix_rig.py`, `collide_rig.py` para comparar y `bake_glb_actions.py`. Cada paso tarda menos de un minuto en la Mac.
 
+## Piezas rígidas de la cara y ajuste IK en los otros tres (2026-11-09)
+
+Jesús vio que las costuras de las mejillas del payaso se alargaban en las animaciones. Son piezas sueltas de 22 vértices junto al borde cabeza-hombro, y el pesado por calor les había dejado hasta un 58 % de `Neck` y un 10 % de los hombros, igual que al borde inferior de la propia cabeza (la regla de cabeza rígida de `autorig.py` solo cubre `|x|` menor que la axila, y la cabeza del payaso es más ancha que los hombros). `scripts/botargas/rigidparts_rig.py` lo corrige para cualquier rig: cada pieza suelta chica (menos de 500 vértices) copia los pesos del vértice más cercano de la pieza grande cuyo hueso dominante coincide con el suyo (una costura es de `Head`, así que copia de la cabeza aunque el hombro esté más cerca), y después la pieza de la cabeza (la isla con más vértices de `Head`, o los vértices dominados por `Head` cuando la cabeza va unida al cuerpo) se queda solo con `Head` y `Neck`. Dos tropiezos que conviene no repetir: la cercanía por centroide elegía el cuerpo, y quitar grupos iterando `v.groups` reindexa la lista y deja uno sin borrar (los vértices quedaban con `Head` 1.0 y `LeftShoulder` 0.26 a la vez); hay que sacar el vértice de todos los grupos y volver a asignar. Verificado en primeros planos de `hit` e `idle`: las costuras quedan pegadas a la mejilla.
+
+El fontanero, la rata y el ogro pasaron por el mismo flujo con `stretch_rig.py` ×1.0, ×1.3 y ×1.5. Cuadros con la mano dentro de la cabeza / del torso, sumados en los 22 clips:
+
+| Personaje | Sin ajuste | ×1.0 + IK | ×1.3 + IK | ×1.5 + IK |
+| --- | --- | --- | --- | --- |
+| Fontanero (brazo 18 cm) | 555 / 648 | 5 / 323 | 24 / 315 | 67 / 206 |
+| Rata (18 cm) | 628 / 639 | 185 / 298 | 232 / 348 | 198 / 249 |
+| Ogro (17 cm) | 688 / 678 | 236 / 445 | 285 / 427 | 301 / 405 |
+
+En los tres, alargar el brazo no mejora la cabeza (sus cabezas no son más anchas que los hombros, a diferencia del payaso), así que quedaron **sin alargar**, solo con el ajuste IK y las piezas rígidas. Lo que queda son roces de menos de 1 cm en el fontanero, y en la rata y el ogro de 2 a 9 cm en `win_1` (manos en la cabeza), `attack_heavy_1`, `idle_4` (agachado) y `ko_*`, que en las hojas se ven como contacto natural. La cabeza de la rata y la del ogro van unidas al cuerpo en una sola isla, así que `collide_rig.py` mide la cabeza con una elipsoide en vez de la isla cerrada. Archivos: `final-<slug>-rig.blend` y `final-<slug>.glb` de los tres, con los anteriores en `_anterior/*.pre-ik.*`, y la entrada `arms` de cada `-rig.json`.
+
+`personaje.sh` ya incluye los pasos: 4b piezas rígidas, 4c brazos si hay `arms.json` (`{"stretch": 1.3}`, solo el payaso) y 4d ajuste IK, y el GLB sale de `bake_glb_actions.py`. Si otro agente vuelve a correr el flujo sobre un personaje, estas correcciones se reaplican solas.
+
 ## Cómo mantener esta bitácora
 
 Actualizar la fecha, el archivo maestro si cambia, las pruebas verificadas y el siguiente paso cuando se termine una sesión de trabajo. Distinguir las pruebas de Blender de las confirmadas en Mixamo o en la arena. Registrar las propuestas de skins como ideas hasta que haya un piloto aprobado.
