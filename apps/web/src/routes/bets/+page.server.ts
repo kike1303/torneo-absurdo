@@ -20,6 +20,7 @@ export const load: PageServerLoad = async ({ fetch, url, locals, setHeaders }) =
   const page = await getBetHistory(internalApi(fetch), before);
   return {
     state: 'ready' as const,
+    before,
     rows: page.ok ? page.data.items.map(historyRow) : null,
     nextBefore: page.ok ? page.data.next_before : null,
   };

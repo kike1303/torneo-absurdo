@@ -79,7 +79,7 @@ describe('/bets load (019)', () => {
   it('reads the first page and turns it into rows', async () => {
     const { result, urls, headers } = run('/es/bets');
     const data = await result();
-    expect(data).toMatchObject({ state: 'ready', nextBefore: 9 });
+    expect(data).toMatchObject({ state: 'ready', before: null, nextBefore: 9 });
     expect(data.rows).toEqual([expect.objectContaining({ id: 9, status: 'lost', net: -40 })]);
     expect(urls.map((url) => new URL(url).pathname + new URL(url).search)).toEqual([
       '/api/bets/history',
@@ -101,6 +101,6 @@ describe('/bets load (019)', () => {
 
   it('a failure of the API is the error state, not a 500', async () => {
     const { result } = run('/es/bets', { answer: () => new Response('', { status: 503 }) });
-    expect(await result()).toEqual({ state: 'ready', rows: null, nextBefore: null });
+    expect(await result()).toEqual({ state: 'ready', before: null, rows: null, nextBefore: null });
   });
 });

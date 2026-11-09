@@ -153,7 +153,9 @@ impl World {
         }
     }
 
-    /// `scheduled` → `settled` (the legal edge of a cancelled fight) and its pool.
+    /// `scheduled` → `settled` (the legal edge of a cancelled fight) and its pool. A cancelled fight
+    /// never has bets in production: this is only the shortest legal way to a settled row, and the
+    /// history reads the result from the rows, never from how the fight ended.
     async fn settle(&self, fight: i32, pool_outcome: &str) {
         sqlx::query(
             "UPDATE fights SET state = 'settled', settled_at = now(), \

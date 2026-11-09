@@ -15,11 +15,13 @@
     /** Null: the API failed. */
     rows: readonly HistoryRow[] | null;
     nextBefore: number | null;
+    /** The page shown, to retry that same one. */
+    before: number | null;
     display: (slug: string, locale: Locale) => FighterDisplay;
     locale: Locale;
   }
 
-  let { rows, nextBefore, display, locale }: Props = $props();
+  let { rows, nextBefore, before, display, locale }: Props = $props();
 
   const coins = (amount: number) => m.coins_amount({ amount: formatCoins(amount, locale) });
 
@@ -63,7 +65,11 @@
   {#if rows === null}
     <div class="flex flex-col items-start gap-3" data-testid="bet-history-error">
       <p role="status">{m.bet_history_error()}</p>
-      <Button variant="outline" href={`/${locale}/bets`} data-sveltekit-reload>
+      <Button
+        variant="outline"
+        href={before === null ? `/${locale}/bets` : `/${locale}/bets?before=${before}`}
+        data-sveltekit-reload
+      >
         {m.bet_history_retry()}
       </Button>
     </div>

@@ -19,5 +19,11 @@
     <Alert.Description><p>{m.session_unavailable_text()}</p></Alert.Description>
   </Alert.Root>
 {:else}
-  <BetHistory rows={data.rows} nextBefore={data.nextBefore} display={fighterDisplay} {locale} />
+  <BetHistory
+    rows={data.rows}
+    nextBefore={data.nextBefore}
+    before={data.before}
+    display={fighterDisplay}
+    {locale}
+  />
 {/if}

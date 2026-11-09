@@ -22,7 +22,7 @@ La feature 012 solo muestra la apuesta de la pelea actual y la de la última. Qu
 
 ## Diseño
 **Protocolo (`crates/protocol/src/bets.rs`).**
-- `BetHistoryItem { fight: u32, a: String, b: String, side: Side, staked: CoinAmount, bets: u32, placed_at: TimestampMs, settled: bool, result: Option<MyFightResult> }`. `a` y `b` son los slugs; `placed_at` es la última apuesta del usuario en esa pelea. `result` reutiliza el de RF33 de 012 y solo existe si la pelea está liquidada.
+- `BetHistoryItem { fight_id: u32, a: String, b: String, side: Side, staked: CoinAmount, bets: u32, placed_at: TimestampMs, settled: bool, result: Option<MyFightResult> }`. `a` y `b` son los slugs; `placed_at` es la última apuesta del usuario en esa pelea. `result` reutiliza el de RF33 de 012 y solo existe si la pelea está liquidada.
 - `BetHistoryPage { items: Vec<BetHistoryItem>, next_before: Option<u32> }`, igual que `FightsPage` (011 RF7).
 
 **Server (`apps/server/src/bets/history.rs`).**

@@ -71,11 +71,16 @@ fn result_of(row: &PgRow) -> Result<Option<MyFightResult>, sqlx::Error> {
         "refunded" => BetOutcome::Refunded,
         _ => return Err(protocol_error("outcome")),
     };
-    let refund_reason = match row.try_get::<Option<&str>, _>(11)? {
-        Some(text) if outcome == BetOutcome::Refunded => PoolOutcome::parse(text)
+    // A refund without its pool is the same broken invariant as a settled fight without results.
+    let refund_reason = if outcome == BetOutcome::Refunded {
+        let text = row
+            .try_get::<Option<&str>, _>(11)?
+            .ok_or_else(|| protocol_error("pool outcome"))?;
+        PoolOutcome::parse(text)
             .ok_or_else(|| protocol_error("pool outcome"))?
-            .refund_reason(),
-        _ => None,
+            .refund_reason()
+    } else {
+        None
     };
     Ok(Some(MyFightResult {
         outcome,
