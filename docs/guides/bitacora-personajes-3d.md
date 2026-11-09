@@ -6,7 +6,7 @@ status: draft
 risk: low
 author: codex
 created: 2026-11-04
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Bitácora de personajes 3D
@@ -200,6 +200,31 @@ Falta: revisar de cerca las deformaciones en todos los clips, decidir si se alar
 Cada carpeta se llama como su slug: `Ogre` pasó a `ogre` y `cone` a `clown`. En la raíz de cada una quedan solo los `final-<slug>.*` vigentes y las tres vistas de la lámina (`final-<slug>-frente.png`, `-perfil.png`, `-espalda.png`). Lo anterior (los trabajos con Mixamo y el primer auto-rig, las láminas y mallas viejas de Tripo y los respaldos `.blend1`) está en `_anterior/`. El `ogre.blend` suelto de la raíz pasó a `ogre/_anterior/`. La botarga base conserva los nombres `Botarga-Base-*`, que usan los scripts de `scripts/botargas/`. Sus `pre-014` y las dos láminas de diseño están en `base/_anterior/`.
 
 Llegaron 11 personajes con su lámina, sin malla todavía: `washer` (robot lavadora), `gnome` (gnomo de plastilina), `astronaut` (astronauta pecera), `yeti` (yeti helado), `mop` (mago trapeador), `hedgehog` (erizo cepillo), `ninja` (ninja calcetín), `pinata` (luchador piñata), `gorilla` (gorila luchador), `goo` (baba rosa) y `eggplant` (berenjena vampiro). Para pasarlos por el flujo falta el `final-<slug>.fbx` de Tripo de cada uno.
+
+## Brazos y ajuste IK del payaso (2026-11-09)
+
+El payaso fue el primero de las bases finales en pasar por la corrección de choques. Su cabeza mide 56 cm de ancho y arranca a la altura del hombro (barbilla en Z≈0.54, brazo en Z≈0.51), y del hombro a la muñeca hay 18 cm. Con los clips de Mixamo tal cual, las manos entraban en la cabeza en los 22 clips, incluso en `idle` (los puños de guardia quedaban dentro de la cara) y en `block`, y en `hit`, `ko_*`, `special_*` y `win_*` también en el torso.
+
+Los scripts de la botarga (`stretch.py`, `ikfix.py`, `collide.py`) dependían del atributo `part` del maestro, que las mallas del flujo nuevo no tienen. Se generalizaron en `scripts/botargas/` para cualquier rig de `autorig.py`, tomando la región de cada vértice de su grupo dominante:
+
+- `stretch_rig.py out.blend K`: alarga el tramo hombro→muñeca ×K en la malla y los huesos (la mano se mueve rígida, el codo queda a la mitad) y parte las aristas del brazo que quedan de más de 3 cm, con pesos y UV interpolados.
+- `ikfix_rig.py out.blend`: por cuadro, adelanta cada mano hasta sacarla de tres elipsoides (cabeza, pecho y panza, medidas de los vértices de `Head`/`Neck`, `Spine1`/`Spine2` y `Spine`/`Hips`), resuelve el brazo con IK de dos huesos y suaviza en el tiempo. Guarda los originales como `<clip>_mixamo`.
+- `collide_rig.py out.json`: cuenta por clip los cuadros con vértices de la mano dentro de la isla cerrada de la cabeza (paridad de cuatro rayos casi horizontales, para que una isla abierta por el cuello no dé falsos positivos) y dentro de las elipsoides del torso, con la profundidad máxima. Un primer intento medía la profundidad con la normal de la cara más cercana sobre superficies abiertas por grupo y daba choques de 20 cm en cuadros limpios; no sirve.
+- `bake_glb_actions.py out.glb`: exporta el GLB con las acciones ya corregidas del archivo (sin las `_mixamo`), en vez de volver a cargar los FBX.
+- `frames_sheet.py out.png clip:cuadro,...`: hoja de revisión de cuadros concretos desde cuatro ángulos.
+
+Se probaron cuatro variantes sobre `clown/final-clown-rig.blend`, con el ajuste IK en todas. Cuadros con la mano dentro de la cabeza / del torso, sumados en los 22 clips (muestreo cada 2 cuadros):
+
+| Brazos | Sin ajuste | Con ajuste IK |
+| --- | --- | --- |
+| ×1.0 (18 cm) | 627 / 675 | 151 / 328 |
+| ×1.3 (23 cm) | — | 86 / 312 |
+| ×1.5 (26 cm) | — | 91 / 189 |
+| ×1.7 (30 cm) | — | 118 / 195 |
+
+Se adoptó **×1.3**: es el cambio de proporción más chico que deja la cabeza limpia (la envergadura pasa de 0.93 a 1.03 y en pose T casi no se nota) y ×1.5 o ×1.7 no mejoran la cabeza. Lo que queda son roces de menos de 2,5 cm y contacto natural: las manos sobre los conos en `win_1`, entre las rodillas en `dodge` y en el suelo en `ko_*`; `idle_4` (agachado) y `win_2` concentran el resto. Archivos: `clown/final-clown-rig.blend` (brazos ×1.3, 22 clips corregidos y sus `_mixamo`), `clown/final-clown.glb` y la entrada `arms` de `clown/final-clown-rig.json`. Lo anterior quedó en `clown/_anterior/*.pre-arms.*`. El GLB se recargó en el visor con los 22 clips.
+
+Para los demás personajes, el mismo orden: `stretch_rig.py` (si hace falta), `ikfix_rig.py`, `collide_rig.py` para comparar y `bake_glb_actions.py`. Cada paso tarda menos de un minuto en la Mac.
 
 ## Cómo mantener esta bitácora
 
