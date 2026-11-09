@@ -8,7 +8,7 @@ author: claude
 linear: null
 depends_on: []
 created: 2026-11-08
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Flujo de un personaje 3D, de la malla al GLB animado
@@ -94,6 +94,16 @@ Si el personaje tiene cola o accesorios en el lado izquierdo (+X), pasa `--side 
 ### 5. Clips (`bake_glb.py`) → `final-<slug>.glb`
 
 Carga los 22 clips de `animations/` en el rig y exporta un GLB con la malla, el skin (como máximo 4 influencias por vértice), la textura y todos los clips como acciones a 30 fps.
+
+### 6. Compresión (`gltfpack`) → el GLB que va a `content/models/`
+
+El GLB de Blender se comprime con meshopt (`EXT_meshopt_compression`, TA-70) antes de entrar al repo. Los ajustes conservan todo lo que el renderer usa y no pierden calidad visible: precisión máxima de 16 bits en posiciones, UV, normales y curvas de animación, sin remuestrear los clips (`-af 0`, se quedan las claves originales a 30 fps y la interpolación `STEP`), con los nombres de nodos y materiales (`-kn -km`) y los `extras` (`-ke`, donde viven `tint_default` y `face_uv_rect`). Las texturas JPEG se copian tal cual (nada de KTX2 ni WebP: KTX2 choca con la CSP).
+
+```
+pnpm -s dlx gltfpack@1.3.0 -i final-<slug>.glb -o <slug>.glb -cc -vp 16 -vt 16 -vn 16 -at 16 -ar 16 -as 16 -af 0 -ac -kn -km -ke
+```
+
+En la botarga base baja de 1,86 MB a 1,07 MB (las texturas son 0,48 MB de ambos). Los ajustes por defecto de `gltfpack` (14 bits, rotaciones de 12 bits, clips remuestreados) ahorran solo 80 KB más, así que no compensan tocar la calidad. Después de comprimir, revisar en `/es/dev/arena` que la pelea se ve igual y que el tinte y la cara siguen funcionando.
 
 ## Revisión en el navegador
 

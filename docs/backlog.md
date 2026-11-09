@@ -25,7 +25,7 @@ Ideas acordadas con el owner que todavía no se implementan. No son requisitos: 
 - Los personajes son **botargas** 3D graciosas. Trabajo en Blender: [bitácora de personajes 3D](guides/bitacora-personajes-3d.md).
 - El motor no cambia: el renderer 3D (candidato Three.js) reproduce el mismo `FightLog`. Cuando el 3D sea viable, el renderer 2D y las herramientas de sprites (`packages/renderer`, `tools/sff-converter`, `tools/sprite-importer`) se apartan a una carpeta de archivo; no se borran.
 - **Escenarios** distintos, solo decorativos al principio.
-- Ya se ve en 3D (feature 013). Queda: fps en un celular real y comprimir la malla y los clips (meshopt; KTX2 choca con la CSP). Los clips de Mixamo van en el repo dentro del GLB (decisión del owner, 2026-11-05).
+- Ya se ve en 3D (feature 013) y el GLB va comprimido con meshopt (TA-70; KTX2 choca con la CSP). Queda: fps en un celular real. Los clips de Mixamo van en el repo dentro del GLB (decisión del owner, 2026-11-05).
 
 ### Un solo "humano por dentro"
 Todas las botargas comparten **un esqueleto** y unas proporciones base. Los personajes del torneo son disfraces completos sobre ese cuerpo; cada uno conserva sus propios ataques especiales en el torneo. Así una prenda le queda a todos sin hacer N versiones.
