@@ -101,8 +101,9 @@ Las órdenes:
 
 **Precisiones de la fase B (implementación).**
 - **Orden de locks.** `tally` toma la fila de su temporada `FOR KEY SHARE` antes de escribir su marca, y `close` la toma `FOR UPDATE` antes de todo. Sin eso, una suma escribía su marca y recién después esperaba la temporada por la llave foránea, mientras `close` esperaba esa marca: un ciclo real, que reproduce un test. Las sumas de una misma temporada no se bloquean entre sí.
-- **Grupos de IP.** Las etiquetas se numeran en Postgres por el primer evento de cada `ip_hash` que usaron dos o más cuentas, así que los hashes nunca llegan al proceso. Los lados opuestos se miden con el `ip_hash` de cada apuesta (`auth_events.bet_id`). La ventana de eventos empieza un día antes de `starts_at`, porque las apuestas de una pelea que cierra en los primeros minutos se hicieron en la temporada anterior.
+- **Grupos de IP.** Las etiquetas se numeran en Postgres por el primer evento de cada `ip_hash` que usaron dos o más cuentas, así que los hashes nunca llegan al proceso. Los lados opuestos se miden con el `ip_hash` de cada apuesta (`auth_events.bet_id`). La ventana de eventos empieza un día antes de `starts_at`, porque las apuestas de una pelea que cierra en los primeros minutos se hicieron en la temporada anterior. `coverage` se mide desde ese mismo inicio.
 - **Top 20 y concentración.** El top 20 es el del leaderboard, con la misma elegibilidad. `concentration_bp` es la suma de lo que dieron las 5 contrapartes principales sobre el `RankedProfit` neto de la temporada, redondeada hacia abajo. Se omite cuando ese `RankedProfit` no es positivo.
+- **Admin sin ban, con lock.** El chequeo de `--by` (también en `fight void`) lee la fila `FOR SHARE`: un ban en curso termina antes o espera al comando. El trigger de `season_review` exige además que `admin_id` sea un admin sin ban.
 - **Exclusión repetida.** `exclude` se niega con `season.already_excluded`: la primera exclusión queda como está.
 
 ## Fases

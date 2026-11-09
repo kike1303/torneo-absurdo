@@ -563,12 +563,14 @@ async fn write_void(
     hook: &dyn SettlementHook,
 ) -> Result<&'static str, VoidFailure> {
     store::set_lock_timeout(&mut *tx, VOID_LOCK_TIMEOUT_MS).await?;
-    // The same rule as `server season` (020): an admin who is not banned.
-    let admin =
-        sqlx::query("SELECT 1 FROM users WHERE id = $1 AND role = 'admin' AND banned_at IS NULL")
-            .bind(command.by)
-            .fetch_optional(&mut *tx)
-            .await?;
+    // The same rule as `server season` (020): an admin who is not banned, `FOR SHARE` so a ban
+    // under way either commits first or waits for this command.
+    let admin = sqlx::query(
+        "SELECT 1 FROM users WHERE id = $1 AND role = 'admin' AND banned_at IS NULL FOR SHARE",
+    )
+    .bind(command.by)
+    .fetch_optional(&mut *tx)
+    .await?;
     if admin.is_none() {
         return Err(VoidFailure::Refused("void.not_admin"));
     }

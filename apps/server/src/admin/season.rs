@@ -259,11 +259,13 @@ async fn write(tx: &mut PgConnection, command: &SeasonCommand) -> Result<String,
         .execute(&mut *tx)
         .await?;
     store::set_lock_timeout(&mut *tx, SEASON_LOCK_TIMEOUT_MS).await?;
-    let admin =
-        sqlx::query("SELECT 1 FROM users WHERE id = $1 AND role = 'admin' AND banned_at IS NULL")
-            .bind(command.by)
-            .fetch_optional(&mut *tx)
-            .await?;
+    // `FOR SHARE`: a ban under way commits first and this sees it, or waits for this command.
+    let admin = sqlx::query(
+        "SELECT 1 FROM users WHERE id = $1 AND role = 'admin' AND banned_at IS NULL FOR SHARE",
+    )
+    .bind(command.by)
+    .fetch_optional(&mut *tx)
+    .await?;
     if admin.is_none() {
         return Err(refused("season.not_admin"));
     }
@@ -476,9 +478,11 @@ async fn farm_report(
         return Err(refused("season.not_ended"));
     }
     refuse_pending(tx, season).await?;
-    // The oldest event left after the retention: the season is covered only from it on.
+    // The oldest event left after the retention: the season is covered only from it on, and from
+    // where the window of `labels_cte!` starts, a day before the season.
     let covered: bool = sqlx::query_scalar(
-        "SELECT COALESCE((SELECT min(created_at) FROM auth_events) <= s.starts_at, false) \
+        "SELECT COALESCE((SELECT min(created_at) FROM auth_events) \
+                         <= s.starts_at - interval '1 day', false) \
          FROM seasons s WHERE s.id = $1",
     )
     .bind(season)

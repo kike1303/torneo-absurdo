@@ -321,10 +321,11 @@ impl World {
             .unwrap();
     }
 
-    /// An event before the season starts: `auth_events` covers all of it.
+    /// An event at the start of the window of `farm-report`, a day before the season: `auth_events`
+    /// covers all of it.
     async fn cover(&self) {
         let someone = self.user().await;
-        self.event(someone, &[0; 32], "2026-08-31T12:00:00Z", None)
+        self.event(someone, &[0; 32], "2026-08-31T00:00:00Z", None)
             .await;
     }
 }
@@ -451,7 +452,7 @@ async fn the_report_shows_the_farm_and_never_an_ip_hash() {
     let farm_hash: [u8; 32] = std::array::from_fn(|i| u8::try_from(i).unwrap() * 7 + 3);
     let lone_hash: [u8; 32] = std::array::from_fn(|i| 255 - u8::try_from(i).unwrap());
     // The first event of the season: it covers all of it, and its hash is the first label.
-    w.event(main, &farm_hash, "2026-08-31T12:00:00Z", None)
+    w.event(main, &farm_hash, "2026-08-31T00:00:00Z", None)
         .await;
     w.event(alt, &farm_hash, "2026-09-02T12:00:00Z", None).await;
     w.event(honest, &lone_hash, "2026-09-02T13:00:00Z", None)
@@ -609,6 +610,19 @@ async fn a_partial_review_closes_only_when_accepted() {
     assert_eq!(payload["coverage"], "partial");
     assert_eq!(payload["accept_partial"], true);
     assert_eq!(payload["tallied"], 0);
+}
+
+/// The coverage starts where the window of the groups does, a day before the season: an event one
+/// second later leaves the bets of the last minutes of August without their `ip_hash`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_coverage_starts_a_day_before_the_season() {
+    let w = world().await;
+    let ana = w.user().await;
+    w.event(ana, &[9; 32], "2026-08-31T00:00:01Z", None).await;
+    w.fillers(&[ana], 1).await;
+    assert_eq!(w.report().await["coverage"], "partial");
+    w.event(ana, &[9; 32], "2026-08-31T00:00:00Z", None).await;
+    assert_eq!(w.report().await["coverage"], "full");
 }
 
 /// Without any `auth_events`, nothing is covered.
@@ -837,6 +851,20 @@ async fn the_guard_takes_only_a_signed_review_after_the_end() {
             "season_review_guard",
             "{actor} {target}"
         );
+    }
+    // Signed by someone who is not an admin, or by a banned admin.
+    let banned = w.user().await;
+    privileged(
+        &w.pool,
+        sqlx::query("UPDATE users SET role = 'admin', banned_at = now() WHERE id = $1")
+            .bind(banned),
+    )
+    .await;
+    for by in [ana, banned] {
+        let error = insert("cli_attributed", Some(by), SEASON.to_string())
+            .await
+            .unwrap_err();
+        assert_eq!(server::db::error_kind(&error), "season_review_guard");
     }
     insert("cli_attributed", Some(w.admin), SEASON.to_string())
         .await

@@ -11,9 +11,10 @@ ALTER TABLE admin_audit
                           'season_review', 'season_close', 'season_exclude'));
 
 -- The second barrier of a review (the first is the source check of apps/server/src/admin/season.rs):
--- `close` trusts the newest one, so a row of `season_review` is refused unless an admin signs it
--- from the CLI, for a season that exists and has already ended. Not a security boundary (any SQL of
--- the server could fill it in): it stops a review written by mistake or too early.
+-- `close` trusts the newest one, so a row of `season_review` is refused unless an admin who is not
+-- banned signs it from the CLI, for a season that exists and has already ended. Not a security
+-- boundary (any SQL of the server could fill it in): it stops a review written by mistake or too
+-- early.
 CREATE FUNCTION admin_audit_season_review_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     -- Two steps: the cast of `target` runs only on six digits, whatever order `OR` takes.
@@ -24,7 +25,10 @@ BEGIN
     THEN
         RAISE EXCEPTION USING ERRCODE = 'TA010', MESSAGE = 'season review guard';
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM seasons WHERE id = NEW.target::int AND ends_at <= now()) THEN
+    IF NOT EXISTS (SELECT 1 FROM seasons WHERE id = NEW.target::int AND ends_at <= now())
+       OR NOT EXISTS (SELECT 1 FROM users
+                      WHERE id = NEW.admin_id AND role = 'admin' AND banned_at IS NULL)
+    THEN
         RAISE EXCEPTION USING ERRCODE = 'TA010', MESSAGE = 'season review guard';
     END IF;
     RETURN NEW;
