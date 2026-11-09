@@ -99,6 +99,10 @@ Las piezas sueltas chicas (costuras, dientes, ojos, botones) copian los pesos de
 
 Los clips de Mixamo están pensados para brazos humanos: con cabezas grandes y brazos cortos, los puños se meten en la cara y el pecho. `ikfix_rig.py` carga los 22 clips, saca las manos de la cabeza, el pecho y la panza cuadro a cuadro con IK de dos huesos y guarda los originales como `<clip>_mixamo`. La cabeza se prueba contra la malla posada (con los bordes abiertos tapados) y el puño queda a 3 cm de la cara; el pecho y la panza son elipsoides del cuerpo y toleran unos 2 cm de contacto (una mano rozando el pecho en una caminata no se toca). La mano nunca se mueve hacia los lados ni se aleja del hombro más del 92 % del brazo: al llegar a ese radio se desliza, así el codo sigue flexionado y el brazo no se abre. Si además hace falta alargar el brazo, `arms.json` en la carpeta del personaje (`{"stretch": 1.3}`) lo hace antes del ajuste; cambia las proporciones, así que el factor lo decide Jesús. Solo el payaso lo necesitó (su cabeza es más ancha que los hombros); el fontanero, la rata y el ogro quedaron sin alargar. `collide_rig.py out.json` cuenta antes y después los cuadros con la mano dentro de la cabeza o del torso, y `frames_sheet.py out.png clip:cuadro,...` renderiza los cuadros que marque.
 
+### 4c2. Manos (`graft_hand_rig.py`)
+
+Todos los personajes llevan la misma mano: la del fontanero, guardada en `scripts/botargas/hand_kit.json`. El paso corta el antebrazo en la muñeca, cose el kit (la derecha es el espejo) y lo pesa 100 % al hueso `Hand`; corre antes del ajuste IK para que este ya vea la mano nueva. La escala iguala la muñeca del kit con la del personaje. `hands.json` en la carpeta del personaje la fija a mano (`{"scale": 1.1}`, el ogro) o deja al personaje con sus manos (`{"skip": true}`, el fontanero). La mano queda del color más común de la original, en un solo texel.
+
 ### 5. Clips (`bake_glb_actions.py`) → `final-<slug>.glb`
 
 Exporta un GLB con la malla, el skin (como máximo 4 influencias por vértice), la textura y los 22 clips ya corregidos como acciones a 30 fps (sin los `_mixamo`).
