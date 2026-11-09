@@ -42,7 +42,7 @@ Decisiones del owner (2026-11-05): **todo se ve en 3D**. El renderer 2D de sprit
 **Assets.** `content/` (derechos reservados) es el lugar del arte propio. El GLB pesa 1,6 MB (texturas JPEG: color y normal a 1024, rugosidad a 512) y las caras se guardan a 256 × 256 (las 11 que se precargan suman unos 300 KB). Así llega antes de `t = 0` con la Fast 3G del e2e. La web los importa con `?url` (Vite les pone hash) y el `Dockerfile` copia `content/models`.
 
 ## Riesgos
-- Peso de descarga en móvil (~1,9 MB): la compresión de la malla y los clips (meshopt) queda como siguiente paso.
+- Peso de descarga en móvil (~1,9 MB): la compresión de la malla y los clips (meshopt) queda como siguiente paso. _Hecho en TA-70 (2026-11-09): 1,07 MB con `EXT_meshopt_compression` sin pérdida visible; receta en la [guía del flujo 3D](../../guides/flujo-personajes-3d.md)._
 - WebGL sin contexto: mismo `webgl_unavailable` y la misma vigilancia de contexto perdido.
 
 ## Pruebas

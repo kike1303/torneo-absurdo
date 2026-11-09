@@ -1,7 +1,11 @@
 // Loads the botarga GLB and its faces (013). The CSP rules (ADR-0012): no workers, no Draco nor
 // KTX2, and the images embedded in the GLB go through `<img>` (`img-src blob:`), because the
 // default `ImageBitmapLoader` fetches their `blob:` URL and `connect-src 'self'` blocks that.
+// The GLB is compressed with `EXT_meshopt_compression` (TA-70): the decoder is a WASM module
+// embedded in Three (`'wasm-unsafe-eval'` is already in `script-src`), decoding on the main thread
+// (`useWorkers` is never called) in a few milliseconds.
 import { SRGBColorSpace, TextureLoader, type AnimationClip, type Texture } from 'three';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { GLTFLoader, type GLTF, type GLTFParser } from 'three/addons/loaders/GLTFLoader.js';
 import {
   CLIP_NAMES,
@@ -39,6 +43,7 @@ async function loadFace(loader: TextureLoader, url: string): Promise<Texture> {
 export async function loadBotarga(model: BotargaModel): Promise<Botarga> {
   try {
     const loader = new GLTFLoader().register(imagesThroughImg);
+    loader.setMeshoptDecoder(MeshoptDecoder);
     const textures = new TextureLoader();
     const faceCodes = FACE_CODES.filter((code) => model.faces[code] !== undefined);
     const [gltf, ...faceTextures] = await Promise.all([
