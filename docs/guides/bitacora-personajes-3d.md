@@ -242,6 +242,8 @@ En los tres, alargar el brazo no mejora la cabeza (sus cabezas no son más ancha
 
 `personaje.sh` ya incluye los pasos: 4b piezas rígidas, 4c brazos si hay `arms.json` (`{"stretch": 1.3}`, solo el payaso) y 4d ajuste IK, y el GLB sale de `bake_glb_actions.py`. Si otro agente vuelve a correr el flujo sobre un personaje, estas correcciones se reaplican solas.
 
+**Codos rectos (2026-11-09, tarde).** Jesús vio que en muchos clips el brazo quedaba recto, tipo zombi: el ajuste IK empujaba la mano hacia adelante hasta sacarla del cuerpo y, con brazos cortos, llegaba al tope del alcance. `ikfix_rig.py` ahora limita la distancia hombro→mano al 92 % del brazo (unos 45° de codo como mínimo) y, al llegar a ese radio, el empuje sigue tangencial: la mano se desliza alrededor de la cabeza o el pecho en vez de estirar el codo (parámetro `alcance`, tercer argumento). Además de verse mejor, deslizar saca más manos que estirar. Cuadros con la mano dentro de la cabeza / del torso, brazo recto → alcance 0.92: payaso 86 / 312 → 72 / 232, fontanero 5 / 323 → 3 / 237, rata 185 / 298 → 86 / 81 y ogro 236 / 445 → 110 / 197. Los cuatro rigs y GLB se rehicieron; `ik_reach` queda en la entrada `arms` de cada `-rig.json`.
+
 ## Cómo mantener esta bitácora
 
 Actualizar la fecha, el archivo maestro si cambia, las pruebas verificadas y el siguiente paso cuando se termine una sesión de trabajo. Distinguir las pruebas de Blender de las confirmadas en Mixamo o en la arena. Registrar las propuestas de skins como ideas hasta que haya un piloto aprobado.
