@@ -1,7 +1,7 @@
 //! Subcommands (plan-b decision 2, plan-c decision 10): `server` / `server serve`,
 //! `server healthcheck`, `server admin grant|revoke|ban|unban <user_id>` and `server admin
-//! [<action>] --help` (009 RF17, the only text that is not a log or a code), and `server fight void`
-//! (012 RF16).
+//! [<action>] --help` (009 RF17, the only text that is not a log or a code), `server fight void`
+//! (012 RF16) and `server season farm-report|exclude|close` (020, phase B).
 //! No error is ever formatted to stdout or stderr: failures become exit codes and, for `serve`
 //! and `admin`, a log line with a code (never an argument).
 
@@ -11,6 +11,7 @@ use std::process::ExitCode;
 
 use std::sync::Arc;
 
+use crate::admin::season::{self, SeasonCommand};
 use crate::admin::{self, AdminCommand, AdminConfig, VoidCommand};
 use crate::app::{self, Settings, StartupError};
 use crate::bets::BetsHook;
@@ -27,6 +28,7 @@ pub enum Command {
     /// `admin --help` and `admin <action> --help`: no config and no connection.
     AdminHelp,
     FightVoid(VoidCommand),
+    Season(SeasonCommand),
     Invalid,
 }
 
@@ -43,6 +45,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Command {
         }
         [first, second, rest @ ..] if first == "fight" && second == "void" => {
             VoidCommand::parse(rest).map_or(Command::Invalid, Command::FightVoid)
+        }
+        [first, rest @ ..] if first == "season" => {
+            SeasonCommand::parse(rest).map_or(Command::Invalid, Command::Season)
         }
         _ => Command::Invalid,
     }
@@ -68,6 +73,9 @@ pub enum CliError {
     /// `fight void` refused, or failed before deciding (012 RF16).
     #[error("the fight was not voided")]
     FightVoid,
+    /// `server season` refused, or failed before deciding (020).
+    #[error("the season command did not apply")]
+    Season,
 }
 
 /// Exit code of each failure: 2 for a bad command line, 1 for everything else.
@@ -86,6 +94,7 @@ pub fn run_cli(command: Command) -> Result<(), CliError> {
         }
         Command::Admin(command) => run_admin(&command),
         Command::FightVoid(command) => run_fight_void(&command),
+        Command::Season(command) => run_season(&command),
         Command::AdminHelp => {
             // A closed stdout changes nothing: the help has no effect to report.
             let _ = std::io::stdout().lock().write_all(admin::HELP.as_bytes());
@@ -138,6 +147,13 @@ fn run_fight_void(command: &VoidCommand) -> Result<(), CliError> {
             &BetsHook,
         ))
         .map_err(|_| CliError::FightVoid)
+}
+
+fn run_season(command: &SeasonCommand) -> Result<(), CliError> {
+    let (config, runtime) = admin_runtime()?;
+    runtime
+        .block_on(season::run_season(&config.database, command))
+        .map_err(|_| CliError::Season)
 }
 
 fn run_serve() -> Result<(), CliError> {
@@ -442,6 +458,234 @@ mod tests {
             assert!(!shown.contains(&USER.replace('-', "")), "{shown}");
             assert!(!shown.contains("987654"), "{shown}");
             assert!(!shown.contains("v9.8.7"), "{shown}");
+        }
+    }
+
+    fn season(list: &[&str]) -> SeasonCommand {
+        match parse(args(list)) {
+            Command::Season(command) => command,
+            other => panic!("{list:?} gave {other:?}"),
+        }
+    }
+
+    /// 020, phase B: the three forms, with the flags in any order.
+    #[test]
+    fn the_forms_of_season() {
+        use crate::admin::season::{ExcludeReason, SeasonAction};
+        const OTHER: &str = "7e0a1b2c-3d4e-4f5a-8b6c-7d8e9f0a1b2c";
+        let user = Uuid::parse_str(USER).unwrap();
+        let other = Uuid::parse_str(OTHER).unwrap();
+        let report = season(&["season", "farm-report", "202609", "--by", USER]);
+        assert_eq!((report.season, report.by), (202_609, user));
+        assert!(report.action == SeasonAction::FarmReport);
+        for (word, reason) in [
+            ("farm_signals", ExcludeReason::FarmSignals),
+            (
+                "shared_ip_opposite_sides",
+                ExcludeReason::SharedIpOppositeSides,
+            ),
+            (
+                "counterpart_concentration",
+                ExcludeReason::CounterpartConcentration,
+            ),
+        ] {
+            for list in [
+                vec![
+                    "season", "exclude", "202612", OTHER, "--by", USER, "--reason", word,
+                ],
+                vec![
+                    "season", "exclude", "202612", OTHER, "--reason", word, "--by", USER,
+                ],
+            ] {
+                let command = season(&list);
+                assert_eq!(command.season, 202_612);
+                assert_eq!(command.by, user);
+                assert!(
+                    command.action
+                        == SeasonAction::Exclude {
+                            user: other,
+                            reason
+                        }
+                );
+            }
+        }
+        for (list, accept_partial) in [
+            (vec!["season", "close", "203001", "--by", USER], false),
+            (
+                vec![
+                    "season",
+                    "close",
+                    "203001",
+                    "--by",
+                    USER,
+                    "--accept-partial",
+                ],
+                true,
+            ),
+            (
+                vec![
+                    "season",
+                    "close",
+                    "203001",
+                    "--accept-partial",
+                    "--by",
+                    USER,
+                ],
+                true,
+            ),
+        ] {
+            let command = season(&list);
+            assert_eq!(command.season, 203_001);
+            assert!(command.action == SeasonAction::Close { accept_partial });
+        }
+    }
+
+    #[test]
+    fn anything_else_about_season_is_invalid() {
+        let upper = USER.to_uppercase();
+        for list in [
+            vec!["season"],
+            vec!["season", "farm-report"],
+            vec!["season", "farm-report", "202609"],
+            vec!["season", "farm-report", "202613", "--by", USER],
+            vec!["season", "farm-report", "202600", "--by", USER],
+            vec!["season", "farm-report", "2026-09", "--by", USER],
+            vec!["season", "farm-report", "20269", "--by", USER],
+            vec!["season", "farm-report", "+202609", "--by", USER],
+            vec!["season", "farm-report", "202609", "--by", &upper],
+            vec![
+                "season",
+                "farm-report",
+                "202609",
+                "--by",
+                USER,
+                "--by",
+                USER,
+            ],
+            vec![
+                "season",
+                "farm-report",
+                "202609",
+                "--by",
+                USER,
+                "--accept-partial",
+            ],
+            vec![
+                "season",
+                "farm-report",
+                "202609",
+                "--by",
+                USER,
+                "--reason",
+                "farm_signals",
+            ],
+            vec!["season", "farm-report", "202609", "--by", USER, "extra"],
+            vec![
+                "season",
+                "close",
+                "202609",
+                "--by",
+                USER,
+                "--accept-partial",
+                "--accept-partial",
+            ],
+            vec![
+                "season",
+                "close",
+                "202609",
+                "--by",
+                USER,
+                "--accept-partial",
+                "yes",
+            ],
+            vec![
+                "season",
+                "close",
+                "202609",
+                "--by",
+                USER,
+                "--reason",
+                "farm_signals",
+            ],
+            vec!["season", "close", "202609"],
+            vec![
+                "season",
+                "exclude",
+                "202609",
+                "--by",
+                USER,
+                "--reason",
+                "farm_signals",
+            ],
+            vec!["season", "exclude", "202609", USER, "--by", USER],
+            vec![
+                "season", "exclude", "202609", USER, "--by", USER, "--reason", "spam",
+            ],
+            vec![
+                "season",
+                "exclude",
+                "202609",
+                USER,
+                "--by",
+                USER,
+                "--reason",
+                "FARM_SIGNALS",
+            ],
+            vec![
+                "season", "exclude", "202609", USER, "--by", USER, "--reason",
+            ],
+            vec![
+                "season",
+                "exclude",
+                "202609",
+                "not-a-uuid",
+                "--by",
+                USER,
+                "--reason",
+                "farm_signals",
+            ],
+            vec![
+                "season",
+                "exclude",
+                "202609",
+                USER,
+                "--by",
+                USER,
+                "--reason",
+                "farm_signals",
+                "--accept-partial",
+            ],
+            vec!["season", "open", "202609", "--by", USER],
+            vec!["season", "CLOSE", "202609", "--by", USER],
+            vec!["season", "--help"],
+        ] {
+            assert_eq!(parse(args(&list)), Command::Invalid, "{list:?}");
+        }
+    }
+
+    /// ADR-0012 A8: the `Debug` of a season command shows neither the season nor the users.
+    #[test]
+    fn the_debug_of_season_shows_only_its_action() {
+        let command = season(&[
+            "season",
+            "exclude",
+            "209912",
+            USER,
+            "--by",
+            USER,
+            "--reason",
+            "farm_signals",
+        ]);
+        for shown in [
+            format!("{command:?}"),
+            format!("{:?}", Command::Season(command)),
+        ] {
+            assert!(!shown.contains(USER), "{shown}");
+            assert!(!shown.contains(&USER.replace('-', "")), "{shown}");
+            assert!(!shown.contains("209912"), "{shown}");
+            assert!(!shown.contains("farm_signals"), "{shown}");
+            assert!(!shown.contains("FarmSignals"), "{shown}");
+            assert!(shown.contains("Exclude"), "{shown}");
         }
     }
 

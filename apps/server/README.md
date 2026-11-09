@@ -115,7 +115,7 @@ server fight void <fight_id> --by <admin_user_id> [--previous-binary <vX.Y.Z|sha
 ```
 
 - En local: `cargo run -p server -- fight void 12 --by <admin_user_id>`. En la imagen: `docker exec <contenedor> /server fight void …`. Lee solo `DATABASE_URL` y `RUST_LOG`.
-- **La razón se deduce, nunca se elige.** `--by` tiene que ser un `admin`, pero solo atribuye: quien corre el comando ya tiene la credencial de la base.
+- **La razón se deduce, nunca se elige.** `--by` tiene que ser un `admin` sin ban (la misma regla de `server season`), pero solo atribuye: quien corre el comando ya tiene la credencial de la base.
 - Corre en una transacción, con el final, el reembolso y una fila de `admin_audit` (`action = 'fight_void'`), y bloquea la fila de la pelea con `lock_timeout` de 5 s.
 - Todo el comando tiene un plazo de 120 s: una base que deja de responder termina en `fight.void_failed` con `error_kind = timeout`, no en un proceso colgado. Una anulación de 20 000 apuestas tardó unos 4 s en local. Si el plazo cae durante el `COMMIT`, la anulación pudo aplicarse: sigue "Tras un `fight.void_failed`". Volver a correr el comando nunca reembolsa dos veces.
 
@@ -132,7 +132,7 @@ server fight void <fight_id> --by <admin_user_id> [--previous-binary <vX.Y.Z|sha
 
 | Código | Qué pasa | Salida |
 |---|---|---|
-| `void.not_admin` | `--by` no existe o no es admin | Usa un admin (`server admin grant`) |
+| `void.not_admin` | `--by` no existe, no es admin o tiene ban | Usa un admin (`server admin grant`) |
 | `void.not_found` | La pelea no existe | |
 | `void.bad_state` | No está en `betting_closed` ni en `live` | |
 | `void.version_missing` | Este binario no tiene su versión de reglas | Vuelve a la versión anterior |
@@ -185,6 +185,44 @@ Con alguna fila, no vuelvas a esa imagen sin decidir antes qué hacer con esas p
 ### Nunca volver a un binario sin liquidación de apuestas
 
 `app::serve` construye `BetsHook`. `NoBets` queda solo para las pruebas del ciclo sin apuestas. **No vuelvas a un binario con `NoBets` si hay apuestas sin liquidar:** cerraría peleas sin sus asientos. Tampoco a una imagen de la fase A con apuestas de dos lados abiertas: esa imagen no reparte, devuelve `payout_unavailable` y detiene las peleas.
+
+## Revisar y cerrar una temporada
+
+Una temporada es un mes calendario UTC (`id = YYYYMM`). Al terminar, se revisa con `farm-report`, se excluye a mano a quien lo merezca y se cierra. No hay endpoint. Detalle en la [feature 020](../../docs/features/020-temporadas-leaderboard/feature.md) y en ADR-0008 D8.
+
+```
+server season farm-report <YYYYMM> --by <admin_user_id>
+server season exclude <YYYYMM> <user_id> --by <admin_user_id> --reason <farm_signals|shared_ip_opposite_sides|counterpart_concentration>
+server season close <YYYYMM> --by <admin_user_id> [--accept-partial]
+```
+
+- En local: `cargo run -p server -- season farm-report 202611 --by <admin_user_id>`. En la imagen: `docker exec <contenedor> /server season …`. Leen solo `DATABASE_URL` y `RUST_LOG`.
+- `--by` tiene que ser un `admin` sin ban. Cada orden corre en una transacción con `lock_timeout` de 5 s y un plazo de 120 s, y deja una fila en `admin_audit` (`season_review`, `season_exclude` o `season_close`).
+- **Ventana:** desde `ends_at`, y córrelo pronto. La cobertura se mide desde un día antes de `starts_at` y la retención es de 38 días, así que en un mes de 31 días una revisión `full` solo es posible hasta `ends_at + 6 d`. Después el reporte sale con `coverage: "partial"` y `close` pide `--accept-partial`.
+
+**Procedimiento.**
+
+1. `farm-report`: imprime una línea de JSON, solo con códigos, ids y conteos:
+   - `shared_ip_opposite_sides`: las peleas donde cuentas del mismo `ip_group` apostaron en lados opuestos.
+   - `counterpart_concentration.top`: el top 20 del leaderboard. Para cada usuario muestra cuánto de su `RankedProfit` salió de sus 5 contrapartes principales (`concentration_bp`) y si comparte grupo con alguna. `flagged` se marca con más de 5000 bp o con un grupo compartido.
+   - `ip_group` es una etiqueta opaca de ese reporte (1, 2…), nunca el `ip_hash`.
+2. **Un grupo compartido no basta para sancionar** (CGNAT móvil). Hace falta, además, lados opuestos y concentración, o una evidencia equivalente. Para sancionar: `exclude`. Se puede excluir con la temporada abierta, y la exclusión no se deshace.
+3. `close`: suma las peleas liquidadas sin marca y vuelve a comprobar que no queden pendientes. Usa la `season_review` más reciente de esa temporada con `at ≥ ends_at` y de las últimas 48 h. Si excluiste a alguien, corre `farm-report` otra vez antes de cerrar: el top 20 cambió.
+
+**Salidas.** Exit 0 imprime el reporte, `season.exclude_applied` o `season.close_applied`, con el evento `season.applied`. Exit 1 con un código imprime una negativa (`season.refused`) y no escribe nada. Exit 1 sin salida es `season.failed`, con `error_kind`: no decidió nada y se puede reintentar. Exit 2 es una línea de comandos inválida.
+
+| Código | Órdenes | Qué pasa |
+|---|---|---|
+| `season.not_admin` | todas | `--by` no existe, no es admin o tiene ban |
+| `season.not_found` | todas | La temporada no tiene fila (ninguna pelea suya se liquidó) |
+| `season.not_ended` | `farm-report`, `close` | Todavía no llega `ends_at` |
+| `season.pending_fights` | `farm-report`, `close` | Hay una pelea de la temporada sin liquidar, o liquidada sin marca en `season_tallies`. La reconciliación del job diario la suma; espera o reinicia el server |
+| `season.closed` | `exclude` | La temporada ya está cerrada |
+| `season.no_stats` | `exclude` | El usuario no tiene fila en la temporada |
+| `season.already_excluded` | `exclude` | Ya estaba excluido: la primera exclusión se queda como está |
+| `season.no_review` | `close` | No hay `season_review` desde `ends_at` y de las últimas 48 h: corre `farm-report` |
+| `season.partial_review` | `close` | La revisión es `partial`: ciérrala con `--accept-partial` solo si la revisaste igual. El flag queda en `admin_audit` |
+| `season.already_closed` | `close` | Ya estaba cerrada |
 
 ## Apuestas
 

@@ -142,14 +142,21 @@ fn real() -> Arc<dyn VoidCompute> {
     Arc::new(RealCompute)
 }
 
-/// Row 1: `--by` that does not exist, or is not an admin. It looks at the role and nothing else, as
-/// RF17 says: an attribution, not an authorization, so a banned admin can still be named.
+/// Row 1: `--by` that does not exist, is not an admin, or is a banned admin: the rule of `server
+/// season` (020), which `fight void` follows since then.
 #[tokio::test]
 async fn only_an_admin_can_be_named() {
     let w = world().await;
     let id = w.closed(0, &Vector::of(KO)).await;
     let user = bets::user(&w.pool).await;
-    for by in [Uuid::new_v4(), user] {
+    let banned = bets::user(&w.pool).await;
+    privileged(
+        &w.pool,
+        sqlx::query("UPDATE users SET role = 'admin', banned_at = now() WHERE id = $1")
+            .bind(banned),
+    )
+    .await;
+    for by in [Uuid::new_v4(), user, banned] {
         let before = written(&w.pool).await;
         assert_eq!(
             w.void_with(&command(id, by, false), real(), &BetsHook)
