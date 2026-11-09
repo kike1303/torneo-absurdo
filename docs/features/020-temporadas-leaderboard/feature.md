@@ -39,11 +39,11 @@ Las apuestas guardan un `RankedProfit` inmutable por apuesta (012 RF6), pero tod
 - `ends_at = starts_at + 1 mes`
 - `id = YYYYMM`
 
-**Datos (una migración).**
+**Datos (una migración por fase).**
 - `seasons (id PK, starts_at, ends_at, closed_at NULL)`. Un `CHECK` exige la forma del mes. Un trigger impide reescribir `closed_at` una vez puesto, y que se escriba sin `torneo.actor = 'cli'` (la misma idea que `users_privileged_guard`). El `INSERT` de `tally`, con la columna en NULL, pasa: lo cubre un test.
 - `season_stats (season_id, user_id, ranked_profit, settled_fights, excluded_at, excluded_by, excluded_reason)`, con PK `(season_id, user_id)` e índice `(season_id, ranked_profit DESC, settled_fights DESC, user_id)`. Escribir `excluded_*` con un valor exige `torneo.actor = 'cli'` (trigger); el upsert de `tally`, que las deja en NULL, pasa.
 - `season_tallies (fight_id PK, season_id)`: marca cada pelea ya sumada. Gracias a ella el gancho, la reconciliación y el backfill nunca suman dos veces ni se pisan.
-- `admin_audit_action_ck` agrega `season_review`, `season_close` y `season_exclude`. Un trigger rechaza una fila `season_review` en cualquiera de estos casos:
+- En la migración de la fase B, `admin_audit_action_ck` agrega `season_review`, `season_close` y `season_exclude`. Un trigger rechaza una fila `season_review` en cualquiera de estos casos:
   - `actor` no es `cli_attributed` o `admin_id` es NULL.
   - `target` no es una temporada existente.
   - `now() < ends_at`.
@@ -72,12 +72,12 @@ Con `T = ends_at`, quien termina la temporada en carencia no aparece en su clasi
   - Lee candidatos por el índice en tandas de 100, filtra la elegibilidad en Rust y se detiene al llegar a 50 o cuando no quedan.
 - `GET /api/seasons` devuelve `Vec<SeasonView { id, starts_at, ends_at, closed }>`, la más nueva primero.
 
-**Web** (`routes/leaderboard/`, pública, enlazada desde el header).
+**Web** (`routes/leaderboard/`, pública, enlazada desde la home junto a las repeticiones: el header no tiene lugar a 375 px).
 - Muestra la tabla y un selector de temporada.
 - Una nota estática y general explica quién entra (fuera de carencia y con 10 peleas). Nunca dice por nombre que alguien está en carencia, excluido o baneado.
 - Mobile-first, `Intl`, i18n `es`/`en` y tokens del theme.
 
-**Retención (código de `jobs.rs`).** `auth_events` pasa de 30 a 38 días, que es `max(30, 31 + 7)` de D8. Se actualizan el doc del módulo y el comentario de `auth_events` en la migración de 008. La ventana operativa de la revisión es hasta `ends_at + 7 d`.
+**Retención (código de `jobs.rs`).** `auth_events` pasa de 30 a 38 días, que es `max(30, 31 + 7)` de D8. Se actualiza el doc del módulo. El comentario de `auth_events` en la migración de 008 queda como historia (editarlo cambiaría su checksum de sqlx), y la nota va en la migración de esta feature. La ventana operativa de la revisión es hasta `ends_at + 7 d`.
 
 **CLI (fase B).** Tres órdenes con las mismas reglas:
 - `--by` exige `role = 'admin' AND banned_at IS NULL`. Se alinea `fight void` con la misma regla.

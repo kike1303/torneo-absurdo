@@ -85,38 +85,52 @@ pub async fn tally(conn: &mut PgConnection, fight_id: i32) -> Result<bool, sqlx:
     Ok(true)
 }
 
-/// Settled fights without a mark, a batch at a time.
+/// Settled fights without a mark, a batch at a time, after the last one seen.
 const UNTALLIED_SQL: &str = "\
-SELECT f.id FROM fights f WHERE f.state = 'settled' \
+SELECT f.id FROM fights f WHERE f.state = 'settled' AND f.id > $1 \
 AND NOT EXISTS (SELECT 1 FROM season_tallies t WHERE t.fight_id = f.id) \
-ORDER BY f.id LIMIT $1";
+ORDER BY f.id LIMIT $2";
 
 const RECONCILE_BATCH: i64 = 200;
 
 /// Sums every settled fight without a mark, each in its own transaction, and returns how many it
 /// summed. Safe at any time and as often as wanted: a fight the hook sums meanwhile keeps its mark,
-/// and this one skips it.
+/// and this one skips it. A fight whose sum fails is logged and left for the next pass, without
+/// holding back the ones after it; `close` sees it as pending and refuses.
 ///
 /// # Errors
-/// A database error; what was summed before it stays.
+/// A database error while listing the fights; what was summed before it stays.
 pub async fn reconcile(pool: &PgPool) -> Result<u64, sqlx::Error> {
     let mut summed = 0_u64;
+    let mut after = 0_i32;
     loop {
         let ids: Vec<i32> = sqlx::query_scalar(UNTALLIED_SQL)
+            .bind(after)
             .bind(RECONCILE_BATCH)
             .fetch_all(pool)
             .await?;
-        if ids.is_empty() {
+        let Some(&last) = ids.last() else {
             return Ok(summed);
-        }
+        };
         for id in ids {
-            let mut tx = pool.begin().await?;
-            if tally(&mut tx, id).await? {
-                summed += 1;
+            match tally_alone(pool, id).await {
+                Ok(true) => summed += 1,
+                Ok(false) => {}
+                Err(error) => tracing::warn!(
+                    event = "seasons.tally_failed",
+                    error_kind = crate::db::error_kind(&error)
+                ),
             }
-            tx.commit().await?;
         }
+        after = last;
     }
+}
+
+async fn tally_alone(pool: &PgPool, fight_id: i32) -> Result<bool, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let summed = tally(&mut tx, fight_id).await?;
+    tx.commit().await?;
+    Ok(summed)
 }
 
 /// [`reconcile`], logging a failure by its code and nothing else: it never stops the server.

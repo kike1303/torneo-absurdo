@@ -11,11 +11,13 @@
   interface Props {
     /** Null: the API failed. */
     board: Leaderboard | null;
+    /** The season asked for has no row. */
+    notFound: boolean;
     seasons: readonly SeasonView[];
     locale: Locale;
   }
 
-  let { board, seasons, locale }: Props = $props();
+  let { board, notFound, seasons, locale }: Props = $props();
 
   const monthOf = (season: SeasonView) =>
     formatDate(new Date(Number(season.starts_at)), locale, {
@@ -34,7 +36,14 @@
     <p class="max-w-prose text-muted-foreground">{m.leaderboard_lead()}</p>
   </div>
 
-  {#if board === null}
+  {#if board === null && notFound}
+    <div class="flex flex-col items-start gap-3" data-testid="leaderboard-not-found">
+      <p role="status">{m.error_season_not_found()}</p>
+      <Button variant="outline" href={`/${locale}/leaderboard`}>
+        {m.leaderboard_current_link()}
+      </Button>
+    </div>
+  {:else if board === null}
     <div class="flex flex-col items-start gap-3" data-testid="leaderboard-error">
       <p role="status">{m.leaderboard_error()}</p>
       <Button variant="outline" href={`/${locale}/leaderboard`} data-sveltekit-reload>
@@ -63,10 +72,8 @@
             class="flex min-h-11 items-center gap-3 rounded-lg border border-border bg-card p-3 text-card-foreground"
             data-testid="leaderboard-row"
           >
-            <span
-              class="w-8 shrink-0 text-center font-display text-lg font-bold tabular-nums"
-              aria-label={`${m.leaderboard_rank()} ${entry.rank}`}
-            >
+            <span class="w-8 shrink-0 text-center font-display text-lg font-bold tabular-nums">
+              <span class="sr-only">{m.leaderboard_rank()}</span>
               {entry.rank}
             </span>
             <span class="flex min-w-0 flex-1 flex-col">

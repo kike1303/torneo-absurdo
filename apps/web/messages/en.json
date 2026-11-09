@@ -380,5 +380,6 @@
   "leaderboard_name": "Name",
   "leaderboard_profit": "Winnings",
   "leaderboard_fights": "Fights",
-  "leaderboard_row": "{fights} fights"
+  "leaderboard_row": "{fights} fights",
+  "leaderboard_current_link": "See the current season"
 }

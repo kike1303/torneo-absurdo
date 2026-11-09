@@ -11,4 +11,4 @@
   <title>{m.leaderboard_title()} · {m.app_name()}</title>
 </svelte:head>
 
-<Leaderboard board={data.board} seasons={data.seasons} {locale} />
+<Leaderboard board={data.board} notFound={data.notFound} seasons={data.seasons} {locale} />

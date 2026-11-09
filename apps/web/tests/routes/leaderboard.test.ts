@@ -38,7 +38,7 @@ function run(query: string, board: () => Response = () => Response.json(BOARD)) 
 describe('/leaderboard load (020)', () => {
   it('reads the board of this moment and the seasons, with no-store', async () => {
     const { result, urls, headers } = run('');
-    expect(await result).toEqual({ board: BOARD, seasons: [SEASON] });
+    expect(await result).toEqual({ board: BOARD, notFound: false, seasons: [SEASON] });
     expect(urls.sort()).toEqual(['/api/leaderboard', '/api/seasons']);
     expect(headers).toEqual([{ 'cache-control': 'no-store' }]);
   });
@@ -56,6 +56,13 @@ describe('/leaderboard load (020)', () => {
 
   it('a failure of the API is the error state, not a 500', async () => {
     const { result } = run('', () => new Response('', { status: 503 }));
-    expect(await result).toEqual({ board: null, seasons: [SEASON] });
+    expect(await result).toEqual({ board: null, notFound: false, seasons: [SEASON] });
+  });
+
+  it('a season without a row says so', async () => {
+    const { result } = run('?season=202001', () =>
+      Response.json({ error: 'season.not_found' }, { status: 404 }),
+    );
+    expect(await result).toMatchObject({ board: null, notFound: true });
   });
 });

@@ -424,8 +424,22 @@ async fn the_leaderboard_shows_only_the_eligible_in_order() {
         (first.rank, first.ranked_profit.get(), first.settled_fights),
         (1, 300, 10)
     );
-    // In October the young account is out of probation, and starts from zero.
-    assert_eq!(w.stats(SEASON_OCT, young).await, None);
+}
+
+/// Test 27: what an account earns in probation counts in full once it leaves it before the end of
+/// the season, including the fights it won while still in probation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn what_probation_earned_appears_on_leaving_it() {
+    let w = world().await;
+    // Its first fights are on September 10: it is 4 days old, in probation. On October 1 it is 15.
+    let late = w.user("2026-09-06").await;
+    w.wins(late, SEASON_MIN_FIGHTS, 25).await;
+    seasons::reconcile(&w.pool).await.unwrap();
+    let response = w.board(&format!("?season={SEASON_SEPT}")).await;
+    let board: Leaderboard = serde_json::from_slice(&response.body).unwrap();
+    assert_eq!(board.entries.len(), 1);
+    assert_eq!(board.entries[0].display_name, w.name(late).await);
+    assert_eq!(board.entries[0].ranked_profit.get(), 250);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

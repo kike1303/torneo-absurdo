@@ -15,6 +15,9 @@ pub const LEADERBOARD_SIZE: usize = 50;
 pub const SEASONS_LISTED: i64 = 120;
 /// Candidates read at a time, before the filter of probation.
 const CANDIDATE_BATCH: i64 = 100;
+/// The most batches one read takes: the worst case stays constant, even with many accounts of high
+/// profit still in probation (020, security review of #122).
+const MAX_BATCHES: i64 = 20;
 
 macro_rules! season_columns {
     () => {
@@ -135,9 +138,11 @@ pub async fn entries(
                 return Ok(entries);
             }
         }
-        if i64::try_from(rows.len()).unwrap_or(i64::MAX) < CANDIDATE_BATCH {
+        offset += CANDIDATE_BATCH;
+        if i64::try_from(rows.len()).unwrap_or(i64::MAX) < CANDIDATE_BATCH
+            || offset >= CANDIDATE_BATCH * MAX_BATCHES
+        {
             return Ok(entries);
         }
-        offset += CANDIDATE_BATCH;
     }
 }

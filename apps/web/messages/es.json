@@ -380,5 +380,6 @@
   "leaderboard_name": "Nombre",
   "leaderboard_profit": "Ganancia",
   "leaderboard_fights": "Peleas",
-  "leaderboard_row": "{fights} peleas"
+  "leaderboard_row": "{fights} peleas",
+  "leaderboard_current_link": "Ver la temporada en curso"
 }

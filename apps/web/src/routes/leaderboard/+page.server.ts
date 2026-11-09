@@ -13,6 +13,8 @@ export const load: PageServerLoad = async ({ fetch, url, setHeaders }) => {
   const [board, seasons] = await Promise.all([getLeaderboard(api, season), getSeasons(api)]);
   return {
     board: board.ok ? board.data : null,
+    // A season well written but without a row: its own text, not the error of a failed load.
+    notFound: !board.ok && 'status' in board && board.status === 404,
     seasons: seasons.ok && Array.isArray(seasons.data) ? seasons.data : [],
   };
 };
