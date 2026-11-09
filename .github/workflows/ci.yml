@@ -159,9 +159,11 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Depth 2: HEAD^1 is the base of the PR merge commit, or the previous commit of main (TA-46).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
       - uses: ./.github/actions/setup-just
       - uses: ./.github/actions/setup-js
         with:
@@ -172,6 +174,8 @@ jobs:
         run: pnpm exec vitest run --config scripts/vitest.policy.config.mjs
       - name: just hooks in a temporary clone (RF-C17)
         run: bash scripts/check-hooks.sh
+      - name: no existing migration deleted or renamed (TA-46)
+        run: node scripts/check-migrations.mjs HEAD^1
 
   rust:
     needs: changes
