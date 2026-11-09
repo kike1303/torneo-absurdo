@@ -104,6 +104,7 @@ fn a_round_of_bets_logs_no_id_and_no_amount() {
             for path in [
                 "/api/wallet".to_owned(),
                 format!("/api/bets/mine?fight_id={id}"),
+                "/api/bets/history".to_owned(),
                 format!("/api/fights/{id}/quote?side={side}&amount=25"),
             ] {
                 let response =

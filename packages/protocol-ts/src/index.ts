@@ -6,6 +6,8 @@ export type * from './generated/AuthErrorCode.js';
 export type * from './generated/BailoutErrorCode.js';
 export type * from './generated/BailoutState.js';
 export type * from './generated/BetErrorCode.js';
+export type * from './generated/BetHistoryItem.js';
+export type * from './generated/BetHistoryPage.js';
 export type * from './generated/BetOutcome.js';
 export type * from './generated/BetPlaced.js';
 export type * from './generated/BetQuote.js';

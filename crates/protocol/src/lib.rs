@@ -26,8 +26,9 @@ mod me;
 mod ws;
 
 pub use bets::{
-    BailoutState, BetOutcome, BetPlaced, BetQuote, BetRequest, BetView, FightPool, MyFightBets,
-    MyFightResult, PoolOutcome, PoolSettlement, PoolSide, Probation, RefundReason, Wallet,
+    BailoutState, BetHistoryItem, BetHistoryPage, BetOutcome, BetPlaced, BetQuote, BetRequest,
+    BetView, FightPool, MyFightBets, MyFightResult, PoolOutcome, PoolSettlement, PoolSide,
+    Probation, RefundReason, Wallet,
 };
 pub use coins::{CoinAmount, CoinAmountOutOfRange};
 pub use error::{

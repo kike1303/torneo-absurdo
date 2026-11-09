@@ -55,6 +55,14 @@
     b: display(fight.b.slug, locale).name,
   });
   const zone = $derived(panel.fight);
+  // Only with a session: the zones of a signed-in user, or a bet or a result of theirs (019).
+  const historyLink = $derived(
+    zone.kind === 'open' ||
+      zone.kind === 'broke' ||
+      zone.kind === 'capped' ||
+      panel.result !== null ||
+      panel.placed !== null,
+  );
   const rake = $derived(
     zone.kind === 'open' || zone.kind === 'signed_out' ? (zone.pool?.rake_bp ?? null) : null,
   );
@@ -239,6 +247,16 @@
             <li>{m.bet_explainer_fictional()}</li>
           </ul>
         </details>
+      {/if}
+
+      {#if historyLink}
+        <a
+          href={`/${locale}/bets`}
+          class="flex min-h-11 items-center text-sm font-medium underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
+          data-testid="bet-history-link"
+        >
+          {m.bet_history_link()}
+        </a>
       {/if}
     </Card.Content>
   </Card.Root>

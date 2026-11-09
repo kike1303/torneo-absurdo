@@ -5,6 +5,7 @@ pub mod api;
 pub mod audit;
 pub mod claims;
 pub mod facts;
+pub mod history;
 mod http;
 pub mod parimutuel;
 pub mod pool;

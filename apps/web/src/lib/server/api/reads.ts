@@ -1,4 +1,5 @@
 import type {
+  BetHistoryPage,
   FightDetail,
   FightPool,
   FightsCurrent,
@@ -62,6 +63,15 @@ export function getWallet(api: Api): Promise<ApiResult<Wallet>> {
 /** The session's own bets on one fight (012 RF33). */
 export function getMyBets(api: Api, fightId: number): Promise<ApiResult<MyFightBets>> {
   return apiRequest<MyFightBets>(api, 'GET', `/api/bets/mine?fight_id=${fightId}`);
+}
+
+/** A page of the session's own bet history (019). By number, like `getFightsPage`. */
+export function getBetHistory(api: Api, before: number | null): Promise<ApiResult<BetHistoryPage>> {
+  return apiRequest<BetHistoryPage>(
+    api,
+    'GET',
+    before === null ? '/api/bets/history' : `/api/bets/history?before=${before}`,
+  );
 }
 
 /** The public pool of one fight (012 RF34). */

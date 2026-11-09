@@ -162,6 +162,32 @@ pub struct MyFightBets {
     pub result: Option<MyFightResult>,
 }
 
+/// One fight in the history of the session's user (019): the user's bets on it, summed. `a` and `b`
+/// are the slugs, `placed_at` is the user's last bet on it, and `result` is only there once the
+/// fight is settled.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct BetHistoryItem {
+    pub fight_id: u32,
+    pub a: String,
+    pub b: String,
+    pub side: Side,
+    pub staked: CoinAmount,
+    pub bets: u32,
+    pub placed_at: TimestampMs,
+    pub settled: bool,
+    pub result: Option<MyFightResult>,
+}
+
+/// `GET /api/bets/history?before=` (019): one page, the most recent fight first. `next_before` is
+/// the `before` of the next page, `null` on the last one. Never `ranked_profit`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct BetHistoryPage {
+    pub items: Vec<BetHistoryItem>,
+    pub next_before: Option<u32>,
+}
+
 /// `GET /api/fights/{id}/quote` (012 RF47): what this amount alone would collect if its side
 /// wins, with the current pool plus itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -326,6 +352,37 @@ mod tests {
             serde_json::to_string(&quote).unwrap(),
             r#"{"fight_id":7,"side":"b","amount":100,"payout":100,"net":0,"one_sided":true,"rake_bp":0}"#
         );
+    }
+
+    #[test]
+    fn a_history_page_has_the_exact_shape() {
+        let page = BetHistoryPage {
+            items: vec![BetHistoryItem {
+                fight_id: 7,
+                a: "x-a".to_owned(),
+                b: "x-b".to_owned(),
+                side: Side::B,
+                staked: coins(50),
+                bets: 2,
+                placed_at: TimestampMs::from_ms(5),
+                settled: true,
+                result: Some(MyFightResult {
+                    outcome: BetOutcome::Refunded,
+                    payout: coins(50),
+                    net: coins(0),
+                    refund_reason: Some(RefundReason::Draw),
+                }),
+            }],
+            next_before: Some(7),
+        };
+        let json = concat!(
+            r#"{"items":[{"fight_id":7,"a":"x-a","b":"x-b","side":"b","staked":50,"bets":2,"#,
+            r#""placed_at":"5","settled":true,"result":{"outcome":"refunded","payout":50,"#,
+            r#""net":0,"refund_reason":"draw"}}],"next_before":7}"#,
+        );
+        assert_eq!(serde_json::to_string(&page).unwrap(), json);
+        assert_eq!(serde_json::from_str::<BetHistoryPage>(json).unwrap(), page);
+        assert!(!json.contains("ranked"));
     }
 
     #[test]
