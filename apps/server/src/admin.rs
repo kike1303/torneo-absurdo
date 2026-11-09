@@ -19,6 +19,11 @@
 //! (012 RF16) lives here too: the same configuration, the same sort of connection and the only SQL of `admin_audit`.
 //! It does not revoke anything nor write any privileged column, and the decision is of
 //! `fights::sealed::void_fight`. The only caller of this is `cli.rs`: there is no endpoint.
+//!
+//! `server season farm-report|exclude|close` (020, phase B) live in [`season`], with the same rules:
+//! the only other file of `src/` that may name the CLI actor or write `admin_audit`.
+
+pub mod season;
 
 use std::ffi::OsString;
 use std::fmt;
@@ -558,10 +563,12 @@ async fn write_void(
     hook: &dyn SettlementHook,
 ) -> Result<&'static str, VoidFailure> {
     store::set_lock_timeout(&mut *tx, VOID_LOCK_TIMEOUT_MS).await?;
-    let admin = sqlx::query("SELECT 1 FROM users WHERE id = $1 AND role = 'admin'")
-        .bind(command.by)
-        .fetch_optional(&mut *tx)
-        .await?;
+    // The same rule as `server season` (020): an admin who is not banned.
+    let admin =
+        sqlx::query("SELECT 1 FROM users WHERE id = $1 AND role = 'admin' AND banned_at IS NULL")
+            .bind(command.by)
+            .fetch_optional(&mut *tx)
+            .await?;
     if admin.is_none() {
         return Err(VoidFailure::Refused("void.not_admin"));
     }
@@ -1126,6 +1133,9 @@ mod source_rules {
     #[test]
     fn only_the_admin_cli_writes_role_or_banned_at() {
         let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/admin.rs");
+        // `server season` (020) sets the actor for `seasons.closed_at` and `excluded_*`, and writes
+        // neither `role` nor `banned_at`.
+        let season = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/admin/season.rs");
         let files = sources();
         assert!(files.len() > 30, "{}", files.len());
         let actor = ["torneo", ".actor"].concat();
@@ -1139,7 +1149,7 @@ mod source_rules {
                 path.display()
             );
             assert!(
-                !text.to_lowercase().contains(&actor),
+                *path == season || !text.to_lowercase().contains(&actor),
                 "{} names the CLI actor",
                 path.display()
             );

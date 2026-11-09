@@ -31,6 +31,19 @@ const CREATE_SEASON_SQL: &str = concat!(
      ON CONFLICT (id) DO NOTHING"
 );
 
+/// The row of the season of a fight, `FOR KEY SHARE`: before its mark and its stats, since `close`
+/// takes the same row `FOR UPDATE` before them (020, phase B). Without it, a sum would insert its mark
+/// and only then wait on the season (by the foreign key), while `close` waited on that mark: a cycle.
+/// Sums of the same season do not block each other.
+const LOCK_SEASON_SQL: &str = concat!(
+    "SELECT 1 FROM seasons WHERE id = \
+     (SELECT (extract(year FROM m) * 100 + extract(month FROM m))::int \
+      FROM (SELECT ",
+    season_month_sql!(),
+    " AS m FROM fights WHERE id = $1) AS month) \
+     FOR KEY SHARE"
+);
+
 const MARK_SQL: &str = concat!(
     "INSERT INTO season_tallies (fight_id, season_id) \
      SELECT id, (extract(year FROM m) * 100 + extract(month FROM m))::int \
@@ -59,6 +72,10 @@ ON CONFLICT (season_id, user_id) DO UPDATE SET \
 /// A database error.
 pub async fn tally(conn: &mut PgConnection, fight_id: i32) -> Result<bool, sqlx::Error> {
     sqlx::query(CREATE_SEASON_SQL)
+        .bind(fight_id)
+        .execute(&mut *conn)
+        .await?;
+    sqlx::query(LOCK_SEASON_SQL)
         .bind(fight_id)
         .execute(&mut *conn)
         .await?;

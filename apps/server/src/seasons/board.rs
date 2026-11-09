@@ -5,6 +5,7 @@
 use protocol::{CoinAmount, LeaderboardEntry, SeasonView, TimestampMs};
 use sqlx::postgres::PgRow;
 use sqlx::{PgConnection, Row};
+use uuid::Uuid;
 
 use super::SEASON_MIN_FIGHTS;
 use crate::bets::probation;
@@ -43,7 +44,8 @@ SELECT u.display_name, st.ranked_profit, st.settled_fights, \
        (extract(epoch FROM cut.t - u.created_at) * 1000)::bigint, \
        (SELECT count(DISTINCT b.fight_id) FROM bet_settlements b \
           JOIN fights f ON f.id = b.fight_id \
-          WHERE b.user_id = st.user_id AND outcome <> 'refunded' AND f.closes_at < cut.t) \
+          WHERE b.user_id = st.user_id AND outcome <> 'refunded' AND f.closes_at < cut.t), \
+       st.user_id \
 FROM (SELECT LEAST(now(), ends_at) AS t FROM seasons WHERE id = $1) AS cut, \
      season_stats st JOIN users u ON u.id = st.user_id \
 WHERE st.season_id = $1 AND st.excluded_at IS NULL AND u.banned_at IS NULL \
@@ -100,6 +102,15 @@ pub async fn seasons(conn: &mut PgConnection) -> Result<Vec<SeasonView>, sqlx::E
     rows.iter().map(season_of).collect()
 }
 
+/// One eligible user of a season, in the order of its leaderboard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ranked {
+    pub user_id: Uuid,
+    pub display_name: String,
+    pub ranked_profit: i64,
+    pub settled_fights: i32,
+}
+
 /// The leaderboard of a season: up to [`LEADERBOARD_SIZE`] eligible users, ranked from 1. Empty for a
 /// season without a row.
 ///
@@ -109,7 +120,34 @@ pub async fn entries(
     conn: &mut PgConnection,
     season_id: i32,
 ) -> Result<Vec<LeaderboardEntry>, sqlx::Error> {
-    let mut entries = Vec::new();
+    ranked(conn, season_id, LEADERBOARD_SIZE)
+        .await?
+        .into_iter()
+        .enumerate()
+        .map(|(i, user)| {
+            Ok(LeaderboardEntry {
+                rank: u16::try_from(i + 1).map_err(|_| protocol_error("rank"))?,
+                display_name: user.display_name,
+                ranked_profit: CoinAmount::new(user.ranked_profit)
+                    .ok_or_else(|| protocol_error("ranked profit"))?,
+                settled_fights: u32::try_from(user.settled_fights)
+                    .map_err(|_| protocol_error("fights"))?,
+            })
+        })
+        .collect()
+}
+
+/// The first `limit` eligible users of a season, in the order of its leaderboard: what the board shows
+/// and what `farm-report` reviews (020, phase B).
+///
+/// # Errors
+/// A database error.
+pub async fn ranked(
+    conn: &mut PgConnection,
+    season_id: i32,
+    limit: usize,
+) -> Result<Vec<Ranked>, sqlx::Error> {
+    let mut users = Vec::new();
     let mut offset = 0_i64;
     loop {
         let rows = sqlx::query(CANDIDATES_SQL)
@@ -125,24 +163,21 @@ pub async fn entries(
             if probation::of(age_ms, fights).is_some() {
                 continue;
             }
-            let rank = u16::try_from(entries.len() + 1).map_err(|_| protocol_error("rank"))?;
-            entries.push(LeaderboardEntry {
-                rank,
+            users.push(Ranked {
+                user_id: row.try_get(5)?,
                 display_name: row.try_get(0)?,
-                ranked_profit: CoinAmount::new(row.try_get(1)?)
-                    .ok_or_else(|| protocol_error("ranked profit"))?,
-                settled_fights: u32::try_from(row.try_get::<i32, _>(2)?)
-                    .map_err(|_| protocol_error("fights"))?,
+                ranked_profit: row.try_get(1)?,
+                settled_fights: row.try_get(2)?,
             });
-            if entries.len() == LEADERBOARD_SIZE {
-                return Ok(entries);
+            if users.len() == limit {
+                return Ok(users);
             }
         }
         offset += CANDIDATE_BATCH;
         if i64::try_from(rows.len()).unwrap_or(i64::MAX) < CANDIDATE_BATCH
             || offset >= CANDIDATE_BATCH * MAX_BATCHES
         {
-            return Ok(entries);
+            return Ok(users);
         }
     }
 }

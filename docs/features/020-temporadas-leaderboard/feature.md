@@ -2,7 +2,7 @@
 id: "020"
 title: Temporadas, leaderboard y revisión anti-granjas
 type: feature
-status: draft
+status: done
 risk: high
 author: claude
 linear: TA-28
@@ -99,6 +99,12 @@ Las órdenes:
   - Usa la `season_review` más reciente que cumpla `at ≥ ends_at` y `at ≥ now − 48 h`. Si es `partial`, la acepta solo con `--accept-partial`, y el flag queda en `admin_audit`.
   - Hace `UPDATE … WHERE closed_at IS NULL`. Si no cambia ninguna fila, responde `season.already_closed`.
 
+**Precisiones de la fase B (implementación).**
+- **Orden de locks.** `tally` toma la fila de su temporada `FOR KEY SHARE` antes de escribir su marca, y `close` la toma `FOR UPDATE` antes de todo. Sin eso, una suma escribía su marca y recién después esperaba la temporada por la llave foránea, mientras `close` esperaba esa marca: un ciclo real, que reproduce un test. Las sumas de una misma temporada no se bloquean entre sí.
+- **Grupos de IP.** Las etiquetas se numeran en Postgres por el primer evento de cada `ip_hash` que usaron dos o más cuentas, así que los hashes nunca llegan al proceso. Los lados opuestos se miden con el `ip_hash` de cada apuesta (`auth_events.bet_id`). La ventana de eventos empieza un día antes de `starts_at`, porque las apuestas de una pelea que cierra en los primeros minutos se hicieron en la temporada anterior.
+- **Top 20 y concentración.** El top 20 es el del leaderboard, con la misma elegibilidad. `concentration_bp` es la suma de lo que dieron las 5 contrapartes principales sobre el `RankedProfit` neto de la temporada, redondeada hacia abajo. Se omite cuando ese `RankedProfit` no es positivo.
+- **Exclusión repetida.** `exclude` se niega con `season.already_excluded`: la primera exclusión queda como está.
+
 ## Fases
 - **A (PR 1):** migración, `tally` (gancho y reconciliación), retención, `/api/leaderboard`, `/api/seasons` y la página.
 - **B (PR 2):** `farm-report`, `exclude` y `close`, con el test 28 y los chequeos de fuente.
@@ -112,24 +118,24 @@ Las órdenes:
 - **Con `r = 0`** el riesgo residual de una granja sube a `N · (B + R)`, y `farm-report` lo revisa al cierre.
 
 ## Pruebas
-- [ ] `just check` en verde.
-- [ ] Test 25 sobre el agregado: la invariante con `bet_settlements`. Reliquidar, reconciliar y volver a correr la reconciliación no suman dos veces.
-- [ ] Test 27:
+- [x] `just check` en verde.
+- [x] Test 25 sobre el agregado: la invariante con `bet_settlements`. Reliquidar, reconciliar y volver a correr la reconciliación no suman dos veces.
+- [x] Test 27:
   - La pelea que cierra antes de `ends_at` y se liquida después cuenta en su temporada.
   - El acumulado de la carencia aparece al salir de ella.
   - La carencia que cruza el cambio de temporada no sale en la final vieja y en la nueva empieza de cero.
   - Con `SET TIME ZONE 'America/Mexico_City'`, una pelea que cierra a las 00:30 UTC del día 1 cae en el mes nuevo.
-- [ ] Dos liquidaciones concurrentes con usuarios en común no se interbloquean.
-- [ ] Una temporada cerrada no hace fallar el gancho.
-- [ ] Leaderboard:
+- [x] Dos liquidaciones concurrentes con usuarios en común no se interbloquean.
+- [x] Una temporada cerrada no hace fallar el gancho.
+- [x] Leaderboard:
   - Elegibilidad por carencia, mínimo de peleas, baneo y exclusión.
   - Orden y desempate.
   - Sin `user_id` en la respuesta.
   - 404 con un `season` mal formado o inexistente.
-- [ ] Fase B, test 28:
+- [x] Fase B, test 28:
   - Cada negativa de `close` y de `farm-report`, incluida una pelea liquidada sin marcador en `season_tallies`.
   - Una fila de `season_review` por ejecución, y ninguna en las negativas.
   - El trigger y el chequeo de fuente encuentran el token `season_review`.
   - Ningún byte de un `ip_hash` sembrado aparece en la salida ni en `payload`.
   - `coverage: partial` y `--accept-partial`.
-- [ ] Capturas a 375 px y en escritorio, claro y oscuro.
+- [x] Capturas a 375 px y en escritorio, claro y oscuro.
