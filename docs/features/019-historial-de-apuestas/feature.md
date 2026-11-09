@@ -2,7 +2,7 @@
 id: "019"
 title: Historial de apuestas del usuario
 type: feature
-status: draft
+status: done
 risk: high
 author: claude
 linear: TA-45

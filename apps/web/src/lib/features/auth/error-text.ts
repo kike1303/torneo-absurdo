@@ -56,6 +56,8 @@ export const ERROR_TEXT = {
   'bailout.not_eligible': 'error_bailout_not_eligible',
   'bailout.already_claimed': 'error_bailout_already_claimed',
   'wallet.unavailable': 'error_wallet_unavailable',
+  'season.not_found': 'error_season_not_found',
+  'season.unavailable': 'error_season_unavailable',
 } as const satisfies { readonly [K in ErrorCode]: MessageKey };
 
 /** The closed list of `/login?error=` (ADR-0008, amendment 2026-10-28). */

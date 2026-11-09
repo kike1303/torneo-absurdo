@@ -52,6 +52,8 @@ const ERROR_CODES: { readonly [K in ErrorCode]: true } = {
   'bailout.not_eligible': true,
   'bailout.already_claimed': true,
   'wallet.unavailable': true,
+  'season.not_found': true,
+  'season.unavailable': true,
 };
 
 const CALLBACK_ERROR_CODES: { readonly [K in CallbackErrorCode]: true } = {

@@ -218,9 +218,16 @@
       {#if view.kind !== 'live'}
         <p class="max-w-prose text-muted-foreground">{m.home_lead()}</p>
       {/if}
-      <div>
+      <div class="flex flex-wrap gap-2">
         <Button variant="outline" href={`/${locale}/fights`} data-testid="fight-home-replays">
           {m.replay_home_link()}
+        </Button>
+        <Button
+          variant="outline"
+          href={`/${locale}/leaderboard`}
+          data-testid="fight-home-leaderboard"
+        >
+          {m.leaderboard_home_link()}
         </Button>
       </div>
     </div>

@@ -4,10 +4,12 @@ import type {
   FightPool,
   FightsCurrent,
   FightsPage,
+  Leaderboard,
   Me,
   MyFightBets,
   Provider,
   ReauthStatus,
+  SeasonView,
   VoidStats,
   Wallet,
 } from '@torneo/protocol';
@@ -77,4 +79,18 @@ export function getBetHistory(api: Api, before: number | null): Promise<ApiResul
 /** The public pool of one fight (012 RF34). */
 export function getPool(api: Api, fightId: number): Promise<ApiResult<FightPool>> {
   return apiRequest<FightPool>(api, 'GET', `/api/fights/${fightId}/pool`);
+}
+
+/** A season's leaderboard (020), without a session. By number, like `getFightsPage`. */
+export function getLeaderboard(api: Api, season: number | null): Promise<ApiResult<Leaderboard>> {
+  return apiRequest<Leaderboard>(
+    api,
+    'GET',
+    season === null ? '/api/leaderboard' : `/api/leaderboard?season=${season}`,
+  );
+}
+
+/** The seasons with a row, the newest first (020). */
+export function getSeasons(api: Api): Promise<ApiResult<SeasonView[]>> {
+  return apiRequest<SeasonView[]>(api, 'GET', '/api/seasons');
 }

@@ -1,6 +1,6 @@
 //! 008 RF-B16: the daily retention pass (and the one at startup) deletes auth events older
-//! than 30 days, expired OAuth flows and expired sessions (these through sessions::revoke, so
-//! their sockets close).
+//! than 38 days (020: a season of up to 31 days + 7), expired OAuth flows and expired sessions
+//! (these through sessions::revoke, so their sockets close).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod support;
@@ -37,7 +37,7 @@ async fn seed(pool: &PgPool) -> uuid::Uuid {
     .await
     .unwrap();
     // auth_events has no immutability trigger: the old one is inserted with its date.
-    for age in ["31 days", "29 days"] {
+    for age in ["39 days", "37 days"] {
         sqlx::query(
             "INSERT INTO auth_events (user_id, kind, ip_hash, created_at) \
              VALUES ($1, 'login', '\\x00', now() - $2::interval)",
@@ -67,7 +67,7 @@ async fn assert_retained(pool: &PgPool) {
     assert_eq!(
         count(
             pool,
-            "SELECT count(*) FROM auth_events WHERE created_at > now() - interval '30 days'"
+            "SELECT count(*) FROM auth_events WHERE created_at > now() - interval '38 days'"
         )
         .await,
         1

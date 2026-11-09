@@ -457,6 +457,33 @@ impl WalletErrorCode {
     }
 }
 
+/// Season codes (`season.*`, feature 020).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum SeasonErrorCode {
+    /// A `season` that is not `YYYYMM`, or a season without a row.
+    #[serde(rename = "season.not_found")]
+    NotFound,
+    /// The database failed.
+    #[serde(rename = "season.unavailable")]
+    Unavailable,
+}
+
+impl SeasonErrorCode {
+    /// Every variant. A test with an exhaustive `match` keeps this list complete.
+    pub const ALL: &'static [Self] = &[Self::NotFound, Self::Unavailable];
+    /// The only domain prefix this enum may use.
+    pub const PREFIX: &'static str = "season.";
+
+    /// The serialized code (the same string serde writes).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotFound => "season.not_found",
+            Self::Unavailable => "season.unavailable",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(untagged)]
@@ -470,6 +497,7 @@ pub enum ErrorCode {
     Bonus(BonusErrorCode),
     Bailout(BailoutErrorCode),
     Wallet(WalletErrorCode),
+    Season(SeasonErrorCode),
 }
 
 impl ErrorCode {
@@ -485,6 +513,7 @@ impl ErrorCode {
             Self::Bonus(code) => code.as_str(),
             Self::Bailout(code) => code.as_str(),
             Self::Wallet(code) => code.as_str(),
+            Self::Season(code) => code.as_str(),
         }
     }
 }
@@ -528,6 +557,12 @@ impl From<BetErrorCode> for ErrorCode {
 impl From<BonusErrorCode> for ErrorCode {
     fn from(code: BonusErrorCode) -> Self {
         Self::Bonus(code)
+    }
+}
+
+impl From<SeasonErrorCode> for ErrorCode {
+    fn from(code: SeasonErrorCode) -> Self {
+        Self::Season(code)
     }
 }
 
@@ -634,6 +669,13 @@ mod tests {
         }
     }
 
+    fn season_index(code: SeasonErrorCode) -> usize {
+        match code {
+            SeasonErrorCode::NotFound => 0,
+            SeasonErrorCode::Unavailable => 1,
+        }
+    }
+
     fn bet_index(code: BetErrorCode) -> usize {
         match code {
             BetErrorCode::InvalidRequest => 0,
@@ -675,6 +717,7 @@ mod tests {
     const CALLBACK_COUNT: usize = 9;
     const PROFILE_COUNT: usize = 3;
     const FIGHT_COUNT: usize = 2;
+    const SEASON_COUNT: usize = 2;
     const BET_COUNT: usize = 10;
     const BONUS_COUNT: usize = 1;
     const BAILOUT_COUNT: usize = 3;
@@ -709,6 +752,12 @@ mod tests {
             .collect();
         assert_eq!(fight.len(), FIGHT_COUNT);
         assert_eq!(FightErrorCode::ALL.len(), FIGHT_COUNT);
+        let season: HashSet<usize> = SeasonErrorCode::ALL
+            .iter()
+            .map(|c| season_index(*c))
+            .collect();
+        assert_eq!(season.len(), SEASON_COUNT);
+        assert_eq!(SeasonErrorCode::ALL.len(), SEASON_COUNT);
     }
 
     /// The codes of 012 RF38, each wrapped in its `ErrorCode` variant.
@@ -1027,6 +1076,13 @@ mod tests {
             );
             assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
         }
+        for code in SeasonErrorCode::ALL {
+            assert!(
+                code.as_str().starts_with(SeasonErrorCode::PREFIX),
+                "{code:?}"
+            );
+            assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
+        }
         for code in money_codes() {
             let prefix = match code {
                 ErrorCode::Bet(_) => BetErrorCode::PREFIX,
@@ -1045,6 +1101,7 @@ mod tests {
                 + AUTH_COUNT
                 + PROFILE_COUNT
                 + FIGHT_COUNT
+                + SEASON_COUNT
                 + BET_COUNT
                 + BONUS_COUNT
                 + BAILOUT_COUNT
@@ -1087,6 +1144,13 @@ mod tests {
             assert_eq!(
                 serde_json::from_str::<ErrorCode>(&json).unwrap(),
                 ErrorCode::Fight(*code)
+            );
+        }
+        for code in SeasonErrorCode::ALL {
+            let json = format!("\"{}\"", code.as_str());
+            assert_eq!(
+                serde_json::from_str::<ErrorCode>(&json).unwrap(),
+                ErrorCode::Season(*code)
             );
         }
         assert_eq!(

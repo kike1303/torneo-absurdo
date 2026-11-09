@@ -23,6 +23,7 @@ mod fight;
 mod fights;
 mod health;
 mod me;
+mod seasons;
 mod ws;
 
 pub use bets::{
@@ -33,7 +34,8 @@ pub use bets::{
 pub use coins::{CoinAmount, CoinAmountOutOfRange};
 pub use error::{
     ApiError, ApiErrorCode, AuthErrorCode, BailoutErrorCode, BetErrorCode, BonusErrorCode,
-    CallbackErrorCode, ErrorCode, FightErrorCode, ProfileErrorCode, WalletErrorCode, WsErrorCode,
+    CallbackErrorCode, ErrorCode, FightErrorCode, ProfileErrorCode, SeasonErrorCode,
+    WalletErrorCode, WsErrorCode,
 };
 pub use fight::{AbilityKind, EndReason, FightEvent, FightLog, FighterInfo, MomentKind, Side};
 pub use fights::{
@@ -45,4 +47,5 @@ pub use me::{
     DisplayNameRequest, Locale, MAX_SAFE_INTEGER, Me, PreferencesRequest, Provider, ReauthStatus,
     Role, Theme, UnlinkStatus,
 };
+pub use seasons::{Leaderboard, LeaderboardEntry, SeasonView};
 pub use ws::{Channel, ClientMessage, FightId, SelfEvent, ServerMessage};
