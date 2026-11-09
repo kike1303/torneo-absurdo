@@ -115,7 +115,7 @@ El GLB de Blender se comprime con meshopt (`EXT_meshopt_compression`, TA-70) ant
 pnpm -s dlx gltfpack@1.3.0 -i final-<slug>.glb -o <slug>.glb -cc -vp 16 -vt 16 -vn 16 -at 16 -ar 16 -as 16 -af 0 -ac -kn -km -ke
 ```
 
-En la botarga base baja de 1,86 MB a 1,07 MB (las texturas son 0,48 MB de ambos). Los ajustes por defecto de `gltfpack` (14 bits, rotaciones de 12 bits, clips remuestreados) ahorran solo 80 KB más, así que no compensan tocar la calidad. Después de comprimir, revisar en `/es/dev/arena` que la pelea se ve igual y que el tinte y la cara siguen funcionando.
+En la botarga base baja de 1,86 MB a 1,07 MB (1,08 MB desde que lleva las manos del kit) (las texturas son 0,48 MB de ambos). Los ajustes por defecto de `gltfpack` (14 bits, rotaciones de 12 bits, clips remuestreados) ahorran solo 80 KB más, así que no compensan tocar la calidad. Después de comprimir, revisar en `/es/dev/arena` que la pelea se ve igual y que el tinte y la cara siguen funcionando.
 
 ## Revisión en el navegador
 
