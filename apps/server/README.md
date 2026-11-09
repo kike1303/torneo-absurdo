@@ -198,7 +198,7 @@ server season close <YYYYMM> --by <admin_user_id> [--accept-partial]
 
 - En local: `cargo run -p server -- season farm-report 202611 --by <admin_user_id>`. En la imagen: `docker exec <contenedor> /server season …`. Leen solo `DATABASE_URL` y `RUST_LOG`.
 - `--by` tiene que ser un `admin` sin ban. Cada orden corre en una transacción con `lock_timeout` de 5 s y un plazo de 120 s, y deja una fila en `admin_audit` (`season_review`, `season_exclude` o `season_close`).
-- **Ventana:** desde `ends_at` hasta `ends_at + 7 d`. Pasado ese plazo, la retención ya borró los `auth_events` de los primeros días y el reporte sale con `coverage: "partial"`.
+- **Ventana:** desde `ends_at`, y córrelo pronto. La cobertura se mide desde un día antes de `starts_at` y la retención es de 38 días, así que en un mes de 31 días una revisión `full` solo es posible hasta `ends_at + 6 d`. Después el reporte sale con `coverage: "partial"` y `close` pide `--accept-partial`.
 
 **Procedimiento.**
 
