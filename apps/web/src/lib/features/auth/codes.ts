@@ -54,6 +54,21 @@ const ERROR_CODES: { readonly [K in ErrorCode]: true } = {
   'wallet.unavailable': true,
   'season.not_found': true,
   'season.unavailable': true,
+  'botarga.not_created': true,
+  'botarga.invalid_request': true,
+  'botarga.not_unlocked': true,
+  'botarga.style_unknown': true,
+  'botarga.budget_exceeded': true,
+  'botarga.stat_out_of_range': true,
+  'botarga.slots_locked': true,
+  'botarga.ability_count': true,
+  'botarga.ability_kind_count': true,
+  'botarga.ability_duplicate': true,
+  'botarga.weakness_count': true,
+  'botarga.accessory_slot_duplicate': true,
+  'botarga.accessory_stat_total': true,
+  'botarga.build_invalid': true,
+  'botarga.unavailable': true,
 };
 
 const CALLBACK_ERROR_CODES: { readonly [K in CallbackErrorCode]: true } = {

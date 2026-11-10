@@ -6,7 +6,8 @@ pub mod audit;
 pub mod claims;
 pub mod facts;
 pub mod history;
-mod http;
+// The botarga routes (021) share the quotas, the session and the answers.
+pub(crate) mod http;
 pub mod parimutuel;
 pub mod pool;
 pub mod probation;

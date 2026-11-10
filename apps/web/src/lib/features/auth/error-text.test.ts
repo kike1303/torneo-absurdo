@@ -85,8 +85,8 @@ describe('every code has a text in en and es (condition of plan-a, answer 5)', (
   it('every code of the protocol is in the table', () => {
     // 4 + 11 + 12 + 3 + 2 (ApiErrorCode, WsErrorCode, AuthErrorCode, ProfileErrorCode, FightErrorCode)
     // + 10 + 1 + 3 + 1 (BetErrorCode, BonusErrorCode, BailoutErrorCode, WalletErrorCode; 012 RF38)
-    // + 2 (SeasonErrorCode; 020).
-    expect(Object.keys(ERROR_TEXT)).toHaveLength(49);
+    // + 2 (SeasonErrorCode; 020) + 15 (BotargaErrorCode; 021).
+    expect(Object.keys(ERROR_TEXT)).toHaveLength(64);
     expect(Object.keys(CALLBACK_ERROR_TEXT)).toEqual([...CALLBACK]);
   });
 

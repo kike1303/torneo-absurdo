@@ -24,7 +24,10 @@ mod catalog;
 mod error;
 mod file;
 
-pub use catalog::{Catalog, CatalogAbility, CatalogAccessory, NAME_MAX_CHARS, Style, load_catalog};
+pub use catalog::{
+    Catalog, CatalogAbility, CatalogAccessory, CatalogSource, NAME_MAX_CHARS, Style, load_catalog,
+    parse_catalog,
+};
 pub use error::ContentError;
 
 use file::CharacterFile;

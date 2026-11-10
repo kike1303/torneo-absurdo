@@ -17,6 +17,7 @@ use tokio_util::task::TaskTracker;
 
 use crate::auth::AuthState;
 use crate::bets::BetsHook;
+use crate::botarga::BotargaCatalog;
 use crate::config::Config;
 use crate::db::{self, DbProbe, PgProbe, RetryConfig};
 use crate::fights::{self, FightSettings, FightsShared};
@@ -40,6 +41,9 @@ pub enum StartupError {
     /// The TLS config of the OAuth client could not be built (008 plan-c decision 4).
     #[error("the TLS client config could not be built")]
     Tls,
+    /// The embedded catalog of the player botargas does not validate (021).
+    #[error("the botarga catalog is not valid")]
+    Catalog,
 }
 
 /// HTTP connection settings.
@@ -92,19 +96,25 @@ pub struct AppState {
     pub bets: crate::bets::BetsConfig,
     /// The pools of the open windows (012 RF35), filled by the task of `serve`.
     pub pools: Arc<crate::bets::pool::PoolCache>,
+    /// The catalog of the player botargas and their starter build (021).
+    pub botarga: Arc<BotargaCatalog>,
 }
 
 impl AppState {
     /// The whole state from the configuration (008 plan-b decision 3.2): the `Origin`
     /// policy, the client context, the limiters and the WebSocket all come from `config`.
     /// `probe` is the health check of `pool` in production; the tests pass a fake one. Fails only
-    /// with [`StartupError::Tls`].
+    /// with [`StartupError::Tls`] or [`StartupError::Catalog`].
     pub fn from_config(
         config: &Config,
         settings: &Settings,
         pool: PgPool,
         probe: Arc<dyn DbProbe>,
     ) -> Result<Self, StartupError> {
+        let botarga = Arc::new(BotargaCatalog::embedded().map_err(|error| {
+            tracing::error!(event = "botarga.catalog_invalid", error_kind = error.kind);
+            StartupError::Catalog
+        })?);
         Ok(Self {
             db: pool,
             health: Arc::new(HealthState::new(probe, settings.health)),
@@ -112,10 +122,11 @@ impl AppState {
             ws: Arc::new(Self::ws_from_config(config, settings)),
             net: Arc::new(Self::net_from_config(config)),
             rate: Arc::new(RateLimits::new(&settings.rate)),
-            auth: Arc::new(AuthState::from_config(config, settings)?),
+            auth: Arc::new(AuthState::from_config(config, settings, botarga.clone())?),
             fights: Arc::new(FightsShared::new(settings.fights.clock.clone())),
             bets: config.bets,
             pools: Arc::new(crate::bets::pool::PoolCache::default()),
+            botarga,
         })
     }
 

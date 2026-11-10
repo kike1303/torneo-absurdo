@@ -484,6 +484,103 @@ impl SeasonErrorCode {
     }
 }
 
+/// Botarga codes (`botarga.*`, feature 021).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum BotargaErrorCode {
+    /// The user has no botarga yet: `POST /api/botarga` creates it.
+    #[serde(rename = "botarga.not_created")]
+    NotCreated,
+    /// A body that is not a build: malformed, an unknown field, a wrong type, over the size limit,
+    /// an id that is too long or too many ids.
+    #[serde(rename = "botarga.invalid_request")]
+    InvalidRequest,
+    /// An ability, an accessory or a cosmetic the user does not own, or that the catalog does not
+    /// have: the same code, so the answer says nothing about the catalog.
+    #[serde(rename = "botarga.not_unlocked")]
+    NotUnlocked,
+    /// A fighting style the catalog does not have.
+    #[serde(rename = "botarga.style_unknown")]
+    StyleUnknown,
+    /// The stats add up to more than the budget of the level.
+    #[serde(rename = "botarga.budget_exceeded")]
+    BudgetExceeded,
+    /// A stat, after the accessories, outside the range of the ruleset.
+    #[serde(rename = "botarga.stat_out_of_range")]
+    StatOutOfRange,
+    /// More abilities than the slots open at the level.
+    #[serde(rename = "botarga.slots_locked")]
+    SlotsLocked,
+    /// No ability at all, or more than the ruleset allows.
+    #[serde(rename = "botarga.ability_count")]
+    AbilityCount,
+    /// Too many heavies or too many specials.
+    #[serde(rename = "botarga.ability_kind_count")]
+    AbilityKindCount,
+    /// The same ability twice.
+    #[serde(rename = "botarga.ability_duplicate")]
+    AbilityDuplicate,
+    /// The elements of the abilities bring too many weaknesses.
+    #[serde(rename = "botarga.weakness_count")]
+    WeaknessCount,
+    /// Two accessories in the same slot.
+    #[serde(rename = "botarga.accessory_slot_duplicate")]
+    AccessorySlotDuplicate,
+    /// The accessories together move a stat beyond the cap.
+    #[serde(rename = "botarga.accessory_stat_total")]
+    AccessoryStatTotal,
+    /// Any other rule of the loadout or of the ruleset.
+    #[serde(rename = "botarga.build_invalid")]
+    BuildInvalid,
+    /// The database failed, or the row is locked.
+    #[serde(rename = "botarga.unavailable")]
+    Unavailable,
+}
+
+impl BotargaErrorCode {
+    /// Every variant. A test with an exhaustive `match` keeps this list complete.
+    pub const ALL: &'static [Self] = &[
+        Self::NotCreated,
+        Self::InvalidRequest,
+        Self::NotUnlocked,
+        Self::StyleUnknown,
+        Self::BudgetExceeded,
+        Self::StatOutOfRange,
+        Self::SlotsLocked,
+        Self::AbilityCount,
+        Self::AbilityKindCount,
+        Self::AbilityDuplicate,
+        Self::WeaknessCount,
+        Self::AccessorySlotDuplicate,
+        Self::AccessoryStatTotal,
+        Self::BuildInvalid,
+        Self::Unavailable,
+    ];
+    /// The only domain prefix this enum may use.
+    pub const PREFIX: &'static str = "botarga.";
+
+    /// The serialized code (the same string serde writes).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotCreated => "botarga.not_created",
+            Self::InvalidRequest => "botarga.invalid_request",
+            Self::NotUnlocked => "botarga.not_unlocked",
+            Self::StyleUnknown => "botarga.style_unknown",
+            Self::BudgetExceeded => "botarga.budget_exceeded",
+            Self::StatOutOfRange => "botarga.stat_out_of_range",
+            Self::SlotsLocked => "botarga.slots_locked",
+            Self::AbilityCount => "botarga.ability_count",
+            Self::AbilityKindCount => "botarga.ability_kind_count",
+            Self::AbilityDuplicate => "botarga.ability_duplicate",
+            Self::WeaknessCount => "botarga.weakness_count",
+            Self::AccessorySlotDuplicate => "botarga.accessory_slot_duplicate",
+            Self::AccessoryStatTotal => "botarga.accessory_stat_total",
+            Self::BuildInvalid => "botarga.build_invalid",
+            Self::Unavailable => "botarga.unavailable",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(untagged)]
@@ -498,6 +595,7 @@ pub enum ErrorCode {
     Bailout(BailoutErrorCode),
     Wallet(WalletErrorCode),
     Season(SeasonErrorCode),
+    Botarga(BotargaErrorCode),
 }
 
 impl ErrorCode {
@@ -514,6 +612,7 @@ impl ErrorCode {
             Self::Bailout(code) => code.as_str(),
             Self::Wallet(code) => code.as_str(),
             Self::Season(code) => code.as_str(),
+            Self::Botarga(code) => code.as_str(),
         }
     }
 }
@@ -563,6 +662,12 @@ impl From<BonusErrorCode> for ErrorCode {
 impl From<SeasonErrorCode> for ErrorCode {
     fn from(code: SeasonErrorCode) -> Self {
         Self::Season(code)
+    }
+}
+
+impl From<BotargaErrorCode> for ErrorCode {
+    fn from(code: BotargaErrorCode) -> Self {
+        Self::Botarga(code)
     }
 }
 
@@ -676,6 +781,26 @@ mod tests {
         }
     }
 
+    fn botarga_index(code: BotargaErrorCode) -> usize {
+        match code {
+            BotargaErrorCode::NotCreated => 0,
+            BotargaErrorCode::InvalidRequest => 1,
+            BotargaErrorCode::NotUnlocked => 2,
+            BotargaErrorCode::StyleUnknown => 3,
+            BotargaErrorCode::BudgetExceeded => 4,
+            BotargaErrorCode::StatOutOfRange => 5,
+            BotargaErrorCode::SlotsLocked => 6,
+            BotargaErrorCode::AbilityCount => 7,
+            BotargaErrorCode::AbilityKindCount => 8,
+            BotargaErrorCode::AbilityDuplicate => 9,
+            BotargaErrorCode::WeaknessCount => 10,
+            BotargaErrorCode::AccessorySlotDuplicate => 11,
+            BotargaErrorCode::AccessoryStatTotal => 12,
+            BotargaErrorCode::BuildInvalid => 13,
+            BotargaErrorCode::Unavailable => 14,
+        }
+    }
+
     fn bet_index(code: BetErrorCode) -> usize {
         match code {
             BetErrorCode::InvalidRequest => 0,
@@ -718,6 +843,7 @@ mod tests {
     const PROFILE_COUNT: usize = 3;
     const FIGHT_COUNT: usize = 2;
     const SEASON_COUNT: usize = 2;
+    const BOTARGA_COUNT: usize = 15;
     const BET_COUNT: usize = 10;
     const BONUS_COUNT: usize = 1;
     const BAILOUT_COUNT: usize = 3;
@@ -758,6 +884,12 @@ mod tests {
             .collect();
         assert_eq!(season.len(), SEASON_COUNT);
         assert_eq!(SeasonErrorCode::ALL.len(), SEASON_COUNT);
+        let botarga: HashSet<usize> = BotargaErrorCode::ALL
+            .iter()
+            .map(|c| botarga_index(*c))
+            .collect();
+        assert_eq!(botarga.len(), BOTARGA_COUNT);
+        assert_eq!(BotargaErrorCode::ALL.len(), BOTARGA_COUNT);
     }
 
     /// The codes of 012 RF38, each wrapped in its `ErrorCode` variant.
@@ -1083,6 +1215,13 @@ mod tests {
             );
             assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
         }
+        for code in BotargaErrorCode::ALL {
+            assert!(
+                code.as_str().starts_with(BotargaErrorCode::PREFIX),
+                "{code:?}"
+            );
+            assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
+        }
         for code in money_codes() {
             let prefix = match code {
                 ErrorCode::Bet(_) => BetErrorCode::PREFIX,
@@ -1102,6 +1241,7 @@ mod tests {
                 + PROFILE_COUNT
                 + FIGHT_COUNT
                 + SEASON_COUNT
+                + BOTARGA_COUNT
                 + BET_COUNT
                 + BONUS_COUNT
                 + BAILOUT_COUNT
@@ -1152,6 +1292,18 @@ mod tests {
                 serde_json::from_str::<ErrorCode>(&json).unwrap(),
                 ErrorCode::Season(*code)
             );
+        }
+        for code in BotargaErrorCode::ALL {
+            let json = format!("\"{}\"", code.as_str());
+            assert_eq!(
+                serde_json::from_str::<ErrorCode>(&json).unwrap(),
+                ErrorCode::Botarga(*code)
+            );
+            assert_eq!(
+                serde_json::to_value(code).unwrap(),
+                serde_json::Value::from(code.as_str())
+            );
+            assert_eq!(ErrorCode::from(*code).as_str(), code.as_str());
         }
         assert_eq!(
             serde_json::from_str::<ErrorCode>("\"auth.csrf_origin\"").unwrap(),

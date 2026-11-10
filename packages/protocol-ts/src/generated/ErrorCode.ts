@@ -5,6 +5,7 @@ import type { AuthErrorCode } from './AuthErrorCode.js';
 import type { BailoutErrorCode } from './BailoutErrorCode.js';
 import type { BetErrorCode } from './BetErrorCode.js';
 import type { BonusErrorCode } from './BonusErrorCode.js';
+import type { BotargaErrorCode } from './BotargaErrorCode.js';
 import type { FightErrorCode } from './FightErrorCode.js';
 import type { ProfileErrorCode } from './ProfileErrorCode.js';
 import type { SeasonErrorCode } from './SeasonErrorCode.js';
@@ -21,4 +22,5 @@ export type ErrorCode =
   | BonusErrorCode
   | BailoutErrorCode
   | WalletErrorCode
-  | SeasonErrorCode;
+  | SeasonErrorCode
+  | BotargaErrorCode;

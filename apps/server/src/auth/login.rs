@@ -2,7 +2,8 @@
 //!
 //! An existing identity gets a session (or `auth.banned`). A new one, in **one** transaction:
 //! the user with a generated alias (up to 10 tries on the unique key), the OAuth account, the
-//! ledger account, the `grant` of `DAILY_GRANT`, the `auth_events` and the session. If a
+//! ledger account, the botarga with its starter build (021), the `grant` of `DAILY_GRANT`, the
+//! `auth_events` and the session. If a
 //! concurrent first login of the same identity wins the OAuth account, this one rolls back and
 //! retries once as an existing login. A session the request brought is revoked in the same
 //! transaction (rotation, D3). The new session knows the account it logged in with and the
@@ -14,6 +15,7 @@ use sqlx::{PgConnection, PgPool, Row};
 use uuid::Uuid;
 
 use super::AuthState;
+use crate::botarga;
 use crate::ledger;
 use crate::profile::name;
 use crate::sessions::{
@@ -144,6 +146,8 @@ async fn attempt(
                 return Ok(Attempt::Lost);
             };
             ledger::create_user_account(tx, user_id).await?;
+            // 021 "Alta": the botarga is born with the user, or neither is.
+            botarga::store::create(tx, user_id, auth.botarga.starter()).await?;
             let entry = ledger::grant(tx, user_id, auth.daily_grant).await?;
             if let Some(entry) = entry {
                 event(tx, user_id, "grant", None, Some(entry), ip_hash).await?;

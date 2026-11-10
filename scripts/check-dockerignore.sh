@@ -84,6 +84,12 @@ if [ ! -f "$ctx/content/names/nouns.txt" ]; then
     failed=1
 fi
 
+# And the catalog of the player botargas (021).
+if [ ! -f "$ctx/content/catalog/abilities.json" ]; then
+    echo "missing from build context: content/catalog/abilities.json" >&2
+    failed=1
+fi
+
 if [ ! -f "$ctx/apps/server/.env.example" ]; then
     echo "missing from build context: apps/server/.env.example (the !**/.env.example rule)" >&2
     failed=1

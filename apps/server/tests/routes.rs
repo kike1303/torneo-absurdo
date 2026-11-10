@@ -1,5 +1,5 @@
 //! 008 T1: every entry of the manifest answers on the real router by its method, and every
-//! unsafe method on it (with a valid `Origin`) is 405.
+//! unsafe method on it that the manifest does not declare (with a valid `Origin`) is 405.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod support;
@@ -31,7 +31,12 @@ async fn every_manifest_entry_is_routed_and_only_by_its_method() {
             );
         }
         for other in ["POST", "PUT", "PATCH", "DELETE"] {
-            if other == method.as_str() {
+            // `/api/botarga` has a `GET` and a `POST` (021): another entry of the same path
+            // answers its own method.
+            let routed = |r: &server::http::routes::RouteSpec| {
+                r.path == route.path && r.method.http().as_str() == other
+            };
+            if ROUTES.iter().any(routed) {
                 continue;
             }
             let response = http::send(app.addr, other, &path, &[("origin", ORIGIN)]).await;

@@ -195,3 +195,59 @@ async fn a_ban_during_a_claim_stops_it() {
         assert_eq!(entries().await, before, "{path}");
     }
 }
+
+/// 021: a ban that commits while a write of the botarga waits on the user's lock stops it. Without
+/// a row the `POST` would create it, and with one the `PUT` would save the build.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_ban_during_a_botarga_write_stops_it() {
+    const BUILD: &str = concat!(
+        r#"{"stats":{"hp":80,"attack":30,"defense":30,"speed":30,"special":30},"#,
+        r#""style_id":"showman","abilities":["foam_headbutt"],"accessories":[],"#,
+        r#""cosmetics":{"idle":null,"victory":null}}"#,
+    );
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let rows = |user: Uuid| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query("SELECT xmin::text || b::text FROM botargas b WHERE user_id = $1")
+                .bind(user)
+                .fetch_all(&pool)
+                .await
+                .unwrap()
+                .iter()
+                .map(|row| row.get::<String, _>(0))
+                .collect::<Vec<_>>()
+        }
+    };
+
+    let (user, token) = support::app::user_with_session(&pool).await;
+    let response =
+        with_a_ban_in_between(&app, &pool, user, "POST", "/api/botarga", &token, "").await;
+    assert_unauthenticated(&response);
+    assert!(rows(user).await.is_empty());
+
+    let (user, token) = support::app::user_with_session(&pool).await;
+    let mut tx = pool.begin().await.unwrap();
+    let catalog = server::botarga::BotargaCatalog::embedded().unwrap();
+    assert!(
+        server::botarga::store::create(&mut tx, user, catalog.starter())
+            .await
+            .unwrap()
+    );
+    tx.commit().await.unwrap();
+    let before = rows(user).await;
+    assert_eq!(before.len(), 1);
+    let response = with_a_ban_in_between(
+        &app,
+        &pool,
+        user,
+        "PUT",
+        "/api/botarga/build",
+        &token,
+        BUILD,
+    )
+    .await;
+    assert_unauthenticated(&response);
+    assert_eq!(rows(user).await, before);
+}
