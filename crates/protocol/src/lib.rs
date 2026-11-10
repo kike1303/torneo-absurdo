@@ -17,6 +17,7 @@
 #![forbid(unsafe_code)]
 
 mod bets;
+mod botarga;
 mod coins;
 mod error;
 mod fight;
@@ -31,11 +32,15 @@ pub use bets::{
     BetView, FightPool, MyFightBets, MyFightResult, PoolOutcome, PoolSettlement, PoolSide,
     Probation, RefundReason, Wallet,
 };
+pub use botarga::{
+    BotargaBuild, BotargaDaily, BotargaProgress, BotargaStats, BotargaUnlocks, BotargaView,
+    FighterCosmetics, IdleClip, VictoryClip,
+};
 pub use coins::{CoinAmount, CoinAmountOutOfRange};
 pub use error::{
     ApiError, ApiErrorCode, AuthErrorCode, BailoutErrorCode, BetErrorCode, BonusErrorCode,
-    CallbackErrorCode, ErrorCode, FightErrorCode, ProfileErrorCode, SeasonErrorCode,
-    WalletErrorCode, WsErrorCode,
+    BotargaErrorCode, CallbackErrorCode, ErrorCode, FightErrorCode, ProfileErrorCode,
+    SeasonErrorCode, WalletErrorCode, WsErrorCode,
 };
 pub use fight::{AbilityKind, EndReason, FightEvent, FightLog, FighterInfo, MomentKind, Side};
 pub use fights::{

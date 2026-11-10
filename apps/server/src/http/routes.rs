@@ -92,6 +92,9 @@ pub enum Handler {
     Seasons,
     FightPool,
     BetQuote,
+    Botarga,
+    BotargaCreate,
+    BotargaBuild,
     #[cfg(feature = "dev-auth")]
     DevAuthorize,
     #[cfg(feature = "dev-auth")]
@@ -279,6 +282,24 @@ pub const ROUTES: &[RouteSpec] = &[
         effect: Effect::Read,
         handler: Handler::BetQuote,
     },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/botarga",
+        effect: Effect::Read,
+        handler: Handler::Botarga,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/botarga",
+        effect: Effect::Mutate,
+        handler: Handler::BotargaCreate,
+    },
+    RouteSpec {
+        method: RouteMethod::Put,
+        path: "/api/botarga/build",
+        effect: Effect::Mutate,
+        handler: Handler::BotargaBuild,
+    },
     #[cfg(feature = "dev-auth")]
     RouteSpec {
         method: RouteMethod::Get,
@@ -403,6 +424,11 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         // 012 RF34: the limit and the cache of the detail.
         Handler::FightPool => fight_read(on(filter, crate::bets::pool::pool), state),
         Handler::BetQuote => on(filter, crate::bets::pool::quote),
+        Handler::Botarga => on(filter, crate::botarga::api::get),
+        // 021: no body extractor in the first, and the limit anyway; over `MAX_FORM_BYTES` the
+        // second gives 422 `botarga.invalid_request`.
+        Handler::BotargaCreate => on(filter, crate::botarga::api::create).layer(body),
+        Handler::BotargaBuild => on(filter, crate::botarga::api::put_build).layer(body),
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize => on(filter, auth::dev::authorize),
         #[cfg(feature = "dev-auth")]

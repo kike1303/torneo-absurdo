@@ -42,6 +42,10 @@ pub const CLAIM_IP: Quota = Quota::per_minute(nonzero(60));
 pub const WALLET_READ_USER: Quota = Quota::per_minute(nonzero(60));
 pub const WALLET_READ_IP: Quota = Quota::per_minute(nonzero(600));
 
+/// `GET /api/botarga` (021): the numbers of the wallet reads, in its own buckets.
+pub const BOTARGA_READ_USER: Quota = Quota::per_minute(nonzero(60));
+pub const BOTARGA_READ_IP: Quota = Quota::per_minute(nonzero(600));
+
 /// `quote` (012 RF37): 120/min per user and 600/min per IP.
 pub const QUOTE_USER: Quota = Quota::per_minute(nonzero(120));
 pub const QUOTE_IP: Quota = Quota::per_minute(nonzero(600));

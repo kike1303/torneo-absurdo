@@ -138,18 +138,60 @@ const ABILITIES: &str = "abilities.json";
 const ACCESSORIES: &str = "accessories.json";
 const STYLES: &str = "styles.json";
 
+/// The bytes of the catalog files, wherever they come from: the directory ([`load_catalog`]) or a
+/// binary that embeds them (the server, 021). `names` follows the order of [`LOCALES`].
+#[derive(Debug, Clone, Copy)]
+pub struct CatalogSource<'a> {
+    pub abilities: &'a [u8],
+    pub accessories: &'a [u8],
+    pub styles: &'a [u8],
+    pub names: [&'a [u8]; LOCALES.len()],
+}
+
 /// Loads and checks the player catalog under `root` against `ruleset` (the player one, v2).
 ///
 /// # Errors
 /// The first problem found, file by file in the order of the layout above. See [`ContentError`].
 pub fn load_catalog(root: &Path, ruleset: &Ruleset) -> Result<Catalog, ContentError> {
-    let abilities: AbilitiesFile = read_json(root, ABILITIES)?;
-    let accessories: AccessoriesFile = read_json(root, ACCESSORIES)?;
-    let styles: StylesFile = read_json(root, STYLES)?;
+    let abilities = read_file(root, ABILITIES)?;
+    let accessories = read_file(root, ACCESSORIES)?;
+    let styles = read_file(root, STYLES)?;
     let mut names = Vec::new();
     for locale in LOCALES {
-        let file = format!("names.{locale}.json");
-        let parsed: NamesFile = read_json(root, &file)?;
+        names.push(read_file(root, &names_file(locale))?);
+    }
+    let mut source = CatalogSource {
+        abilities: &abilities,
+        accessories: &accessories,
+        styles: &styles,
+        names: [&[]; LOCALES.len()],
+    };
+    for (slot, bytes) in source.names.iter_mut().zip(&names) {
+        *slot = bytes;
+    }
+    parse_catalog(&source, ruleset)
+}
+
+fn names_file(locale: &str) -> String {
+    format!("names.{locale}.json")
+}
+
+/// Checks the player catalog of `source` against `ruleset`: what [`load_catalog`] does once the
+/// files are read. The paths of its errors are the file names of the layout.
+///
+/// # Errors
+/// The first problem found, file by file in the order of the layout above. See [`ContentError`].
+pub fn parse_catalog(
+    source: &CatalogSource<'_>,
+    ruleset: &Ruleset,
+) -> Result<Catalog, ContentError> {
+    let abilities: AbilitiesFile = parse_json(ABILITIES, source.abilities)?;
+    let accessories: AccessoriesFile = parse_json(ACCESSORIES, source.accessories)?;
+    let styles: StylesFile = parse_json(STYLES, source.styles)?;
+    let mut names = Vec::new();
+    for (locale, bytes) in LOCALES.into_iter().zip(source.names) {
+        let file = names_file(locale);
+        let parsed: NamesFile = parse_json(&file, bytes)?;
         names.push((locale, PathBuf::from(file), parsed));
     }
 
@@ -254,15 +296,18 @@ pub fn load_catalog(root: &Path, ruleset: &Ruleset) -> Result<Catalog, ContentEr
     Ok(catalog)
 }
 
-fn read_json<T: DeserializeOwned>(root: &Path, file: &str) -> Result<T, ContentError> {
+fn read_file(root: &Path, file: &str) -> Result<Vec<u8>, ContentError> {
     let path = PathBuf::from(file);
     let checked = match entry_kind(root, &path)? {
         EntryKind::File(meta) => meta,
         EntryKind::Missing => return Err(ContentError::MissingCatalogFile { path }),
         EntryKind::Dir | EntryKind::Other => return Err(ContentError::UnexpectedEntry { path }),
     };
-    let bytes = read_bounded(root, &path, &checked)?;
-    serde_json::from_slice(&bytes).map_err(|e| json_error(&path, &e))
+    read_bounded(root, &path, &checked)
+}
+
+fn parse_json<T: DeserializeOwned>(file: &str, bytes: &[u8]) -> Result<T, ContentError> {
+    serde_json::from_slice(bytes).map_err(|e| json_error(Path::new(file), &e))
 }
 
 fn catalog_error(path: &Path, id: &str, rule: String) -> ContentError {

@@ -123,6 +123,8 @@ jobs:
               - crates/protocol/**
               - crates/content/**
               - content/names/**
+              # Embedded in the server too (021).
+              - content/catalog/**
               - Cargo.toml
               - Cargo.lock
               - rust-toolchain.toml

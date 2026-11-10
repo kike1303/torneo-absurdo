@@ -63,6 +63,8 @@ COPY apps/server apps/server
 COPY crates crates
 # The alias word lists and the reserved names, embedded with include_str! (spec 008 RF-B7).
 COPY content/names content/names
+# The catalog of the player botargas, embedded with include_bytes! (021).
+COPY content/catalog content/catalog
 RUN cargo zigbuild --release --locked --target x86_64-unknown-linux-musl -p server
 
 # distroless/static-debian13:nonroot, index digest (uid 65532, no shell).

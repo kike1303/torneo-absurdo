@@ -113,6 +113,18 @@ fn request_of(route: &RouteSpec, id: i32) -> (String, Vec<(&'static str, &'stati
         | Handler::Wallet => (vec![], String::new()),
         Handler::MyBets | Handler::BetHistory | Handler::FightPool => (vec![], String::new()),
         Handler::BetQuote => (vec![], String::new()),
+        // 021: the botarga of the identity, if it has one, and a build that changes nothing.
+        Handler::Botarga => (vec![], String::new()),
+        Handler::BotargaCreate => (vec![form], String::new()),
+        Handler::BotargaBuild => (
+            vec![json],
+            concat!(
+                r#"{"stats":{"hp":40,"attack":40,"defense":40,"speed":40,"special":40},"#,
+                r#""style_id":"balanced","abilities":["foam_headbutt"],"accessories":[],"#,
+                r#""cosmetics":{"idle":null,"victory":null}}"#,
+            )
+            .to_owned(),
+        ),
         // 012 RF25: a bet on the fight of the case, which the window may refuse.
         Handler::Bet => (
             vec![json],
@@ -245,7 +257,11 @@ fn expected_status(handler: Handler, identity: &str) -> Option<u16> {
         | Handler::MyBets
         | Handler::BetHistory
         | Handler::FightPool
-        | Handler::BetQuote => None,
+        | Handler::BetQuote
+        // 021: they depend on whether the identity has a botarga.
+        | Handler::Botarga
+        | Handler::BotargaCreate
+        | Handler::BotargaBuild => None,
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize | Handler::DevToken | Handler::DevUserinfo => None,
     }

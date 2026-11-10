@@ -58,6 +58,21 @@ export const ERROR_TEXT = {
   'wallet.unavailable': 'error_wallet_unavailable',
   'season.not_found': 'error_season_not_found',
   'season.unavailable': 'error_season_unavailable',
+  'botarga.not_created': 'error_botarga_not_created',
+  'botarga.invalid_request': 'error_botarga_invalid_request',
+  'botarga.not_unlocked': 'error_botarga_not_unlocked',
+  'botarga.style_unknown': 'error_botarga_style_unknown',
+  'botarga.budget_exceeded': 'error_botarga_budget_exceeded',
+  'botarga.stat_out_of_range': 'error_botarga_stat_out_of_range',
+  'botarga.slots_locked': 'error_botarga_slots_locked',
+  'botarga.ability_count': 'error_botarga_ability_count',
+  'botarga.ability_kind_count': 'error_botarga_ability_kind_count',
+  'botarga.ability_duplicate': 'error_botarga_ability_duplicate',
+  'botarga.weakness_count': 'error_botarga_weakness_count',
+  'botarga.accessory_slot_duplicate': 'error_botarga_accessory_slot_duplicate',
+  'botarga.accessory_stat_total': 'error_botarga_accessory_stat_total',
+  'botarga.build_invalid': 'error_botarga_build_invalid',
+  'botarga.unavailable': 'error_botarga_unavailable',
 } as const satisfies { readonly [K in ErrorCode]: MessageKey };
 
 /** The closed list of `/login?error=` (ADR-0008, amendment 2026-10-28). */

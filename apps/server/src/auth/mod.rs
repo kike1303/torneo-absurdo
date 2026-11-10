@@ -29,6 +29,7 @@ use rand_core::{OsRng, TryRngCore};
 use sha2::{Digest, Sha256};
 
 use crate::app::{AppState, Settings, StartupError};
+use crate::botarga::BotargaCatalog;
 use crate::config::{ClientSecret, Config, OAuthCredentials};
 use crate::http::cookies::CookiePolicy;
 use crate::ledger::Coins;
@@ -54,6 +55,8 @@ pub struct AuthState {
     pub link_gate: link::LinkGateConfig,
     /// The pause of the unlink race tests ([`unlink::NoUnlinkGate`] in production, 009 RF15).
     pub unlink_gate: unlink::UnlinkGateConfig,
+    /// The starter build of the botarga a new user gets in the login transaction (021).
+    pub botarga: Arc<BotargaCatalog>,
     #[cfg(feature = "dev-auth")]
     pub dev: dev::DevProvider,
 }
@@ -69,7 +72,11 @@ impl fmt::Debug for AuthState {
 impl AuthState {
     /// The auth state, with the TLS config of the OAuth client (built here, once). Fails with
     /// [`StartupError::Tls`] if a real provider is on and the config cannot be built.
-    pub fn from_config(config: &Config, settings: &Settings) -> Result<Self, StartupError> {
+    pub fn from_config(
+        config: &Config,
+        settings: &Settings,
+        botarga: Arc<BotargaCatalog>,
+    ) -> Result<Self, StartupError> {
         let tls = tls_for(config)?;
         Ok(Self {
             cookies: config.cookies,
@@ -83,6 +90,7 @@ impl AuthState {
             http: client::HttpClient::new(tls),
             link_gate: settings.link_gate.clone(),
             unlink_gate: settings.unlink_gate.clone(),
+            botarga,
             #[cfg(feature = "dev-auth")]
             dev: dev::DevProvider::default(),
         })

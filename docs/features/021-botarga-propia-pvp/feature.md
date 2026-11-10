@@ -106,6 +106,15 @@ Una issue por fase en el proyecto de Linear "Fase 3 — Juego propio". Cada una 
 4. **TA-64** Rating, rendimientos decrecientes, leaderboard, temporadas PvP y `farm-report`.
 5. **TA-65** UI: `/botarga`, buscar pelea, `/pvp/fights`, repetición y leaderboard; e2e del flujo completo.
 
+Ajustes de la implementación (fase 1, TA-61):
+- El catálogo va embebido en el binario (`include_bytes!`, como `content/names`) y se valida al arrancar; no hay variable de entorno nueva.
+- La botarga genérica reparte sus 200 puntos en partes iguales: 40 por stat.
+- Los desbloqueos `starter` son solo el pesado inicial. Idle y victoria nacen en `null` (la variante del torneo) y ningún cosmético está desbloqueado hasta que las fases siguientes los otorguen. Los ids de cosmético son los códigos de clip del renderer (`idle` a `idle_5`, `win_1` a `win_3`).
+- `body_type` nace en `normal` y `face_id` en `rookie` (la cara "novato entusiasta" del backlog). La build no los cambia todavía.
+- Un id que no está desbloqueado y uno que no existe en el catálogo responden el mismo código, `botarga.not_unlocked`.
+- `BotargaProgress.daily` responde 0 ataques y 100 % hasta que existan las peleas (fases 2 y 4).
+- `GET /api/botarga` tiene cuota propia (`BOTARGA_READ_*`, los números de `wallet`).
+
 ## Riesgos
 - **Monedas por volumen:** el `pvp_reward` sale de `issuance` y no de otro usuario, así que infla la masa. Lo acotan el escalón diario (tope duro de 10 recompensas completas por día), el tope por pareja, la carencia y el índice único por pelea; el test de conservación del ledger suma `pvp_reward` a los grants permitidos.
 - **Granjas de rating:** dos cuentas que pelean en bucle o cuentas nuevas que solo pierden contra una misma cuenta. Se mitiga con el emparejamiento (sin los últimos 3 rivales), el tope de 3 peleas puntuadas por pareja y día, K bajo tras 30 peleas y las señales de `farm-report`; la sanción es manual, como en 020.

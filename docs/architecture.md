@@ -4,7 +4,7 @@ type: architecture
 status: draft
 author: architect
 created: 2026-10-20
-updated: 2026-11-05
+updated: 2026-11-09
 ---
 
 # Arquitectura general
@@ -130,6 +130,11 @@ Antes de correr `grant`, revisa los proveedores vinculados en `/account`: todo l
 - **Pozo en vivo:** una tarea junto al runner lee cada 2 s los pozos de las peleas en `betting_open` en una sola consulta, y manda `pool_update` por el canal `schedule` solo si cambió y tiene apuestas, más un último valor tras el cierre. El hub guarda el último por pelea, serializado una vez, y un socket lento salta al último. `quote` estima desde esa caché.
 - **Reserva de sockets:** el último quinto de `WS_MAX_CONNECTIONS` es para cuentas fuera de carencia. La carencia solo se consulta cuando se llega a la reserva.
 - **Custodia:** `bet_stake` está atado en la base al `stake` de su apuesta (migración `20261103000000`). `refund` y `bet_payout` no; la consulta de custodia del README del server lo detecta.
+
+### Botarga del jugador (feature 021, fase 1)
+- **Tablas:** `botargas` (una por usuario: nivel, XP, stats gastados, estilo, ataques y accesorios equipados, cosméticos, rating) y `botarga_unlocks` (lo que el usuario tiene). Nace en la transacción del login que crea al usuario, con la build inicial de `Catalog::starter`; la migración no recorre `users`.
+- **Catálogo:** `content/catalog/` va embebido en el binario (`include_bytes!`, como `content/names`) y se valida al arrancar contra el ruleset v2. Con un catálogo inválido el server no arranca (`botarga.catalog_invalid`).
+- **Rutas** (privadas, `private, no-store` y `Vary: Cookie`): `GET /api/botarga` (404 `botarga.not_created` sin fila; nunca escribe), `POST /api/botarga` (la crea si falta, idempotente) y `PUT /api/botarga/build`. La build se valida en el borde: tamaños, ids que estén en `botarga_unlocks` y en el catálogo, y `engine::loadout::resolve` con v2. Un rechazo es un código `botarga.*`, nunca texto. Las dos escrituras bloquean al usuario si no está baneado, con `lock_timeout` de 1 s. Ninguna ruta recibe un id de usuario: siempre es el de la sesión.
 
 ## Tipos compartidos
 `crates/protocol` define los mensajes WS, los DTOs del API y el log de pelea (`FightLog`, `FightEvent` y sus enums, feature 003) con serde. Es una librería pura: sin I/O, sin `tokio`, sin reloj y sin texto para humanos (ADR-0007).
