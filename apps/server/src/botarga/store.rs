@@ -69,30 +69,28 @@ macro_rules! unlocked_sql {
     };
 }
 
-/// One statement, so the build and the unlocks are of one snapshot.
-const VIEW_SQL: &str = concat!(
-    "SELECT b.level, b.xp, b.hp, b.attack, b.defense, b.speed, b.special, b.style_id, \
-     b.abilities, b.accessories, b.cosmetic_idle, b.cosmetic_victory, b.body_type, b.face_id, \
-     b.rating, b.rated_fights, ",
-    unlocked_sql!("ability"),
-    ", ",
-    unlocked_sql!("accessory"),
-    ", ",
-    unlocked_sql!("cosmetic"),
-    " FROM botargas b WHERE b.user_id = $1"
-);
+/// One statement, so the build and the unlocks are of one snapshot. One list of columns for the two
+/// reads: [`decode`] reads them by position.
+macro_rules! view_sql {
+    ($suffix:literal) => {
+        concat!(
+            "SELECT b.level, b.xp, b.hp, b.attack, b.defense, b.speed, b.special, b.style_id, \
+             b.abilities, b.accessories, b.cosmetic_idle, b.cosmetic_victory, b.body_type, \
+             b.face_id, b.rating, b.rated_fights, ",
+            unlocked_sql!("ability"),
+            ", ",
+            unlocked_sql!("accessory"),
+            ", ",
+            unlocked_sql!("cosmetic"),
+            " FROM botargas b WHERE b.user_id = $1",
+            $suffix
+        )
+    };
+}
 
-const VIEW_LOCKED_SQL: &str = concat!(
-    "SELECT b.level, b.xp, b.hp, b.attack, b.defense, b.speed, b.special, b.style_id, \
-     b.abilities, b.accessories, b.cosmetic_idle, b.cosmetic_victory, b.body_type, b.face_id, \
-     b.rating, b.rated_fights, ",
-    unlocked_sql!("ability"),
-    ", ",
-    unlocked_sql!("accessory"),
-    ", ",
-    unlocked_sql!("cosmetic"),
-    " FROM botargas b WHERE b.user_id = $1 FOR UPDATE OF b"
-);
+const VIEW_SQL: &str = view_sql!("");
+
+const VIEW_LOCKED_SQL: &str = view_sql!(" FOR UPDATE OF b");
 
 fn bad() -> sqlx::Error {
     sqlx::Error::Decode(Box::new(BadBotargaRow))

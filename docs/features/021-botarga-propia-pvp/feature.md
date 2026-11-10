@@ -112,6 +112,8 @@ Ajustes de la implementación (fase 1, TA-61):
 - Los desbloqueos `starter` son solo el pesado inicial. Idle y victoria nacen en `null` (la variante del torneo) y ningún cosmético está desbloqueado hasta que las fases siguientes los otorguen. Los ids de cosmético son los códigos de clip del renderer (`idle` a `idle_5`, `win_1` a `win_3`).
 - `body_type` nace en `normal` y `face_id` en `rookie` (la cara "novato entusiasta" del backlog). La build no los cambia todavía.
 - Un id que no está desbloqueado y uno que no existe en el catálogo responden el mismo código, `botarga.not_unlocked`.
+- Un `LoadoutError` no viaja como su `code()`: se traduce a un `BotargaErrorCode` cerrado, y lo que un cliente no puede provocar con el catálogo cae en `botarga.build_invalid`.
+- Una build solo se valida al guardarla, y el catálogo cambia con cada release. La fase 2 tiene que volver a resolver la build guardada del atacante y del defensor con el catálogo vigente antes de `simulate`, decidir qué pasa si falla (nunca un 500) y cubrirlo con un test.
 - `BotargaProgress.daily` responde 0 ataques y 100 % hasta que existan las peleas (fases 2 y 4).
 - `GET /api/botarga` tiene cuota propia (`BOTARGA_READ_*`, los números de `wallet`).
 
