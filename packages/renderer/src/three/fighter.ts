@@ -5,7 +5,6 @@ import {
   AnimationMixer,
   Color,
   LoopOnce,
-  MeshLambertMaterial,
   Vector3,
   type AnimationAction,
   type Material,
@@ -18,7 +17,9 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import type { ClipName, Pose } from '../model/pose.ts';
 import type { Side } from '../timeline/types.ts';
 import type { Botarga } from './load.ts';
+import { ownMaterial, type BotargaMaterial } from './materials.ts';
 import type { BotargaTint } from './types.ts';
+import { dress, recolorZones } from './wardrobe.ts';
 import { GROUND_Y, type FighterScene } from '../scene/types.ts';
 import { arenaPoint, facingYaw } from './world.ts';
 
@@ -28,9 +29,6 @@ export const FADE_MS = 200;
 const FLASH_STRENGTH = 0.6;
 /** Keeps a held clip off its exact end, where `LoopOnce` would stop sampling it. */
 const END_EPSILON = 1e-4;
-
-/** PBR as exported, or diffuse only (`lite`): a far smaller shader, for software WebGL. */
-type BotargaMaterial = MeshStandardMaterial | MeshLambertMaterial;
 
 const SHORTS = 'Botarga_Short';
 const FACE = 'Botarga_Cara';
@@ -104,7 +102,9 @@ export function createFighter(
   tint: BotargaTint | undefined,
   lite = false,
 ): Fighter3d {
-  const root = cloneSkinned(botarga.gltf.scene);
+  const outfit = botarga.outfits[side];
+  const { body, skin } = outfit;
+  const root = cloneSkinned(body.gltf.scene);
   const materials: BotargaMaterial[] = [];
   const face = { value: (botarga.faces.get('neutral') ?? null) as Texture | null };
   let currentFace: string | null = null;
@@ -115,11 +115,11 @@ export function createFighter(
     // Skinned bounds come from the rest pose; a clip can leave them.
     mesh.frustumCulled = false;
     const source = mesh.material as MeshStandardMaterial;
-    const material: BotargaMaterial = lite
-      ? new MeshLambertMaterial({ name: source.name, color: source.color, map: source.map })
-      : source.clone();
+    const material = ownMaterial(source, lite);
     const extras = (source.userData ?? {}) as { tint_default?: unknown; face_uv_rect?: unknown };
-    const custom = source.name === SHORTS ? tint?.shorts : tint?.body;
+    // The side tint is the base botarga's: a skin is colored by its zones (022).
+    const sideTint = skin === undefined ? tint : undefined;
+    const custom = source.name === SHORTS ? sideTint?.shorts : sideTint?.body;
     const color = custom ?? extras.tint_default;
     if (typeof color === 'string') material.color.set(color);
     if (source.name === FACE) {
@@ -130,12 +130,18 @@ export function createFighter(
     materials.push(material);
   });
 
+  // Still in the rest pose and at the origin: the accessories are placed from it (022).
+  const zoneTextures =
+    skin === undefined ? [] : recolorZones(materials, skin, outfit.look.colors, outfit.islandImage);
+  const wardrobe = dress(root, skin?.fit, outfit.accessories, lite);
+  materials.push(...wardrobe.materials);
+
   const mixer = new AnimationMixer(root);
   const actions = new Map<ClipName, AnimationAction>();
   const actionFor = (clip: ClipName): AnimationAction => {
     let action = actions.get(clip);
     if (action === undefined) {
-      const source = botarga.clips.get(clip);
+      const source = body.clips.get(clip);
       if (source === undefined) throw new Error(`missing clip ${clip}`);
       action = mixer.clipAction(source);
       action.setLoop(LoopOnce, 1);
@@ -186,6 +192,7 @@ export function createFighter(
         }
       }
       mixer.update(0);
+      wardrobe.update(t);
 
       if (pose.face !== currentFace) {
         const texture = botarga.faces.get(pose.face) ?? botarga.faces.get('neutral') ?? null;
@@ -199,6 +206,8 @@ export function createFighter(
       mixer.stopAllAction();
       mixer.uncacheRoot(root);
       for (const material of materials) (material as Material).dispose();
+      for (const texture of zoneTextures) texture.dispose();
+      wardrobe.dispose();
     },
   };
 }

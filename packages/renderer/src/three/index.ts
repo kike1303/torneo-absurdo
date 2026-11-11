@@ -6,7 +6,25 @@ import type { RendererHandle } from '../player/types.ts';
 import { createThreeStage } from './stage.ts';
 import type { Renderer3dOptions } from './types.ts';
 
-export type { BotargaModel, BotargaTint, Renderer3dOptions } from './types.ts';
+export type {
+  AccessoryModel,
+  BotargaModel,
+  BotargaTint,
+  FighterLook,
+  Renderer3dOptions,
+  SkinModel,
+} from './types.ts';
+export { parseAccessoryManifest, parseSkinManifest, type SkinManifest } from '../look/manifest.ts';
+export {
+  BODY_SLOTS,
+  TINT_SLOTS,
+  type AccessoryManifest,
+  type BodyFit,
+  type BodySlot,
+  type ColorChoice,
+  type ColorZones,
+  type TintSlot,
+} from '../look/types.ts';
 export {
   FACE_CODES,
   type FaceCode,
