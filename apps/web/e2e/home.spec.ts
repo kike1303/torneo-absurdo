@@ -251,12 +251,15 @@ test.describe('in live (RF54, RF55)', () => {
   });
 
   test('the clock stops at the ko, and only then', async ({ page }) => {
-    await watching(page, KO_AT - 1500, koFight(KO_AT));
+    // `t` runs from before the page loads, and the clock only shows once the stage is up: with the
+    // software GL of Chromium that takes over 1.5 s here, so the margin has to cover it (TA-75).
+    const margin = 5000;
+    await watching(page, KO_AT - margin, koFight(KO_AT));
     const clock = page.getByTestId('round-clock');
     const seconds = Math.ceil((86_000 - KO_AT) / 1000);
     const frozen = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
     await expect(clock).not.toHaveText(frozen);
-    await expect(clock).toHaveText(frozen, { timeout: 5000 });
+    await expect(clock).toHaveText(frozen, { timeout: margin + 5000 });
     await page.waitForTimeout(1200);
     await expect(clock).toHaveText(frozen);
   });
