@@ -156,6 +156,23 @@ test('changing a fighter reloads the arena and leaves it paused (TA-20)', async 
   await play(page);
 });
 
+test('the wardrobe controls write the URL and reload the stage (TA-76)', async ({ page }) => {
+  const errors = trackErrors(page);
+  await page.goto('/en/dev/arena?t=1500');
+  await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
+  await waitForHydration(page);
+  await page.getByTestId('arena-wear-a-propeller_beanie').check();
+  await expect(page).toHaveURL(/[?&]t=1500&wear_a=propeller_beanie$/);
+  await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
+  await page.getByTestId('arena-color-b-accent').fill(`#${'2a9d8f'}`);
+  await expect(page).toHaveURL(/colors_b=accent%3A2a9d8f/);
+  await page.getByTestId('arena-color-b-accent-reset').click();
+  await expect(page).not.toHaveURL(/colors_b/);
+  await expect(page.getByTestId('arena-wear-a-propeller_beanie')).toBeChecked();
+  await expect(stage(page)).toHaveAttribute('data-state', 'ready', { timeout: 15_000 });
+  expect(errors).toEqual([]);
+});
+
 test('the instance without the catalog answers 404', async ({ request }) => {
   const res = await request.get('http://localhost:4174/es/dev/arena');
   expect(res.status()).toBe(404);
