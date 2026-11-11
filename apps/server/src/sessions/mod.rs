@@ -485,15 +485,20 @@ async fn finish(
     .execute(pool)
     .await?;
     // 021 "Emparejamiento": the day of the last visit, for the defenders. Best effort: a user row
-    // that a write holds is skipped, never waited for, and the next request tries again.
-    sqlx::query(
+    // that a write holds is skipped, never waited for, a failure never fails the request, and the
+    // next request tries again.
+    let seen = sqlx::query(
         "UPDATE users SET last_seen_at = now() WHERE id = (SELECT id FROM users WHERE id = $1 \
          AND (last_seen_at IS NULL OR last_seen_at < now() - interval '1 day') \
-         FOR UPDATE SKIP LOCKED)",
+         FOR NO KEY UPDATE SKIP LOCKED)",
     )
     .bind(info.user_id)
     .execute(pool)
-    .await?;
+    .await;
+    if let Err(error) = seen {
+        let error_kind = crate::db::error_kind(&error);
+        tracing::warn!(event = "sessions.last_seen_failed", error_kind);
+    }
     Ok(Some(info))
 }
 

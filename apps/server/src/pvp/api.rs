@@ -140,9 +140,11 @@ async fn search(
             .await?
             .map_or(Outcome::Gone, |answer| Outcome::Repeated(Box::new(answer))));
     }
-    let daily_index = store::attacks_today(&mut *tx, user_id)
-        .await?
-        .saturating_add(1);
+    let attacks = store::attacks_today(&mut *tx, user_id).await?;
+    if attacks >= rewards::DAILY_ATTACKS_MAX {
+        return refusal(StatusCode::TOO_MANY_REQUESTS, PvpErrorCode::DailyLimit);
+    }
+    let daily_index = attacks.saturating_add(1);
     let level = me.progress.level;
     // 021 "Ajustes": the saved build, with the catalog of this binary.
     let Ok(spec_a) = build::resolve(&state.botarga, level, &me.build) else {

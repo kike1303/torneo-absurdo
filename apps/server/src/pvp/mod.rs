@@ -51,8 +51,9 @@ impl Default for PvpConfig {
 }
 
 /// The characters of the tournament as rivals of last resort: the roster of `CONTENT_DIR`, read
-/// the first time an attack finds no user, and kept for the life of the process like the roster of
-/// the scheduler. A directory that does not load gives no character (and `pvp.no_rival`).
+/// before the first search outside any transaction, and kept for the life of the process like the
+/// roster of the scheduler once it loads. A directory that does not load gives no character (and
+/// `pvp.no_rival`) until it does.
 #[derive(Debug)]
 pub struct Rivals {
     dir: PathBuf,
@@ -68,29 +69,32 @@ impl Rivals {
         }
     }
 
-    /// The specs of the roster, in the order of `load_roster` (by slug).
+    /// The specs of the roster, in the order of `load_roster` (by slug). A roster that loads is
+    /// kept for the life of the process; one that fails is not, so the next search reads it again
+    /// (at most one per quota of `POST /api/pvp/fights`).
     pub async fn specs(&self) -> Arc<[CharacterSpec]> {
-        self.specs
-            .get_or_init(|| async {
+        let loaded = self
+            .specs
+            .get_or_try_init(|| async {
                 let dir = self.dir.clone();
                 let loaded = tokio::task::spawn_blocking(move || {
                     crate::fights::roster::rival_specs(&dir).map_err(|error| error.kind)
                 })
                 .await;
                 match loaded {
-                    Ok(Ok(specs)) => specs.into(),
-                    Ok(Err(error_kind)) => {
-                        tracing::warn!(event = "pvp.rivals_invalid", error_kind);
-                        Arc::from([])
-                    }
-                    Err(_) => {
-                        tracing::warn!(event = "pvp.rivals_invalid", error_kind = "load_panicked");
-                        Arc::from([])
-                    }
+                    Ok(Ok(specs)) => Ok(Arc::<[CharacterSpec]>::from(specs)),
+                    Ok(Err(error_kind)) => Err(error_kind),
+                    Err(_) => Err("load_panicked"),
                 }
             })
-            .await
-            .clone()
+            .await;
+        match loaded {
+            Ok(specs) => specs.clone(),
+            Err(error_kind) => {
+                tracing::warn!(event = "pvp.rivals_invalid", error_kind);
+                Arc::from([])
+            }
+        }
     }
 }
 

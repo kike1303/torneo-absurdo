@@ -230,7 +230,7 @@ Las apuestas (feature 012) son solo con monedas ficticias (ADR-0005). Los valore
 
 ### Peleas PvP (feature 021, fase 2)
 
-`POST /api/pvp/fights` con `{"client_key":"<uuidgen en minúsculas>"}` resuelve al instante una pelea contra la botarga de otro usuario (o contra un personaje del torneo de `CONTENT_DIR` si no hay nadie). La victoria del atacante contra un usuario paga `PVP_WIN_COINS` (15 por defecto, opcional, de 0 a 2000; 0 las apaga) por el escalón del día, como un asiento `pvp_reward` de `issuance`. No pagan: una derrota, un empate, la defensa, el torneo, la cuarta pelea del día de una pareja ni una pelea con un lado en carencia PvP (menos de 7 días o de 10 ataques). El compose de producción no pasa `PVP_WIN_COINS`.
+`POST /api/pvp/fights` con `{"client_key":"<uuidgen en minúsculas>"}` resuelve al instante una pelea contra la botarga de otro usuario (o contra un personaje del torneo de `CONTENT_DIR` si no hay nadie). La victoria del atacante contra un usuario paga `PVP_WIN_COINS` (15 por defecto, opcional, de 0 a 2000; 0 las apaga) por el escalón del día, como un asiento `pvp_reward` de `issuance`. Un usuario ataca como mucho 50 veces por día UTC (429 `pvp.daily_limit`). No pagan: una derrota, un empate, la defensa, el torneo, la cuarta pelea del día de una pareja ni una pelea con un lado en carencia PvP (menos de 7 días o de 10 ataques). El compose de producción no pasa `PVP_WIN_COINS`.
 
 Para ver lo que pagó el PvP, de solo lectura:
 

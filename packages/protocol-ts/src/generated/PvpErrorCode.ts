@@ -9,5 +9,6 @@ export type PvpErrorCode =
   | 'pvp.not_found'
   | 'pvp.build_invalid'
   | 'pvp.no_rival'
+  | 'pvp.daily_limit'
   | 'pvp.busy'
   | 'pvp.unavailable';

@@ -77,6 +77,7 @@ export const ERROR_TEXT = {
   'pvp.not_found': 'error_pvp_not_found',
   'pvp.build_invalid': 'error_pvp_build_invalid',
   'pvp.no_rival': 'error_pvp_no_rival',
+  'pvp.daily_limit': 'error_pvp_daily_limit',
   'pvp.busy': 'error_pvp_busy',
   'pvp.unavailable': 'error_pvp_unavailable',
 } as const satisfies { readonly [K in ErrorCode]: MessageKey };

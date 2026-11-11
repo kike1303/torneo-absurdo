@@ -17,7 +17,7 @@ updated: 2026-11-10
 Cada usuario recibe una botarga genérica y la hace suya: sube de nivel, arma su build con lo que desbloquea y busca pelea contra la botarga de otro usuario real, esté conectado o no. El server resuelve la pelea al instante con el motor (ruleset v2), mueve el rating de los dos y guarda la semilla para que cualquiera la vea después como repetición. Es el paso 4 del [backlog](../../backlog.md) y la fase 5 que la feature [016](../016-botarga-del-jugador/feature.md) dejó pendiente. Hoy no existe nada de esto de cara al usuario: solo el motor, los catálogos y el simulador de builds.
 
 ## Decisiones del owner (chat, 2026-11-09)
-- **Rendimientos decrecientes por día UTC:** las primeras 10 peleas como atacante dan recompensa completa; de la 11 a la 20 bajan por escalones (75 %, 50 %, 25 %); desde la 21 no dan XP ni monedas ni mueven el rating. Nunca hay un muro: se puede seguir peleando.
+- **Rendimientos decrecientes por día UTC:** las primeras 10 peleas como atacante dan recompensa completa; de la 11 a la 20 bajan por escalones (75 %, 50 %, 25 %); desde la 21 no dan XP ni monedas ni mueven el rating. Se puede seguir peleando hasta 50 ataques por día UTC (enmienda del 2026-11-11, a pedido del `security-reviewer`: cada ataque guarda su pelea para siempre, así que el volumen de una cuenta necesita techo); el 51 responde 429 `pvp.daily_limit` y no escribe nada.
 - **Rating:** Elo con 1000 de inicio, K=40 en las primeras 30 peleas y K=20 después.
 - **Temporadas:** el mismo mes UTC que el torneo (020). Al cerrar, el rating se comprime hacia 1000; nivel, XP e inventario se conservan siempre.
 - **Sin apuestas en el PvP** en esta versión: la pelea se resuelve al instante y no hay ventana. Queda en el backlog.
@@ -126,6 +126,7 @@ Ajustes de la implementación (fase 2, TA-63):
 - El personaje del torneo escalado: cada stat parte del mínimo de v2 y el resto del presupuesto del nivel se reparte en las proporciones del personaje (hacia abajo, con el tope del ruleset); los ataques son los primeros que caben en las ranuras del nivel y en el límite por tipo de v2. El roster se lee de `CONTENT_DIR` la primera vez que hace falta; sin roster, 503 `pvp.no_rival` y no se escribe nada.
 - `PvpFightCreated` lleva además `reward: PvpReward` (rating, XP, monedas y escalón del atacante), lo que la UI muestra debajo de la repetición; `PvpFightSummary` lleva el mismo `reward` desde el lado del usuario. Un lado es `PvpFighter` (`player` con `display_name` o `tournament` con `slug`).
 - `pvp_fights` es inmutable (`TA011`) y la regla `TA008` exige que un `pvp_reward` mueva exactamente el `coins_attacker` de su pelea, de `issuance` a su atacante.
+- Tope de 50 ataques por día UTC (decisión del owner del 2026-11-11): se comprueba bajo el lock del atacante, después de buscar el `client_key` (un reintento sigue devolviendo su pelea), y `pvp_daily` lo repite con un `CHECK`. `coins_attacker` también tiene su `CHECK`: entre 0 y 2000, y distinto de 0 solo si ganó el atacante.
 - `PVP_WIN_COINS` acepta de 0 a 2000. `GET /api/pvp/fights` usa la cuota de `GET /api/botarga`. Un `lock_timeout` responde 503 `pvp.busy`.
 
 ## Riesgos

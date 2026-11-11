@@ -73,6 +73,7 @@ const ERROR_CODES: { readonly [K in ErrorCode]: true } = {
   'pvp.not_found': true,
   'pvp.build_invalid': true,
   'pvp.no_rival': true,
+  'pvp.daily_limit': true,
   'pvp.busy': true,
   'pvp.unavailable': true,
 };

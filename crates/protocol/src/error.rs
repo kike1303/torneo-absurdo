@@ -599,6 +599,9 @@ pub enum PvpErrorCode {
     /// There is no other botarga nor any character of the tournament to fight.
     #[serde(rename = "pvp.no_rival")]
     NoRival,
+    /// The attacks of the UTC day reached their limit: the next one waits for the next day.
+    #[serde(rename = "pvp.daily_limit")]
+    DailyLimit,
     /// A row was locked for more than the `lock_timeout`: the client retries with the same key.
     #[serde(rename = "pvp.busy")]
     Busy,
@@ -614,6 +617,7 @@ impl PvpErrorCode {
         Self::NotFound,
         Self::BuildInvalid,
         Self::NoRival,
+        Self::DailyLimit,
         Self::Busy,
         Self::Unavailable,
     ];
@@ -627,6 +631,7 @@ impl PvpErrorCode {
             Self::NotFound => "pvp.not_found",
             Self::BuildInvalid => "pvp.build_invalid",
             Self::NoRival => "pvp.no_rival",
+            Self::DailyLimit => "pvp.daily_limit",
             Self::Busy => "pvp.busy",
             Self::Unavailable => "pvp.unavailable",
         }
@@ -869,6 +874,7 @@ mod tests {
             PvpErrorCode::NoRival => 3,
             PvpErrorCode::Busy => 4,
             PvpErrorCode::Unavailable => 5,
+            PvpErrorCode::DailyLimit => 6,
         }
     }
 
@@ -915,7 +921,7 @@ mod tests {
     const FIGHT_COUNT: usize = 2;
     const SEASON_COUNT: usize = 2;
     const BOTARGA_COUNT: usize = 15;
-    const PVP_COUNT: usize = 6;
+    const PVP_COUNT: usize = 7;
     const BET_COUNT: usize = 10;
     const BONUS_COUNT: usize = 1;
     const BAILOUT_COUNT: usize = 3;

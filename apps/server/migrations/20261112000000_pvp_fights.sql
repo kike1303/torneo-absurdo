@@ -31,7 +31,9 @@ CREATE TABLE pvp_fights (
         CHECK (rating_delta BETWEEN -40 AND 40),
     xp_attacker int NOT NULL CONSTRAINT pvp_fights_xp_attacker_ck CHECK (xp_attacker >= 0),
     xp_defender int NOT NULL CONSTRAINT pvp_fights_xp_defender_ck CHECK (xp_defender >= 0),
-    coins_attacker int NOT NULL CONSTRAINT pvp_fights_coins_ck CHECK (coins_attacker >= 0),
+    -- Only a victory of the attacker pays, and never more than the top of `PVP_WIN_COINS`.
+    coins_attacker int NOT NULL CONSTRAINT pvp_fights_coins_ck
+        CHECK (coins_attacker BETWEEN 0 AND 2000 AND (coins_attacker = 0 OR winner = 'a')),
     daily_index smallint NOT NULL CONSTRAINT pvp_fights_daily_index_ck CHECK (daily_index >= 1),
     -- Both set by `pvp_fights_guard`, whatever the application sends: `YYYYMM` of the UTC month.
     season_id int NOT NULL,
@@ -78,7 +80,8 @@ ALTER TABLE users ADD COLUMN last_seen_at timestamptz NULL;
 CREATE TABLE pvp_daily (
     user_id uuid NOT NULL REFERENCES botargas,
     day date NOT NULL,
-    attacks smallint NOT NULL CONSTRAINT pvp_daily_attacks_ck CHECK (attacks >= 1),
+    -- At most 50 a day (`DAILY_ATTACKS_MAX`): every attack stores its fight for good.
+    attacks smallint NOT NULL CONSTRAINT pvp_daily_attacks_ck CHECK (attacks BETWEEN 1 AND 50),
     CONSTRAINT pvp_daily_pk PRIMARY KEY (user_id, day)
 );
 

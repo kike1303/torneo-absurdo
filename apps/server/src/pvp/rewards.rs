@@ -9,6 +9,10 @@ use protocol::Side;
 /// Attacks of a UTC day at full pay.
 pub const FULL_ATTACKS: u16 = 10;
 
+/// Attacks of a UTC day at all (owner, 2026-11-11): each one stores its log for good, so the volume
+/// of one account has a ceiling. Above the last paid step (20), so the steps do not change.
+pub const DAILY_ATTACKS_MAX: u16 = 50;
+
 /// Fights of one pair in one UTC day that count: from the fourth on, no rating, no coins and no XP
 /// of defense (021 "Emparejamiento").
 pub const PAIR_FIGHTS_PER_DAY: i64 = 3;

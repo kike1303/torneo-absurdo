@@ -384,6 +384,7 @@
   "error_pvp_not_found": "That fight does not exist.",
   "error_pvp_build_invalid": "Your build no longer fits the rules: save it again to see what changed.",
   "error_pvp_no_rival": "There is nobody to fight right now. Try again later.",
+  "error_pvp_daily_limit": "You fought enough for today: come back tomorrow (UTC).",
   "error_pvp_busy": "The arena is busy. Try again in a moment.",
   "error_pvp_unavailable": "We could not start the fight. Try again.",
   "leaderboard_title": "Bettor ranking",

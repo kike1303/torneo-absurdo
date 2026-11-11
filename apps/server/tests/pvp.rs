@@ -920,3 +920,44 @@ async fn the_database_refuses_a_second_or_a_wrong_reward() {
     assert_eq!(code(error).as_deref(), Some("23514"));
     assert_eq!(support::bets::total(pool).await, 0);
 }
+
+/// Owner, 2026-11-11: at most 50 attacks a UTC day, since each one stores its fight for good. The
+/// 50th is resolved; the 51st answers a code and writes nothing; a retry of an earlier key still
+/// gives its fight.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_51st_attack_of_the_day_is_refused_and_writes_nothing() {
+    let (app, _db) = start().await;
+    let pool = &app.pool;
+    let (a, token) = player(pool).await;
+    set_attacks(pool, a, 49).await;
+    let key = Uuid::new_v4().to_string();
+    let last = app.attack_with(&token, &key).await;
+    assert_eq!(last.status, 201, "{}", last.text());
+    assert_eq!(body(&last)["progress"]["daily"]["attacks"], 50);
+    let before = count(pool, "pvp_fights").await;
+    let refused = app.attack(&token).await;
+    assert_code(&refused, 429, "pvp.daily_limit");
+    assert_private(&refused);
+    assert_eq!(count(pool, "pvp_fights").await, before);
+    assert_eq!(
+        count(pool, "auth_events WHERE kind = 'pvp_attack'").await,
+        before
+    );
+    let attacks: i16 = sqlx::query_scalar("SELECT attacks FROM pvp_daily WHERE user_id = $1")
+        .bind(a)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(attacks, 50);
+    assert_eq!(app.attack_with(&token, &key).await.status, 200);
+    // And the database refuses a 51st by itself.
+    let error = sqlx::query("UPDATE pvp_daily SET attacks = 51 WHERE user_id = $1")
+        .bind(a)
+        .execute(pool)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.as_database_error().and_then(|e| e.code()).as_deref(),
+        Some("23514")
+    );
+}
