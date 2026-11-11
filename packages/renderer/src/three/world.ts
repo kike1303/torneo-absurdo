@@ -3,11 +3,15 @@
 import { PerspectiveCamera } from 'three';
 import { CIRCLE_ANGLE } from '../model/circling.ts';
 import { FRONT_SHOT, type Shot } from '../model/shot.ts';
+import { STAGE_METERS_PER_PX } from '../model/stance.ts';
 import { GROUND_Y, STAGE_WIDTH, type CameraScene } from '../scene/types.ts';
 import type { Side } from '../timeline/types.ts';
 
-/** Horizontal scale: the marks end up ~1.5 m apart and a strike connects at ~0.46 m. */
-export const METERS_PER_PX = 1 / 140;
+/**
+ * Horizontal scale: a strike connects at ~0.46 m. The fighters stand where `stanceScene` puts them
+ * (TA-74), ~1.05 m apart at their marks.
+ */
+export const METERS_PER_PX = STAGE_METERS_PER_PX;
 /** Vertical scale, so the impact height (56 px) is the chest and the damage numbers the head. */
 export const HEIGHT_PER_PX = 1 / 120;
 /**

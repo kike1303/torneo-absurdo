@@ -5,6 +5,7 @@ import type { SpriteManifest } from '../manifest/types.ts';
 import {
   prepareScene,
   prepareSceneFrom,
+  type PrepareOptions,
   reachedEnd,
   type PreparedScene,
 } from '../scene/prepare.ts';
@@ -75,7 +76,12 @@ function continues(previous: Timeline, next: Timeline): boolean {
   return closing || previous.duration_ms === next.duration_ms;
 }
 
-export function createPlayer(options: RendererOptions, stage: Stage): RendererHandle {
+export function createPlayer(
+  options: RendererOptions,
+  stage: Stage,
+  /** How the stage wants its scenes prepared (the 3D arena has its own return, TA-74). */
+  prepare: PrepareOptions = {},
+): RendererHandle {
   let reducedMotion = options.reducedMotion;
   let prepared: PreparedScene | null = null;
   let playback: Playback = INITIAL_PLAYBACK;
@@ -165,7 +171,7 @@ export function createPlayer(options: RendererOptions, stage: Stage): RendererHa
       const manifests = validateAssets(assets);
       const result = validateTimeline(timelineJson, manifests);
       if (!result.ok) throw new RendererError('timeline_invalid');
-      const next = prepareScene(result.timeline, manifests);
+      const next = prepareScene(result.timeline, manifests, prepare);
       await ready;
       if (destroyed || id !== loadId) return;
       await stage.loadAssets(manifests, options.resolveAsset);
@@ -190,7 +196,7 @@ export function createPlayer(options: RendererOptions, stage: Stage): RendererHa
         throw error;
       }
       if (destroyed || id !== loadId) return;
-      const next = prepareScene(fight.timeline, manifests);
+      const next = prepareScene(fight.timeline, manifests, prepare);
       fight.installed = true;
       install(next);
     },

@@ -19,6 +19,13 @@ export const BOTARGA_PACE: Readonly<Record<string, ActionPace>> = Object.freeze(
   dodge: { total: 750 },
 });
 
+/**
+ * How long a botarga takes back to its mark (TA-74): three guard steps (`STEP_M`) at a pace that
+ * reads as steps. The 2D return (300 ms) crossed them at ~2 m/s, feet flickering. The fight does
+ * not slow down: the cues stay where they are and the next strike cuts a return short.
+ */
+export const BOTARGA_RETURN_MS = 900;
+
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
