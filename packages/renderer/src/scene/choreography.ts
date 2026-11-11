@@ -24,7 +24,10 @@ import {
 } from '../timeline/types.ts';
 import { CONTACT_PX, FACING, MARK_X } from './types.ts';
 
-/** Return to the mark. */
+/**
+ * Return to the mark. A renderer whose fighters walk it at their own pace gives its own (the 3D
+ * arena, TA-74); everything that reads the return takes it from the prepared scene.
+ */
 export const RETURN_MS = 300;
 /** Cap for reactions and recoveries (the longest non-looping animation of the format). */
 export const MAX_ACTION_MS = 3000;
@@ -65,7 +68,7 @@ export interface Segment {
   readonly moveStart: number;
   readonly moveEnd: number;
   /** Index of the cue that caused it; `start ≥ at_ms − MAX_WINDUP_MS` and
-   * `end ≤ at_ms + MAX_ACTION_MS + RETURN_MS`, so `cueWindow` always reaches it. */
+   * `end ≤ at_ms + MAX_ACTION_MS + returnMs`, so `cueWindow` always reaches it. */
   readonly owner: number;
 }
 
@@ -142,6 +145,8 @@ interface Sim {
   pending: Pending | null;
   /** Start of every own windup, sorted. */
   windups: number[];
+  /** How long the return to the mark takes. */
+  returnMs: number;
   out: Segment[][];
 }
 
@@ -214,20 +219,20 @@ function afterAction(sim: Sim, e: number, x: number, owner: number): Open {
   const mark = MARK_X[sim.side];
   if (Math.abs(x - mark) < MOVE_EPSILON) return idle(sim, e);
   const next = firstAtOrAfter(sim.windups, e);
-  if (next !== undefined && next < e + RETURN_MS) {
+  if (next !== undefined && next < e + sim.returnMs) {
     // Rule 2: the next windup starts before the return would end, so stay at contact.
     return still('contact', e, Number.POSITIVE_INFINITY, 'idle', x, owner);
   }
   return {
     kind: 'return',
     start: e,
-    end: e + RETURN_MS,
+    end: e + sim.returnMs,
     animation: 'walk',
     animStart: e,
     x0: x,
     x1: mark,
     moveStart: e,
-    moveEnd: e + RETURN_MS,
+    moveEnd: e + sim.returnMs,
     owner,
   };
 }
@@ -288,6 +293,7 @@ interface SimEvent {
 export function buildChoreography(
   timeline: Timeline,
   timings: Readonly<Record<Side, TimingTable>>,
+  returnMs: number = RETURN_MS,
 ): Choreography {
   const out: Segment[][] = timeline.cues.map(() => []);
   const impacts: (Impact | undefined)[] = timeline.cues.map(() => undefined);
@@ -301,6 +307,7 @@ export function buildChoreography(
       hold: null,
       pending: null,
       windups: [],
+      returnMs,
       out,
     };
   }

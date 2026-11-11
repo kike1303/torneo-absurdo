@@ -23,6 +23,7 @@ import { MAX_PARTICLES } from '../fx/particles.ts';
 import { poseFor } from '../model/pose.ts';
 import { arenaAngle, depthAt, sidestep } from '../model/circling.ts';
 import { shotFor } from '../model/shot.ts';
+import { stanceScene } from '../model/stance.ts';
 import { RendererError } from '../player/errors.ts';
 import type { RendererTheme, Stage, StageSetup } from '../player/types.ts';
 import { GROUND_Y, type DamageNumberEffect, type Scene } from '../scene/types.ts';
@@ -156,9 +157,11 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
     if (w.particles.instanceColor !== null) w.particles.instanceColor.needsUpdate = true;
   }
 
-  function draw(w: World, scene: Scene): void {
+  function draw(w: World, logical: Scene): void {
     const current = theme;
     if (current === null) return;
+    // The fighters stand closer in 3D than on the 2D stage, three steps from contact (TA-74).
+    const scene = stanceScene(logical);
     // The fight axis turns and a dodge steps off it (018): presentation only, from the scene.
     const angle = arenaAngle(scene);
     placeCamera(w.camera, aspect, scene.camera, shotFor(scene), angle);
@@ -186,6 +189,7 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
             intro: scene.phase === 'intro',
           },
           model.cosmetics?.[side],
+          botarga.outfits[side].body.gaits,
         );
         fighters[side].apply(f, pose, scene.t, flash, angle, sidestep(f, scene));
       }

@@ -5,6 +5,8 @@ import type { AnimationCode } from '../manifest/types.ts';
 import { RETURN_MS } from '../scene/choreography.ts';
 import type { FighterScene } from '../scene/types.ts';
 import type { Side } from '../timeline/types.ts';
+import { arrivingTime, leavingTime, type Gaits, type RootMotion } from './gait.ts';
+import { metersFromMark } from './stance.ts';
 
 /** The 16 clips of `content/models/botarga-base/botarga-base.glb`. */
 export const CLIP_NAMES = [
@@ -200,7 +202,7 @@ export function clipTime(
   t: number,
 ): number {
   const ms = Math.max(0, fighter.elapsed);
-  // A walk (the return to the mark, `RETURN_MS`) takes one step: half the clip's cycle.
+  // A walk clip without root motion (in place) cannot follow the ground: one step per return.
   if (clip === 'walk_forward' || clip === 'walk_back')
     return Math.min(1, ms / RETURN_MS) * (duration / 2);
   if (fighter.animation === 'idle' || fighter.animation === 'intro' || fighter.animation === 'walk')
@@ -250,21 +252,43 @@ export function faceFor(
   }
 }
 
-/** The pose of `fighter` at scene time `t`, given the length of each clip. */
+/**
+ * Seconds into a walk clip for a fighter of a `stanceScene` (TA-74): the frame in which the clip's
+ * root has advanced what the fighter has walked, so its feet do not slide. A return counts its
+ * steps back from the mark and ends on the clip's last frame; a walk towards the rival counts
+ * them from the mark. A function of the position alone, so a seek shows the same step.
+ */
+export function walkTime(
+  fighter: Pick<FighterScene, 'side' | 'x' | 'travel'>,
+  gait: RootMotion,
+): number {
+  const meters = metersFromMark(fighter);
+  return fighter.travel < 0 ? arrivingTime(gait, meters) : leavingTime(gait, meters);
+}
+
+/**
+ * The pose of `fighter` at scene time `t`, given the length of each clip. With the root motion of
+ * the walk clips (`gaits`), `fighter` is one of a `stanceScene` and a walk follows the ground.
+ */
 export function poseFor(
   fighter: FighterScene,
   t: number,
   durations: ClipDurations,
   context: FaceContext,
   cosmetics?: FighterCosmetics,
+  gaits?: Gaits,
 ): Pose {
   const wanted = clipFor(fighter, t, cosmetics);
   const length = durations[wanted];
   // A clip the GLB lacks plays as idle (the walks before they are exported).
   const clip = length === undefined ? 'idle' : wanted;
+  const gait = clip === 'walk_forward' || clip === 'walk_back' ? gaits?.[clip] : undefined;
   return {
     clip,
-    time: clipTime(fighter, clip, length ?? durations.idle, t),
+    time:
+      gait === undefined
+        ? clipTime(fighter, clip, length ?? durations.idle, t)
+        : walkTime(fighter, gait),
     face: faceFor(fighter, context),
   };
 }

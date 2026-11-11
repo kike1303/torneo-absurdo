@@ -15,8 +15,10 @@ import {
   type ClipName,
   type FaceCode,
 } from '../model/pose.ts';
+import type { Gaits } from '../model/gait.ts';
 import { RendererError } from '../player/errors.ts';
 import type { Side } from '../timeline/types.ts';
+import { groundWalks } from './gait.ts';
 import type { AccessoryModel, BotargaModel, FighterLook, SkinModel } from './types.ts';
 
 /** A body that can fight: the base botarga or a skin (022), with its own clips. */
@@ -24,6 +26,8 @@ export interface Body {
   readonly gltf: GLTF;
   readonly clips: ReadonlyMap<string, AnimationClip>;
   readonly durations: ClipDurations;
+  /** The root motion taken out of its walk clips (TA-74). */
+  readonly gaits: Gaits;
 }
 
 export interface LoadedAccessory {
@@ -62,8 +66,13 @@ async function loadFace(loader: TextureLoader, url: string): Promise<Texture> {
   return texture;
 }
 
+/** One `Body` per GLB: both sides may share it, and its walks are grounded only once. */
+const bodies = new WeakMap<GLTF, Body>();
+
 /** Throws when a clip the pose needs is missing: a skin must bring them all, as the base does. */
 function bodyOf(gltf: GLTF): Body {
+  const known = bodies.get(gltf);
+  if (known !== undefined) return known;
   const clips = new Map(gltf.animations.map((clip) => [clip.name, clip]));
   const durations = {} as Record<ClipName, number>;
   for (const name of CLIP_NAMES) {
@@ -75,7 +84,9 @@ function bodyOf(gltf: GLTF): Body {
     const clip = clips.get(name);
     if (clip !== undefined) durations[name] = clip.duration;
   }
-  return { gltf, clips, durations };
+  const body = { gltf, clips, durations, gaits: groundWalks(gltf.scene, clips) };
+  bodies.set(gltf, body);
+  return body;
 }
 
 /** Rejects with `RendererError('asset_load_failed')`. */

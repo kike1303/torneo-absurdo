@@ -1,6 +1,6 @@
 // @torneo/renderer/three: the 3D arena (013). It never imports `src/index.ts`, so Pixi stays out of
 // its chunk; the host loads it with `import()` like the Pixi one (RF-A17).
-import { paceAssets } from '../model/pacing.ts';
+import { BOTARGA_RETURN_MS, paceAssets } from '../model/pacing.ts';
 import { createPlayer } from '../player/player.ts';
 import type { RendererHandle } from '../player/types.ts';
 import { createThreeStage } from './stage.ts';
@@ -36,13 +36,16 @@ export {
 /**
  * Draws a timeline in `container` with Three.js and the generic botarga. Same handle as
  * `createRenderer`; `load` also rejects with `RendererError('asset_load_failed')` if the GLB or a
- * face cannot be loaded. The manifests get the botarga's own pace (`paceAssets`, 017).
+ * face cannot be loaded. The manifests get the botarga's own pace (`paceAssets`, 017) and the
+ * fighters walk back to their marks at the pace of their steps (`BOTARGA_RETURN_MS`, TA-74).
  */
 export function createRenderer3d(
   container: HTMLElement,
   options: Renderer3dOptions,
 ): RendererHandle {
-  const handle = createPlayer(options, createThreeStage(container, options.model));
+  const handle = createPlayer(options, createThreeStage(container, options.model), {
+    returnMs: BOTARGA_RETURN_MS,
+  });
   return {
     ...handle,
     load: (timeline, assets) => handle.load(timeline, paceAssets(assets)),

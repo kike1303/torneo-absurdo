@@ -26,8 +26,19 @@ import {
 } from './choreography.ts';
 import { MARK_X } from './types.ts';
 
-/** How far back `cueWindow` looks: the longest action plus the return to the mark. */
+/**
+ * How far back `cueWindow` looks with the default return: the longest action plus the return to
+ * the mark. A scene prepared with its own return looks back `lookbackMs(prepared)`.
+ */
 export const LOOKBACK_MS = MAX_ACTION_MS + RETURN_MS;
+
+export interface PrepareOptions {
+  /**
+   * How long a fighter takes back to its mark (default `RETURN_MS`). The 3D arena walks it at the
+   * pace of its clip (TA-74). A longer return is cut by the next strike like any other segment.
+   */
+  readonly returnMs?: number;
+}
 /** How far ahead it looks: the longest windup (RF-A11). */
 export const LOOKAHEAD_MS = MAX_WINDUP_MS;
 /**
@@ -86,6 +97,8 @@ export interface PreparedFighter {
 
 export interface PreparedScene {
   readonly durationMs: number;
+  /** The return to the mark this scene was prepared with. */
+  readonly returnMs: number;
   readonly fighters: Readonly<Record<Side, PreparedFighter>>;
   readonly cues: readonly PreparedCue[];
   /** `at_ms` of every cue, for binary searches. */
@@ -167,12 +180,17 @@ export function upperBound(sorted: readonly number[], x: number): number {
   return lo;
 }
 
+/** How far back `cueWindow` looks in `prepared`: the longest action plus its return. */
+export function lookbackMs(prepared: Pick<PreparedScene, 'returnMs'>): number {
+  return MAX_ACTION_MS + prepared.returnMs;
+}
+
 /**
- * The only cues `sceneAt` reads: those with `at_ms` in [t − LOOKBACK_MS, t + LOOKAHEAD_MS].
+ * The only cues `sceneAt` reads: those with `at_ms` in [t − lookback, t + LOOKAHEAD_MS].
  * Every segment active at `t` belongs to one of them (see `Segment.owner`).
  */
 export function cueWindow(prepared: PreparedScene, t: number): readonly PreparedCue[] {
-  const lo = lowerBound(prepared.cueTimes, t - LOOKBACK_MS);
+  const lo = lowerBound(prepared.cueTimes, t - lookbackMs(prepared));
   const hi = upperBound(prepared.cueTimes, t + LOOKAHEAD_MS);
   return prepared.cues.slice(lo, hi);
 }
@@ -181,7 +199,11 @@ export function cueWindow(prepared: PreparedScene, t: number): readonly Prepared
  * Prepares a validated timeline and its manifests (by asset id) for `sceneAt`. The result is
  * deeply frozen, always: the core cannot tell development from production (plan-a1 decision 2).
  */
-export function prepareScene(timeline: Timeline, manifests: ManifestsById): PreparedScene {
+export function prepareScene(
+  timeline: Timeline,
+  manifests: ManifestsById,
+  options: PrepareOptions = {},
+): PreparedScene {
   const manifestOf = (side: Side): SpriteManifest => {
     const manifest = manifests.get(timeline.fighters[side].asset);
     if (manifest === undefined) throw new Error('timeline.unknown_asset');
@@ -194,11 +216,12 @@ export function prepareScene(timeline: Timeline, manifests: ManifestsById): Prep
     { a: timingTable(a), b: timingTable(b) },
     { a: a.scale ?? 1, b: b.scale ?? 1 },
     null,
+    options.returnMs ?? RETURN_MS,
   );
 }
 
 /**
- * The same result as `prepareScene(timeline, manifests)`, for a `timeline` with the same fighters
+ * The same result as `prepareScene(timeline, manifests)` with the return of `previous`, for a `timeline` with the same fighters
  * and whose cues start with those of `previous` (the caller checks it, RF47). Reuses the timing
  * tables and the `PreparedCue` that no new cue can change: those of `cuesFixedBy`.
  */
@@ -208,20 +231,21 @@ export function prepareSceneFrom(previous: PreparedScene, timeline: Timeline): P
     { a: previous.fighters.a.timing, b: previous.fighters.b.timing },
     { a: previous.fighters.a.scale, b: previous.fighters.b.scale },
     previous,
+    previous.returnMs,
   );
 }
 
 /**
  * How many leading cues of `previous` no later cue can change. A new cue has `at_ms ≥ last`, so
  * its windup starts at `≥ last − MAX_WINDUP_MS`; the only reading of the future is the return to
- * the mark, which looks RETURN_MS ahead (`afterAction`). Before H nothing changes, and a segment
- * ends by `at_ms + LOOKBACK_MS` (see `Segment.owner`).
+ * the mark, which looks its length ahead (`afterAction`). Before H nothing changes, and a segment
+ * ends by `at_ms + lookbackMs` (see `Segment.owner`).
  */
 function cuesFixedBy(previous: PreparedScene): number {
   const last = previous.cueTimes.at(-1);
   if (last === undefined) return 0;
-  const h = last - MAX_WINDUP_MS - RETURN_MS;
-  return lowerBound(previous.cueTimes, h - LOOKBACK_MS);
+  const h = last - MAX_WINDUP_MS - previous.returnMs;
+  return lowerBound(previous.cueTimes, h - lookbackMs(previous));
 }
 
 function assemble(
@@ -229,8 +253,9 @@ function assemble(
   timings: Readonly<Record<Side, TimingTable>>,
   scales: Readonly<Record<Side, number>>,
   previous: PreparedScene | null,
+  returnMs: number,
 ): PreparedScene {
-  const choreography = buildChoreography(timeline, timings);
+  const choreography = buildChoreography(timeline, timings, returnMs);
   const fixed = previous === null ? 0 : cuesFixedBy(previous);
 
   const hp: Record<Side, HpStep[]> = { a: [], b: [] };
@@ -328,6 +353,7 @@ function assemble(
 
   const prepared: PreparedScene = {
     durationMs: timeline.duration_ms,
+    returnMs,
     fighters: { a: fighter('a'), b: fighter('b') },
     cues,
     cueTimes: timeline.cues.map((cue) => cue.at_ms),
