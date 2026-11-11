@@ -181,7 +181,10 @@ describe('wardrobe manifests', () => {
   it('reads an accessory manifest and rejects a broken one', () => {
     const manifest = {
       slot: 'hands',
-      attach: [{ bone: 'LeftHand' }, { bone: 'RightHand', mirror: true }],
+      attach: [
+        { bone: 'LeftHand', node: 'Knit' },
+        { bone: 'RightHand', mirror: true, node: 'Puffer' },
+      ],
       fit: { y: -0.1, scale: 0.95 },
       hides: false,
     };
@@ -191,6 +194,7 @@ describe('wardrobe manifests', () => {
       { ...manifest, slot: 'tail' },
       { ...manifest, attach: [] },
       { ...manifest, attach: [{ bone: '' }] },
+      { ...manifest, attach: [{ bone: 'LeftHand', node: '' }] },
       { ...manifest, fit: { scale: 0 } },
       { ...manifest, hides: 'yes' },
     ])
@@ -251,7 +255,17 @@ describe('content/models/accessories', () => {
       );
       expect(manifest, id).not.toBeNull();
       expect(manifest?.slot, id).toBe(BODY_SLOT[entry?.slot ?? '']);
-      expect(existsSync(path.join(dir, id, `${id}.glb`)), id).toBe(true);
+      const glb = path.join(dir, id, `${id}.glb`);
+      expect(existsSync(glb), id).toBe(true);
+      // a piece named in `attach` has to be in the GLB (its JSON chunk follows the 20-byte header)
+      const named = manifest?.attach.flatMap((entry) => entry.node ?? []) ?? [];
+      if (named.length === 0) continue;
+      const bytes = readFileSync(glb);
+      const json = JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString('utf8')) as {
+        nodes?: { name?: string }[];
+      };
+      const nodes = new Set((json.nodes ?? []).map((node) => node.name));
+      for (const node of named) expect(nodes.has(node), `${id}: ${node}`).toBe(true);
     }
   });
 });

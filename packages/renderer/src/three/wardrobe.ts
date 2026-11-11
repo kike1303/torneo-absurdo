@@ -225,7 +225,12 @@ export function dress(
       const placed = placement(anchor.world, body, manifest.fit, attach.mirror === true);
 
       if (!skinned) {
-        const node = gltf.scene.clone(true);
+        // A named piece is modeled at the origin like the whole scene: its own transform in the
+        // GLB is replaced by the placement.
+        const source =
+          attach.node === undefined ? gltf.scene : gltf.scene.getObjectByName(attach.node);
+        if (source === undefined) continue;
+        const node = source.clone(true);
         colorAccessory(node, model.colors, lite, owned, textures);
         node.matrixAutoUpdate = false;
         node.matrix.copy(bone.world).invert().multiply(placed);

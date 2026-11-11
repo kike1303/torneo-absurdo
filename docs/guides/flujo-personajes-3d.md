@@ -139,7 +139,7 @@ El renderer viste a cada luchador con lo que haya en `content/models/` ([feature
 **Un accesorio** va en `content/models/accessories/<id>/`, con el `id` del catálogo (`content/catalog/accessories.json`):
 
 - `<id>.glb`: modelado a escala de la botarga base, en T, con el origen en el hueso del que cuelga. Los pares se modelan para el lado izquierdo. Los materiales recoloreables llevan en `extras` su `tint_default` y su `tint_slot` (`primary`, `secondary`, `accent`); un forro, `tint_shade`; una textura de dos colores, `tint_pattern: "primary,accent"`. Una prenda deformable trae huesos de relleno con los nombres de Mixamo y los pesos copiados del cuerpo base.
-- `accessory.json`: `slot` (`head`, `hands`, `feet`, `hips`, `chest`), `attach` (huesos por el final de su nombre, con `anchor` y `mirror` opcionales), `fit` opcional (`y`, `z`, `scale`, `tilt`) y `hides` si tapa piel.
+- `accessory.json`: `slot` (`head`, `hands`, `feet`, `hips`, `chest`), `attach` (huesos por el final de su nombre, con `anchor`, `mirror` y `node` opcionales; `node` cuelga de ese hueso solo el nodo del GLB con ese nombre, para un par de piezas distintas, cada una modelada en el origen), `fit` opcional (`y`, `z`, `scale`, `tilt`) y `hides` si tapa piel.
 
 Se comprime igual que un cuerpo, sin las opciones de animación:
 

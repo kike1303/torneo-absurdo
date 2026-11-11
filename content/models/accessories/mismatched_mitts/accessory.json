@@ -1,0 +1,14 @@
+{
+  "slot": "hands",
+  "attach": [
+    {
+      "bone": "LeftHand",
+      "node": "Knit"
+    },
+    {
+      "bone": "RightHand",
+      "mirror": true,
+      "node": "Puffer"
+    }
+  ]
+}

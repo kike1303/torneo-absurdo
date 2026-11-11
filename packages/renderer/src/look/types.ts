@@ -24,6 +24,8 @@ export interface AccessoryAttach {
   readonly anchor?: string;
   /** The right-hand piece of a pair modeled for the left. */
   readonly mirror?: boolean;
+  /** Only this node of the GLB hangs here (a pair whose two pieces differ); the whole scene without it. */
+  readonly node?: string;
 }
 
 /** Fine placement on the base botarga: meters, a uniform scale and a forward tilt in degrees. */
