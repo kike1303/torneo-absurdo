@@ -2,7 +2,7 @@
 //! `engine::loadout::resolve` with the player ruleset. Pure: no database, no clock.
 
 use engine::loadout::{self, LoadoutError};
-use engine::{SpecError, Stats};
+use engine::{CharacterSpec, SpecError, Stats};
 use protocol::{BotargaBuild, BotargaErrorCode, BotargaUnlocks};
 
 use super::{BotargaCatalog, MAX_ACCESSORIES, MAX_ID_BYTES};
@@ -69,6 +69,21 @@ pub fn check(
     {
         return Err(BotargaErrorCode::NotUnlocked);
     }
+    resolve(catalog, level, build).map(|_| ())
+}
+
+/// The spec a build of a botarga of `level` fights with, against the catalog of this binary and the
+/// player ruleset. What the user owns is not checked here: [`check`] did it when the build was saved,
+/// and nothing is ever taken away. A saved build may still fail: the catalog changes with each
+/// release (021 "Ajustes de la implementación").
+///
+/// # Errors
+/// `NotUnlocked` for an id the catalog no longer has, and the code of the loadout otherwise.
+pub fn resolve(
+    catalog: &BotargaCatalog,
+    level: u8,
+    build: &BotargaBuild,
+) -> Result<CharacterSpec, BotargaErrorCode> {
     let s = build.stats;
     let stats = Stats {
         hp: s.hp,
@@ -87,9 +102,7 @@ pub fn check(
             &build.accessories,
         )
         .ok_or(BotargaErrorCode::NotUnlocked)?;
-    loadout::resolve(&loadout, catalog.ruleset())
-        .map(|_| ())
-        .map_err(refusal)
+    loadout::resolve(&loadout, catalog.ruleset()).map_err(refusal)
 }
 
 #[cfg(test)]

@@ -184,6 +184,23 @@ fn bets_from(
     ))
 }
 
+/// `PVP_WIN_COINS` (021 "Números"): optional, ASCII digits inside `PvpConfig::WIN_COINS_RANGE`; 0
+/// turns the coins of the player fights off.
+fn pvp_from(
+    text: &impl Fn(&'static str) -> Result<Option<String>, ConfigError>,
+) -> Result<crate::pvp::PvpConfig, ConfigError> {
+    use crate::pvp::PvpConfig;
+    const VAR: &str = "PVP_WIN_COINS";
+    let win_coins = match text(VAR)? {
+        None => PvpConfig::DEFAULT_WIN_COINS,
+        Some(value) => parse_digits(&value, PvpConfig::WIN_COINS_RANGE)
+            .ok_or(ConfigError::Invalid { var: VAR })?,
+    };
+    Ok(PvpConfig {
+        win_coins: Coins(win_coins),
+    })
+}
+
 /// The cookie policy (RF-B9): the development names only with the feature (whose gate already
 /// required a loopback origin).
 #[cfg(feature = "dev-auth")]
@@ -317,6 +334,8 @@ pub struct Config {
     pub daily_grant: Coins,
     /// `m`, `R` and the caps of the bets (012 RF40).
     pub bets: BetsConfig,
+    /// `PVP_WIN_COINS` (021).
+    pub pvp: crate::pvp::PvpConfig,
     /// Cookie names and attributes (RF-B9).
     pub cookies: CookiePolicy,
     /// Google and Discord (RF-C1): both always outside loopback.
@@ -342,6 +361,7 @@ impl fmt::Debug for Config {
             .field("ip_hash_key", &"<redacted>")
             .field("daily_grant", &self.daily_grant.0)
             .field("bets", &self.bets)
+            .field("pvp", &self.pvp)
             .field("cookies", &self.cookies)
             .field("oauth", &self.oauth.configured())
             .field("fights", &self.fights)
@@ -499,6 +519,7 @@ impl Config {
         let daily_grant = parse_daily_grant(&required(DAILY_GRANT)?)
             .ok_or(ConfigError::Invalid { var: DAILY_GRANT })?;
         let (bets, rake_bp) = bets_from(&text, daily_grant)?;
+        let pvp = pvp_from(&text)?;
 
         // RF-C1 and plan-c decision 3: a provider with both variables is on, one with neither
         // is off (only on loopback: outside it the four are required), and a half pair is a
@@ -580,6 +601,7 @@ impl Config {
             ip_hash_key,
             daily_grant,
             bets,
+            pvp,
             cookies,
             oauth,
             fights,
@@ -852,6 +874,22 @@ mod tests {
             assert_eq!(
                 with(&[("DAILY_GRANT", value)]).unwrap_err().var(),
                 "DAILY_GRANT",
+                "{value:?}"
+            );
+        }
+    }
+
+    /// 021: `PVP_WIN_COINS` is 15 by default, 0 is allowed, and a typo stops the start.
+    #[test]
+    fn the_coins_of_the_player_fights_have_their_default_and_range() {
+        let coins = |extra: &[(&str, &str)]| with(extra).map(|config| config.pvp.win_coins);
+        assert_eq!(coins(&[]).unwrap(), Coins(15));
+        assert_eq!(coins(&[("PVP_WIN_COINS", "0")]).unwrap(), Coins(0));
+        assert_eq!(coins(&[("PVP_WIN_COINS", "2000")]).unwrap(), Coins(2000));
+        for value in ["2001", "-1", "", " 15", "1e2", "15.0"] {
+            assert_eq!(
+                coins(&[("PVP_WIN_COINS", value)]).unwrap_err().var(),
+                "PVP_WIN_COINS",
                 "{value:?}"
             );
         }

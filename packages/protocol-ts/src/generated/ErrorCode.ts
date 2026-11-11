@@ -8,6 +8,7 @@ import type { BonusErrorCode } from './BonusErrorCode.js';
 import type { BotargaErrorCode } from './BotargaErrorCode.js';
 import type { FightErrorCode } from './FightErrorCode.js';
 import type { ProfileErrorCode } from './ProfileErrorCode.js';
+import type { PvpErrorCode } from './PvpErrorCode.js';
 import type { SeasonErrorCode } from './SeasonErrorCode.js';
 import type { WalletErrorCode } from './WalletErrorCode.js';
 import type { WsErrorCode } from './WsErrorCode.js';
@@ -23,4 +24,5 @@ export type ErrorCode =
   | BailoutErrorCode
   | WalletErrorCode
   | SeasonErrorCode
-  | BotargaErrorCode;
+  | BotargaErrorCode
+  | PvpErrorCode;

@@ -24,6 +24,7 @@ mod fight;
 mod fights;
 mod health;
 mod me;
+mod pvp;
 mod seasons;
 mod ws;
 
@@ -39,7 +40,7 @@ pub use botarga::{
 pub use coins::{CoinAmount, CoinAmountOutOfRange};
 pub use error::{
     ApiError, ApiErrorCode, AuthErrorCode, BailoutErrorCode, BetErrorCode, BonusErrorCode,
-    BotargaErrorCode, CallbackErrorCode, ErrorCode, FightErrorCode, ProfileErrorCode,
+    BotargaErrorCode, CallbackErrorCode, ErrorCode, FightErrorCode, ProfileErrorCode, PvpErrorCode,
     SeasonErrorCode, WalletErrorCode, WsErrorCode,
 };
 pub use fight::{AbilityKind, EndReason, FightEvent, FightLog, FighterInfo, MomentKind, Side};
@@ -51,6 +52,10 @@ pub use health::HealthResponse;
 pub use me::{
     DisplayNameRequest, Locale, MAX_SAFE_INTEGER, Me, PreferencesRequest, Provider, ReauthStatus,
     Role, Theme, UnlinkStatus,
+};
+pub use pvp::{
+    PvpFightCreated, PvpFightDetail, PvpFightRequest, PvpFightSummary, PvpFighter, PvpFightsPage,
+    PvpReward, PvpRole,
 };
 pub use seasons::{Leaderboard, LeaderboardEntry, SeasonView};
 pub use ws::{Channel, ClientMessage, FightId, SelfEvent, ServerMessage};

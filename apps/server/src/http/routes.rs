@@ -95,6 +95,9 @@ pub enum Handler {
     Botarga,
     BotargaCreate,
     BotargaBuild,
+    PvpFightCreate,
+    PvpFights,
+    PvpFightDetail,
     #[cfg(feature = "dev-auth")]
     DevAuthorize,
     #[cfg(feature = "dev-auth")]
@@ -300,6 +303,24 @@ pub const ROUTES: &[RouteSpec] = &[
         effect: Effect::Mutate,
         handler: Handler::BotargaBuild,
     },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/pvp/fights",
+        effect: Effect::Mutate,
+        handler: Handler::PvpFightCreate,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/pvp/fights",
+        effect: Effect::Read,
+        handler: Handler::PvpFights,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/pvp/fights/{id}",
+        effect: Effect::Read,
+        handler: Handler::PvpFightDetail,
+    },
     #[cfg(feature = "dev-auth")]
     RouteSpec {
         method: RouteMethod::Get,
@@ -429,6 +450,11 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         // second gives 422 `botarga.invalid_request`.
         Handler::BotargaCreate => on(filter, crate::botarga::api::create).layer(body),
         Handler::BotargaBuild => on(filter, crate::botarga::api::put_build).layer(body),
+        // 021: over `MAX_FORM_BYTES`, 422 `pvp.invalid_request`. The list is private; the detail
+        // is public, with the limit and the cache of the tournament fights.
+        Handler::PvpFightCreate => on(filter, crate::pvp::api::create).layer(body),
+        Handler::PvpFights => on(filter, crate::pvp::api::list),
+        Handler::PvpFightDetail => fight_read(on(filter, crate::pvp::api::detail), state),
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize => on(filter, auth::dev::authorize),
         #[cfg(feature = "dev-auth")]

@@ -125,6 +125,13 @@ fn request_of(route: &RouteSpec, id: i32) -> (String, Vec<(&'static str, &'stati
             )
             .to_owned(),
         ),
+        // 021 phase 2: a search of the identity (against the other one, once both created their
+        // botarga), its list, and the detail of the player fight with the id of the case.
+        Handler::PvpFightCreate => (
+            vec![json],
+            format!(r#"{{"client_key":"{}"}}"#, uuid::Uuid::new_v4()),
+        ),
+        Handler::PvpFights | Handler::PvpFightDetail => (vec![], String::new()),
         // 012 RF25: a bet on the fight of the case, which the window may refuse.
         Handler::Bet => (
             vec![json],
@@ -237,8 +244,15 @@ fn expected_status(handler: Handler, identity: &str) -> Option<u16> {
         | Handler::Leaderboard
         | Handler::Seasons
         | Handler::AuthProviders => Some(200),
-        Handler::Me | Handler::Wallet if identity == "anonymous" => Some(401),
-        Handler::Me | Handler::Wallet => Some(200),
+        Handler::Me | Handler::Wallet | Handler::PvpFights | Handler::PvpFightCreate
+            if identity == "anonymous" =>
+        {
+            Some(401)
+        }
+        Handler::Me | Handler::Wallet | Handler::PvpFights => Some(200),
+        // 021: a search is a real fight once the identity created its botarga above, until the
+        // quota of the attacks; the id of the case may or may not be a player fight too.
+        Handler::PvpFightCreate | Handler::PvpFightDetail => None,
         Handler::Ws
         | Handler::AuthStart
         | Handler::AuthLink
@@ -316,7 +330,7 @@ async fn sweep(
     cookie_name: &str,
     id: i32,
     state: FightState,
-    canaries: &[String],
+    (canaries, secrets): (&[String], &[String]),
 ) {
     let session = |token: String| format!("{cookie_name}={token}");
     for route in ROUTES {
@@ -344,7 +358,13 @@ async fn sweep(
             if let Some(expected) = expected_status(route.handler, identity) {
                 assert_eq!(response.status.as_u16(), expected, "{what}");
             }
-            assert_clean(&what, &response, canaries);
+            // 021: a player fight is public from the moment it exists, so its own log has the
+            // fragments of any log. What it must never carry is the secret of this fight.
+            let pvp = matches!(
+                route.handler,
+                Handler::PvpFightCreate | Handler::PvpFights | Handler::PvpFightDetail
+            );
+            assert_clean(&what, &response, if pvp { secrets } else { canaries });
         }
     }
     sweep_list(addr, pool, who, cookie_name, id, state, canaries).await;
@@ -597,7 +617,7 @@ async fn nothing_leaks_in_any_state_with_any_identity() {
         &cookie_name,
         id,
         FightState::Scheduled,
-        &canaries,
+        (&canaries, &secrets),
     )
     .await;
     sweep_sockets(
@@ -632,7 +652,7 @@ async fn nothing_leaks_in_any_state_with_any_identity() {
         &cookie_name,
         id,
         FightState::BettingOpen,
-        &canaries,
+        (&canaries, &secrets),
     )
     .await;
     sweep_sockets(
@@ -656,7 +676,7 @@ async fn nothing_leaks_in_any_state_with_any_identity() {
         &cookie_name,
         id,
         FightState::BettingClosed,
-        &canaries,
+        (&canaries, &secrets),
     )
     .await;
     sweep_sockets(
@@ -683,7 +703,7 @@ async fn nothing_leaks_in_any_state_with_any_identity() {
         &cookie_name,
         id,
         FightState::Live,
-        &canaries,
+        (&canaries, &secrets),
     )
     .await;
     // On air, the events are public as they become due, each at its hour: a text search for `"t":` no
@@ -737,9 +757,17 @@ async fn nothing_leaks_in_any_state_with_any_identity() {
         &cookie_name,
         id,
         FightState::Settled,
-        &settled_canaries,
+        (&settled_canaries, &secrets),
     )
     .await;
+    // 021: the sweeps did run real player fights, and the detail of one of them was read.
+    let pvp: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM pvp_fights WHERE defender_id IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(pvp >= 2, "{pvp}");
+    assert!(pvp >= i64::from(id), "{pvp} {id}");
     // RF26: not even now does a socket get the seed or the log, only the events it already had.
     sweep_sockets(
         app.addr,

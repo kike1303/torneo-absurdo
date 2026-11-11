@@ -69,6 +69,13 @@ const ERROR_CODES: { readonly [K in ErrorCode]: true } = {
   'botarga.accessory_stat_total': true,
   'botarga.build_invalid': true,
   'botarga.unavailable': true,
+  'pvp.invalid_request': true,
+  'pvp.not_found': true,
+  'pvp.build_invalid': true,
+  'pvp.no_rival': true,
+  'pvp.daily_limit': true,
+  'pvp.busy': true,
+  'pvp.unavailable': true,
 };
 
 const CALLBACK_ERROR_CODES: { readonly [K in CallbackErrorCode]: true } = {

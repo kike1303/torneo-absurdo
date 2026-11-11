@@ -82,6 +82,8 @@ macro_rules! view_sql {
             unlocked_sql!("accessory"),
             ", ",
             unlocked_sql!("cosmetic"),
+            ", COALESCE((SELECT d.attacks FROM pvp_daily d WHERE d.user_id = b.user_id \
+             AND d.day = (now() AT TIME ZONE 'UTC')::date), 0)::smallint",
             " FROM botargas b WHERE b.user_id = $1",
             $suffix
         )
@@ -140,10 +142,13 @@ fn decode(row: &PgRow) -> Result<BotargaView, sqlx::Error> {
             xp_to_next: xp_to_next(level),
             budget_free: budget.saturating_sub(spent),
             slots_open: u8::try_from(slots(level)).map_err(|_| bad())?,
-            // There are no player fights yet (021 phases 2 and 4): no attack today, at full pay.
-            daily: BotargaDaily {
-                attacks: 0,
-                factor_pct: 100,
+            // The attacks of today, and the step of the next one (021 "Escalones del día").
+            daily: {
+                let attacks = u16::try_from(row.try_get::<i16, _>(19)?).map_err(|_| bad())?;
+                BotargaDaily {
+                    attacks,
+                    factor_pct: crate::pvp::rewards::factor_pct(attacks.saturating_add(1)),
+                }
             },
         },
         unlocks: BotargaUnlocks {

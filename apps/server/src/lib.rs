@@ -18,6 +18,7 @@ pub mod jobs;
 pub mod ledger;
 pub mod net;
 pub mod profile;
+pub mod pvp;
 pub mod rate;
 pub mod seasons;
 pub mod sessions;

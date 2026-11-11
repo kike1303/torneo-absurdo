@@ -228,6 +228,19 @@ server season close <YYYYMM> --by <admin_user_id> [--accept-partial]
 
 Las apuestas (feature 012) son solo con monedas ficticias (ADR-0005). Los valores están en RF40: `DAILY_GRANT` es `B`, y `BET_MIN`, `BET_RAKE_BP` y `BET_CAP_MULTIPLE` son opcionales (ver `.env.example`). El compose de producción no pasa `BET_*`.
 
+### Peleas PvP (feature 021, fase 2)
+
+`POST /api/pvp/fights` con `{"client_key":"<uuidgen en minúsculas>"}` resuelve al instante una pelea contra la botarga de otro usuario (o contra un personaje del torneo de `CONTENT_DIR` si no hay nadie). La victoria del atacante contra un usuario paga `PVP_WIN_COINS` (15 por defecto, opcional, de 0 a 2000; 0 las apaga) por el escalón del día, como un asiento `pvp_reward` de `issuance`. Un usuario ataca como mucho 50 veces por día UTC (429 `pvp.daily_limit`). No pagan: una derrota, un empate, la defensa, el torneo, la cuarta pelea del día de una pareja ni una pelea con un lado en carencia PvP (menos de 7 días o de 10 ataques). El compose de producción no pasa `PVP_WIN_COINS`.
+
+Para ver lo que pagó el PvP, de solo lectura:
+
+```sh
+psql "$DATABASE_URL" -c "SELECT date_trunc('day', e.created_at) AS day, count(*), sum(p.amount) \
+  FROM ledger_entries e JOIN ledger_postings p ON p.entry_id = e.id \
+  WHERE e.kind = 'pvp_reward' AND p.account_id <> '00000000-0000-0000-0000-000000000001' \
+  GROUP BY 1 ORDER BY 1 DESC LIMIT 14"
+```
+
 ### Comprobar la custodia
 
 Una consulta de solo lectura, en **una sola sentencia** para que una liquidación a medias no dé un falso positivo (RF13). Sana, `escrow` y `open_stakes` coinciden, y las otras tres dan 0. La consulta está en [`sql/custody.sql`](sql/custody.sql), y un test la ejecuta tal cual (`tests/bets_custody.rs`).

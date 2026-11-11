@@ -157,6 +157,40 @@ pub async fn rake(
     Ok(entry)
 }
 
+/// The coins of an attack (021 "Buscar pelea" step 5): issuance −`amount`, attacker +`amount`, once
+/// per fight (`ledger_entries_pvp_reward_uq`). `amount` must be the `coins_attacker` of the fight and
+/// positive: the database refuses anything else (`TA008`), and the caller writes no entry for 0.
+pub async fn pvp_reward(
+    tx: &mut PgConnection,
+    pvp_fight_id: i32,
+    user_id: Uuid,
+    amount: Coins,
+) -> Result<Uuid, sqlx::Error> {
+    let entry = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO ledger_entries (id, kind, user_id, pvp_fight_id) VALUES ($1, 'pvp_reward', $2, $3)",
+    )
+    .bind(entry)
+    .bind(user_id)
+    .bind(pvp_fight_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO ledger_postings (entry_id, account_id, amount) \
+         SELECT $1, $2, $3 \
+         UNION ALL \
+         SELECT $1, id, $4 FROM ledger_accounts WHERE user_id = $5",
+    )
+    .bind(entry)
+    .bind(ISSUANCE_ACCOUNT)
+    .bind(-amount.0)
+    .bind(amount.0)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+    Ok(entry)
+}
+
 /// Rows of each batch of [`settle_batch`] (012 RF2).
 pub const SETTLE_BATCH_ROWS: usize = 1000;
 
