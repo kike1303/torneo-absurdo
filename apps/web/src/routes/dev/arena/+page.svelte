@@ -4,16 +4,20 @@
   // `vite dev`) and `?pace=` (RF-B7, RF-B9); phase C, `?log=` to play an engine log (RF-C3). 006
   // clamps `?pace=` to the smallest valid factor of the timeline (RF16) and reports it (RF17). 010
   // adds `?live=1`: an engine log released by its `t`, with `?t=` as the time already elapsed. 022
-  // adds the wardrobe: `?wear_a=`, `?skin_a=` and `?colors_a=` (and `_b`).
+  // adds the wardrobe: `?wear_a=`, `?skin_a=` and `?colors_a=` (and `_b`); TA-76, its controls,
+  // which rewrite those parameters and remount the stage (FightStage reads `looks` on mount).
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import type { FrameStats, Side } from '@torneo/renderer';
   import type { Timeline } from '@torneo/renderer/timeline';
   import ArenaControls from '#lib/components/fight/ArenaControls.svelte';
   import ArenaStats from '#lib/components/fight/ArenaStats.svelte';
+  import ArenaWardrobe from '#lib/components/fight/ArenaWardrobe.svelte';
+  import { wardrobeCatalog, type LookSpecs } from '#lib/components/fight/botarga-model.js';
   import FightStage, { type FightStageState } from '#lib/components/fight/FightStage.svelte';
   import { ARENA_FIGHTERS, type ArenaFighterId } from '#lib/features/arena/fighters.js';
-  import { parseLooks } from '#lib/features/arena/looks.js';
+  import { looksKey, parseLooks, writeLooks } from '#lib/features/arena/looks.js';
   import { createLocalAssets, loadLocalFighterIds } from '#lib/features/arena/local-fighters.js';
   import { durationStats, openLogDrip, type DurationStats } from '#lib/features/arena/log-drip.js';
   import {
@@ -55,7 +59,15 @@
   const start = initialT();
   /** `?renderer=2d`: the hidden Pixi sprites (013); the 3D botarga otherwise. */
   const view = page.url.searchParams.get('renderer') === '2d' ? '2d' : '3d';
-  const looks = parseLooks(page.url.searchParams);
+  const looks = $derived(parseLooks(page.url.searchParams));
+  const lookKey = $derived(looksKey(page.url.searchParams));
+  const catalog = wardrobeCatalog();
+
+  /** The new look goes to the URL (shareable, survives a reload); the stage follows it. */
+  function changeLooks(next: LookSpecs): void {
+    const query = writeLooks(new URLSearchParams(page.url.search), next).toString();
+    void goto(query === '' ? page.url.pathname : `?${query}`, { replace: true, reset: false });
+  }
   const pace = parsePace(page.url.searchParams.get('pace'));
   const retime =
     pace === null
@@ -105,20 +117,22 @@
 </svelte:head>
 
 <div class="flex flex-col gap-4" data-testid="arena">
-  <FightStage
-    bind:this={stage}
-    bind:phase
-    fighters={{ a: fighters.a, b: fighters.b }}
-    {view}
-    {looks}
-    {reducedMotion}
-    initialT={start}
-    {local}
-    {retime}
-    {source}
-    {live}
-    debug
-  />
+  {#key lookKey}
+    <FightStage
+      bind:this={stage}
+      bind:phase
+      fighters={{ a: fighters.a, b: fighters.b }}
+      {view}
+      {looks}
+      {reducedMotion}
+      initialT={start}
+      {local}
+      {retime}
+      {source}
+      {live}
+      debug
+    />
+  {/key}
   <ArenaControls
     {phase}
     options={ARENA_FIGHTERS}
@@ -130,6 +144,9 @@
     ontoggle={() => stage?.toggle()}
     onrestart={() => stage?.restart()}
   />
+  {#if view === '3d'}
+    <ArenaWardrobe {catalog} {looks} onchange={changeLooks} disabled={phase === 'loading'} />
+  {/if}
   {#if showStats}
     <ArenaStats
       {stats}
