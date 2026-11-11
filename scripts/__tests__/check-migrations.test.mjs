@@ -1,17 +1,23 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { checkMigrations, MIGRATIONS_DIR, migrationProblems } from '../check-migrations.mjs';
+import { cleanGitEnv } from '../git-env.mjs';
 
 // TA-46: runs in the CI job `policy` (scripts/vitest.policy.config.mjs) and in `just check`.
 const SCRIPT = fileURLToPath(new URL('../check-migrations.mjs', import.meta.url));
-// From a git hook (pre-push runs `just check`) git exports GIT_DIR and friends: the temporary
-// repositories below would then be the real one, and `git init` would mark it bare and write the
-// test identity into its config. Every git these tests start finds its repository from its cwd.
-for (const key of Object.keys(process.env)) if (key.startsWith('GIT_')) delete process.env[key];
+const GIT_ENV = fileURLToPath(new URL('../git-env.mjs', import.meta.url));
 const work = mkdtempSync(path.join(tmpdir(), 'check-migrations-test-'));
 afterAll(() => rmSync(work, { recursive: true, force: true }));
 
@@ -56,7 +62,8 @@ let n = 0;
 /** A git repository whose base commit has two migrations; `change` edits the tree for HEAD. */
 function repo(change) {
   const dir = path.join(work, `repo-${n++}`);
-  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
+  const git = (...args) =>
+    execFileSync('git', args, { cwd: dir, encoding: 'utf8', env: cleanGitEnv() });
   mkdirSync(path.join(dir, MIGRATIONS_DIR), { recursive: true });
   git('init', '-q', '-b', 'main');
   git('config', 'user.email', 'test@example.invalid');
@@ -101,7 +108,8 @@ describe('checkMigrations', () => {
 
   it('compares against the merge base, not the tip of the base', () => {
     const dir = repo(() => {});
-    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
+    const git = (...args) =>
+      execFileSync('git', args, { cwd: dir, encoding: 'utf8', env: cleanGitEnv() });
     // A migration added on main after the branch point is not one the branch deleted.
     git('switch', '-q', 'main');
     writeFileSync(path.join(dir, M('3_main.sql')), 'select 1;\n');
@@ -111,14 +119,49 @@ describe('checkMigrations', () => {
     expect(checkMigrations(dir, 'main')).toEqual([]);
   });
 
+  it('never touches the repository that GIT_DIR names (TA-80)', () => {
+    // The pre-push hook runs `just check` with GIT_DIR and GIT_WORK_TREE set; `repo()` and
+    // `checkMigrations` must still work on their own directory, never on that repository.
+    const scratch = path.join(work, 'scratch');
+    mkdirSync(scratch);
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: scratch, env: cleanGitEnv() });
+    const config = path.join(scratch, '.git', 'config');
+    const before = readFileSync(config, 'utf8');
+    const saved = { dir: process.env.GIT_DIR, tree: process.env.GIT_WORK_TREE };
+    process.env.GIT_DIR = path.join(scratch, '.git');
+    process.env.GIT_WORK_TREE = scratch;
+    try {
+      const dir = repo((d) => rmSync(path.join(d, M('1_base.sql'))));
+      expect(checkMigrations(dir, 'main')).toEqual([
+        `${M('1_base.sql')}: deleted, an existing migration is never deleted`,
+      ]);
+    } finally {
+      for (const [name, value] of [
+        ['GIT_DIR', saved.dir],
+        ['GIT_WORK_TREE', saved.tree],
+      ]) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+    expect(readFileSync(config, 'utf8')).toBe(before);
+    const head = spawnSync('git', ['rev-parse', '-q', '--verify', 'HEAD'], {
+      cwd: scratch,
+      env: cleanGitEnv(),
+    });
+    expect(head.status).not.toBe(0);
+  });
+
   it('exits 0, 1 or 2 from the command line', () => {
     // The script checks the repository it lives in: a copy of it inside each repo (built-ins only).
     const run = (dir, base) => {
       mkdirSync(path.join(dir, 'scripts'), { recursive: true });
       copyFileSync(SCRIPT, path.join(dir, 'scripts/check-migrations.mjs'));
+      copyFileSync(GIT_ENV, path.join(dir, 'scripts/git-env.mjs'));
       return spawnSync('node', ['scripts/check-migrations.mjs', base], {
         cwd: dir,
         encoding: 'utf8',
+        env: cleanGitEnv(),
       });
     };
     expect(

@@ -18,6 +18,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { cleanGitEnv } from '../git-env.mjs';
 
 const script = new URL('../local-secrets.sh', import.meta.url);
 const serverExample = readFileSync(
@@ -301,7 +302,10 @@ describe('local-secrets.sh', () => {
     expect(dockerignore.split('\n')).toContain('infra/local.secrets.env*');
     const repo = new URL('../..', import.meta.url).pathname;
     for (const path of ['infra/local.secrets.env', 'infra/local.secrets.env.abc123']) {
-      execFileSync('git', ['check-ignore', '-q', '--no-index', path], { cwd: repo });
+      execFileSync('git', ['check-ignore', '-q', '--no-index', path], {
+        cwd: repo,
+        env: cleanGitEnv(),
+      });
     }
   });
 });

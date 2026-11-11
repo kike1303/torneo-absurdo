@@ -8,5 +8,6 @@ export default defineConfig({
     include: ['scripts/__tests__/**/*.test.mjs'],
     exclude: ['scripts/__tests__/check-workflows.test.mjs'],
     environment: 'node',
+    setupFiles: ['scripts/vitest.setup.mjs'],
   },
 });

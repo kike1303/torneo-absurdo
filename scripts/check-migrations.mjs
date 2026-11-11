@@ -11,6 +11,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cleanGitEnv } from './git-env.mjs';
 
 export const MIGRATIONS_DIR = 'apps/server/migrations';
 
@@ -45,7 +46,8 @@ export function migrationProblems(output) {
  * @param {string} base a revision
  */
 export function checkMigrations(cwd, base) {
-  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
+  // Without GIT_* (TA-80): `cwd` names the repository, also under the pre-push hook.
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', env: cleanGitEnv() });
   const mergeBase = git('merge-base', base, 'HEAD').trim();
   const diff = git(
     'diff',
