@@ -10,5 +10,6 @@ export default defineConfig({
       'scripts/__tests__/check-migrations.test.mjs',
     ],
     environment: 'node',
+    setupFiles: ['scripts/vitest.setup.mjs'],
   },
 });
