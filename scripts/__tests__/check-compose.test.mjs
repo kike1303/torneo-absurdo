@@ -745,6 +745,18 @@ const CASES = [
     /web-characters: COPY content content is not allowed/,
   ],
   [
+    'web Dockerfile: the whole catalog instead of its names',
+    {
+      [WD]: [
+        [
+          'COPY content/catalog/names.en.json content/catalog/names.es.json content/catalog/\n',
+          'COPY content/catalog content/catalog\n',
+        ],
+      ],
+    },
+    /web-characters: COPY content\/catalog content\/catalog is not allowed/,
+  ],
+  [
     'web Dockerfile: the characters in the final stage',
     {
       [WD]: [

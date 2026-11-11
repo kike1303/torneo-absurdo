@@ -29,6 +29,8 @@ COPY packages packages
 COPY content/characters content/characters
 # The 3D botarga (013): the build hashes it into the client assets.
 COPY content/models content/models
+# The names of the catalog's accessories and cosmetics (022), by name.
+COPY content/catalog/names.en.json content/catalog/names.es.json content/catalog/
 RUN pnpm --filter web build
 
 # distroless/nodejs22-debian13:nonroot, index digest (Node v22.23.4, uid 65532, no shell).

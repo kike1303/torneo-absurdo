@@ -139,6 +139,8 @@ jobs:
               - content/characters/**
               # The web build bundles it (013).
               - content/models/**
+              # And the names of the catalog (022).
+              - content/catalog/**
               - scripts/check-compose.mjs
               - scripts/check-dockerignore.sh
               - scripts/check-release-binary.mjs

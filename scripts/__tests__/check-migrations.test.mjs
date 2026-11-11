@@ -8,6 +8,10 @@ import { checkMigrations, MIGRATIONS_DIR, migrationProblems } from '../check-mig
 
 // TA-46: runs in the CI job `policy` (scripts/vitest.policy.config.mjs) and in `just check`.
 const SCRIPT = fileURLToPath(new URL('../check-migrations.mjs', import.meta.url));
+// From a git hook (pre-push runs `just check`) git exports GIT_DIR and friends: the temporary
+// repositories below would then be the real one, and `git init` would mark it bare and write the
+// test identity into its config. Every git these tests start finds its repository from its cwd.
+for (const key of Object.keys(process.env)) if (key.startsWith('GIT_')) delete process.env[key];
 const work = mkdtempSync(path.join(tmpdir(), 'check-migrations-test-'));
 afterAll(() => rmSync(work, { recursive: true, force: true }));
 

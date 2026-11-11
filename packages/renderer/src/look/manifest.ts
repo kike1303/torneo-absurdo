@@ -35,10 +35,12 @@ function attachOf(value: unknown): AccessoryAttach | null {
   if (!isObject(value) || !isName(value.bone)) return null;
   if (value.anchor !== undefined && !isName(value.anchor)) return null;
   if (value.mirror !== undefined && typeof value.mirror !== 'boolean') return null;
+  if (value.node !== undefined && !isName(value.node)) return null;
   return {
     bone: value.bone,
     ...(value.anchor === undefined ? {} : { anchor: value.anchor }),
     ...(value.mirror === undefined ? {} : { mirror: value.mirror }),
+    ...(value.node === undefined ? {} : { node: value.node }),
   };
 }
 

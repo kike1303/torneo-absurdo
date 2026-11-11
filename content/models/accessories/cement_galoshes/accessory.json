@@ -1,0 +1,12 @@
+{
+  "slot": "feet",
+  "attach": [
+    {
+      "bone": "LeftFoot"
+    },
+    {
+      "bone": "RightFoot",
+      "mirror": true
+    }
+  ]
+}

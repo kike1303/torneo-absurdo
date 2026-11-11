@@ -1,0 +1,15 @@
+{
+  "slot": "head",
+  "attach": [
+    {
+      "bone": "Head",
+      "anchor": "HeadTop_End"
+    }
+  ],
+  "fit": {
+    "y": -0.125,
+    "z": -0.02,
+    "scale": 0.95,
+    "tilt": 8
+  }
+}
