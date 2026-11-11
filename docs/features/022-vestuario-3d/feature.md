@@ -48,6 +48,8 @@ Las texturas recoloreadas son copias por luchador: los dos lados pueden llevar e
 
 **`/dev/arena`.** `?wear_a=propeller_beanie,oven_mitts`, `?skin_b=<slug>`, `?colors_a=primary:ff0000,z1:00aa88` (y lo mismo con `_b`). Sin parámetros, nada cambia. Los ids se validan contra lo que existe; uno desconocido se ignora.
 
+**Fallos.** Un accesorio que no carga no se lleva y la pelea se muestra igual; un traje que no carga falla la carga (`asset_load_failed`), como la base.
+
 **Costos.** Sin `look`, cero trabajo extra. Los GLB de accesorios se bajan solo si alguien los lleva. El recolor y la máscara se calculan una vez al cargar, no por cuadro.
 
 ## Riesgos

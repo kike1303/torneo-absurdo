@@ -7,7 +7,13 @@ export type BotargaMaterial = MeshStandardMaterial | MeshLambertMaterial;
 
 export function ownMaterial(source: MeshStandardMaterial, lite: boolean): BotargaMaterial {
   return lite
-    ? new MeshLambertMaterial({ name: source.name, color: source.color, map: source.map })
+    ? new MeshLambertMaterial({
+        name: source.name,
+        color: source.color,
+        map: source.map,
+        // A garment is seen from inside too (cuffs, armholes).
+        side: source.side,
+      })
     : source.clone();
 }
 

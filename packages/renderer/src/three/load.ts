@@ -100,14 +100,23 @@ export async function loadBotarga(model: BotargaModel): Promise<Botarga> {
       const [gltf, islandTexture, ...accessories] = await Promise.all([
         glb(look.skin?.glb ?? model.glb),
         island === undefined ? null : textures.loadAsync(island),
-        ...(look.accessories ?? []).map(async (accessory) => ({
-          model: accessory,
-          gltf: await glb(accessory.glb),
-        })),
+        // An accessory that does not load is not worn: the fight is still shown.
+        ...(look.accessories ?? []).map((accessory) =>
+          glb(accessory.glb).then(
+            (loaded): LoadedAccessory => ({ model: accessory, gltf: loaded }),
+            () => null,
+          ),
+        ),
       ]);
       const islandImage = (islandTexture?.image ?? null) as HTMLImageElement | null;
       islandTexture?.dispose();
-      return { body: bodyOf(gltf), skin: look.skin, islandImage, look, accessories };
+      return {
+        body: bodyOf(gltf),
+        skin: look.skin,
+        islandImage,
+        look,
+        accessories: accessories.filter((accessory) => accessory !== null),
+      };
     };
     const [gltf, a, b, ...faceTextures] = await Promise.all([
       glb(model.glb),
@@ -116,7 +125,10 @@ export async function loadBotarga(model: BotargaModel): Promise<Botarga> {
       ...faceCodes.map((code) => loadFace(textures, model.faces[code] as string)),
     ]);
     const faces = new Map(faceCodes.map((code, i) => [code, faceTextures[i] as Texture]));
-    const extras = (await Promise.all(glbs.values())).filter((other) => other !== gltf);
+    const settled = await Promise.allSettled(glbs.values());
+    const extras = settled
+      .flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []))
+      .filter((other) => other !== gltf);
     return { ...bodyOf(gltf), faces, outfits: { a, b }, extras };
   } catch (cause) {
     throw new RendererError('asset_load_failed', { cause });

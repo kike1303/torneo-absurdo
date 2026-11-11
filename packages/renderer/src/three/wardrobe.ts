@@ -33,7 +33,7 @@ import type { LoadedAccessory } from './load.ts';
 import { ownMaterial, texelsOf, textureWith, type BotargaMaterial } from './materials.ts';
 import type { SkinModel } from './types.ts';
 
-/** Turns per second of a propeller, in radians. */
+/** Angular speed of a propeller, in radians per second. */
 const SPIN = 9;
 const SPINNER = /propeller$/i;
 const NO_FIT: SlotFit = { scale: [1, 1, 1], offset: [0, 0, 0] };
@@ -195,6 +195,7 @@ export function dress(
   const materials: BotargaMaterial[] = [];
   const textures: Texture[] = [];
   const geometries: BufferGeometry[] = [];
+  const skeletons: Skeleton[] = [];
   const spinners: { node: Object3D; base: number }[] = [];
   if (accessories.length === 0) {
     return { materials, update: () => undefined, dispose: () => undefined };
@@ -249,13 +250,16 @@ export function dress(
         if (first === undefined || inverse === undefined || targets.includes(undefined)) continue;
         const toModel = first.matrixWorld.clone().multiply(inverse).multiply(mesh.bindMatrix);
         const bones = targets as RestNode[];
-        mesh.bind(
-          new Skeleton(
-            bones.map((b) => b.node as Bone),
-            bones.map((b) => b.world.clone().invert()),
-          ),
-          placed.clone().multiply(toModel),
+        const standIns = mesh.skeleton.bones;
+        const skeleton = new Skeleton(
+          bones.map((b) => b.node as Bone),
+          bones.map((b) => b.world.clone().invert()),
         );
+        mesh.bind(skeleton, placed.clone().multiply(toModel));
+        skeletons.push(skeleton);
+        // The stand-ins carry the names of the real bones: out of the tree, so a clip never
+        // finds them instead.
+        for (const standIn of standIns) standIn.removeFromParent();
         bound.push({ mesh, toModel, joints });
       }
       if (bound.length !== garmentMeshes.length) continue;
@@ -309,6 +313,7 @@ export function dress(
     dispose() {
       for (const texture of textures) texture.dispose();
       for (const geometry of geometries) geometry.dispose();
+      for (const skeleton of skeletons) skeleton.dispose();
     },
   };
 }
