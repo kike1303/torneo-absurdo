@@ -44,6 +44,38 @@ const skinImages = import.meta.glob<string>('../../../../../../content/models/sk
   import: 'default',
 });
 
+/** Folder names under `kind/` of the glob keys, sorted: what exists, without fetching a file. */
+function folders(files: Record<string, unknown>, kind: string): string[] {
+  const names = Object.keys(files).flatMap((path) => {
+    const name = new RegExp(`/content/models/${kind}/([^/]+)/`).exec(path)?.[1];
+    return name === undefined ? [] : [name];
+  });
+  return [...new Set(names)].sort();
+}
+
+/** The wardrobe that exists in content/models/ (TA-76): accessory ids and skin slugs. */
+export interface WardrobeCatalog {
+  readonly accessories: readonly string[];
+  readonly skins: readonly string[];
+}
+
+/** An accessory or skin needs both its manifest and its GLB to be worn, so only those count. */
+export function wardrobeCatalog(): WardrobeCatalog {
+  const both = (
+    manifests: Record<string, unknown>,
+    glbs: Record<string, unknown>,
+    kind: string,
+  ) => {
+    const withGlb = new Set(folders(glbs, kind));
+    return folders(manifests, kind).filter((id) => withGlb.has(id));
+  };
+  return {
+    accessories: both(accessoryManifests, accessoryGlbs, 'accessories'),
+    // A skin's manifest is optional (`loadLook`): its GLB is enough.
+    skins: folders(skinGlbs, 'skins'),
+  };
+}
+
 /** What one side wears, by id: the host's way to ask for a `FighterLook`. */
 export interface LookSpec {
   /** Folder of content/models/skins/; without it, the base botarga. */
