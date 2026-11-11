@@ -8,7 +8,7 @@ author: claude
 linear: null
 depends_on: []
 created: 2026-11-08
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # Flujo de un personaje 3D, de la malla al GLB animado
@@ -131,3 +131,26 @@ Lo que el flujo no hace y se decide por personaje:
 
 - **Pesos finos.** Si en el visor se ve un hombro, la panza o una rodilla mal, se corrige con `fixw.py` y `smoothw.py`, adaptados a las medidas del personaje.
 - **Textura a mano.** Si la proyección deja una zona mal, se retoca el mapa `<Nombre> · Color` en Blender (Texture Paint) dentro de `final-<slug>-rig.blend` y se repite solo el paso 5. Los retoques de textura no tocan el rig.
+
+## Vestuario en el juego (022)
+
+El renderer viste a cada luchador con lo que haya en `content/models/` ([feature 022](../features/022-vestuario-3d/feature.md)). Se prueba en `/es/dev/arena` con `?wear_a=`, `?skin_a=` y `?colors_a=` (y `_b`).
+
+**Un accesorio** va en `content/models/accessories/<id>/`, con el `id` del catálogo (`content/catalog/accessories.json`):
+
+- `<id>.glb`: modelado a escala de la botarga base, en T, con el origen en el hueso del que cuelga. Los pares se modelan para el lado izquierdo. Los materiales recoloreables llevan en `extras` su `tint_default` y su `tint_slot` (`primary`, `secondary`, `accent`); un forro, `tint_shade`; una textura de dos colores, `tint_pattern: "primary,accent"`. Una prenda deformable trae huesos de relleno con los nombres de Mixamo y los pesos copiados del cuerpo base.
+- `accessory.json`: `slot` (`head`, `hands`, `feet`, `hips`, `chest`), `attach` (huesos por el final de su nombre, con `anchor` y `mirror` opcionales), `fit` opcional (`y`, `z`, `scale`, `tilt`) y `hides` si tapa piel.
+
+Se comprime igual que un cuerpo, sin las opciones de animación:
+
+```sh
+pnpm -s dlx gltfpack@1.3.0 -i <slug>.glb -o <id>.glb -cc -vp 16 -vt 16 -vn 16 -kn -km -ke
+```
+
+**Un traje** (un personaje completo como disfraz) va en `content/models/skins/<slug>/`:
+
+- `<slug>.glb`: el `final-<slug>.glb` del paso 5, comprimido como en el paso 6. Tiene que traer el mismo esqueleto y los mismos nombres de clip que la base.
+- `skin.json` (opcional): `fit` (las `slots` de `accessory-fit.json`, que escalan y centran los accesorios sobre ese cuerpo), y `zones`, `islands` e `island_map` (lo que escribe `color_zones.py` en `color-zones.json`), que permiten recolorearlo por zonas.
+- `zone-map.png` (solo con islas): la imagen que numera las islas.
+
+Hoy no hay ningún traje en el repo: publicar el arte de un personaje es decisión del owner.

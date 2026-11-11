@@ -3,7 +3,8 @@
   // lives in lib/components/fight/ (ADR-0009 D5). Phase B adds the local fighters (only in
   // `vite dev`) and `?pace=` (RF-B7, RF-B9); phase C, `?log=` to play an engine log (RF-C3). 006
   // clamps `?pace=` to the smallest valid factor of the timeline (RF16) and reports it (RF17). 010
-  // adds `?live=1`: an engine log released by its `t`, with `?t=` as the time already elapsed.
+  // adds `?live=1`: an engine log released by its `t`, with `?t=` as the time already elapsed. 022
+  // adds the wardrobe: `?wear_a=`, `?skin_a=` and `?colors_a=` (and `_b`).
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import type { FrameStats, Side } from '@torneo/renderer';
@@ -12,6 +13,7 @@
   import ArenaStats from '#lib/components/fight/ArenaStats.svelte';
   import FightStage, { type FightStageState } from '#lib/components/fight/FightStage.svelte';
   import { ARENA_FIGHTERS, type ArenaFighterId } from '#lib/features/arena/fighters.js';
+  import { parseLooks } from '#lib/features/arena/looks.js';
   import { createLocalAssets, loadLocalFighterIds } from '#lib/features/arena/local-fighters.js';
   import { durationStats, openLogDrip, type DurationStats } from '#lib/features/arena/log-drip.js';
   import {
@@ -53,6 +55,7 @@
   const start = initialT();
   /** `?renderer=2d`: the hidden Pixi sprites (013); the 3D botarga otherwise. */
   const view = page.url.searchParams.get('renderer') === '2d' ? '2d' : '3d';
+  const looks = parseLooks(page.url.searchParams);
   const pace = parsePace(page.url.searchParams.get('pace'));
   const retime =
     pace === null
@@ -107,6 +110,7 @@
     bind:phase
     fighters={{ a: fighters.a, b: fighters.b }}
     {view}
+    {looks}
     {reducedMotion}
     initialT={start}
     {local}

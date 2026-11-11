@@ -180,7 +180,7 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
         const pose = poseFor(
           f,
           scene.t,
-          botarga.durations,
+          botarga.outfits[side].body.durations,
           {
             hpFraction: hud.maxHp > 0 ? hud.hp / hud.maxHp : 1,
             intro: scene.phase === 'intro',
@@ -371,15 +371,17 @@ export function createThreeStage(container: HTMLElement, model: BotargaModel): S
       }
       if (botarga !== null) {
         for (const texture of botarga.faces.values()) texture.dispose();
-        botarga.gltf.scene.traverse((node) => {
-          const mesh = node as Mesh;
-          if (!mesh.isMesh) return;
-          mesh.geometry.dispose();
-          const material = mesh.material as MeshStandardMaterial;
-          for (const map of [material.map, material.normalMap, material.roughnessMap])
-            map?.dispose();
-          material.dispose();
-        });
+        for (const gltf of [botarga.gltf, ...botarga.extras]) {
+          gltf.scene.traverse((node) => {
+            const mesh = node as Mesh;
+            if (!mesh.isMesh) return;
+            mesh.geometry.dispose();
+            const material = mesh.material as MeshStandardMaterial;
+            for (const map of [material.map, material.normalMap, material.roughnessMap])
+              map?.dispose();
+            material.dispose();
+          });
+        }
         botarga = null;
       }
     },

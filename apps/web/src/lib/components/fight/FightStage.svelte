@@ -20,7 +20,7 @@
   import type { ArenaFighterId, PlaceholderFighterId } from '#lib/features/arena/fighters.js';
   import type { LiveSession } from '#lib/features/fight/live-session.js';
   import type { LocalAssets } from '#lib/features/arena/local-fighters.js';
-  import { loadBotargaModel, preloadBotargaModel } from './botarga-model.js';
+  import { loadBotargaModel, preloadBotargaModel, type LookSpecs } from './botarga-model.js';
   import { formatInteger } from '#lib/i18n/format.js';
   import { m } from '#lib/paraglide/messages.js';
   import { getLocale } from '#lib/paraglide/runtime.js';
@@ -36,6 +36,8 @@
      * kept hidden (only `/dev/arena?renderer=2d`).
      */
     view?: '2d' | '3d';
+    /** What each side wears in 3D (022): a skin, accessories and colors. Read once, on mount. */
+    looks?: LookSpecs;
     /** The "simulate reduced motion" switch; OR-ed with `prefers-reduced-motion`. */
     reducedMotion?: boolean;
     /** Where the paused stage starts (`?t=` on /dev/arena); it plays only on `toggle` (TA-20). */
@@ -79,6 +81,7 @@
   let {
     fighters,
     view = '3d',
+    looks,
     reducedMotion = false,
     initialT = 0,
     debug = false,
@@ -152,10 +155,11 @@
         isValid: (timeline) => pixi.validateTimeline(timeline).ok,
       };
     }
+    const renderer = import('@torneo/renderer/three');
     const [three, timelines, model] = await Promise.all([
-      import('@torneo/renderer/three'),
+      renderer,
       import('@torneo/renderer/timeline'),
-      loadBotargaModel(),
+      loadBotargaModel(looks, () => renderer),
     ]);
     return {
       create: (container, options) => three.createRenderer3d(container, { ...options, model }),

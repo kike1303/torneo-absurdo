@@ -16,13 +16,36 @@ import {
   type FaceCode,
 } from '../model/pose.ts';
 import { RendererError } from '../player/errors.ts';
-import type { BotargaModel } from './types.ts';
+import type { Side } from '../timeline/types.ts';
+import type { AccessoryModel, BotargaModel, FighterLook, SkinModel } from './types.ts';
 
-export interface Botarga {
+/** A body that can fight: the base botarga or a skin (022), with its own clips. */
+export interface Body {
   readonly gltf: GLTF;
   readonly clips: ReadonlyMap<string, AnimationClip>;
   readonly durations: ClipDurations;
+}
+
+export interface LoadedAccessory {
+  readonly model: AccessoryModel;
+  readonly gltf: GLTF;
+}
+
+/** What one side fights in (022). */
+export interface Outfit {
+  readonly body: Body;
+  /** Absent on the base botarga. */
+  readonly skin?: SkinModel;
+  readonly islandImage: HTMLImageElement | null;
+  readonly look: FighterLook;
+  readonly accessories: readonly LoadedAccessory[];
+}
+
+export interface Botarga extends Body {
   readonly faces: ReadonlyMap<FaceCode, Texture>;
+  readonly outfits: Readonly<Record<Side, Outfit>>;
+  /** Every GLB loaded besides the base one (skins and accessories), to dispose. */
+  readonly extras: readonly GLTF[];
 }
 
 function imagesThroughImg(parser: GLTFParser) {
@@ -39,6 +62,22 @@ async function loadFace(loader: TextureLoader, url: string): Promise<Texture> {
   return texture;
 }
 
+/** Throws when a clip the pose needs is missing: a skin must bring them all, as the base does. */
+function bodyOf(gltf: GLTF): Body {
+  const clips = new Map(gltf.animations.map((clip) => [clip.name, clip]));
+  const durations = {} as Record<ClipName, number>;
+  for (const name of CLIP_NAMES) {
+    const clip = clips.get(name);
+    if (clip === undefined) throw new Error(`missing clip ${name}`);
+    durations[name] = clip.duration;
+  }
+  for (const name of OPTIONAL_CLIP_NAMES) {
+    const clip = clips.get(name);
+    if (clip !== undefined) durations[name] = clip.duration;
+  }
+  return { gltf, clips, durations };
+}
+
 /** Rejects with `RendererError('asset_load_failed')`. */
 export async function loadBotarga(model: BotargaModel): Promise<Botarga> {
   try {
@@ -46,23 +85,39 @@ export async function loadBotarga(model: BotargaModel): Promise<Botarga> {
     loader.setMeshoptDecoder(MeshoptDecoder);
     const textures = new TextureLoader();
     const faceCodes = FACE_CODES.filter((code) => model.faces[code] !== undefined);
-    const [gltf, ...faceTextures] = await Promise.all([
-      loader.loadAsync(model.glb),
+    // Each URL once: both sides may wear the same skin or the same accessory.
+    const glbs = new Map<string, Promise<GLTF>>([[model.glb, loader.loadAsync(model.glb)]]);
+    const glb = (url: string): Promise<GLTF> => {
+      let pending = glbs.get(url);
+      if (pending === undefined) {
+        pending = loader.loadAsync(url);
+        glbs.set(url, pending);
+      }
+      return pending;
+    };
+    const outfit = async (look: FighterLook): Promise<Outfit> => {
+      const island = look.skin?.islandMap?.url;
+      const [gltf, islandTexture, ...accessories] = await Promise.all([
+        glb(look.skin?.glb ?? model.glb),
+        island === undefined ? null : textures.loadAsync(island),
+        ...(look.accessories ?? []).map(async (accessory) => ({
+          model: accessory,
+          gltf: await glb(accessory.glb),
+        })),
+      ]);
+      const islandImage = (islandTexture?.image ?? null) as HTMLImageElement | null;
+      islandTexture?.dispose();
+      return { body: bodyOf(gltf), skin: look.skin, islandImage, look, accessories };
+    };
+    const [gltf, a, b, ...faceTextures] = await Promise.all([
+      glb(model.glb),
+      outfit(model.looks?.a ?? {}),
+      outfit(model.looks?.b ?? {}),
       ...faceCodes.map((code) => loadFace(textures, model.faces[code] as string)),
     ]);
-    const clips = new Map(gltf.animations.map((clip) => [clip.name, clip]));
-    const durations = {} as Record<ClipName, number>;
-    for (const name of CLIP_NAMES) {
-      const clip = clips.get(name);
-      if (clip === undefined) throw new Error(`missing clip ${name}`);
-      durations[name] = clip.duration;
-    }
-    for (const name of OPTIONAL_CLIP_NAMES) {
-      const clip = clips.get(name);
-      if (clip !== undefined) durations[name] = clip.duration;
-    }
     const faces = new Map(faceCodes.map((code, i) => [code, faceTextures[i] as Texture]));
-    return { gltf, clips, durations, faces };
+    const extras = (await Promise.all(glbs.values())).filter((other) => other !== gltf);
+    return { ...bodyOf(gltf), faces, outfits: { a, b }, extras };
   } catch (cause) {
     throw new RendererError('asset_load_failed', { cause });
   }
