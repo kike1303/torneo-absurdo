@@ -8,7 +8,7 @@ author: claude
 linear: TA-60
 depends_on: ["011", "012", "016", "020"]
 created: 2026-11-09
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # Botarga propia y PvP asíncrono
@@ -116,6 +116,17 @@ Ajustes de la implementación (fase 1, TA-61):
 - Una build solo se valida al guardarla, y el catálogo cambia con cada release. La fase 2 tiene que volver a resolver la build guardada del atacante y del defensor con el catálogo vigente antes de `simulate`, decidir qué pasa si falla (nunca un 500) y cubrirlo con un test.
 - `BotargaProgress.daily` responde 0 ataques y 100 % hasta que existan las peleas (fases 2 y 4).
 - `GET /api/botarga` tiene cuota propia (`BOTARGA_READ_*`, los números de `wallet`).
+
+Ajustes de la implementación (fase 2, TA-63):
+- Esta fase paga las monedas con todo lo que las acota: escalón del día, tope por pareja (en los dos sentidos) y carencia de los dos lados. La XP y el rating se calculan en `pvp::rewards` y valen 0 hasta TA-62 y TA-64, que solo cambian esas dos funciones y escriben las `botargas` en la misma transacción. `BotargaProgress.daily` ya cuenta los ataques del día.
+- `users` no tenía `last_seen_at` (vive en `sessions`). La migración la agrega nula y el toque de la sesión la refresca como mucho una vez al día, con `FOR UPDATE SKIP LOCKED` para no esperar nunca el lock del usuario. Un usuario sin visita en 30 días solo entra si no hay activos en el paso.
+- El sorteo del defensor no toma el lock en la misma sentencia que el `OFFSET` (Postgres bloquea también las filas que el `OFFSET` salta): cuenta los candidatos del paso, elige uno con `OsRng` sin bloquear y luego bloquea solo esa fila, con los filtros otra vez y `FOR UPDATE SKIP LOCKED`. Un candidato bloqueado o con build que ya no resuelve queda fuera de la búsqueda; hasta 4 por paso.
+- "Sin los últimos 3 rivales": primero se recorren los 4 pasos sin ellos y, si nadie cabe, otra vez con ellos.
+- Build guardada que ya no resuelve con el catálogo del binario: la del atacante responde 409 `pvp.build_invalid` (guardarla de nuevo dice qué falla); la de un defensor lo saca de la búsqueda.
+- El personaje del torneo escalado: cada stat parte del mínimo de v2 y el resto del presupuesto del nivel se reparte en las proporciones del personaje (hacia abajo, con el tope del ruleset); los ataques son los primeros que caben en las ranuras del nivel y en el límite por tipo de v2. El roster se lee de `CONTENT_DIR` la primera vez que hace falta; sin roster, 503 `pvp.no_rival` y no se escribe nada.
+- `PvpFightCreated` lleva además `reward: PvpReward` (rating, XP, monedas y escalón del atacante), lo que la UI muestra debajo de la repetición; `PvpFightSummary` lleva el mismo `reward` desde el lado del usuario. Un lado es `PvpFighter` (`player` con `display_name` o `tournament` con `slug`).
+- `pvp_fights` es inmutable (`TA011`) y la regla `TA008` exige que un `pvp_reward` mueva exactamente el `coins_attacker` de su pelea, de `issuance` a su atacante.
+- `PVP_WIN_COINS` acepta de 0 a 2000. `GET /api/pvp/fights` usa la cuota de `GET /api/botarga`. Un `lock_timeout` responde 503 `pvp.busy`.
 
 ## Riesgos
 - **Monedas por volumen:** el `pvp_reward` sale de `issuance` y no de otro usuario, así que infla la masa. Lo acotan el escalón diario (tope duro de 10 recompensas completas por día), el tope por pareja, la carencia y el índice único por pelea; el test de conservación del ledger suma `pvp_reward` a los grants permitidos.

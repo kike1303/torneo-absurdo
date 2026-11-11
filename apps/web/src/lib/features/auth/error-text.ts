@@ -73,6 +73,12 @@ export const ERROR_TEXT = {
   'botarga.accessory_stat_total': 'error_botarga_accessory_stat_total',
   'botarga.build_invalid': 'error_botarga_build_invalid',
   'botarga.unavailable': 'error_botarga_unavailable',
+  'pvp.invalid_request': 'error_pvp_invalid_request',
+  'pvp.not_found': 'error_pvp_not_found',
+  'pvp.build_invalid': 'error_pvp_build_invalid',
+  'pvp.no_rival': 'error_pvp_no_rival',
+  'pvp.busy': 'error_pvp_busy',
+  'pvp.unavailable': 'error_pvp_unavailable',
 } as const satisfies { readonly [K in ErrorCode]: MessageKey };
 
 /** The closed list of `/login?error=` (ADR-0008, amendment 2026-10-28). */

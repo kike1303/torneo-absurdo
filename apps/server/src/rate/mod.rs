@@ -27,9 +27,9 @@ use tokio_util::sync::CancellationToken;
 pub use clock::ServerClock;
 pub use quotas::{
     AUTH_IP, BET_IP, BET_USER, BOTARGA_READ_IP, BOTARGA_READ_USER, CLAIM_IP, CLAIM_USER,
-    FIGHT_READ_IP, FULL_RETRY_AFTER_SECS, MAX_KEYS, MUTATION_IP, MUTATION_USER, QUOTE_IP,
-    QUOTE_USER, WALLET_READ_IP, WALLET_READ_USER, WS_ANON_UPGRADE_IP, WS_SESSION_UPGRADE_IP,
-    WS_SESSION_UPGRADE_USER,
+    FIGHT_READ_IP, FULL_RETRY_AFTER_SECS, MAX_KEYS, MUTATION_IP, MUTATION_USER, PVP_IP, PVP_USER,
+    QUOTE_IP, QUOTE_USER, WALLET_READ_IP, WALLET_READ_USER, WS_ANON_UPGRADE_IP,
+    WS_SESSION_UPGRADE_IP, WS_SESSION_UPGRADE_USER,
 };
 use store::CappedStore;
 
@@ -211,6 +211,9 @@ pub struct RateLimits {
     /// `GET /api/botarga` (021).
     pub botarga_read_user: Arc<KeyedLimiter<Uuid>>,
     pub botarga_read_ip: Arc<KeyedLimiter>,
+    /// `POST /api/pvp/fights` (021).
+    pub pvp_user: Arc<KeyedLimiter<Uuid>>,
+    pub pvp_ip: Arc<KeyedLimiter>,
 }
 
 impl RateLimits {
@@ -233,6 +236,8 @@ impl RateLimits {
             quote_ip: Arc::new(KeyedLimiter::new(QUOTE_IP, settings)),
             botarga_read_user: Arc::new(KeyedLimiter::new(BOTARGA_READ_USER, settings)),
             botarga_read_ip: Arc::new(KeyedLimiter::new(BOTARGA_READ_IP, settings)),
+            pvp_user: Arc::new(KeyedLimiter::new(PVP_USER, settings)),
+            pvp_ip: Arc::new(KeyedLimiter::new(PVP_IP, settings)),
         }
     }
 
@@ -254,6 +259,8 @@ impl RateLimits {
         self.quote_ip.sweep();
         self.botarga_read_user.sweep();
         self.botarga_read_ip.sweep();
+        self.pvp_user.sweep();
+        self.pvp_ip.sweep();
     }
 }
 

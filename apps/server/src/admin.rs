@@ -863,7 +863,7 @@ mod source_rules {
 
     /// The database barriers of 009 RF1 and RF3 (`TA005` and `TA004`), with the version of the
     /// migration that creates each one.
-    const GUARD_TRIGGERS: [(&str, i64); 18] = [
+    const GUARD_TRIGGERS: [(&str, i64); 20] = [
         ("users_privileged_guard", 20261029100000),
         ("oauth_accounts_identity_guard", 20261030000000),
         // The ledger only grows, every entry balances, and a closed one takes nothing more (008).
@@ -884,12 +884,16 @@ mod source_rules {
         ("bet_settlements_no_truncate", 20261102000000),
         ("pool_settlements_immutable", 20261102000000),
         ("pool_settlements_no_truncate", 20261102000000),
+        // A player fight, and so the coins it paid, never changes (021).
+        ("pvp_fights_guard", 20261112000000),
+        ("pvp_fights_no_truncate", 20261112000000),
     ];
 
     /// The bodies of those triggers, when the function has another name: a `CREATE OR REPLACE` of one
     /// with a `RETURN NEW` switches its trigger off without naming it.
-    const GUARD_FUNCTIONS: [&str; 4] = [
+    const GUARD_FUNCTIONS: [&str; 5] = [
         "ledger_posting_rules",
+        "pvp_fights_guard",
         "ledger_immutable",
         "ledger_entry_balanced",
         "ledger_posting_open_entry",
@@ -899,7 +903,7 @@ mod source_rules {
     /// `DROP INDEX` of one takes the barrier away without touching a trigger. Replacing one, as the
     /// migration of 012 does with the two that 008 created, needs its line in
     /// `GUARD_CHANGES_ALLOWED`.
-    const GUARD_CONSTRAINTS: [&str; 15] = [
+    const GUARD_CONSTRAINTS: [&str; 18] = [
         "ledger_entries_kind_ck",
         "ledger_entries_user_ck",
         "ledger_entries_bet_refs_ck",
@@ -915,13 +919,18 @@ mod source_rules {
         "bet_settlements_refunded_ck",
         "bet_settlements_lost_ck",
         "pool_settlements_refund_ck",
+        // 021: a `pvp_reward` is of its fight and of its attacker, and the tournament never pays.
+        "ledger_entries_pvp_ck",
+        "ledger_entries_pvp_owner_fk",
+        "pvp_fights_tournament_ck",
     ];
-    const GUARD_INDEXES: [&str; 5] = [
+    const GUARD_INDEXES: [&str; 6] = [
         "ledger_entries_grant_day_uq",
         "ledger_entries_bailout_day_uq",
         "ledger_entries_bet_stake_uq",
         "ledger_entries_bet_settled_uq",
         "ledger_entries_rake_uq",
+        "ledger_entries_pvp_reward_uq",
     ];
 
     /// What takes a guard away when its statement names it.
@@ -1040,7 +1049,7 @@ mod source_rules {
     /// Only 009: the guard also had to refuse `admin_account_cutoff`, which took a new body and,
     /// as `UPDATE OF` can not be altered, a drop and a create in the same migration, which runs in
     /// one transaction. A later migration needs its own line here, and a review.
-    const GUARD_CHANGES_ALLOWED: [(i64, &str, &str); 5] = [
+    const GUARD_CHANGES_ALLOWED: [(i64, &str, &str); 7] = [
         (
             20261030000000,
             "or replace function",
@@ -1053,6 +1062,14 @@ mod source_rules {
         // 012 phase B ties a `bet_stake` to its bet's stake: one more branch, nothing taken away.
         (
             20261103000000,
+            "or replace function",
+            "ledger_posting_rules",
+        ),
+        // 021 widens the kinds with `pvp_reward` in the same statement, and ties its postings to
+        // the coins of its fight: one more kind and one more branch, nothing taken away.
+        (20261112000000, "drop constraint", "ledger_entries_kind_ck"),
+        (
+            20261112000000,
             "or replace function",
             "ledger_posting_rules",
         ),

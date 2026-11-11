@@ -98,6 +98,10 @@ pub struct AppState {
     pub pools: Arc<crate::bets::pool::PoolCache>,
     /// The catalog of the player botargas and their starter build (021).
     pub botarga: Arc<BotargaCatalog>,
+    /// `PVP_WIN_COINS` (021).
+    pub pvp: crate::pvp::PvpConfig,
+    /// The characters of the tournament as rivals of last resort, read from `CONTENT_DIR` (021).
+    pub pvp_rivals: Arc<crate::pvp::Rivals>,
 }
 
 impl AppState {
@@ -127,6 +131,8 @@ impl AppState {
             bets: config.bets,
             pools: Arc::new(crate::bets::pool::PoolCache::default()),
             botarga,
+            pvp: config.pvp,
+            pvp_rivals: Arc::new(crate::pvp::Rivals::new(config.fights.content_dir.clone())),
         })
     }
 

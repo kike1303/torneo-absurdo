@@ -46,6 +46,10 @@ pub const WALLET_READ_IP: Quota = Quota::per_minute(nonzero(600));
 pub const BOTARGA_READ_USER: Quota = Quota::per_minute(nonzero(60));
 pub const BOTARGA_READ_IP: Quota = Quota::per_minute(nonzero(600));
 
+/// `POST /api/pvp/fights` (021): 10/min per user with a burst of 3, and 120/min per IP.
+pub const PVP_USER: Quota = Quota::per_minute(nonzero(10)).allow_burst(nonzero(3));
+pub const PVP_IP: Quota = Quota::per_minute(nonzero(120));
+
 /// `quote` (012 RF37): 120/min per user and 600/min per IP.
 pub const QUOTE_USER: Quota = Quota::per_minute(nonzero(120));
 pub const QUOTE_IP: Quota = Quota::per_minute(nonzero(600));

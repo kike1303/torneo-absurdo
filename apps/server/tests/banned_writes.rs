@@ -251,3 +251,45 @@ async fn a_ban_during_a_botarga_write_stops_it() {
     assert_unauthenticated(&response);
     assert_eq!(rows(user).await, before);
 }
+
+/// 021 phase 2: a ban that commits while an attack waits on the user's lock stops it, and nothing of
+/// the fight is written: no row, no counter of the day, no event and no coins.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_ban_during_an_attack_stops_it() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let catalog = server::botarga::BotargaCatalog::embedded().unwrap();
+    let mut users = Vec::new();
+    for _ in 0..2 {
+        let (user, token) = support::app::user_with_session(&pool).await;
+        let mut tx = pool.begin().await.unwrap();
+        server::botarga::store::create(&mut tx, user, catalog.starter())
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        users.push((user, token));
+    }
+    let (user, token) = &users[0];
+    let body = r#"{"client_key":"0b0e8e5e-8a43-4c3c-9b55-0e6e3e1b2a10"}"#;
+    let response =
+        with_a_ban_in_between(&app, &pool, *user, "POST", "/api/pvp/fights", token, body).await;
+    assert_unauthenticated(&response);
+    for table in [
+        "pvp_fights",
+        "pvp_daily",
+        "ledger_entries WHERE kind = 'pvp_reward'",
+    ] {
+        let count: i64 =
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT count(*) FROM {table}")))
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(count, 0, "{table}");
+    }
+    let events: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM auth_events WHERE kind = 'pvp_attack'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(events, 0);
+}

@@ -261,12 +261,24 @@ fn the_search_lets_through_what_is_not_a_form() {
     }
 }
 
-/// RF24: outside `fights/sealed.rs` no name of the log nor of the seed, no rename and no glob.
+/// RF24: outside `fights/sealed.rs` no name of the log nor of the seed, no rename and no glob. The
+/// one other file is `pvp/resolve.rs` (021): a player fight has no window and no secret, its seed is
+/// public from the start, and it never reads a row of `fights`.
 #[test]
 fn only_the_sealed_module_touches_the_seed_and_the_log() {
     let sealed = src().join("fights").join("sealed.rs");
+    let pvp = src().join("pvp").join("resolve.rs");
+    let pvp_text = std::fs::read_to_string(&pvp).unwrap();
+    assert!(
+        violation(&pvp_text).is_some(),
+        "the exception is not vacuous"
+    );
+    let found = tokens(&pvp_text)
+        .iter()
+        .any(|t| t.eq_ignore_ascii_case("fight_secrets") || t == "fights" || t == "revealed_seed");
+    assert!(!found, "pvp/resolve.rs reads the tournament");
     for (path, text) in sources() {
-        if path != sealed {
+        if path != sealed && path != pvp {
             assert_eq!(violation(&text), None, "{}", path.display());
         }
     }

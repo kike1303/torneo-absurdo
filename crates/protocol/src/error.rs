@@ -581,6 +581,58 @@ impl BotargaErrorCode {
     }
 }
 
+/// Player fight codes (`pvp.*`, feature 021).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum PvpErrorCode {
+    /// A body that is not a search: malformed, an unknown field, or a `client_key` that is not a
+    /// canonical UUID; or a query that is not a fight id.
+    #[serde(rename = "pvp.invalid_request")]
+    InvalidRequest,
+    /// No player fight with that id.
+    #[serde(rename = "pvp.not_found")]
+    NotFound,
+    /// The saved build of the user no longer fits the catalog of this release: saving it again
+    /// says why.
+    #[serde(rename = "pvp.build_invalid")]
+    BuildInvalid,
+    /// There is no other botarga nor any character of the tournament to fight.
+    #[serde(rename = "pvp.no_rival")]
+    NoRival,
+    /// A row was locked for more than the `lock_timeout`: the client retries with the same key.
+    #[serde(rename = "pvp.busy")]
+    Busy,
+    /// The database failed.
+    #[serde(rename = "pvp.unavailable")]
+    Unavailable,
+}
+
+impl PvpErrorCode {
+    /// Every variant. A test with an exhaustive `match` keeps this list complete.
+    pub const ALL: &'static [Self] = &[
+        Self::InvalidRequest,
+        Self::NotFound,
+        Self::BuildInvalid,
+        Self::NoRival,
+        Self::Busy,
+        Self::Unavailable,
+    ];
+    /// The only domain prefix this enum may use.
+    pub const PREFIX: &'static str = "pvp.";
+
+    /// The serialized code (the same string serde writes).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidRequest => "pvp.invalid_request",
+            Self::NotFound => "pvp.not_found",
+            Self::BuildInvalid => "pvp.build_invalid",
+            Self::NoRival => "pvp.no_rival",
+            Self::Busy => "pvp.busy",
+            Self::Unavailable => "pvp.unavailable",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(untagged)]
@@ -596,6 +648,7 @@ pub enum ErrorCode {
     Wallet(WalletErrorCode),
     Season(SeasonErrorCode),
     Botarga(BotargaErrorCode),
+    Pvp(PvpErrorCode),
 }
 
 impl ErrorCode {
@@ -613,6 +666,7 @@ impl ErrorCode {
             Self::Wallet(code) => code.as_str(),
             Self::Season(code) => code.as_str(),
             Self::Botarga(code) => code.as_str(),
+            Self::Pvp(code) => code.as_str(),
         }
     }
 }
@@ -668,6 +722,12 @@ impl From<SeasonErrorCode> for ErrorCode {
 impl From<BotargaErrorCode> for ErrorCode {
     fn from(code: BotargaErrorCode) -> Self {
         Self::Botarga(code)
+    }
+}
+
+impl From<PvpErrorCode> for ErrorCode {
+    fn from(code: PvpErrorCode) -> Self {
+        Self::Pvp(code)
     }
 }
 
@@ -801,6 +861,17 @@ mod tests {
         }
     }
 
+    fn pvp_index(code: PvpErrorCode) -> usize {
+        match code {
+            PvpErrorCode::InvalidRequest => 0,
+            PvpErrorCode::NotFound => 1,
+            PvpErrorCode::BuildInvalid => 2,
+            PvpErrorCode::NoRival => 3,
+            PvpErrorCode::Busy => 4,
+            PvpErrorCode::Unavailable => 5,
+        }
+    }
+
     fn bet_index(code: BetErrorCode) -> usize {
         match code {
             BetErrorCode::InvalidRequest => 0,
@@ -844,6 +915,7 @@ mod tests {
     const FIGHT_COUNT: usize = 2;
     const SEASON_COUNT: usize = 2;
     const BOTARGA_COUNT: usize = 15;
+    const PVP_COUNT: usize = 6;
     const BET_COUNT: usize = 10;
     const BONUS_COUNT: usize = 1;
     const BAILOUT_COUNT: usize = 3;
@@ -890,6 +962,9 @@ mod tests {
             .collect();
         assert_eq!(botarga.len(), BOTARGA_COUNT);
         assert_eq!(BotargaErrorCode::ALL.len(), BOTARGA_COUNT);
+        let pvp: HashSet<usize> = PvpErrorCode::ALL.iter().map(|c| pvp_index(*c)).collect();
+        assert_eq!(pvp.len(), PVP_COUNT);
+        assert_eq!(PvpErrorCode::ALL.len(), PVP_COUNT);
     }
 
     /// The codes of 012 RF38, each wrapped in its `ErrorCode` variant.
@@ -1222,6 +1297,10 @@ mod tests {
             );
             assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
         }
+        for code in PvpErrorCode::ALL {
+            assert!(code.as_str().starts_with(PvpErrorCode::PREFIX), "{code:?}");
+            assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
+        }
         for code in money_codes() {
             let prefix = match code {
                 ErrorCode::Bet(_) => BetErrorCode::PREFIX,
@@ -1242,6 +1321,7 @@ mod tests {
                 + FIGHT_COUNT
                 + SEASON_COUNT
                 + BOTARGA_COUNT
+                + PVP_COUNT
                 + BET_COUNT
                 + BONUS_COUNT
                 + BAILOUT_COUNT
@@ -1298,6 +1378,18 @@ mod tests {
             assert_eq!(
                 serde_json::from_str::<ErrorCode>(&json).unwrap(),
                 ErrorCode::Botarga(*code)
+            );
+            assert_eq!(
+                serde_json::to_value(code).unwrap(),
+                serde_json::Value::from(code.as_str())
+            );
+            assert_eq!(ErrorCode::from(*code).as_str(), code.as_str());
+        }
+        for code in PvpErrorCode::ALL {
+            let json = format!("\"{}\"", code.as_str());
+            assert_eq!(
+                serde_json::from_str::<ErrorCode>(&json).unwrap(),
+                ErrorCode::Pvp(*code)
             );
             assert_eq!(
                 serde_json::to_value(code).unwrap(),

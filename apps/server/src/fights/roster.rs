@@ -36,6 +36,20 @@ pub struct RosterError {
     pub kind: &'static str,
 }
 
+/// The specs of the roster of `dir` as the rivals of last resort of the player fights (021 "Sin
+/// rival"), sorted by slug. Never a fight of the tournament: those run from their snapshot (RF5).
+///
+/// # Errors
+/// [`RosterError`] with a code from the closed lists of `content` and of the engine.
+pub fn rival_specs(dir: &Path) -> Result<Vec<engine::CharacterSpec>, RosterError> {
+    let ruleset = Ruleset::for_version(RULESET_VERSION).ok_or(RosterError {
+        kind: "version_missing",
+    })?;
+    let characters =
+        load_roster(dir, &ruleset).map_err(|error| RosterError { kind: error.code() })?;
+    Ok(characters.iter().map(|c| c.spec().clone()).collect())
+}
+
 impl Roster {
     /// Loads and converts the roster.
     ///
