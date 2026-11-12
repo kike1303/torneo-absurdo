@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use protocol::Leaderboard;
 use server::app::Settings;
+use server::jobs::Jobs;
 use server::seasons::{self, SEASON_MIN_FIGHTS};
 use sqlx::{PgPool, Row};
 use support::app::RunningApp;
@@ -30,36 +31,21 @@ struct World {
     slot: std::sync::atomic::AtomicI64,
 }
 
+/// The app without its jobs: the reconciliation at startup would otherwise sum the fights this file
+/// sows and settles by hand before the test's own `tally` or `reconcile` (TA-82).
 async fn world() -> World {
     let db = TestDb::create().await;
-    let (app, pool) = start_quiet(&db, |_| async {}).await;
+    let settings = Settings {
+        jobs: Jobs::Off,
+        ..Settings::default()
+    };
+    let (app, pool, _) = f::start_app(&db, &[], &settings).await;
     World {
         _db: db,
         app,
         pool,
         slot: std::sync::atomic::AtomicI64::new(0),
     }
-}
-
-/// The app once the startup pass of its job has ended (TA-81): that pass reconciles the seasons,
-/// and on a slow runner it could otherwise mark a fight after the test settles it and before the
-/// test sums it. `before_wait` runs between the start and the wait (the regression test below).
-async fn start_quiet<F, Fut>(db: &TestDb, before_wait: F) -> (RunningApp, PgPool)
-where
-    F: FnOnce(PgPool) -> Fut,
-    Fut: std::future::Future<Output = ()>,
-{
-    let started = Arc::new(tokio::sync::Notify::new());
-    let settings = Settings {
-        jobs_started: server::jobs::StartupPassSignal(Some(started.clone())),
-        ..Settings::default()
-    };
-    let (app, pool, _) = f::start_app(db, &[], &settings).await;
-    before_wait(pool.clone()).await;
-    tokio::time::timeout(std::time::Duration::from_secs(30), started.notified())
-        .await
-        .expect("the startup pass of the job never ended");
-    (app, pool)
 }
 
 impl World {
@@ -76,8 +62,7 @@ impl World {
     }
 
     /// A fight whose window closes at `closes_at` (ms), still scheduled: its results are sown first
-    /// and [`World::settle`] comes after, as in production, where both are one transaction. The
-    /// reconciliation of the app's job could otherwise mark it before its results exist.
+    /// and [`World::settle`] comes after, as in production, where both are one transaction.
     async fn fight_closing_at(&self, closes_at: i64) -> i32 {
         f::announce(
             &self.pool,
@@ -539,38 +524,4 @@ async fn the_settlement_hook_tallies_the_fight() {
     assert_eq!(total.1, 2);
     assert!(total.0 <= 0, "{total:?}");
     assert_eq!(seasons::reconcile(&pool).await.unwrap(), 0);
-}
-
-/// TA-81: a startup pass of the job that ends late (here held back by a lock on `auth_events`, the
-/// first table it touches) still ends before the world sows its fights, so the test's own tally is
-/// the one that sums them.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_slow_startup_pass_ends_before_the_fights_are_sown() {
-    let db = TestDb::create().await;
-    let held = db.migrated_pool().await;
-    let mut hold = held.begin().await.unwrap();
-    sqlx::query("LOCK TABLE auth_events IN ACCESS EXCLUSIVE MODE")
-        .execute(&mut *hold)
-        .await
-        .unwrap();
-    let (app, pool) = start_quiet(&db, |_| async move {
-        // Let the pass reach the lock before it is released.
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        hold.commit().await.unwrap();
-    })
-    .await;
-    let w = World {
-        _db: db,
-        app,
-        pool,
-        slot: std::sync::atomic::AtomicI64::new(0),
-    };
-    let ana = w.user("2026-08-01").await;
-    let fight = w.september_fight().await;
-    w.result(fight, ana, "won", 10, 10).await;
-    w.settle(fight).await;
-    let mut tx = w.pool.begin().await.unwrap();
-    assert!(seasons::tally(&mut tx, fight).await.unwrap());
-    tx.commit().await.unwrap();
-    assert_eq!(w.stats(SEASON_SEPT, ana).await, Some((10, 1)));
 }

@@ -153,4 +153,4 @@ pnpm -s dlx gltfpack@1.3.0 -i <slug>.glb -o <id>.glb -cc -vp 16 -vt 16 -vn 16 -k
 - `skin.json` (opcional): `fit` (las `slots` de `accessory-fit.json`, que escalan y centran los accesorios sobre ese cuerpo), y `zones`, `islands` e `island_map` (lo que escribe `color_zones.py` en `color-zones.json`), que permiten recolorearlo por zonas.
 - `zone-map.png` (solo con islas): la imagen que numera las islas.
 
-Hoy no hay ningún traje en el repo: publicar el arte de un personaje es decisión del owner.
+El primer traje es `tournament_suit`, el traje del torneo sobre la botarga base (TA-79): camisa y pantalón cortados de una versión limpia del cuerpo (remesh por vóxeles, alisado y pesos copiados del original), con tres zonas de color. Publicar el arte de un personaje sigue siendo decisión del owner.

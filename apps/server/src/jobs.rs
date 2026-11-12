@@ -5,17 +5,25 @@
 //! too. Then it sums in their season the settled fights without a mark (`seasons::reconcile`). Logs
 //! only a failure, by code.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::PgPool;
-use tokio::sync::Notify;
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
 use crate::sessions::{self, RevokeFilter};
 
 pub const RETENTION_INTERVAL: Duration = Duration::from_secs(24 * 3600);
+
+/// Whether `app::serve_listener` starts [`run`]. Always [`Jobs::Run`] in production; the in-process
+/// tests that sow settled fights by hand and then tally or reconcile them turn it off, because the
+/// pass at startup would otherwise race them (TA-82). Never an environment variable.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Jobs {
+    #[default]
+    Run,
+    Off,
+}
 
 pub async fn retention_pass(pool: &PgPool) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
@@ -29,18 +37,10 @@ pub async fn retention_pass(pool: &PgPool) -> Result<(), sqlx::Error> {
     tx.commit().await
 }
 
-/// Told once the pass at startup has ended (test code only, never an environment variable): the
-/// tests that sum seasons by hand wait for it, so its reconciliation never marks their fights first
-/// (TA-81). `None` in production.
-#[derive(Clone, Debug, Default)]
-pub struct StartupPassSignal(pub Option<Arc<Notify>>);
-
-/// A pass now, then every [`RETENTION_INTERVAL`], until `stop` is cancelled. `started` is told when
-/// the first pass ends.
-pub async fn run(pool: PgPool, stop: CancellationToken, started: StartupPassSignal) {
+/// A pass now, then every [`RETENTION_INTERVAL`], until `stop` is cancelled.
+pub async fn run(pool: PgPool, stop: CancellationToken) {
     let mut interval = tokio::time::interval(RETENTION_INTERVAL);
     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    let mut started = started.0;
     loop {
         tokio::select! {
             () = stop.cancelled() => return,
@@ -53,10 +53,6 @@ pub async fn run(pool: PgPool, stop: CancellationToken, started: StartupPassSign
                     );
                 }
                 crate::seasons::reconcile_logged(&pool).await;
-                if let Some(started) = started.take() {
-                    // A stored permit: a waiter that arrives later still sees it.
-                    started.notify_one();
-                }
             }
         }
     }
