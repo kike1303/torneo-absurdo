@@ -1,0 +1,98 @@
+{
+  "fit": {
+    "head": {
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "offset": [
+        0.0,
+        0,
+        0.0
+      ]
+    },
+    "chest": {
+      "scale": [
+        1.115,
+        1.0,
+        1.064
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0021
+      ]
+    },
+    "hips": {
+      "scale": [
+        1.045,
+        1.0,
+        1.082
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0001
+      ]
+    },
+    "hands": {
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0
+      ]
+    },
+    "feet": {
+      "scale": [
+        1.027,
+        1.0,
+        1.0
+      ],
+      "offset": [
+        -0.003,
+        0,
+        -0.0
+      ]
+    }
+  },
+  "zones": [
+    {
+      "id": "z1",
+      "label": "Paneles y hombros",
+      "color": "#F8F5F0",
+      "share": 0.502,
+      "pick": true,
+      "only": [
+        "Traje_Camisa",
+        "Traje_Pantalon"
+      ]
+    },
+    {
+      "id": "z2",
+      "label": "Traje",
+      "color": "#1E4BD8",
+      "share": 0.393,
+      "pick": true
+    },
+    {
+      "id": "z3",
+      "label": "Cinturón, puños y emblema",
+      "color": "#FFD21A",
+      "share": 0.105,
+      "pick": true
+    },
+    {
+      "id": "z4",
+      "label": "Mezcla de bordes (amarillo con azul)",
+      "color": "#B4A559",
+      "share": 0.0,
+      "pick": false
+    }
+  ]
+}
