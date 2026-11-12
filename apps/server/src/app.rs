@@ -80,6 +80,8 @@ pub struct Settings {
     pub unlink_gate: crate::auth::unlink::UnlinkGateConfig,
     /// The clock, the hook and the times of the fights (010): never an environment variable.
     pub fights: FightSettings,
+    /// Whether the retention job runs in `serve_listener` (the tests that sow fights turn it off).
+    pub jobs: crate::jobs::Jobs,
 }
 
 #[derive(Clone)]
@@ -102,6 +104,8 @@ pub struct AppState {
     pub pvp: crate::pvp::PvpConfig,
     /// The characters of the tournament as rivals of last resort, read from `CONTENT_DIR` (021).
     pub pvp_rivals: Arc<crate::pvp::Rivals>,
+    /// From [`Settings::jobs`].
+    pub jobs: crate::jobs::Jobs,
 }
 
 impl AppState {
@@ -133,6 +137,7 @@ impl AppState {
             botarga,
             pvp: config.pvp,
             pvp_rivals: Arc::new(crate::pvp::Rivals::new(config.fights.content_dir.clone())),
+            jobs: settings.jobs,
         })
     }
 
@@ -327,7 +332,9 @@ pub async fn serve_listener(
         background.clone(),
     ));
     // Retention (008 RF-B16): a pass at startup, then daily.
-    tokio::spawn(crate::jobs::run(state.db.clone(), background.clone()));
+    if state.jobs == crate::jobs::Jobs::Run {
+        tokio::spawn(crate::jobs::run(state.db.clone(), background.clone()));
+    }
     let _stop_background = background.drop_guard();
     let router = http::router(state);
     let connections = TaskTracker::new();
