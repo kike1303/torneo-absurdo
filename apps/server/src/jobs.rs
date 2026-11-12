@@ -15,6 +15,16 @@ use crate::sessions::{self, RevokeFilter};
 
 pub const RETENTION_INTERVAL: Duration = Duration::from_secs(24 * 3600);
 
+/// Whether `app::serve_listener` starts [`run`]. Always [`Jobs::Run`] in production; the in-process
+/// tests that sow settled fights by hand and then tally or reconcile them turn it off, because the
+/// pass at startup would otherwise race them (TA-82). Never an environment variable.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Jobs {
+    #[default]
+    Run,
+    Off,
+}
+
 pub async fn retention_pass(pool: &PgPool) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
     sqlx::query("DELETE FROM auth_events WHERE created_at < now() - interval '38 days'")

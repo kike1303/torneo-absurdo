@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use protocol::Leaderboard;
 use server::app::Settings;
+use server::jobs::Jobs;
 use server::seasons::{self, SEASON_MIN_FIGHTS};
 use sqlx::{PgPool, Row};
 use support::app::RunningApp;
@@ -30,9 +31,15 @@ struct World {
     slot: std::sync::atomic::AtomicI64,
 }
 
+/// The app without its jobs: the reconciliation at startup would otherwise sum the fights this file
+/// sows and settles by hand before the test's own `tally` or `reconcile` (TA-82).
 async fn world() -> World {
     let db = TestDb::create().await;
-    let (app, pool, _) = f::start_app(&db, &[], &Settings::default()).await;
+    let settings = Settings {
+        jobs: Jobs::Off,
+        ..Settings::default()
+    };
+    let (app, pool, _) = f::start_app(&db, &[], &settings).await;
     World {
         _db: db,
         app,
@@ -55,8 +62,7 @@ impl World {
     }
 
     /// A fight whose window closes at `closes_at` (ms), still scheduled: its results are sown first
-    /// and [`World::settle`] comes after, as in production, where both are one transaction. The
-    /// reconciliation of the app's job could otherwise mark it before its results exist.
+    /// and [`World::settle`] comes after, as in production, where both are one transaction.
     async fn fight_closing_at(&self, closes_at: i64) -> i32 {
         f::announce(
             &self.pool,
