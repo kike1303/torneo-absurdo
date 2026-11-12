@@ -5,9 +5,11 @@
 //! too. Then it sums in their season the settled fights without a mark (`seasons::reconcile`). Logs
 //! only a failure, by code.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::PgPool;
+use tokio::sync::Notify;
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
@@ -27,10 +29,18 @@ pub async fn retention_pass(pool: &PgPool) -> Result<(), sqlx::Error> {
     tx.commit().await
 }
 
-/// A pass now, then every [`RETENTION_INTERVAL`], until `stop` is cancelled.
-pub async fn run(pool: PgPool, stop: CancellationToken) {
+/// Told once the pass at startup has ended (test code only, never an environment variable): the
+/// tests that sum seasons by hand wait for it, so its reconciliation never marks their fights first
+/// (TA-81). `None` in production.
+#[derive(Clone, Debug, Default)]
+pub struct StartupPassSignal(pub Option<Arc<Notify>>);
+
+/// A pass now, then every [`RETENTION_INTERVAL`], until `stop` is cancelled. `started` is told when
+/// the first pass ends.
+pub async fn run(pool: PgPool, stop: CancellationToken, started: StartupPassSignal) {
     let mut interval = tokio::time::interval(RETENTION_INTERVAL);
     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut started = started.0;
     loop {
         tokio::select! {
             () = stop.cancelled() => return,
@@ -43,6 +53,10 @@ pub async fn run(pool: PgPool, stop: CancellationToken) {
                     );
                 }
                 crate::seasons::reconcile_logged(&pool).await;
+                if let Some(started) = started.take() {
+                    // A stored permit: a waiter that arrives later still sees it.
+                    started.notify_one();
+                }
             }
         }
     }

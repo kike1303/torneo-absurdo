@@ -118,7 +118,11 @@ async fn the_job_runs_a_pass_at_startup_and_stops_when_cancelled() {
     helper(&pool).await;
     seed(&pool).await;
     let stop = CancellationToken::new();
-    let task = tokio::spawn(server::jobs::run(pool.clone(), stop.clone()));
+    let task = tokio::spawn(server::jobs::run(
+        pool.clone(),
+        stop.clone(),
+        server::jobs::StartupPassSignal::default(),
+    ));
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     while count(&pool, "SELECT count(*) FROM sessions").await != 1
         && std::time::Instant::now() < deadline
