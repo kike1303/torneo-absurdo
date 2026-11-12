@@ -84,6 +84,25 @@ impl Harness {
         wait_for("the hub", || async { self.shared.hub().knows(id) }).await;
     }
 
+    /// Waits for the board of `schedule` to show this fight on air. The runner publishes the board
+    /// after the database says `live`, so a socket that subscribes before would get it later, as a
+    /// `schedule_update` that the test did not expect.
+    async fn wait_board_live(&self, id: i32) {
+        let id = u32::try_from(id).unwrap();
+        wait_for("the board", || async {
+            let (_, text) = self.shared.hub().subscribe_schedule();
+            let Some(text) = text else { return false };
+            matches!(
+                serde_json::from_str(text.as_str()),
+                Ok(ServerMessage::ScheduleUpdate { board })
+                    if board.current.as_ref().is_some_and(|fight| {
+                        fight.id == id && fight.state == FightState::Live
+                    })
+            )
+        })
+        .await;
+    }
+
     async fn watch(&self, id: i32) -> Client {
         self.wait_hub(id).await;
         let mut client = self.connect().await;
@@ -100,6 +119,7 @@ async fn on_air(db: &TestDb, vector: &Vector) -> (Harness, i32, i64) {
     f::close_by_sql(&pool, id, closes_at).await;
     let harness = harness(db, live_at, |_| {}).await;
     wait_state(&pool, id, FightState::Live).await;
+    harness.wait_board_live(id).await;
     (harness, id, live_at)
 }
 
@@ -413,7 +433,8 @@ async fn the_public_channels_neither_open_nor_close_self() {
     ws::subscribe(&mut client, "schedule").await;
     let _ = ws::next_message(&mut client, Duration::from_secs(5)).await;
     h.sockets.self_hub().publish(user, event.clone());
-    assert!(ws::drain(&mut client, SEVERAL_TICKS).await.is_empty());
+    let drained = ws::drain(&mut client, SEVERAL_TICKS).await;
+    assert!(drained.is_empty(), "{drained:?}");
 
     ws::subscribe(&mut client, "self").await;
     h.wait_hub(id).await;
