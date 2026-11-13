@@ -100,17 +100,18 @@ pub fn compute(daily_index: u16, winner: Option<Side>, rival: Rival, win_coins: 
 }
 
 /// The XP of the attacker and of the defender before the step of the day (021 "XP por pelea"). A
-/// draw pays as a defeat to both. The bonus of a victory reads the rating only when the fight
-/// counts: a fight in probation or over the pair limit never pays for a gap it cannot move.
+/// draw pays as a defeat to both. The probation stops the rating and the coins, never the XP (owner,
+/// 2026-11-09 and 2026-11-13), so the bonus of a victory reads the gap in probation too; over the
+/// limit of the pair it does not, so an alt cannot feed it.
 fn xp(winner: Option<Side>, rival: Rival) -> (u32, u32) {
     match rival {
         Rival::Player {
-            counts,
             pair_open,
             rating_gap,
+            ..
         } => {
             let attacker = if winner == Some(Side::A) {
-                let bonus = if counts {
+                let bonus = if pair_open {
                     rating_gap.clamp(-XP_BONUS_GAP, XP_BONUS_GAP) / XP_BONUS_DIVISOR
                 } else {
                     0
@@ -228,18 +229,21 @@ mod tests {
     }
 
     #[test]
-    fn the_rating_bonus_pays_victories_that_count_only() {
+    fn the_rating_bonus_pays_victories_under_the_pair_limit() {
         let up = |gap| compute(1, Some(Side::A), player(true, true, gap), 15).xp_attacker;
         assert_eq!(up(300), 150);
         assert_eq!(up(200), 150);
         assert_eq!(up(103), 125);
         assert_eq!(up(-103), 75);
         assert_eq!(up(-1000), 50);
-        // A defeat ignores the gap, and so does a fight that does not count.
+        // A defeat ignores the gap, and so does a fight over the limit of the pair.
         let lost = compute(1, Some(Side::B), player(true, true, 400), 15);
         assert_eq!(lost.xp_attacker, 30);
+        let over = compute(1, Some(Side::A), player(false, false, 400), 15);
+        assert_eq!(over.xp_attacker, 100);
+        // Probation keeps the bonus: it stops the rating and the coins, not the XP.
         let probation = compute(1, Some(Side::A), player(false, true, 400), 15);
-        assert_eq!(probation.xp_attacker, 100);
+        assert_eq!(probation.xp_attacker, 150);
         // Probation leaves the XP of the defender; the pair limit takes it.
         assert_eq!(probation.xp_defender, 15);
         let capped = compute(1, Some(Side::B), player(false, false, 0), 15);

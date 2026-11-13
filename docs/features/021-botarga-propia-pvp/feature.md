@@ -131,10 +131,11 @@ Ajustes de la implementación (fase 2, TA-63):
 
 Ajustes de la implementación (fase 3, TA-62):
 - `botargas.xp` es la XP dentro del nivel: al cruzar uno se resta su `xp_to_next`, y en el nivel 100 queda en 0 (un `CHECK` lo repite).
-- Un empate da la XP de una derrota a los dos lados. El bono por rating solo aplica a una victoria que cuenta: con un lado en carencia o pasado el tope de la pareja no hay rating que mover, así que tampoco paga por la diferencia. La carencia no quita la XP de defensa; el tope de la pareja sí.
-- Varios sorteos pueden quedar pendientes a la vez (`GET /api/botarga` los trae en `draws`, el más viejo primero), así que no hay índice único de "uno pendiente": hay uno por nivel y usuario (`UNIQUE (user_id, level)`). Un sorteo nuevo no repite opciones de otro pendiente; si el jugador acumula sorteos sin elegir, los siguientes salen con menos opciones o de cosméticos.
-- Sin ataques que ofrecer, el sorteo ofrece hasta 3 códigos de clip (idle o victoria) que el usuario no tiene, con `kind = 'cosmetic'`; sin nada que ofrecer, ese nivel no sortea.
-- Elegir un ataque lo equipa si el nivel tiene una ranura libre y la build sigue resolviendo con él; si no, solo queda desbloqueado. Un cosmético nunca se equipa solo.
+- Un empate da la XP de una derrota a los dos lados. La carencia no quita XP, tampoco el bono por rating ni la XP de defensa (owner, 2026-11-13, conforme a (c)); pasado el tope de la pareja no hay bono ni XP de defensa, para que una alt no los alimente.
+- Hay un solo sorteo abierto por usuario (índice único parcial) y uno por nivel. Si sube varios niveles sin elegir, los siguientes quedan en cola sin opciones (`queued_draws` en `GET /api/botarga`) y cada uno se sortea al elegir el anterior, entre lo que el usuario tiene en ese momento (owner, 2026-11-13). Así un sorteo no le quita un ataque a otro: las opciones se escriben en la transacción que sube el nivel solo si no hay otro abierto.
+- Sin ataques que ofrecer, el sorteo ofrece hasta 3 códigos de clip (idle o victoria) que el usuario no tiene, con `kind = 'cosmetic'`; sin nada que ofrecer, ese nivel se borra de la cola.
+- Elegir un ataque nuevo lo equipa si el nivel tiene una ranura libre y la build sigue resolviendo con él; si no, solo queda desbloqueado. Un cosmético nunca se equipa solo.
+- `pvp_fights` gana topes de XP como segunda barrera: `xp_attacker ≤ 150` y `xp_defender ≤ 50`.
 - `POST /api/botarga/level-up`, que nombraba la issue, no existe: repartir los puntos nuevos ya es `PUT /api/botarga/build` (`budget_free` dice cuántos quedan).
 - Un `draw_id` que no cabe en la columna responde como uno inexistente (404 `botarga.draw_not_found`).
 

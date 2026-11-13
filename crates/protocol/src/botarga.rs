@@ -169,8 +169,8 @@ pub struct BotargaDrawChoice {
 }
 
 /// `GET /api/botarga`, and the answer of `POST /api/botarga`, `PUT /api/botarga/build` and
-/// `POST /api/botarga/draw/choose`: the botarga of the session's user. `draws` are the pending
-/// ones, the oldest first.
+/// `POST /api/botarga/draw/choose`: the botarga of the session's user. `draws` is the open draw
+/// (at most one); `queued_draws` the levels whose draw opens, one by one, as each is chosen.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct BotargaView {
@@ -178,6 +178,7 @@ pub struct BotargaView {
     pub progress: BotargaProgress,
     pub unlocks: BotargaUnlocks,
     pub draws: Vec<PendingDraw>,
+    pub queued_draws: u16,
     pub body_type: String,
     pub face_id: String,
     pub rating: u16,
@@ -239,6 +240,7 @@ mod tests {
                 kind: DrawKind::Ability,
                 options: vec!["a".to_owned(), "b".to_owned()],
             }],
+            queued_draws: 2,
             body_type: "normal".to_owned(),
             face_id: "rookie".to_owned(),
             rating: 1000,
@@ -249,7 +251,7 @@ mod tests {
                 r#"{{"build":{},"progress":{{"level":1,"xp":0,"xp_to_next":120,"budget_free":0,"#,
                 r#""slots_open":1,"daily":{{"attacks":0,"factor_pct":100}}}},"#,
                 r#""unlocks":{{"abilities":["foam_headbutt"],"accessories":[],"cosmetics":[]}},"#,
-                r#""draws":[{{"id":7,"level":5,"kind":"ability","options":["a","b"]}}],"#,
+                r#""draws":[{{"id":7,"level":5,"kind":"ability","options":["a","b"]}}],"queued_draws":2,"#,
                 r#""body_type":"normal","face_id":"rookie","rating":1000,"rated_fights":0}}"#,
             ),
             BUILD_JSON

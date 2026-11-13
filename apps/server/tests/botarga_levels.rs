@@ -267,31 +267,45 @@ async fn a_choice_outside_the_draw_is_refused_with_its_code() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn two_levels_in_a_row_queue_two_draws_with_different_options() {
+async fn two_levels_in_a_row_queue_the_second_draw_until_the_first_is_chosen() {
     let db = TestDb::create().await;
     let (app, pool) = oauth::start_app(&db).await;
     let (user, token) = user_with_botarga(app.addr, &pool).await;
     grant(&pool, user, xp_between(1, 10)).await;
     let v = view(app.addr, &token).await;
     assert_eq!(v["progress"]["level"], 10);
+    // One draw open, the other queued without options.
     let draws = v["draws"].as_array().unwrap();
-    assert_eq!(draws.len(), 2);
+    assert_eq!(draws.len(), 1);
     assert_eq!(draws[0]["level"], 5);
-    assert_eq!(draws[1]["level"], 10);
-    let first: HashSet<String> = strings(&draws[0]["options"]).into_iter().collect();
-    let second: HashSet<String> = strings(&draws[1]["options"]).into_iter().collect();
-    assert!(first.is_disjoint(&second), "{first:?} {second:?}");
-    // Each one is chosen on its own, in any order.
-    let item = strings(&draws[1]["options"])[0].clone();
-    assert_eq!(
-        choose(app.addr, &token, &draws[1]["id"], &item)
+    assert_eq!(v["queued_draws"], 1);
+    let queued: i32 =
+        sqlx::query_scalar("SELECT id FROM botarga_draws WHERE user_id = $1 AND options IS NULL")
+            .bind(user)
+            .fetch_one(&pool)
             .await
-            .status,
-        200
+            .unwrap();
+    // A queued draw cannot be chosen yet.
+    assert_code(
+        &choose(app.addr, &token, &json!(queued), "x").await,
+        404,
+        "botarga.draw_not_found",
     );
-    let left = view(app.addr, &token).await["draws"].clone();
-    assert_eq!(left.as_array().unwrap().len(), 1);
-    assert_eq!(left[0]["level"], 5);
+    let first = strings(&draws[0]["options"]);
+    let item = first[0].clone();
+    let response = choose(app.addr, &token, &draws[0]["id"], &item).await;
+    assert_eq!(response.status, 200, "{}", response.text());
+    let after: Value = serde_json::from_str(&response.text()).unwrap();
+    // The choice opens the next draw, which may offer what the first one did not give.
+    assert_eq!(after["queued_draws"], 0);
+    let next = after["draws"].as_array().unwrap();
+    assert_eq!(next.len(), 1);
+    assert_eq!(next[0]["level"], 10);
+    assert_eq!(next[0]["id"], json!(queued));
+    let options = strings(&next[0]["options"]);
+    assert_eq!(options.len(), 3);
+    assert!(!options.contains(&item), "the chosen attack is owned now");
+    assert!(!options.contains(&"foam_headbutt".to_owned()));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -337,22 +351,32 @@ async fn the_last_level_keeps_no_xp_and_every_draw_offers_something_new() {
     assert_eq!(v["progress"]["xp_to_next"], 0);
     assert_eq!(v["progress"]["slots_open"], 4);
     assert_eq!(v["progress"]["budget_free"], 100);
-    // No option is offered twice nor owned, whatever the kind.
-    let mut seen = HashSet::new();
-    let mut levels = Vec::new();
-    for draw in v["draws"].as_array().unwrap() {
-        levels.push(draw["level"].as_u64().unwrap());
-        for option in strings(&draw["options"]) {
-            assert_ne!(option, "foam_headbutt");
-            assert!(seen.insert(option.clone()), "{option} twice");
-        }
-    }
-    assert!(!levels.is_empty());
-    assert!(levels.windows(2).all(|pair| pair[0] < pair[1]));
-    assert!(levels.iter().all(|level| level % 5 == 0));
+    assert_eq!(v["draws"][0]["level"], 5);
+    assert_eq!(v["queued_draws"], 19);
     // More XP at the last level changes nothing.
     grant(&pool, user, 1000).await;
     assert_eq!(view(app.addr, &token).await, v);
+    // Choosing the first option of each draw walks the queue: every level in order, never an
+    // option the user owns, and a level with nothing left to offer is dropped.
+    let mut owned: HashSet<String> = HashSet::from(["foam_headbutt".to_owned()]);
+    let mut levels = Vec::new();
+    let mut v = v;
+    while let Some(draw) = v["draws"].as_array().unwrap().first().cloned() {
+        levels.push(draw["level"].as_u64().unwrap());
+        let options = strings(&draw["options"]);
+        for option in &options {
+            assert!(!owned.contains(option), "{option} is owned");
+        }
+        let response = choose(app.addr, &token, &draw["id"], &options[0]).await;
+        assert_eq!(response.status, 200, "{}", response.text());
+        owned.insert(options[0].clone());
+        v = serde_json::from_str(&response.text()).unwrap();
+    }
+    assert_eq!(v["queued_draws"], 0);
+    assert!(levels.windows(2).all(|pair| pair[0] < pair[1]));
+    assert!(levels.iter().all(|level| level % 5 == 0));
+    // The catalog and the 8 clips cover the 20 draws: none was dropped.
+    assert_eq!(levels.len(), 20);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -400,6 +424,38 @@ async fn the_database_guards_the_draws_and_the_xp() {
     .await
     .unwrap_err();
     assert_eq!(code(err), "23505");
+    // A second open draw, of another level.
+    let err = sqlx::query(
+        "INSERT INTO botarga_draws (user_id, level, kind, options) VALUES ($1, 10, 'ability', ARRAY['a'])",
+    )
+    .bind(user)
+    .execute(&pool)
+    .await
+    .unwrap_err();
+    assert_eq!(code(err), "23505");
+    // A queued draw: no options, nothing chosen, and it is the only row a delete may remove.
+    for sql in [
+        "INSERT INTO botarga_draws (user_id, level, kind) VALUES ($1, 10, 'ability')",
+        "INSERT INTO botarga_draws (user_id, level, chosen, chosen_at) VALUES ($1, 10, 'a', now())",
+    ] {
+        let err = sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(user)
+            .execute(&pool)
+            .await
+            .unwrap_err();
+        assert_eq!(code(err), "23514", "{sql}");
+    }
+    sqlx::query("INSERT INTO botarga_draws (user_id, level) VALUES ($1, 10)")
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let deleted = sqlx::query("DELETE FROM botarga_draws WHERE user_id = $1 AND level = 10")
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(deleted.rows_affected(), 1);
     // Chosen once; then no change at all.
     sqlx::query("UPDATE botarga_draws SET chosen = $2, chosen_at = now() WHERE id = $1")
         .bind(id)

@@ -101,6 +101,7 @@ fn starter_view() -> Value {
         },
         "unlocks": {"abilities": ["foam_headbutt"], "accessories": [], "cosmetics": []},
         "draws": [],
+        "queued_draws": 0,
         "body_type": "normal",
         "face_id": "rookie",
         "rating": 1000,

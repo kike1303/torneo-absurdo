@@ -169,9 +169,10 @@ pub async fn put_build(
     answer(saved, &state, "botarga.build_failed")
 }
 
-/// `POST /api/botarga/draw/choose`: one option of a pending draw of the session's user. The same
-/// option again answers the botarga as it is; another one, 409. A chosen attack is equipped too
-/// when a slot is free and the build still resolves with it; otherwise it only joins the unlocks.
+/// `POST /api/botarga/draw/choose`: one option of the open draw of the session's user, which opens
+/// the next queued one. The same option again answers the botarga as it is; another one, 409. A
+/// newly unlocked attack is equipped too when a slot is free and the build still resolves with it;
+/// otherwise it only joins the unlocks.
 pub async fn choose_draw(
     State(state): State<AppState>,
     client: Option<Extension<ClientContext>>,
@@ -208,7 +209,7 @@ pub async fn choose_draw(
         if store::view_locked(&mut tx, user_id).await?.is_none() {
             return Ok(Outcome::Refused(BotargaErrorCode::NotCreated));
         }
-        match store::choose(&mut tx, user_id, draw_id, &request.item_id).await? {
+        match store::choose(&mut tx, &state.botarga, user_id, draw_id, &request.item_id).await? {
             store::Choice::NotFound => return Ok(Outcome::Refused(BotargaErrorCode::DrawNotFound)),
             store::Choice::Other => {
                 return Ok(Outcome::Refused(BotargaErrorCode::DrawAlreadyChosen));
@@ -216,10 +217,13 @@ pub async fn choose_draw(
             store::Choice::NotAnOption => {
                 return Ok(Outcome::Refused(BotargaErrorCode::DrawOptionInvalid));
             }
-            store::Choice::Same | store::Choice::Chosen(DrawKind::Cosmetic) => {}
-            store::Choice::Chosen(DrawKind::Ability) => {
+            store::Choice::Chosen {
+                kind: DrawKind::Ability,
+                new: true,
+            } => {
                 equip(&mut tx, &state, user_id, &request.item_id).await?;
             }
+            store::Choice::Same | store::Choice::Chosen { .. } => {}
         }
         let Some(view) = store::view(&mut tx, user_id).await? else {
             return Ok(Outcome::Refused(BotargaErrorCode::NotCreated));

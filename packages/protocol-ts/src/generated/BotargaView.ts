@@ -7,14 +7,15 @@ import type { PendingDraw } from './PendingDraw.js';
 
 /**
  * `GET /api/botarga`, and the answer of `POST /api/botarga`, `PUT /api/botarga/build` and
- * `POST /api/botarga/draw/choose`: the botarga of the session's user. `draws` are the pending
- * ones, the oldest first.
+ * `POST /api/botarga/draw/choose`: the botarga of the session's user. `draws` is the open draw
+ * (at most one); `queued_draws` the levels whose draw opens, one by one, as each is chosen.
  */
 export type BotargaView = {
   build: BotargaBuild;
   progress: BotargaProgress;
   unlocks: BotargaUnlocks;
   draws: Array<PendingDraw>;
+  queued_draws: number;
   body_type: string;
   face_id: string;
   rating: number;
