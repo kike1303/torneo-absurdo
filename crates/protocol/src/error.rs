@@ -535,6 +535,15 @@ pub enum BotargaErrorCode {
     /// The database failed, or the row is locked.
     #[serde(rename = "botarga.unavailable")]
     Unavailable,
+    /// No draw of the user's with that id: another user's and a missing one answer the same.
+    #[serde(rename = "botarga.draw_not_found")]
+    DrawNotFound,
+    /// The draw was already chosen, with another option.
+    #[serde(rename = "botarga.draw_already_chosen")]
+    DrawAlreadyChosen,
+    /// The item is not one of the options of the draw.
+    #[serde(rename = "botarga.draw_option_invalid")]
+    DrawOptionInvalid,
 }
 
 impl BotargaErrorCode {
@@ -555,6 +564,9 @@ impl BotargaErrorCode {
         Self::AccessoryStatTotal,
         Self::BuildInvalid,
         Self::Unavailable,
+        Self::DrawNotFound,
+        Self::DrawAlreadyChosen,
+        Self::DrawOptionInvalid,
     ];
     /// The only domain prefix this enum may use.
     pub const PREFIX: &'static str = "botarga.";
@@ -577,6 +589,9 @@ impl BotargaErrorCode {
             Self::AccessoryStatTotal => "botarga.accessory_stat_total",
             Self::BuildInvalid => "botarga.build_invalid",
             Self::Unavailable => "botarga.unavailable",
+            Self::DrawNotFound => "botarga.draw_not_found",
+            Self::DrawAlreadyChosen => "botarga.draw_already_chosen",
+            Self::DrawOptionInvalid => "botarga.draw_option_invalid",
         }
     }
 }
@@ -863,6 +878,9 @@ mod tests {
             BotargaErrorCode::AccessoryStatTotal => 12,
             BotargaErrorCode::BuildInvalid => 13,
             BotargaErrorCode::Unavailable => 14,
+            BotargaErrorCode::DrawNotFound => 15,
+            BotargaErrorCode::DrawAlreadyChosen => 16,
+            BotargaErrorCode::DrawOptionInvalid => 17,
         }
     }
 
@@ -920,7 +938,7 @@ mod tests {
     const PROFILE_COUNT: usize = 3;
     const FIGHT_COUNT: usize = 2;
     const SEASON_COUNT: usize = 2;
-    const BOTARGA_COUNT: usize = 15;
+    const BOTARGA_COUNT: usize = 18;
     const PVP_COUNT: usize = 7;
     const BET_COUNT: usize = 10;
     const BONUS_COUNT: usize = 1;

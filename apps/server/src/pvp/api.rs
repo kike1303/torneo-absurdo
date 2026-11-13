@@ -161,11 +161,14 @@ async fn search(
         Some(defender) => {
             let pair = store::pair_fights_today(&mut *tx, user_id, defender.user_id).await?;
             let probation = matchmaking::probation(&mut *tx, user_id).await?;
+            let pair_open = pair < PAIR_FIGHTS_PER_DAY;
             Opponent {
                 spec: defender.spec,
                 defender: Some(defender.user_id),
                 rival: Rival::Player {
-                    counts: !probation && !defender.probation && pair < PAIR_FIGHTS_PER_DAY,
+                    counts: !probation && !defender.probation && pair_open,
+                    pair_open,
+                    rating_gap: i32::from(defender.rating) - i32::from(me.rating),
                 },
             }
         }
@@ -234,8 +237,13 @@ async fn search(
         ledger::pvp_reward(&mut *tx, id, user_id, coins).await?;
     }
     audit::record(&mut *tx, user_id, Event::PvpAttack { fight: id }, ip_hash).await?;
-    // TA-62 and TA-64 add here, in this same transaction, the XP and the level of both botargas and
-    // their ratings (`rewards` already carries the numbers, 0 until then).
+    // The XP, the levels and their draws of both botargas, whose rows this transaction holds.
+    // TA-64 adds the ratings here.
+    let catalog = &state.botarga;
+    botarga::store::grant_xp(&mut *tx, catalog, user_id, rewards.xp_attacker).await?;
+    if let Some(defender_id) = opponent.defender {
+        botarga::store::grant_xp(&mut *tx, catalog, defender_id, rewards.xp_defender).await?;
+    }
     Ok(created(&mut *tx, id, user_id)
         .await?
         .map_or(Outcome::Gone, |answer| Outcome::Created(Box::new(answer))))

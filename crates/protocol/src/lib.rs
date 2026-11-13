@@ -34,8 +34,8 @@ pub use bets::{
     Probation, RefundReason, Wallet,
 };
 pub use botarga::{
-    BotargaBuild, BotargaDaily, BotargaProgress, BotargaStats, BotargaUnlocks, BotargaView,
-    FighterCosmetics, IdleClip, VictoryClip,
+    BotargaBuild, BotargaDaily, BotargaDrawChoice, BotargaProgress, BotargaStats, BotargaUnlocks,
+    BotargaView, DrawKind, FighterCosmetics, IdleClip, PendingDraw, VictoryClip,
 };
 pub use coins::{CoinAmount, CoinAmountOutOfRange};
 pub use error::{

@@ -301,15 +301,16 @@ async fn an_attack_between_two_users_is_resolved_paid_by_entry_and_public() {
         );
         // TA-64 moves the rating; until then nothing does.
         assert_eq!(fight["rating_delta"], 0);
-        let coins = if winner(&created) == Some("a") {
+        // Equal ratings: no bonus. A defeat or a draw gives 30 (TA-62).
+        let (coins, xp) = if winner(&created) == Some("a") {
             won += 1;
-            15
+            (15, 100)
         } else {
-            0
+            (0, 30)
         };
         assert_eq!(
             created["reward"],
-            serde_json::json!({"rating_delta": 0, "xp": 0, "coins": coins, "factor_pct": 100})
+            serde_json::json!({"rating_delta": 0, "xp": xp, "coins": coins, "factor_pct": 100})
         );
         assert_replays(fight);
         keys.push(key);
@@ -542,9 +543,16 @@ async fn the_fourth_fight_of_a_pair_and_a_side_in_probation_pay_nothing() {
     let created = a_victory(&app, &token, 5).await.expect("no victory");
     assert_eq!(created["reward"]["coins"], 0);
     assert_eq!(created["reward"]["factor_pct"], 100);
+    // The attacker keeps its XP, without the bonus of a fight that counts; the defender gets none.
+    assert_eq!(created["reward"]["xp"], 100);
+    assert_eq!(
+        count(pool, "pvp_fights WHERE xp_defender > 0").await,
+        0,
+        "the fourth fight of a pair gives no XP of defense"
+    );
     assert_eq!(rewarded(pool, a).await, 0);
 
-    // A defender in probation (a new account): the fight does not pay either.
+    // A defender in probation (a new account): the fight does not pay either, but its XP does.
     let (c, _) = player(pool).await;
     weaken(pool, c).await;
     ban_where(pool, "id = $1", &[b]).await;
@@ -554,6 +562,24 @@ async fn the_fourth_fight_of_a_pair_and_a_side_in_probation_pay_nothing() {
         display_name(c).as_str()
     );
     assert_eq!(created["reward"]["coins"], 0);
+    let earned: i64 = sqlx::query_scalar(
+        "SELECT sum(xp_defender)::bigint FROM pvp_fights WHERE defender_id = $1",
+    )
+    .bind(c)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(earned > 0);
+    let row = sqlx::query("SELECT level, xp FROM botargas WHERE user_id = $1")
+        .bind(c)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let gain = server::botarga::levels::gain(1, 0, u32::try_from(earned).unwrap());
+    assert_eq!(
+        (row.get::<i16, _>(0), row.get::<i32, _>(1)),
+        (i16::from(gain.level), i32::try_from(gain.xp).unwrap())
+    );
 
     // An attacker in probation: 10 attacks but 2 days old.
     sqlx::query("UPDATE users SET created_at = now() - interval '2 days' WHERE id = $1")
@@ -627,9 +653,17 @@ async fn without_other_users_the_rival_is_a_character_of_the_tournament() {
 async fn the_windows_leave_out_the_far_the_banned_and_the_locked() {
     let (app, _db) = start().await;
     let pool = &app.pool;
-    let (_a, token) = player(pool).await;
+    let (a, token) = player(pool).await;
     let (b, _) = player(pool).await;
     let kind = |created: &Value| created["fight"]["b"]["kind"].as_str().unwrap().to_owned();
+    // Each attack gives XP (TA-62): the attacker goes back to level 1 before a check of the gap.
+    let level_one = || async move {
+        sqlx::query("UPDATE botargas SET level = 1, xp = 0 WHERE user_id = $1")
+            .bind(a)
+            .execute(pool)
+            .await
+            .unwrap();
+    };
     // Four steps of 100: 401 points away is out of every window.
     sqlx::query("UPDATE botargas SET rating = 1401 WHERE user_id = $1")
         .bind(b)
@@ -644,13 +678,15 @@ async fn the_windows_leave_out_the_far_the_banned_and_the_locked() {
         .unwrap();
     assert_eq!(kind(&body(&app.attack(&token).await)), "player");
     // The gap of level 1 is 3.
-    sqlx::query("UPDATE botargas SET rating = 1000, level = 5 WHERE user_id = $1")
+    level_one().await;
+    sqlx::query("UPDATE botargas SET rating = 1000, level = 5, xp = 0 WHERE user_id = $1")
         .bind(b)
         .execute(pool)
         .await
         .unwrap();
     assert_eq!(kind(&body(&app.attack(&token).await)), "tournament");
-    sqlx::query("UPDATE botargas SET level = 4 WHERE user_id = $1")
+    level_one().await;
+    sqlx::query("UPDATE botargas SET level = 4, xp = 0 WHERE user_id = $1")
         .bind(b)
         .execute(pool)
         .await

@@ -8,7 +8,7 @@ author: claude
 linear: TA-55
 depends_on: ["003", "015"]
 created: 2026-11-05
-updated: 2026-11-06
+updated: 2026-11-13
 ---
 
 # Botarga del jugador con varios especiales y animaciones
@@ -107,7 +107,7 @@ Además, win rate por banda de nivel contra la misma banda (que ningún nivel te
 - [ ] `just check` en verde.
 - [x] Motor: v2 rechaza 3 especiales o 3 pesados; con todas libres, el peso de un tipo es el mismo con 1 o 2 habilidades, y una en cooldown deja fuera su parte; los logs v1 se re-simulan idénticos. A lo largo de una pelea, una segunda habilidad sí cubre el cooldown de la primera y el tipo sale algo más: lo mide `just sim --builds` (win rate por número de ranuras).
 - [x] Un accesorio que suma puntos netos o pasa el tope por stat se rechaza; una build con más de 2 debilidades también.
-- [ ] Sorteo: las 3 opciones nunca incluyen un ataque que el jugador ya tiene, y reintentar devuelve las mismas.
+- [x] Sorteo: las 3 opciones nunca incluyen un ataque que el jugador ya tiene, y reintentar devuelve las mismas (`apps/server/tests/botarga_levels.rs`, TA-62).
 - [x] `just sim --check` (torneo, v1) y `just sim --builds 2000 --fights 50000 --check` (v2, nivel 100) pasan; una versión chica corre en `just check`.
 - [x] Renderer: con `FighterCosmetics` salen la victoria y el idle elegidos; sin ellos, lo de hoy; el KO es el mismo en dos cargas de la misma pelea.
 

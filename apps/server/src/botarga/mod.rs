@@ -8,10 +8,11 @@
 
 pub mod api;
 pub mod build;
+pub mod levels;
 pub mod store;
 
 use content::{Catalog, CatalogSource, Style, parse_catalog};
-use engine::loadout::{self, Accessory, LEVEL_MAX, Loadout};
+use engine::loadout::{self, Accessory, LEVEL_MAX, Loadout, tier};
 use engine::{Ability, Ruleset, Stats};
 
 /// The ruleset of the player fights (016): the tournament stays in version 1.
@@ -148,6 +149,21 @@ impl BotargaCatalog {
             .ok()
             .and_then(|at| accessories.get(at))
             .map(|entry| &entry.accessory)
+    }
+
+    /// The abilities a draw of `level` may offer: the ones of its tier or a lower one (016). The
+    /// caller leaves out what the user owns.
+    #[must_use]
+    pub fn drawable_abilities(&self, level: u8) -> Vec<&str> {
+        let Some(top) = tier(level) else {
+            return Vec::new();
+        };
+        self.catalog
+            .abilities
+            .iter()
+            .filter(|entry| entry.tier <= top)
+            .map(|entry| entry.ability.id.as_str())
+            .collect()
     }
 
     #[must_use]
