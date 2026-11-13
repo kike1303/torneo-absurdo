@@ -55,7 +55,7 @@ pub use me::{
 };
 pub use pvp::{
     PvpFightCreated, PvpFightDetail, PvpFightRequest, PvpFightSummary, PvpFighter, PvpFightsPage,
-    PvpReward, PvpRole,
+    PvpLeaderboard, PvpLeaderboardEntry, PvpReward, PvpRole,
 };
 pub use seasons::{Leaderboard, LeaderboardEntry, SeasonView};
 pub use ws::{Channel, ClientMessage, FightId, SelfEvent, ServerMessage};

@@ -51,6 +51,7 @@ pub struct Defender {
     pub display_name: String,
     pub spec: CharacterSpec,
     pub rating: u16,
+    pub rated_fights: u32,
     pub probation: bool,
 }
 
@@ -237,6 +238,7 @@ async fn lock(
         display_name,
         spec,
         rating: view.rating,
+        rated_fights: view.rated_fights,
         probation: probation(&mut *tx, id).await?,
     }))
 }

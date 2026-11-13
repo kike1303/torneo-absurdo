@@ -284,6 +284,8 @@ async fn an_attack_between_two_users_is_resolved_paid_by_entry_and_public() {
     // The pair counts three times today: enough for the strong side to win at least once.
     let mut keys = Vec::new();
     let mut won = 0;
+    // The ratings as the test follows them (TA-64): K = 40, the defender moves the opposite.
+    let (mut rating_a, mut rating_b) = (1000_i64, 1000_i64);
     for _ in 0..3 {
         let key = Uuid::new_v4().to_string();
         let created = app.attack_with(&token_a, &key).await;
@@ -299,19 +301,34 @@ async fn an_attack_between_two_users_is_resolved_paid_by_entry_and_public() {
             fight["b"],
             serde_json::json!({"kind": "player", "display_name": display_name(b)})
         );
-        // TA-64 moves the rating; until then nothing does.
-        assert_eq!(fight["rating_delta"], 0);
-        // Equal ratings: no bonus. A defeat or a draw gives 30 (TA-62).
+        let delta = created["reward"]["rating_delta"].as_i64().unwrap();
+        assert_eq!(fight["rating_delta"], delta);
+        let gap = (rating_b - rating_a).clamp(-200, 200);
+        let expected = server::pvp::rewards::elo_delta(
+            i32::try_from(rating_b - rating_a).unwrap(),
+            40,
+            match winner(&created) {
+                Some("a") => Some(protocol::Side::A),
+                Some(_) => Some(protocol::Side::B),
+                None => None,
+            },
+            100,
+        );
+        assert_eq!(delta, i64::from(expected));
+        // A victory pays the bonus of the gap (TA-62); a defeat or a draw gives 30.
         let (coins, xp) = if winner(&created) == Some("a") {
             won += 1;
-            (15, 100)
+            assert!(delta > 0);
+            (15, 100 + gap / 4)
         } else {
             (0, 30)
         };
         assert_eq!(
             created["reward"],
-            serde_json::json!({"rating_delta": 0, "xp": xp, "coins": coins, "factor_pct": 100})
+            serde_json::json!({"rating_delta": delta, "xp": xp, "coins": coins, "factor_pct": 100})
         );
+        rating_a += delta;
+        rating_b -= delta;
         assert_replays(fight);
         keys.push(key);
     }
@@ -326,7 +343,26 @@ async fn an_attack_between_two_users_is_resolved_paid_by_entry_and_public() {
         won
     );
     assert_eq!(support::bets::total(pool).await, 0);
-    // The counter of the day is the attacker's alone, and the ratings stay.
+    // Conservation with the rewards (021 "Riesgos"): what came out of the issuance is exactly the
+    // grants, the bailouts and the `pvp_reward`s, and it is all in the accounts of the users.
+    let issued: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(-sum(p.amount), 0)::bigint FROM ledger_postings p WHERE p.account_id = $1",
+    )
+    .bind(server::ledger::ISSUANCE_ACCOUNT)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let paid: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(sum(p.amount), 0)::bigint FROM ledger_postings p \
+         JOIN ledger_entries e ON e.id = p.entry_id JOIN ledger_accounts a ON a.id = p.account_id \
+         WHERE a.kind = 'user' AND e.kind IN ('grant', 'bailout', 'pvp_reward')",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(issued, paid);
+    assert!(issued >= 15 * won);
+    // The counter of the day is the attacker's alone, and the ratings moved opposite and alike.
     let daily: Vec<(Uuid, i16)> = sqlx::query("SELECT user_id, attacks FROM pvp_daily")
         .fetch_all(pool)
         .await
@@ -335,11 +371,17 @@ async fn an_attack_between_two_users_is_resolved_paid_by_entry_and_public() {
         .map(|row| (row.get(0), row.get(1)))
         .collect();
     assert_eq!(daily, vec![(a, 3)]);
-    let ratings: Vec<i32> = sqlx::query_scalar("SELECT rating FROM botargas ORDER BY rating")
-        .fetch_all(pool)
-        .await
-        .unwrap();
-    assert_eq!(ratings, [1000, 1000]);
+    for (user, rating) in [(a, rating_a), (b, rating_b)] {
+        let row = sqlx::query("SELECT rating, rated_fights FROM botargas WHERE user_id = $1")
+            .bind(user)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        assert_eq!(i64::from(row.get::<i32, _>(0)), rating);
+        assert_eq!(row.get::<i32, _>(1), 3);
+    }
+    assert_eq!(rating_a + rating_b, 2000);
+    assert_eq!(count(pool, "pvp_fights WHERE rated").await, 3);
     // One event per attack, with the hash of the address.
     let events = sqlx::query(
         "SELECT user_id, octet_length(ip_hash) FROM auth_events WHERE kind = 'pvp_attack'",
@@ -507,6 +549,19 @@ async fn the_steps_of_the_day_scale_the_coins_and_the_21st_pays_nothing() {
         };
         assert_eq!(created["reward"]["factor_pct"], factor, "{index}");
         assert_eq!(created["reward"]["coins"], coins, "{index}");
+        // The rating follows the same step (TA-64): a victory on a paid step moves at least 1, and
+        // from the 21st on nothing moves.
+        let delta = created["reward"]["rating_delta"].as_i64().unwrap();
+        let rated: bool = sqlx::query_scalar("SELECT rated FROM pvp_fights WHERE id = $1")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        if factor > 0 {
+            assert!(delta >= 1 && rated, "{index} {delta}");
+        } else {
+            assert!(delta == 0 && !rated, "{index} {delta}");
+        }
         assert_eq!(balance(pool, a).await - before, coins, "{index}");
         // From the 21st on, the fight is resolved and stored all the same.
         if attacks == 20 {
@@ -543,6 +598,9 @@ async fn the_fourth_fight_of_a_pair_and_a_side_in_probation_pay_nothing() {
     let created = a_victory(&app, &token, 5).await.expect("no victory");
     assert_eq!(created["reward"]["coins"], 0);
     assert_eq!(created["reward"]["factor_pct"], 100);
+    // Over the limit of the pair, nothing moves the rating (TA-64).
+    assert_eq!(created["reward"]["rating_delta"], 0);
+    assert_eq!(count(pool, "pvp_fights WHERE rated").await, 0);
     // The attacker keeps its XP, without the bonus of a fight that counts; the defender gets none.
     assert_eq!(created["reward"]["xp"], 100);
     assert_eq!(
@@ -600,6 +658,12 @@ async fn the_fourth_fight_of_a_pair_and_a_side_in_probation_pay_nothing() {
     assert_eq!(rewarded(pool, a).await, 0);
     assert_eq!(
         count(pool, "ledger_entries WHERE kind = 'pvp_reward'").await,
+        0
+    );
+    // Probation on either side: no rating either, and every rating is where it started.
+    assert_eq!(count(pool, "pvp_fights WHERE rated").await, 0);
+    assert_eq!(
+        count(pool, "botargas WHERE rating <> 1000 OR rated_fights <> 0").await,
         0
     );
 }

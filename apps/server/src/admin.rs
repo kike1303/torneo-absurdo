@@ -20,9 +20,11 @@
 //! It does not revoke anything nor write any privileged column, and the decision is of
 //! `fights::sealed::void_fight`. The only caller of this is `cli.rs`: there is no endpoint.
 //!
-//! `server season farm-report|exclude|close` (020, phase B) live in [`season`], with the same rules:
-//! the only other file of `src/` that may name the CLI actor or write `admin_audit`.
+//! `server season farm-report|exclude|close` (020, phase B) live in [`season`], and `server pvp
+//! farm-report|exclude` (021, phase 4) in [`pvp`], with the same rules: the only other files of
+//! `src/` that may name the CLI actor or write `admin_audit`.
 
+pub mod pvp;
 pub mod season;
 
 use std::ffi::OsString;
@@ -1049,7 +1051,7 @@ mod source_rules {
     /// Only 009: the guard also had to refuse `admin_account_cutoff`, which took a new body and,
     /// as `UPDATE OF` can not be altered, a drop and a create in the same migration, which runs in
     /// one transaction. A later migration needs its own line here, and a review.
-    const GUARD_CHANGES_ALLOWED: [(i64, &str, &str); 7] = [
+    const GUARD_CHANGES_ALLOWED: [(i64, &str, &str); 9] = [
         (
             20261030000000,
             "or replace function",
@@ -1073,6 +1075,10 @@ mod source_rules {
             "or replace function",
             "ledger_posting_rules",
         ),
+        // 021 phase 4: `pvp_fights_guard` keeps its body and refuses one more thing, a rated fight
+        // in a closed month. Named twice: the trigger and the function share the name.
+        (20261114000000, "or replace function", "pvp_fights_guard"),
+        (20261114000000, "or replace function", "pvp_fights_guard"),
     ];
 
     /// `(version, file name, text)` of every migration.
@@ -1155,6 +1161,8 @@ mod source_rules {
         // `server season` (020) sets the actor for `seasons.closed_at` and `excluded_*`, and writes
         // neither `role` nor `banned_at`.
         let season = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/admin/season.rs");
+        // `server pvp` (021, phase 4) sets it for `pvp_exclusions`, and writes neither either.
+        let pvp = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/admin/pvp.rs");
         let files = sources();
         assert!(files.len() > 30, "{}", files.len());
         let actor = ["torneo", ".actor"].concat();
@@ -1168,7 +1176,7 @@ mod source_rules {
                 path.display()
             );
             assert!(
-                *path == season || !text.to_lowercase().contains(&actor),
+                *path == season || *path == pvp || !text.to_lowercase().contains(&actor),
                 "{} names the CLI actor",
                 path.display()
             );

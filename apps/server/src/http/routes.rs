@@ -99,6 +99,8 @@ pub enum Handler {
     PvpFightCreate,
     PvpFights,
     PvpFightDetail,
+    PvpLeaderboard,
+    PvpSeasons,
     #[cfg(feature = "dev-auth")]
     DevAuthorize,
     #[cfg(feature = "dev-auth")]
@@ -328,6 +330,18 @@ pub const ROUTES: &[RouteSpec] = &[
         effect: Effect::Read,
         handler: Handler::PvpFightDetail,
     },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/pvp/leaderboard",
+        effect: Effect::Read,
+        handler: Handler::PvpLeaderboard,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/pvp/seasons",
+        effect: Effect::Read,
+        handler: Handler::PvpSeasons,
+    },
     #[cfg(feature = "dev-auth")]
     RouteSpec {
         method: RouteMethod::Get,
@@ -464,6 +478,9 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         Handler::PvpFightCreate => on(filter, crate::pvp::api::create).layer(body),
         Handler::PvpFights => on(filter, crate::pvp::api::list),
         Handler::PvpFightDetail => fight_read(on(filter, crate::pvp::api::detail), state),
+        // 021 phase 4: public reads, as the leaderboard of 020.
+        Handler::PvpLeaderboard => fight_read(on(filter, crate::pvp::api::leaderboard), state),
+        Handler::PvpSeasons => fight_read(on(filter, crate::pvp::api::seasons), state),
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize => on(filter, auth::dev::authorize),
         #[cfg(feature = "dev-auth")]

@@ -169,8 +169,10 @@ pub async fn insert(tx: &mut PgConnection, fight: &NewFight<'_>) -> Result<i32, 
     sqlx::query_scalar(
         "INSERT INTO pvp_fights (attacker_id, defender_id, defender_slug, client_key, \
          ruleset_version, spec_a, spec_b, seed, log, winner, end_reason, rating_delta, \
-         xp_attacker, xp_defender, coins_attacker, daily_index, season_id, created_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 0, now()) \
+         xp_attacker, xp_defender, coins_attacker, daily_index, rated, defender_rating_delta, \
+         season_id, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, \
+         0, now()) \
          RETURNING id",
     )
     .bind(fight.attacker_id)
@@ -189,8 +191,30 @@ pub async fn insert(tx: &mut PgConnection, fight: &NewFight<'_>) -> Result<i32, 
     .bind(int(r.xp_defender)?)
     .bind(int(r.coins_attacker)?)
     .bind(i16::try_from(fight.daily_index).map_err(|_| bad())?)
+    .bind(r.rated)
+    .bind(r.defender_rating_delta)
     .fetch_one(&mut *tx)
     .await
+}
+
+/// Moves the rating of `user_id` by `delta`, within the bounds of 021, and counts one more rated
+/// fight (the K of the next ones). The row is the transaction's: the attacker's lock or the
+/// defender's `SKIP LOCKED`.
+///
+/// # Errors
+/// The database error.
+pub async fn rate(tx: &mut PgConnection, user_id: Uuid, delta: i32) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE botargas SET rating = LEAST($3, GREATEST($2, rating + $1)), \
+         rated_fights = rated_fights + 1 WHERE user_id = $4",
+    )
+    .bind(delta)
+    .bind(super::rewards::RATING_MIN)
+    .bind(super::rewards::RATING_MAX)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+    Ok(())
 }
 
 /// The columns of a fight that the two reads share, in the order [`fighter`] and [`detail_of`]
@@ -271,7 +295,8 @@ fn count(row: &PgRow, at: usize) -> Result<u32, sqlx::Error> {
     u32::try_from(row.try_get::<i32, _>(at)?).map_err(|_| bad())
 }
 
-/// What fight `row` gave to `role`. Read with the columns of [`page`].
+/// What fight `row` gave to `role`, each side with its own change of rating (TA-64: each its own
+/// K). Read with the columns of [`page`].
 fn reward_of(row: &PgRow, role: PvpRole) -> Result<PvpReward, sqlx::Error> {
     let delta: i16 = row.try_get(6)?;
     let daily_index = u16::try_from(row.try_get::<i16, _>(11)?).map_err(|_| bad())?;
@@ -283,7 +308,7 @@ fn reward_of(row: &PgRow, role: PvpRole) -> Result<PvpReward, sqlx::Error> {
             factor_pct: factor_pct(daily_index),
         },
         PvpRole::Defender => PvpReward {
-            rating_delta: delta.checked_neg().ok_or_else(bad)?,
+            rating_delta: row.try_get(12)?,
             xp: count(row, 10)?,
             coins: 0,
             factor_pct: factor_pct(daily_index),
@@ -301,7 +326,8 @@ pub async fn attacker_reward(
     attacker_id: Uuid,
 ) -> Result<Option<PvpReward>, sqlx::Error> {
     let row = sqlx::query(fight_sql!(
-        ", f.coins_attacker, f.xp_attacker, f.xp_defender, f.daily_index",
+        ", f.coins_attacker, f.xp_attacker, f.xp_defender, f.daily_index, \
+         f.defender_rating_delta",
         " WHERE f.id = $1 AND f.attacker_id = $2"
     ))
     .bind(id)
@@ -325,7 +351,7 @@ pub async fn page(
     let limit = i64::try_from(PAGE_SIZE + 1).unwrap_or(i64::MAX);
     let rows = sqlx::query(fight_sql!(
         ", f.coins_attacker, f.xp_attacker, f.xp_defender, f.daily_index, \
-         f.attacker_id = $1",
+         f.defender_rating_delta, f.attacker_id = $1",
         " WHERE (f.attacker_id = $1 OR f.defender_id = $1) AND ($2::int IS NULL OR f.id < $2) \
          ORDER BY f.id DESC LIMIT $3"
     ))
@@ -337,7 +363,7 @@ pub async fn page(
     let more = rows.len() > PAGE_SIZE;
     let mut fights = Vec::with_capacity(PAGE_SIZE);
     for row in rows.iter().take(PAGE_SIZE) {
-        let role = if row.try_get(12)? {
+        let role = if row.try_get(13)? {
             PvpRole::Attacker
         } else {
             PvpRole::Defender

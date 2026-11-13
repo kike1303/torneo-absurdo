@@ -4,6 +4,10 @@
 //! `oauth_flows` and the expired sessions; these through `sessions::revoke`, so their sockets close
 //! too. Then it sums in their season the settled fights without a mark (`seasons::reconcile`). Logs
 //! only a failure, by code.
+//!
+//! The PvP seasons that are due close in their own pass, at startup and every hour
+//! (`pvp::season::close_due`, 021 phase 4): a month ends at any hour, and its soft reset should not
+//! wait a day.
 
 use std::time::Duration;
 
@@ -14,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 use crate::sessions::{self, RevokeFilter};
 
 pub const RETENTION_INTERVAL: Duration = Duration::from_secs(24 * 3600);
+pub const PVP_CLOSE_INTERVAL: Duration = Duration::from_secs(3600);
 
 /// Whether `app::serve_listener` starts [`run`]. Always [`Jobs::Run`] in production; the in-process
 /// tests that sow settled fights by hand and then tally or reconcile them turn it off, because the
@@ -41,6 +46,8 @@ pub async fn retention_pass(pool: &PgPool) -> Result<(), sqlx::Error> {
 pub async fn run(pool: PgPool, stop: CancellationToken) {
     let mut interval = tokio::time::interval(RETENTION_INTERVAL);
     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut pvp = tokio::time::interval(PVP_CLOSE_INTERVAL);
+    pvp.set_missed_tick_behavior(MissedTickBehavior::Delay);
     loop {
         tokio::select! {
             () = stop.cancelled() => return,
@@ -54,6 +61,8 @@ pub async fn run(pool: PgPool, stop: CancellationToken) {
                 }
                 crate::seasons::reconcile_logged(&pool).await;
             }
+            // Its first tick is immediate too.
+            _ = pvp.tick() => crate::pvp::season::close_due_logged(&pool).await,
         }
     }
 }

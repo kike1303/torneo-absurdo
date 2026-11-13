@@ -9,7 +9,8 @@ import type { TimestampMs } from './TimestampMs.js';
  * `GET /api/pvp/fights/{id}` (public) and the fight of [`PvpFightCreated`]. The attacker is always
  * side `a`. `spec_a`, `spec_b` and `log` are the canonical JSON of the engine and `seed` is
  * lowercase hexadecimal: the same bytes as a tournament fight, so the browser re-simulates them.
- * `rating_delta` is the change of the attacker; the defender moves the opposite.
+ * `rating_delta` is the change of the attacker; the defender's, with its own K, is in its private
+ * [`PvpReward`].
  */
 export type PvpFightDetail = {
   id: number;

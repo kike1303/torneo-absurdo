@@ -110,6 +110,8 @@ fn request_of(route: &RouteSpec, id: i32) -> (String, Vec<(&'static str, &'stati
         | Handler::FightDetail
         | Handler::Leaderboard
         | Handler::Seasons
+        | Handler::PvpLeaderboard
+        | Handler::PvpSeasons
         | Handler::Wallet => (vec![], String::new()),
         Handler::MyBets | Handler::BetHistory | Handler::FightPool => (vec![], String::new()),
         Handler::BetQuote => (vec![], String::new()),
@@ -248,6 +250,8 @@ fn expected_status(handler: Handler, identity: &str) -> Option<u16> {
         | Handler::FightDetail
         | Handler::Leaderboard
         | Handler::Seasons
+        | Handler::PvpLeaderboard
+        | Handler::PvpSeasons
         | Handler::AuthProviders => Some(200),
         Handler::Me | Handler::Wallet | Handler::PvpFights | Handler::PvpFightCreate
             if identity == "anonymous" =>

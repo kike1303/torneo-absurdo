@@ -104,6 +104,8 @@ pub struct AppState {
     pub pvp: crate::pvp::PvpConfig,
     /// The characters of the tournament as rivals of last resort, read from `CONTENT_DIR` (021).
     pub pvp_rivals: Arc<crate::pvp::Rivals>,
+    /// The live PvP leaderboard, served from memory for a while (021, phase 4).
+    pub pvp_board: Arc<crate::pvp::season::BoardCache>,
     /// From [`Settings::jobs`].
     pub jobs: crate::jobs::Jobs,
 }
@@ -137,6 +139,7 @@ impl AppState {
             botarga,
             pvp: config.pvp,
             pvp_rivals: Arc::new(crate::pvp::Rivals::new(config.fights.content_dir.clone())),
+            pvp_board: Arc::new(crate::pvp::season::BoardCache::default()),
             jobs: settings.jobs,
         })
     }

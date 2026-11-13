@@ -224,6 +224,34 @@ server season close <YYYYMM> --by <admin_user_id> [--accept-partial]
 | `season.partial_review` | `close` | La revisión es `partial`: ciérrala con `--accept-partial` solo si la revisaste igual. El flag queda en `admin_audit` |
 | `season.already_closed` | `close` | Ya estaba cerrada |
 
+## Temporadas PvP
+
+Una temporada PvP es el mes UTC de sus peleas (feature 021, fase 4). **Se cierra sola**: el job del server (al arrancar y cada hora) cierra cada mes terminado que tenga peleas puntuadas. Guarda la foto de los ratings en `pvp_season_ratings` y aplica el reinicio suave (`1000 + (rating − 1000) / 2`), aunque llegue tarde. El leaderboard del mes en curso se lee en vivo. La revisión anti-granjas y la exclusión son a mano, por CLI:
+
+```
+server pvp farm-report <YYYYMM> --by <admin_user_id>
+server pvp exclude <YYYYMM> <user_id> --by <admin_user_id> --reason <farm_signals|shared_ip_opposite_sides|counterpart_concentration>
+```
+
+- Las mismas reglas que `server season`: `--by` es un admin sin ban, se ejecutan en una transacción, quedan en `admin_audit` (`pvp_review` y `pvp_exclude`), y tienen las mismas salidas y exit codes (eventos `pvp.admin_applied`, `pvp.admin_refused` y `pvp.admin_failed`).
+- **`farm-report`** solo funciona con una temporada cerrada. Imprime una línea de JSON con estas señales:
+  - `repeated_pairs`: 10 o más peleas de una pareja, o un defensor que es la mitad de los ataques de alguien con 10 o más.
+  - `punching_bags`: no ataca y pierde el 90 % de 8 o más defensas.
+  - `one_way_new`: una cuenta nueva que pierde el 90 % contra una y gana el 40 % contra el resto.
+  - `sink_and_rebound`: cae más de 200 en 30 peleas puntuadas y gana el 80 % de las 30 siguientes.
+  - `tournament_streaks`: informativa.
+  - `counterpart_concentration`: el top 20, con el rating que ganó de sus 5 contrapartes principales y su `ip_group` opaco.
+- Ninguna señal es prueba.
+- **`exclude`** saca a un usuario del leaderboard de una temporada, la actual o una cerrada. No se deshace.
+
+| Código | Órdenes | Qué pasa |
+|---|---|---|
+| `pvp.not_admin` | las dos | `--by` no existe, no es admin o tiene ban |
+| `pvp.season_not_closed` | `farm-report` | El mes no se cerró: está en curso, no tuvo peleas puntuadas o el job todavía no pasó |
+| `pvp.season_not_found` | `exclude` | El mes no es el actual ni uno cerrado |
+| `pvp.no_botarga` | `exclude` | El usuario no tiene botarga |
+| `pvp.already_excluded` | `exclude` | Ya estaba excluido |
+
 ## Apuestas
 
 Las apuestas (feature 012) son solo con monedas ficticias (ADR-0005). Los valores están en RF40: `DAILY_GRANT` es `B`, y `BET_MIN`, `BET_RAKE_BP` y `BET_CAP_MULTIPLE` son opcionales (ver `.env.example`). El compose de producción no pasa `BET_*`.

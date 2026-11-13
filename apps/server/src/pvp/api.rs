@@ -14,13 +14,17 @@ use axum::extract::{Json, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use engine::CharacterSpec;
-use protocol::{BotargaErrorCode, ErrorCode, PvpErrorCode, PvpFightCreated, PvpFightRequest};
+use protocol::{
+    BotargaErrorCode, ErrorCode, PvpErrorCode, PvpFightCreated, PvpFightRequest, PvpLeaderboard,
+    SeasonErrorCode,
+};
 use serde::Deserialize;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
 use super::matchmaking::{self, Seeker};
 use super::rewards::{self, PAIR_FIGHTS_PER_DAY, Rival};
+use super::season;
 use super::store::{self, DefenderRef, NewFight};
 use crate::app::AppState;
 use crate::bets::audit::{self, Event};
@@ -109,7 +113,9 @@ pub async fn create(
         Err(error) => {
             let kind = error_kind(&error);
             tracing::warn!(event = "pvp.attack_failed", error_kind = kind);
-            if kind == "lock_timeout" {
+            // A fight that waited for the close of its month is refused by the database: the
+            // retry, with the same key, lands in the new one.
+            if kind == "lock_timeout" || kind == "pvp_ranking_guard" {
                 unavailable(PvpErrorCode::Busy)
             } else {
                 unavailable(PvpErrorCode::Unavailable)
@@ -169,6 +175,9 @@ async fn search(
                     counts: !probation && !defender.probation && pair_open,
                     pair_open,
                     rating_gap: i32::from(defender.rating) - i32::from(me.rating),
+                    attacker_rating: i32::from(me.rating),
+                    attacker_rated_fights: me.rated_fights,
+                    defender_rated_fights: defender.rated_fights,
                 },
             }
         }
@@ -237,8 +246,19 @@ async fn search(
         ledger::pvp_reward(&mut *tx, id, user_id, coins).await?;
     }
     audit::record(&mut *tx, user_id, Event::PvpAttack { fight: id }, ip_hash).await?;
-    // The XP, the levels and their draws of both botargas, whose rows this transaction holds.
-    // TA-64 adds the ratings here.
+    // The ratings, the XP, the levels and their draws of both botargas, whose rows this transaction
+    // holds.
+    if rewards.rated
+        && let Some(defender_id) = opponent.defender
+    {
+        store::rate(&mut *tx, user_id, i32::from(rewards.rating_delta)).await?;
+        store::rate(
+            &mut *tx,
+            defender_id,
+            i32::from(rewards.defender_rating_delta),
+        )
+        .await?;
+    }
     let catalog = &state.botarga;
     botarga::store::grant_xp(&mut *tx, catalog, user_id, rewards.xp_attacker).await?;
     if let Some(defender_id) = opponent.defender {
@@ -352,6 +372,83 @@ pub async fn detail(
             tracing::warn!(event = "pvp.detail_failed", error_kind = "timeout");
             error_response(StatusCode::SERVICE_UNAVAILABLE, PvpErrorCode::Unavailable)
         }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct BoardQuery {
+    season: Option<String>,
+}
+
+fn season_not_found() -> Response {
+    error_response(StatusCode::NOT_FOUND, SeasonErrorCode::NotFound)
+}
+
+fn season_unavailable(error: &sqlx::Error, event: &'static str) -> Response {
+    tracing::warn!(event, error_kind = error_kind(error));
+    error_response(
+        StatusCode::SERVICE_UNAVAILABLE,
+        SeasonErrorCode::Unavailable,
+    )
+}
+
+/// `GET /api/pvp/leaderboard?season=` (public). Without `season`, the current one; a `season` that
+/// is not `YYYYMM`, repeated, or neither the current nor a closed one is a 404 `season.not_found`,
+/// the code of the leaderboard of 020. The route adds `no-store` and the limit of the fights.
+pub async fn leaderboard(
+    State(state): State<AppState>,
+    query: Result<Query<BoardQuery>, QueryRejection>,
+) -> Response {
+    let wanted = match query {
+        Ok(Query(BoardQuery { season: None })) => None,
+        Ok(Query(BoardQuery { season: Some(text) })) => {
+            match crate::seasons::api::parse_season(&text) {
+                Some(id) => Some(id),
+                None => return season_not_found(),
+            }
+        }
+        Err(_) => return season_not_found(),
+    };
+    let read = async {
+        // The current season always from the cache, so asking for it by its id costs the same.
+        let (current, live) = state.pvp_board.live(&state.db).await?;
+        let (season, entries) = match wanted {
+            Some(id) if i64::from(id) != i64::from(current.id) => {
+                let mut conn = state.db.acquire().await?;
+                match season::closed(&mut conn, id).await? {
+                    Some(closed) => {
+                        let entries = season::entries(&mut conn, &closed).await?;
+                        (closed, entries)
+                    }
+                    None => return Ok(None),
+                }
+            }
+            _ => (current, live),
+        };
+        Ok::<_, sqlx::Error>(Some(PvpLeaderboard {
+            season,
+            entries,
+            min_fights: u16::try_from(season::SEASON_MIN_FIGHTS).unwrap_or(u16::MAX),
+        }))
+    };
+    match tokio::time::timeout(ACQUIRE_TIMEOUT.saturating_mul(3), read).await {
+        Ok(Ok(Some(board))) => Json(board).into_response(),
+        Ok(Ok(None)) => season_not_found(),
+        Ok(Err(error)) => season_unavailable(&error, "pvp.leaderboard_failed"),
+        Err(_) => season_unavailable(&sqlx::Error::PoolTimedOut, "pvp.leaderboard_failed"),
+    }
+}
+
+/// `GET /api/pvp/seasons` (public): the current season and the closed ones, the newest first.
+pub async fn seasons(State(state): State<AppState>) -> Response {
+    let read = async {
+        let mut conn = state.db.acquire().await?;
+        season::seasons(&mut conn).await
+    };
+    match tokio::time::timeout(ACQUIRE_TIMEOUT.saturating_mul(3), read).await {
+        Ok(Ok(list)) => Json(list).into_response(),
+        Ok(Err(error)) => season_unavailable(&error, "pvp.seasons_failed"),
+        Err(_) => season_unavailable(&sqlx::Error::PoolTimedOut, "pvp.seasons_failed"),
     }
 }
 
