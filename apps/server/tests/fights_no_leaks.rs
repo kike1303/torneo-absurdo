@@ -125,6 +125,11 @@ fn request_of(route: &RouteSpec, id: i32) -> (String, Vec<(&'static str, &'stati
             )
             .to_owned(),
         ),
+        // 021 phase 3: a draw the identity does not have.
+        Handler::BotargaDrawChoose => (
+            vec![json],
+            r#"{"draw_id":2147483647,"item_id":"foam_headbutt"}"#.to_owned(),
+        ),
         // 021 phase 2: a search of the identity (against the other one, once both created their
         // botarga), its list, and the detail of the player fight with the id of the case.
         Handler::PvpFightCreate => (
@@ -275,7 +280,8 @@ fn expected_status(handler: Handler, identity: &str) -> Option<u16> {
         // 021: they depend on whether the identity has a botarga.
         | Handler::Botarga
         | Handler::BotargaCreate
-        | Handler::BotargaBuild => None,
+        | Handler::BotargaBuild
+        | Handler::BotargaDrawChoose => None,
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize | Handler::DevToken | Handler::DevUserinfo => None,
     }

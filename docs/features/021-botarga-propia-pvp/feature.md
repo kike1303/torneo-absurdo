@@ -8,7 +8,7 @@ author: claude
 linear: TA-60
 depends_on: ["011", "012", "016", "020"]
 created: 2026-11-09
-updated: 2026-11-10
+updated: 2026-11-13
 ---
 
 # Botarga propia y PvP asíncrono
@@ -129,6 +129,15 @@ Ajustes de la implementación (fase 2, TA-63):
 - Tope de 50 ataques por día UTC (decisión del owner del 2026-11-11): se comprueba bajo el lock del atacante, después de buscar el `client_key` (un reintento sigue devolviendo su pelea), y `pvp_daily` lo repite con un `CHECK`. `coins_attacker` también tiene su `CHECK`: entre 0 y 2000, y distinto de 0 solo si ganó el atacante.
 - `PVP_WIN_COINS` acepta de 0 a 2000. `GET /api/pvp/fights` usa la cuota de `GET /api/botarga`. Un `lock_timeout` responde 503 `pvp.busy`.
 
+Ajustes de la implementación (fase 3, TA-62):
+- `botargas.xp` es la XP dentro del nivel: al cruzar uno se resta su `xp_to_next`, y en el nivel 100 queda en 0 (un `CHECK` lo repite).
+- Un empate da la XP de una derrota a los dos lados. El bono por rating solo aplica a una victoria que cuenta: con un lado en carencia o pasado el tope de la pareja no hay rating que mover, así que tampoco paga por la diferencia. La carencia no quita la XP de defensa; el tope de la pareja sí.
+- Varios sorteos pueden quedar pendientes a la vez (`GET /api/botarga` los trae en `draws`, el más viejo primero), así que no hay índice único de "uno pendiente": hay uno por nivel y usuario (`UNIQUE (user_id, level)`). Un sorteo nuevo no repite opciones de otro pendiente; si el jugador acumula sorteos sin elegir, los siguientes salen con menos opciones o de cosméticos.
+- Sin ataques que ofrecer, el sorteo ofrece hasta 3 códigos de clip (idle o victoria) que el usuario no tiene, con `kind = 'cosmetic'`; sin nada que ofrecer, ese nivel no sortea.
+- Elegir un ataque lo equipa si el nivel tiene una ranura libre y la build sigue resolviendo con él; si no, solo queda desbloqueado. Un cosmético nunca se equipa solo.
+- `POST /api/botarga/level-up`, que nombraba la issue, no existe: repartir los puntos nuevos ya es `PUT /api/botarga/build` (`budget_free` dice cuántos quedan).
+- Un `draw_id` que no cabe en la columna responde como uno inexistente (404 `botarga.draw_not_found`).
+
 ## Riesgos
 - **Monedas por volumen:** el `pvp_reward` sale de `issuance` y no de otro usuario, así que infla la masa. Lo acotan el escalón diario (tope duro de 10 recompensas completas por día), el tope por pareja, la carencia y el índice único por pelea; el test de conservación del ledger suma `pvp_reward` a los grants permitidos.
 - **Granjas de rating:** dos cuentas que pelean en bucle o cuentas nuevas que solo pierden contra una misma cuenta. Se mitiga con el emparejamiento (sin los últimos 3 rivales), el tope de 3 peleas puntuadas por pareja y día, K bajo tras 30 peleas y las señales de `farm-report`; la sanción es manual, como en 020.
@@ -146,7 +155,7 @@ Ajustes de la implementación (fase 2, TA-63):
 - [ ] SQL: un segundo `pvp_reward` para la misma pelea falla por el índice único; un asiento de `issuance` con otro `kind` sigue fallando con `TA008`; `excluded_*` y `closed_at` sin `torneo.actor = 'cli'` fallan; `farm-report` no imprime ningún byte de `ip_hash`.
 - [ ] Unitario: la tabla de Elo es simétrica, `delta_win` y `delta_loss` dan +34 y −6 para 1000 contra 1300 con K=40, y una pelea que cuenta nunca da 0.
 - [ ] Integración: sin otros usuarios, el rival es un personaje del torneo, da XP y no mueve rating.
-- [ ] Integración: el sorteo nunca ofrece un ataque que el jugador tiene, repetir `choose` devuelve lo mismo, y dos niveles de golpe encolan dos sorteos.
+- [x] Integración: el sorteo nunca ofrece un ataque que el jugador tiene, repetir `choose` devuelve lo mismo, y dos niveles de golpe encolan dos sorteos.
 - [ ] Conservación del ledger con `pvp_reward` incluido; `fights_no_leaks` cubre las rutas nuevas con un canario en la semilla y afirma que ningún cuerpo público ni log lleva `user_id`, `daily_index`, `coins_attacker`, `client_key` ni la semilla antes de resolverse.
 - [ ] Vitest: `verifyFight` da `match` con un `PvpFightDetail` real; el cierre de temporada aplica el reinicio suave y es idempotente.
 - [ ] e2e: onboarding → `/botarga` → buscar pelea → repetición verificada, a 375 px y escritorio, claro y oscuro.

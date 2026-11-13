@@ -66,11 +66,12 @@ async fn with_a_ban_in_between(
     method: &'static str,
     path: &'static str,
     token: &str,
-    body: &'static str,
+    body: &str,
 ) -> http::Response {
     let ban = pending_ban(pool, user).await;
     let cookie = oauth::session_cookie(token);
     let addr = app.addr;
+    let body = body.to_owned();
     let request = tokio::spawn(async move {
         http::send_body(
             addr,
@@ -81,7 +82,7 @@ async fn with_a_ban_in_between(
                 ("cookie", cookie.as_str()),
                 ("content-type", "application/json"),
             ],
-            body,
+            &body,
         )
         .await
     });
@@ -250,6 +251,45 @@ async fn a_ban_during_a_botarga_write_stops_it() {
     .await;
     assert_unauthenticated(&response);
     assert_eq!(rows(user).await, before);
+
+    // 021 phase 3: the choice of a draw.
+    let (user, token) = support::app::user_with_session(&pool).await;
+    let mut tx = pool.begin().await.unwrap();
+    server::botarga::store::create(&mut tx, user, catalog.starter())
+        .await
+        .unwrap();
+    // From level 1 to 5: 120 + 140 + 160 + 180.
+    server::botarga::store::grant_xp(&mut tx, &catalog, user, 600)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let draw = sqlx::query("SELECT id, options[1] FROM botarga_draws WHERE user_id = $1")
+        .bind(user)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let (id, item): (i32, String) = (draw.get(0), draw.get(1));
+    let before = rows(user).await;
+    let body = format!(r#"{{"draw_id":{id},"item_id":"{item}"}}"#);
+    let response = with_a_ban_in_between(
+        &app,
+        &pool,
+        user,
+        "POST",
+        "/api/botarga/draw/choose",
+        &token,
+        &body,
+    )
+    .await;
+    assert_unauthenticated(&response);
+    assert_eq!(rows(user).await, before);
+    let chosen: Option<String> =
+        sqlx::query_scalar("SELECT chosen FROM botarga_draws WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(chosen, None);
 }
 
 /// 021 phase 2: a ban that commits while an attack waits on the user's lock stops it, and nothing of

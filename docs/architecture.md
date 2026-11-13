@@ -4,7 +4,7 @@ type: architecture
 status: draft
 author: architect
 created: 2026-10-20
-updated: 2026-11-09
+updated: 2026-11-13
 ---
 
 # Arquitectura general
@@ -131,10 +131,11 @@ Antes de correr `grant`, revisa los proveedores vinculados en `/account`: todo l
 - **Reserva de sockets:** el último quinto de `WS_MAX_CONNECTIONS` es para cuentas fuera de carencia. La carencia solo se consulta cuando se llega a la reserva.
 - **Custodia:** `bet_stake` está atado en la base al `stake` de su apuesta (migración `20261103000000`). `refund` y `bet_payout` no; la consulta de custodia del README del server lo detecta.
 
-### Botarga del jugador (feature 021, fase 1)
+### Botarga del jugador (feature 021, fases 1 y 3)
 - **Tablas:** `botargas` (una por usuario: nivel, XP, stats gastados, estilo, ataques y accesorios equipados, cosméticos, rating) y `botarga_unlocks` (lo que el usuario tiene). Nace en la transacción del login que crea al usuario, con la build inicial de `Catalog::starter`; la migración no recorre `users`.
 - **Catálogo:** `content/catalog/` va embebido en el binario (`include_bytes!`, como `content/names`) y se valida al arrancar contra el ruleset v2. Con un catálogo inválido el server no arranca (`botarga.catalog_invalid`).
 - **Rutas** (privadas, `private, no-store` y `Vary: Cookie`): `GET /api/botarga` (404 `botarga.not_created` sin fila; nunca escribe), `POST /api/botarga` (la crea si falta, idempotente) y `PUT /api/botarga/build`. La build se valida en el borde: tamaños, ids que estén en `botarga_unlocks` y en el catálogo, y `engine::loadout::resolve` con v2. Un rechazo es un código `botarga.*`, nunca texto. Las dos escrituras bloquean al usuario si no está baneado, con `lock_timeout` de 1 s. Ninguna ruta recibe un id de usuario: siempre es el de la sesión.
+- **Niveles y sorteos (fase 3):** la XP de una pelea PvP se suma a las dos botargas en la misma transacción de la pelea; `botargas.xp` es la XP dentro del nivel (0 en el 100). Cada nivel múltiplo de 5 escribe su fila en `botarga_draws` con 1 a 3 opciones sacadas con `OsRng` entre lo que el usuario no tiene ni le ofrece otro sorteo pendiente (ataques del tier de su nivel o menor; sin ninguno, códigos de clip). Un sorteo solo cambia una vez, de `chosen` nulo a una de sus opciones (`TA012`), y nunca se borra. `POST /api/botarga/draw/choose` lo elige, desbloquea lo elegido con fuente `draw` y equipa el ataque si hay una ranura libre y la build sigue resolviendo; la misma opción otra vez responde igual, otra da 409.
 
 ### Peleas PvP (feature 021, fase 2)
 - **Tablas:** `pvp_fights` (una fila por ataque, entera desde el insert e inmutable, `TA011`; con `spec_a`, `spec_b`, `seed`, `log` y `ruleset_version` en claro, porque en el PvP no hay ventana de apuestas) y `pvp_daily` (los ataques de cada usuario en cada día UTC). `users.last_seen_at` lo refresca el toque de la sesión una vez al día con `SKIP LOCKED`, para preferir defensores activos sin unir `sessions`.

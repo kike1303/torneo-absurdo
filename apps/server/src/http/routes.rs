@@ -95,6 +95,7 @@ pub enum Handler {
     Botarga,
     BotargaCreate,
     BotargaBuild,
+    BotargaDrawChoose,
     PvpFightCreate,
     PvpFights,
     PvpFightDetail,
@@ -305,6 +306,12 @@ pub const ROUTES: &[RouteSpec] = &[
     },
     RouteSpec {
         method: RouteMethod::Post,
+        path: "/api/botarga/draw/choose",
+        effect: Effect::Mutate,
+        handler: Handler::BotargaDrawChoose,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
         path: "/api/pvp/fights",
         effect: Effect::Mutate,
         handler: Handler::PvpFightCreate,
@@ -450,6 +457,8 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         // second gives 422 `botarga.invalid_request`.
         Handler::BotargaCreate => on(filter, crate::botarga::api::create).layer(body),
         Handler::BotargaBuild => on(filter, crate::botarga::api::put_build).layer(body),
+        // 021 phase 3: over `MAX_FORM_BYTES`, 422 `botarga.invalid_request`.
+        Handler::BotargaDrawChoose => on(filter, crate::botarga::api::choose_draw).layer(body),
         // 021: over `MAX_FORM_BYTES`, 422 `pvp.invalid_request`. The list is private; the detail
         // is public, with the limit and the cache of the tournament fights.
         Handler::PvpFightCreate => on(filter, crate::pvp::api::create).layer(body),

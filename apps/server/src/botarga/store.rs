@@ -4,13 +4,14 @@
 use engine::loadout::{budget, slots};
 use protocol::{
     BotargaBuild, BotargaDaily, BotargaProgress, BotargaStats, BotargaUnlocks, BotargaView,
-    FighterCosmetics, IdleClip, VictoryClip,
+    DrawKind, FighterCosmetics, IdleClip, PendingDraw, VictoryClip,
 };
 use sqlx::postgres::PgRow;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
-use super::{Starter, xp_to_next};
+use super::levels::{self, Gain};
+use super::{BotargaCatalog, Starter, xp_to_next};
 
 /// A row that a `CHECK` of the table forbids, so only someone with the credential can have written
 /// it. Its own error, so it is not taken for a failure of the protocol of the database.
@@ -156,6 +157,8 @@ fn decode(row: &PgRow) -> Result<BotargaView, sqlx::Error> {
             accessories: row.try_get(17)?,
             cosmetics: row.try_get(18)?,
         },
+        // Filled by [`with_draws`].
+        draws: Vec::new(),
         body_type: row.try_get(12)?,
         face_id: row.try_get(13)?,
         rating: u16::try_from(row.try_get::<i32, _>(14)?).map_err(|_| bad())?,
@@ -175,7 +178,7 @@ pub async fn view(
         .bind(user_id)
         .fetch_optional(&mut *conn)
         .await?;
-    row.as_ref().map(decode).transpose()
+    with_draws(conn, user_id, row.as_ref().map(decode).transpose()?).await
 }
 
 /// Like [`view`], with the row of `botargas` locked `FOR UPDATE` until the transaction ends.
@@ -190,7 +193,219 @@ pub async fn view_locked(
         .bind(user_id)
         .fetch_optional(&mut *tx)
         .await?;
-    row.as_ref().map(decode).transpose()
+    with_draws(tx, user_id, row.as_ref().map(decode).transpose()?).await
+}
+
+const fn kind_code(kind: DrawKind) -> &'static str {
+    match kind {
+        DrawKind::Ability => "ability",
+        DrawKind::Cosmetic => "cosmetic",
+    }
+}
+
+fn kind_of(code: &str) -> Result<DrawKind, sqlx::Error> {
+    match code {
+        "ability" => Ok(DrawKind::Ability),
+        "cosmetic" => Ok(DrawKind::Cosmetic),
+        _ => Err(bad()),
+    }
+}
+
+/// `view` with the pending draws of `user_id`, the oldest first.
+async fn with_draws(
+    conn: &mut PgConnection,
+    user_id: Uuid,
+    view: Option<BotargaView>,
+) -> Result<Option<BotargaView>, sqlx::Error> {
+    let Some(mut view) = view else {
+        return Ok(None);
+    };
+    let rows = sqlx::query(
+        "SELECT id, level, kind, options FROM botarga_draws \
+         WHERE user_id = $1 AND chosen IS NULL ORDER BY id",
+    )
+    .bind(user_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    for row in &rows {
+        view.draws.push(PendingDraw {
+            id: u32::try_from(row.try_get::<i32, _>(0)?).map_err(|_| bad())?,
+            level: u8::try_from(row.try_get::<i16, _>(1)?).map_err(|_| bad())?,
+            kind: kind_of(row.try_get(2)?)?,
+            options: row.try_get(3)?,
+        });
+    }
+    Ok(Some(view))
+}
+
+/// Adds `xp` to the botarga of `user_id`, inside the transaction of a fight: the levels it crosses
+/// and, for each one that draws, its draw with the options already taken (021 "Niveles y sorteo").
+/// The caller holds the row of `botargas` locked. Nothing happens without a botarga or with 0 XP.
+///
+/// # Errors
+/// The database error, or `Protocol("os_rng")` without entropy: the fight is not written without
+/// its draw.
+pub async fn grant_xp(
+    tx: &mut PgConnection,
+    catalog: &BotargaCatalog,
+    user_id: Uuid,
+    xp: u32,
+) -> Result<(), sqlx::Error> {
+    if xp == 0 {
+        return Ok(());
+    }
+    let Some(row) = sqlx::query("SELECT level, xp FROM botargas WHERE user_id = $1 FOR UPDATE")
+        .bind(user_id)
+        .fetch_optional(&mut *tx)
+        .await?
+    else {
+        return Ok(());
+    };
+    let level = u8::try_from(row.try_get::<i16, _>(0)?).map_err(|_| bad())?;
+    let current = u32::try_from(row.try_get::<i32, _>(1)?).map_err(|_| bad())?;
+    let Gain {
+        level: new_level,
+        xp: new_xp,
+        draw_levels,
+    } = levels::gain(level, current, xp);
+    sqlx::query("UPDATE botargas SET level = $2, xp = $3, updated_at = now() WHERE user_id = $1")
+        .bind(user_id)
+        .bind(i16::from(new_level))
+        .bind(i32::try_from(new_xp).map_err(|_| bad())?)
+        .execute(&mut *tx)
+        .await?;
+    for draw_level in draw_levels {
+        draw(tx, catalog, user_id, draw_level).await?;
+    }
+    Ok(())
+}
+
+/// What `user_id` cannot be offered in a draw of `kind`: what they own and what a pending draw
+/// already offers.
+async fn taken(
+    tx: &mut PgConnection,
+    user_id: Uuid,
+    kind: DrawKind,
+) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT item_id FROM botarga_unlocks WHERE user_id = $1 AND kind = $2 \
+         UNION SELECT unnest(options) FROM botarga_draws \
+         WHERE user_id = $1 AND kind = $2 AND chosen IS NULL",
+    )
+    .bind(user_id)
+    .bind(kind_code(kind))
+    .fetch_all(&mut *tx)
+    .await
+}
+
+/// The draw of `level`: attacks of its tiers, or clip codes once none is left; with neither, no
+/// draw. A level draws once (`botarga_draws_level_uq`).
+async fn draw(
+    tx: &mut PgConnection,
+    catalog: &BotargaCatalog,
+    user_id: Uuid,
+    level: u8,
+) -> Result<(), sqlx::Error> {
+    let entropy = || sqlx::Error::Protocol("os_rng".to_owned());
+    let taken_abilities = taken(tx, user_id, DrawKind::Ability).await?;
+    let abilities: Vec<String> = catalog
+        .drawable_abilities(level)
+        .into_iter()
+        .filter(|id| !taken_abilities.iter().any(|t| t == id))
+        .map(str::to_owned)
+        .collect();
+    let (kind, pool) = if abilities.is_empty() {
+        let taken_cosmetics = taken(tx, user_id, DrawKind::Cosmetic).await?;
+        let cosmetics: Vec<String> = IdleClip::ALL
+            .iter()
+            .map(|clip| clip.as_str())
+            .chain(VictoryClip::ALL.iter().map(|clip| clip.as_str()))
+            .filter(|code| !taken_cosmetics.iter().any(|t| t == code))
+            .map(str::to_owned)
+            .collect();
+        (DrawKind::Cosmetic, cosmetics)
+    } else {
+        (DrawKind::Ability, abilities)
+    };
+    let options = levels::pick(pool, crate::pvp::uniform).ok_or_else(entropy)?;
+    if options.is_empty() {
+        return Ok(());
+    }
+    sqlx::query(
+        "INSERT INTO botarga_draws (user_id, level, kind, options) VALUES ($1, $2, $3, $4) \
+         ON CONFLICT (user_id, level) DO NOTHING",
+    )
+    .bind(user_id)
+    .bind(i16::from(level))
+    .bind(kind_code(kind))
+    .bind(&options)
+    .execute(&mut *tx)
+    .await?;
+    Ok(())
+}
+
+/// What [`choose`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Choice {
+    /// Chosen now: the item is unlocked.
+    Chosen(DrawKind),
+    /// Chosen before, with the same item: nothing changes.
+    Same,
+    /// Chosen before, with another item.
+    Other,
+    /// The item is not an option of the draw.
+    NotAnOption,
+    /// No draw of `user_id` with that id.
+    NotFound,
+}
+
+/// Chooses `item_id` in draw `draw_id` of `user_id`, and unlocks it with source `draw`. The draw is
+/// locked until the transaction ends, so two choices at once are one after the other.
+///
+/// # Errors
+/// The database error.
+pub async fn choose(
+    tx: &mut PgConnection,
+    user_id: Uuid,
+    draw_id: i32,
+    item_id: &str,
+) -> Result<Choice, sqlx::Error> {
+    let Some(row) = sqlx::query(
+        "SELECT kind, options, chosen FROM botarga_draws WHERE id = $1 AND user_id = $2 FOR UPDATE",
+    )
+    .bind(draw_id)
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    else {
+        return Ok(Choice::NotFound);
+    };
+    let kind = kind_of(row.try_get(0)?)?;
+    let options: Vec<String> = row.try_get(1)?;
+    let chosen: Option<String> = row.try_get(2)?;
+    match chosen {
+        Some(chosen) if chosen == item_id => return Ok(Choice::Same),
+        Some(_) => return Ok(Choice::Other),
+        None => {}
+    }
+    if !options.iter().any(|option| option == item_id) {
+        return Ok(Choice::NotAnOption);
+    }
+    sqlx::query("UPDATE botarga_draws SET chosen = $2, chosen_at = now() WHERE id = $1")
+        .bind(draw_id)
+        .bind(item_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "INSERT INTO botarga_unlocks (user_id, kind, item_id, source) VALUES ($1, $2, $3, 'draw') \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(user_id)
+    .bind(kind_code(kind))
+    .bind(item_id)
+    .execute(&mut *tx)
+    .await?;
+    Ok(Choice::Chosen(kind))
 }
 
 /// Writes a build that [`super::build::check`] accepted. `false`: the user has no botarga.

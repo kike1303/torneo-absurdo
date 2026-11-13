@@ -100,6 +100,7 @@ fn starter_view() -> Value {
             "daily": {"attacks": 0, "factor_pct": 100},
         },
         "unlocks": {"abilities": ["foam_headbutt"], "accessories": [], "cosmetics": []},
+        "draws": [],
         "body_type": "normal",
         "face_id": "rookie",
         "rating": 1000,

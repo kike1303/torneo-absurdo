@@ -19,4 +19,7 @@ export type BotargaErrorCode =
   | 'botarga.accessory_slot_duplicate'
   | 'botarga.accessory_stat_total'
   | 'botarga.build_invalid'
-  | 'botarga.unavailable';
+  | 'botarga.unavailable'
+  | 'botarga.draw_not_found'
+  | 'botarga.draw_already_chosen'
+  | 'botarga.draw_option_invalid';

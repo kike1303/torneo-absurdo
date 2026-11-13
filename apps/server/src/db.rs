@@ -62,6 +62,8 @@ pub fn error_kind(error: &sqlx::Error) -> &'static str {
             "TA009" => return "season_guard",
             // `admin_audit_season_review_guard` (020, phase B).
             "TA010" => return "season_review_guard",
+            // `botarga_draws_guard` (021, phase 3).
+            "TA012" => return "botarga_draw_guard",
             // `SET LOCAL lock_timeout` of the fight transitions (010 RF8).
             "55P03" => return "lock_timeout",
             // A row that a foreign key needs was deleted meanwhile: a login whose identity an

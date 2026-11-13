@@ -138,14 +138,46 @@ pub struct BotargaUnlocks {
     pub cosmetics: Vec<String>,
 }
 
-/// `GET /api/botarga`, and the answer of `POST /api/botarga` and `PUT /api/botarga/build`: the
-/// botarga of the session's user.
+/// What a draw offers: attacks of the catalog, or clip codes once no attack of the tiers of the
+/// level is left (016 "Sorteo de ataques").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(rename_all = "snake_case")]
+pub enum DrawKind {
+    Ability,
+    Cosmetic,
+}
+
+/// A draw of a level not chosen yet: from 1 to 3 options, always the same ones until one is
+/// chosen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct PendingDraw {
+    pub id: u32,
+    pub level: u8,
+    pub kind: DrawKind,
+    pub options: Vec<String>,
+}
+
+/// The body of `POST /api/botarga/draw/choose`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(deny_unknown_fields)]
+pub struct BotargaDrawChoice {
+    pub draw_id: u32,
+    pub item_id: String,
+}
+
+/// `GET /api/botarga`, and the answer of `POST /api/botarga`, `PUT /api/botarga/build` and
+/// `POST /api/botarga/draw/choose`: the botarga of the session's user. `draws` are the pending
+/// ones, the oldest first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct BotargaView {
     pub build: BotargaBuild,
     pub progress: BotargaProgress,
     pub unlocks: BotargaUnlocks,
+    pub draws: Vec<PendingDraw>,
     pub body_type: String,
     pub face_id: String,
     pub rating: u16,
@@ -201,6 +233,12 @@ mod tests {
                 accessories: Vec::new(),
                 cosmetics: Vec::new(),
             },
+            draws: vec![PendingDraw {
+                id: 7,
+                level: 5,
+                kind: DrawKind::Ability,
+                options: vec!["a".to_owned(), "b".to_owned()],
+            }],
             body_type: "normal".to_owned(),
             face_id: "rookie".to_owned(),
             rating: 1000,
@@ -211,6 +249,7 @@ mod tests {
                 r#"{{"build":{},"progress":{{"level":1,"xp":0,"xp_to_next":120,"budget_free":0,"#,
                 r#""slots_open":1,"daily":{{"attacks":0,"factor_pct":100}}}},"#,
                 r#""unlocks":{{"abilities":["foam_headbutt"],"accessories":[],"cosmetics":[]}},"#,
+                r#""draws":[{{"id":7,"level":5,"kind":"ability","options":["a","b"]}}],"#,
                 r#""body_type":"normal","face_id":"rookie","rating":1000,"rated_fights":0}}"#,
             ),
             BUILD_JSON
@@ -238,6 +277,33 @@ mod tests {
         ] {
             assert!(serde_json::from_str::<BotargaBuild>(&bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_draw_choice_refuses_what_it_does_not_know() {
+        let json = r#"{"draw_id":3,"item_id":"x"}"#;
+        assert_eq!(
+            serde_json::from_str::<BotargaDrawChoice>(json).unwrap(),
+            BotargaDrawChoice {
+                draw_id: 3,
+                item_id: "x".to_owned()
+            }
+        );
+        for bad in [
+            r#"{"draw_id":3,"item_id":"x","user_id":"u"}"#,
+            r#"{"draw_id":-1,"item_id":"x"}"#,
+            r#"{"draw_id":"3","item_id":"x"}"#,
+            r#"{"item_id":"x"}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<BotargaDrawChoice>(bad).is_err(),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            serde_json::to_string(&DrawKind::Cosmetic).unwrap(),
+            r#""cosmetic""#
+        );
     }
 
     #[test]
