@@ -1,7 +1,8 @@
 //! Subcommands (plan-b decision 2, plan-c decision 10): `server` / `server serve`,
 //! `server healthcheck`, `server admin grant|revoke|ban|unban <user_id>` and `server admin
 //! [<action>] --help` (009 RF17, the only text that is not a log or a code), `server fight void`
-//! (012 RF16) and `server season farm-report|exclude|close` (020, phase B).
+//! (012 RF16), `server season farm-report|exclude|close` (020, phase B) and `server pvp
+//! farm-report|exclude` (021, phase 4).
 //! No error is ever formatted to stdout or stderr: failures become exit codes and, for `serve`
 //! and `admin`, a log line with a code (never an argument).
 
@@ -11,6 +12,7 @@ use std::process::ExitCode;
 
 use std::sync::Arc;
 
+use crate::admin::pvp::{self, PvpCommand};
 use crate::admin::season::{self, SeasonCommand};
 use crate::admin::{self, AdminCommand, AdminConfig, VoidCommand};
 use crate::app::{self, Settings, StartupError};
@@ -29,6 +31,7 @@ pub enum Command {
     AdminHelp,
     FightVoid(VoidCommand),
     Season(SeasonCommand),
+    Pvp(PvpCommand),
     Invalid,
 }
 
@@ -48,6 +51,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Command {
         }
         [first, rest @ ..] if first == "season" => {
             SeasonCommand::parse(rest).map_or(Command::Invalid, Command::Season)
+        }
+        [first, rest @ ..] if first == "pvp" => {
+            PvpCommand::parse(rest).map_or(Command::Invalid, Command::Pvp)
         }
         _ => Command::Invalid,
     }
@@ -76,6 +82,9 @@ pub enum CliError {
     /// `server season` refused, or failed before deciding (020).
     #[error("the season command did not apply")]
     Season,
+    /// `server pvp` refused, or failed before deciding (021, phase 4).
+    #[error("the pvp command did not apply")]
+    Pvp,
 }
 
 /// Exit code of each failure: 2 for a bad command line, 1 for everything else.
@@ -95,6 +104,7 @@ pub fn run_cli(command: Command) -> Result<(), CliError> {
         Command::Admin(command) => run_admin(&command),
         Command::FightVoid(command) => run_fight_void(&command),
         Command::Season(command) => run_season(&command),
+        Command::Pvp(command) => run_pvp(&command),
         Command::AdminHelp => {
             // A closed stdout changes nothing: the help has no effect to report.
             let _ = std::io::stdout().lock().write_all(admin::HELP.as_bytes());
@@ -154,6 +164,13 @@ fn run_season(command: &SeasonCommand) -> Result<(), CliError> {
     runtime
         .block_on(season::run_season(&config.database, command))
         .map_err(|_| CliError::Season)
+}
+
+fn run_pvp(command: &PvpCommand) -> Result<(), CliError> {
+    let (config, runtime) = admin_runtime()?;
+    runtime
+        .block_on(pvp::run_pvp(&config.database, command))
+        .map_err(|_| CliError::Pvp)
 }
 
 fn run_serve() -> Result<(), CliError> {
@@ -685,6 +702,125 @@ mod tests {
             assert!(!shown.contains("209912"), "{shown}");
             assert!(!shown.contains("farm_signals"), "{shown}");
             assert!(!shown.contains("FarmSignals"), "{shown}");
+            assert!(shown.contains("Exclude"), "{shown}");
+        }
+    }
+
+    fn pvp(list: &[&str]) -> PvpCommand {
+        match parse(args(list)) {
+            Command::Pvp(command) => command,
+            other => panic!("{list:?} gave {other:?}"),
+        }
+    }
+
+    /// 021, phase 4: `server pvp farm-report|exclude`, the flags in any order and none repeated.
+    #[test]
+    fn the_forms_of_pvp() {
+        use crate::admin::pvp::PvpAction;
+        use crate::admin::season::ExcludeReason;
+        const OTHER: &str = "7e0a1b2c-3d4e-4f5a-8b6c-7d8e9f0a1b2c";
+        let user: uuid::Uuid = USER.parse().unwrap();
+        let other: uuid::Uuid = OTHER.parse().unwrap();
+        let report = pvp(&["pvp", "farm-report", "202609", "--by", USER]);
+        assert_eq!((report.season, report.by), (202_609, user));
+        assert!(report.action == PvpAction::FarmReport);
+        for list in [
+            [
+                "pvp",
+                "exclude",
+                "202612",
+                OTHER,
+                "--by",
+                USER,
+                "--reason",
+                "farm_signals",
+            ],
+            [
+                "pvp",
+                "exclude",
+                "202612",
+                OTHER,
+                "--reason",
+                "farm_signals",
+                "--by",
+                USER,
+            ],
+        ] {
+            let command = pvp(&list);
+            assert_eq!((command.season, command.by), (202_612, user));
+            assert!(
+                command.action
+                    == PvpAction::Exclude {
+                        user: other,
+                        reason: ExcludeReason::FarmSignals
+                    }
+            );
+        }
+        let upper = USER.to_uppercase();
+        for list in [
+            vec!["pvp"],
+            vec!["pvp", "farm-report"],
+            vec!["pvp", "farm-report", "202609"],
+            vec!["pvp", "farm-report", "202613", "--by", USER],
+            vec!["pvp", "farm-report", "202609", "--by", &upper],
+            vec!["pvp", "farm-report", "202609", "--by", USER, "--by", USER],
+            vec![
+                "pvp",
+                "farm-report",
+                "202609",
+                "--by",
+                USER,
+                "--reason",
+                "farm_signals",
+            ],
+            vec!["pvp", "farm-report", "202609", "--by", USER, "extra"],
+            vec!["pvp", "close", "202609", "--by", USER],
+            vec!["pvp", "exclude", "202609", OTHER, "--by", USER],
+            vec![
+                "pvp",
+                "exclude",
+                "202609",
+                "--by",
+                USER,
+                "--reason",
+                "farm_signals",
+            ],
+            vec![
+                "pvp", "exclude", "202609", OTHER, "--by", USER, "--reason", "cheating",
+            ],
+            vec![
+                "pvp",
+                "exclude",
+                "202609",
+                OTHER,
+                "--by",
+                USER,
+                "--reason",
+                "farm_signals",
+                "--reason",
+                "farm_signals",
+            ],
+        ] {
+            assert_eq!(parse(args(&list)), Command::Invalid, "{list:?}");
+        }
+        // A8: neither the season, nor the users, nor the reason in its `Debug`.
+        let command = pvp(&[
+            "pvp",
+            "exclude",
+            "209912",
+            OTHER,
+            "--by",
+            USER,
+            "--reason",
+            "farm_signals",
+        ]);
+        for shown in [
+            format!("{command:?}"),
+            format!("{:?}", Command::Pvp(command)),
+        ] {
+            for hidden in [USER, OTHER, "209912", "farm_signals", "FarmSignals"] {
+                assert!(!shown.contains(hidden), "{shown}");
+            }
             assert!(shown.contains("Exclude"), "{shown}");
         }
     }

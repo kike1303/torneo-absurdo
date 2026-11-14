@@ -68,6 +68,8 @@ export type * from './generated/PvpFightRequest.js';
 export type * from './generated/PvpFightSummary.js';
 export type * from './generated/PvpFighter.js';
 export type * from './generated/PvpFightsPage.js';
+export type * from './generated/PvpLeaderboard.js';
+export type * from './generated/PvpLeaderboardEntry.js';
 export type * from './generated/PvpReward.js';
 export type * from './generated/PvpRole.js';
 export type * from './generated/ReauthStatus.js';

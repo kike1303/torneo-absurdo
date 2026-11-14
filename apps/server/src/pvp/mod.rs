@@ -12,6 +12,7 @@ pub mod matchmaking;
 pub mod resolve;
 pub mod rewards;
 pub mod rival;
+pub mod season;
 pub mod store;
 
 use std::path::PathBuf;

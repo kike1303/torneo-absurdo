@@ -51,7 +51,7 @@ pub enum ExcludeReason {
 }
 
 impl ExcludeReason {
-    fn parse(word: &str) -> Option<Self> {
+    pub fn parse(word: &str) -> Option<Self> {
         match word {
             "farm_signals" => Some(Self::FarmSignals),
             "shared_ip_opposite_sides" => Some(Self::SharedIpOppositeSides),

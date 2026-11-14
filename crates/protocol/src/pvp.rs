@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::botarga::BotargaProgress;
 use crate::fight::{EndReason, Side};
 use crate::fights::TimestampMs;
+use crate::seasons::SeasonView;
 
 /// The body of `POST /api/pvp/fights`: a canonical UUID the client keeps for its retries.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,7 +32,8 @@ pub enum PvpFighter {
 /// `GET /api/pvp/fights/{id}` (public) and the fight of [`PvpFightCreated`]. The attacker is always
 /// side `a`. `spec_a`, `spec_b` and `log` are the canonical JSON of the engine and `seed` is
 /// lowercase hexadecimal: the same bytes as a tournament fight, so the browser re-simulates them.
-/// `rating_delta` is the change of the attacker; the defender moves the opposite.
+/// `rating_delta` is the change of the attacker; the defender's, with its own K, is in its private
+/// [`PvpReward`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PvpFightDetail {
@@ -100,6 +102,30 @@ pub struct PvpFightCreated {
     pub fight: PvpFightDetail,
     pub reward: PvpReward,
     pub progress: BotargaProgress,
+}
+
+/// One row of the PvP leaderboard, ranked from 1: the rating of the season (live in the current one,
+/// before the soft reset in a closed one) and its rated fights.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct PvpLeaderboardEntry {
+    pub rank: u16,
+    pub display_name: String,
+    pub rating: u16,
+    pub rated_fights: u32,
+    pub wins: u32,
+    pub losses: u32,
+}
+
+/// `GET /api/pvp/leaderboard?season=` (public; 021 "Lectura"). `min_fights` is the rated fights an
+/// account needs in the season to appear. The seasons of `GET /api/pvp/seasons` are [`SeasonView`]s:
+/// the closed ones and the current one, which is never `closed`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct PvpLeaderboard {
+    pub season: SeasonView,
+    pub entries: Vec<PvpLeaderboardEntry>,
+    pub min_fights: u16,
 }
 
 #[cfg(test)]
@@ -183,6 +209,46 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn a_leaderboard_entry_names_no_user_id() {
+        let board = PvpLeaderboard {
+            season: SeasonView {
+                id: 202_611,
+                starts_at: TimestampMs::from_ms(0),
+                ends_at: TimestampMs::from_ms(1),
+                closed: false,
+            },
+            entries: vec![PvpLeaderboardEntry {
+                rank: 1,
+                display_name: "Ana".to_owned(),
+                rating: 1240,
+                rated_fights: 12,
+                wins: 9,
+                losses: 3,
+            }],
+            min_fights: 10,
+        };
+        let json = serde_json::to_value(&board).unwrap();
+        let entry = json["entries"][0].as_object().unwrap();
+        let mut keys: Vec<&str> = entry.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "display_name",
+                "losses",
+                "rank",
+                "rated_fights",
+                "rating",
+                "wins"
+            ]
+        );
+        assert_eq!(
+            serde_json::from_value::<PvpLeaderboard>(json).unwrap(),
+            board
+        );
     }
 
     #[test]

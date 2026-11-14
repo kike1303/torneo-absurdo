@@ -105,6 +105,7 @@ async fn the_port_opens_only_after_the_database_and_the_migrations() {
             20_261_111_000_000,
             20_261_112_000_000,
             20_261_113_000_000,
+            20_261_114_000_000,
         ]
     );
     assert!(rows.iter().all(|r| r.get::<bool, _>("success")));

@@ -1045,6 +1045,9 @@ fn only_the_subcommand_names_a_season_review() {
         "apps/server/src/admin/season.rs",
         "apps/server/tests/season_cli.rs",
         "apps/server/migrations/20261110000000_season_review.sql",
+        // 021 phase 4 widens `admin_audit_action_ck` with the PvP actions: it lists the action
+        // again in the same check, and writes nothing.
+        "apps/server/migrations/20261114000000_pvp_ranking.sql",
     ]
     .iter()
     .map(|p| root.join(p))
