@@ -1,5 +1,6 @@
 import type {
   BetHistoryPage,
+  BotargaView,
   FightDetail,
   FightPool,
   FightsCurrent,
@@ -8,6 +9,9 @@ import type {
   Me,
   MyFightBets,
   Provider,
+  PvpFightDetail,
+  PvpFightsPage,
+  PvpLeaderboard,
   ReauthStatus,
   SeasonView,
   VoidStats,
@@ -93,4 +97,33 @@ export function getLeaderboard(api: Api, season: number | null): Promise<ApiResu
 /** The seasons with a row, the newest first (020). */
 export function getSeasons(api: Api): Promise<ApiResult<SeasonView[]>> {
   return apiRequest<SeasonView[]>(api, 'GET', '/api/seasons');
+}
+
+/** The botarga of the session's user (021); 404 `botarga.not_created` until it has one. */
+export function getBotarga(api: Api): Promise<ApiResult<BotargaView>> {
+  return apiRequest<BotargaView>(api, 'GET', '/api/botarga');
+}
+
+/** The PvP fights of the session's user, as attacker and as defender (021). */
+export function getPvpFights(api: Api, before: number | null): Promise<ApiResult<PvpFightsPage>> {
+  const path = before === null ? '/api/pvp/fights' : `/api/pvp/fights?before=${before}`;
+  return apiRequest<PvpFightsPage>(api, 'GET', path as `/api/${string}`);
+}
+
+/** The PvP leaderboard (021): the current season without `season`. */
+export function getPvpLeaderboard(
+  api: Api,
+  season: number | null,
+): Promise<ApiResult<PvpLeaderboard>> {
+  const path = season === null ? '/api/pvp/leaderboard' : `/api/pvp/leaderboard?season=${season}`;
+  return apiRequest<PvpLeaderboard>(api, 'GET', path as `/api/${string}`);
+}
+
+export function getPvpSeasons(api: Api): Promise<ApiResult<SeasonView[]>> {
+  return apiRequest<SeasonView[]>(api, 'GET', '/api/pvp/seasons');
+}
+
+/** A player fight, public (021): who fought, for the title. The browser reads the rest itself. */
+export function getPvpFightDetail(api: Api, id: number): Promise<ApiResult<PvpFightDetail>> {
+  return apiRequest<PvpFightDetail>(api, 'GET', `/api/pvp/fights/${id}`);
 }

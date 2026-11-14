@@ -1,10 +1,15 @@
 import type {
   BetPlaced,
   BetRequest,
+  BotargaBuild,
+  BotargaDrawChoice,
+  BotargaView,
   DisplayNameRequest,
   Me,
   PreferencesRequest,
   Provider,
+  PvpFightCreated,
+  PvpFightRequest,
   Wallet,
 } from '@torneo/protocol';
 import { apiRequest, type Api, type ApiResult } from './client.js';
@@ -38,4 +43,23 @@ export function postBonusClaim(api: Api): Promise<ApiResult<Wallet>> {
 
 export function postBailoutClaim(api: Api): Promise<ApiResult<Wallet>> {
   return apiRequest<Wallet>(api, 'POST', '/api/bailout/claim');
+}
+
+/** Creates the botarga of a user who has none yet (021); 200 if it already had one. */
+export function postBotarga(api: Api): Promise<ApiResult<BotargaView>> {
+  return apiRequest<BotargaView>(api, 'POST', '/api/botarga');
+}
+
+export function putBotargaBuild(api: Api, body: BotargaBuild): Promise<ApiResult<BotargaView>> {
+  return apiRequest<BotargaView>(api, 'PUT', '/api/botarga/build', { body });
+}
+
+export function postDrawChoice(api: Api, body: BotargaDrawChoice): Promise<ApiResult<BotargaView>> {
+  return apiRequest<BotargaView>(api, 'POST', '/api/botarga/draw/choose', { body });
+}
+
+/** 201 for a new fight, 200 for a repeated `client_key` (021): both carry `PvpFightCreated`. */
+export function postPvpFight(api: Api, body: PvpFightRequest): Promise<ApiResult<PvpFightCreated>> {
+  // The fight is resolved by the engine in the request: more time than a read.
+  return apiRequest<PvpFightCreated>(api, 'POST', '/api/pvp/fights', { body, timeoutMs: 10_000 });
 }

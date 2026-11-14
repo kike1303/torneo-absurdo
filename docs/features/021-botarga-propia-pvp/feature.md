@@ -8,7 +8,7 @@ author: claude
 linear: TA-60
 depends_on: ["011", "012", "016", "020"]
 created: 2026-11-09
-updated: 2026-11-13
+updated: 2026-11-14
 ---
 
 # Botarga propia y PvP asíncrono
@@ -151,6 +151,18 @@ Ajustes de la implementación (fase 4, TA-64):
   - La señal de las monedas PvP de una cuenta que apuesta contra una del top 20 se mide aparte (TA-83).
 - El cierre corre cada hora y no cada 24 h, para que el reinicio suave no espere un día.
 
+Ajustes de la implementación (fase 5, TA-65):
+- **La botarga en 3D** de `/botarga` es el escenario del arena con una línea de tiempo de exhibición (`features/botarga/showcase.ts`): queda en pausa en su reposo y "Ver su victoria" reproduce un golpe que tumba a un sparring y su victoria. El reposo y la victoria son los que eligió (`FightStage` gana la prop `cosmetics`). El sparring lleva los del torneo.
+- **El sorteo abierto** va antes de todo, como un panel de cartas. Mientras hay uno, la build no se muestra: "Elige en el sorteo para seguir armando tu build".
+- **Buscar pelea** es un form action con un `client_key` nuevo en cada carga. Así reenviar el mismo formulario no crea una segunda pelea. La respuesta se muestra en la misma página: la repetición, la recompensa y un enlace a `/pvp/fights/{id}`.
+- **La repetición PvP** hace su propia lectura de `GET /api/pvp/fights/{id}` y la verifica con el mismo WASM que 011 (`features/pvp/verify.ts`): el log es lo que da el motor con su semilla y sus specs, y el final y los slugs coinciden. No hay sello ni snapshot que comprobar: la semilla es pública desde que la pelea existe. Los textos de "coincide" y de "más sobre esta comprobación" son propios del PvP, y el resto se comparte con 011.
+- **Los nombres de ataques y estilos** salen de `content/catalog/names.<locale>.json`, como los accesorios del arena. La UI agrupa y nombra, y el server decide todas las reglas: presupuesto, ranuras, tope por tipo y desbloqueos. El total de puntos del formulario es una ayuda.
+- **Los accesorios** no se eligen todavía en la UI: la build los conserva tal como están (TA-67).
+- **La recompensa** de "buscar pelea" y el progreso que cambió (nivel, XP y sorteo nuevo) aparecen al ver el resultado, con la misma regla de spoilers que la repetición (owner, 2026-11-14). Hasta entonces la página no vuelve a leer sus datos. Sin JavaScript, el envío del formulario recarga la página entera y los muestra al momento.
+- **`/pvp/fights`** muestra el resultado y el cambio de rating de cada pelea, también el de las defensas que el usuario no vio (owner, 2026-11-14): es su historial. Las defensas van marcadas, pero no hay "lo que pasó desde la última visita": va al [backlog](../../backlog.md).
+- **Las repeticiones PvP** usan las animaciones del torneo en los dos lados: el reposo y la victoria elegidos solo se ven en `/botarga` (TA-84).
+- **El reloj del round** de la repetición sale de los límites del ruleset de la pelea, que da el motor WASM, y no de una constante.
+
 ## Riesgos
 - **Monedas por volumen:** el `pvp_reward` sale de `issuance` y no de otro usuario, así que infla la masa. Lo acotan el escalón diario (tope duro de 10 recompensas completas por día), el tope por pareja, la carencia y el índice único por pelea; el test de conservación del ledger suma `pvp_reward` a los grants permitidos.
 - **Granjas de rating:** dos cuentas que pelean en bucle o cuentas nuevas que solo pierden contra una misma cuenta. Se mitiga con el emparejamiento (sin los últimos 3 rivales), el tope de 3 peleas puntuadas por pareja y día, el K propio de cada lado (bajo tras 30 peleas) y las señales de `farm-report`; la sanción es manual, como en 020.
@@ -170,5 +182,5 @@ Ajustes de la implementación (fase 4, TA-64):
 - [x] Integración: sin otros usuarios, el rival es un personaje del torneo, da XP y no mueve rating.
 - [x] Integración: el sorteo nunca ofrece un ataque que el jugador tiene, repetir `choose` devuelve lo mismo, y dos niveles de golpe encolan dos sorteos.
 - [x] Conservación del ledger con `pvp_reward` incluido; `fights_no_leaks` cubre las rutas nuevas con un canario en la semilla y afirma que ningún cuerpo público ni log lleva `user_id`, `daily_index`, `coins_attacker`, `client_key` ni la semilla antes de resolverse.
-- [ ] Vitest: `verifyFight` da `match` con un `PvpFightDetail` real; el cierre de temporada aplica el reinicio suave y es idempotente.
-- [ ] e2e: onboarding → `/botarga` → buscar pelea → repetición verificada, a 375 px y escritorio, claro y oscuro.
+- [x] Vitest: la verificación PvP (`verifyPvpFight`) da `match` y cada `mismatch`; el `match` con un `PvpFightDetail` real y el WASM lo da el e2e. El cierre de temporada aplica el reinicio suave y es idempotente (integración en Rust, `tests/pvp_ranking.rs`).
+- [x] e2e: login de una cuenta nueva (su botarga nace con el usuario) → `/botarga` → guardar la build → buscar pelea → repetición verificada, también pública y sin sesión. Corre en Chromium de escritorio; a 375 px y escritorio, en claro y oscuro, deja capturas y comprueba que no hay scroll horizontal (`e2e/pvp.spec.ts`).

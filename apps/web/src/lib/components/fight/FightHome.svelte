@@ -229,6 +229,17 @@
         >
           {m.leaderboard_home_link()}
         </Button>
+        <!-- 021: the player's own botarga and its leaderboard. -->
+        <Button variant="outline" href={`/${locale}/botarga`} data-testid="fight-home-botarga">
+          {m.botarga_home_link()}
+        </Button>
+        <Button
+          variant="outline"
+          href={`/${locale}/pvp/leaderboard`}
+          data-testid="fight-home-pvp-leaderboard"
+        >
+          {m.pvp_leaderboard_home_link()}
+        </Button>
       </div>
     </div>
   </div>

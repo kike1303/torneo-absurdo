@@ -73,4 +73,5 @@ Dos monedas: la de **apuestas** (la del torneo público) y la de **torneos de am
 - ¿Cómo se ganan las monedas de torneo de amigos sin pagar?
 - ¿Los niveles tienen tope? ¿Hay temporadas que reinician el ranking?
 - ¿Se puede apostar en peleas PvP de otros?
+- ¿`/pvp/fights` marca lo que pasó desde la última visita (las defensas que el usuario no vio)? Hoy solo las marca como defensas (021, fase 5).
 - ¿Las caras se pueden recolorear (cejas y boca) o cada una trae colores fijos?
