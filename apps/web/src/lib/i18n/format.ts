@@ -12,6 +12,14 @@ export function formatInteger(n: number, locale: Locale): string {
   return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(n);
 }
 
+/** A change with its sign (`+12`, `−3`, `0`): a rating that moved (021). */
+export function formatSigned(n: number, locale: Locale): string {
+  return new Intl.NumberFormat(locale, {
+    signDisplay: 'exceptZero',
+    maximumFractionDigits: 0,
+  }).format(n);
+}
+
 /** A number with exactly `digits` decimals (frame statistics). */
 export function formatDecimal(n: number, locale: Locale, digits: number): string {
   return new Intl.NumberFormat(locale, {

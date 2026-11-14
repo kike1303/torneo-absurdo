@@ -16,6 +16,7 @@
   } from '@torneo/renderer';
   import { Button } from '#lib/components/ui/button/index.js';
   import { Skeleton } from '#lib/components/ui/skeleton/index.js';
+  import type { FighterCosmetics } from '@torneo/renderer/three';
   import type { Timeline } from '@torneo/renderer/timeline';
   import type { ArenaFighterId, PlaceholderFighterId } from '#lib/features/arena/fighters.js';
   import type { LiveSession } from '#lib/features/fight/live-session.js';
@@ -38,6 +39,8 @@
     view?: '2d' | '3d';
     /** What each side wears in 3D (022): a skin, accessories and colors. Read once, on mount. */
     looks?: LookSpecs;
+    /** The idle and the victory each side picked (016, 021); without it, the tournament ones. */
+    cosmetics?: Readonly<Partial<Record<Side, FighterCosmetics>>>;
     /** The "simulate reduced motion" switch; OR-ed with `prefers-reduced-motion`. */
     reducedMotion?: boolean;
     /** Where the paused stage starts (`?t=` on /dev/arena); it plays only on `toggle` (TA-20). */
@@ -82,6 +85,7 @@
     fighters,
     view = '3d',
     looks,
+    cosmetics,
     reducedMotion = false,
     initialT = 0,
     debug = false,
@@ -162,7 +166,11 @@
       loadBotargaModel(looks, () => renderer),
     ]);
     return {
-      create: (container, options) => three.createRenderer3d(container, { ...options, model }),
+      create: (container, options) =>
+        three.createRenderer3d(container, {
+          ...options,
+          model: cosmetics === undefined ? model : { ...model, cosmetics },
+        }),
       isValid: (timeline) => timelines.validateTimeline(timeline).ok,
     };
   }
