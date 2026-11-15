@@ -23,6 +23,27 @@ const NUMBER_FONT_RATIO = 0.07;
 
 export const cssColor = (hex: number): string => `#${hex.toString(16).padStart(6, '0')}`;
 
+/**
+ * The halo of a damage number, in the background color of the arena (TA-36): the number reads over
+ * any fighter, dark or light, in both themes. Eight offsets of 0.06 em and a soft blur, as an
+ * outline that `text-shadow` can draw in every browser.
+ */
+export function numberHalo(background: number): string {
+  const c = cssColor(background);
+  const d = '0.06em';
+  const offsets = [
+    [d, '0'],
+    [`-${d}`, '0'],
+    ['0', d],
+    ['0', `-${d}`],
+    [d, d],
+    [`-${d}`, d],
+    [d, `-${d}`],
+    [`-${d}`, `-${d}`],
+  ];
+  return [...offsets.map(([x, y]) => `${x} ${y} 0 ${c}`), `0 0 0.15em ${c}`].join(', ');
+}
+
 function colorOf(theme: RendererTheme, role: ColorRole): string {
   return cssColor(theme.colors[role]);
 }
@@ -116,7 +137,10 @@ export function createOverlay(
     // The bell is not a blow: no crit color (005 spec P1).
     banners.time.style.color = colorOf(current, 'text');
     for (const code of BANNERS) banners[code].style.fontFamily = current.fonts.display;
-    for (const el of numberEls) el.style.fontFamily = current.fonts.display;
+    for (const el of numberEls) {
+      el.style.fontFamily = current.fonts.display;
+      el.style.textShadow = numberHalo(current.colors.bg);
+    }
   };
   paint();
 
