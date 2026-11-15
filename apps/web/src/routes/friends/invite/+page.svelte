@@ -5,6 +5,8 @@
   // waits for a click on "accept": it never accepts on its own.
   import { onMount, tick } from 'svelte';
   import { enhance } from '$app/forms';
+  import { replaceState } from '$app/navigation';
+  import { page } from '$app/state';
   import * as Alert from '#lib/components/ui/alert/index.js';
   import { Button } from '#lib/components/ui/button/index.js';
   import { resolveApiError } from '#lib/features/auth/error-text.js';
@@ -27,6 +29,17 @@
     } catch {
       code = fromHash;
     }
+    // Out of the address bar and the history once kept: a shared screen or a synced history must
+    // not show it.
+    if (fromHash !== null) {
+      void tick().then(() => {
+        try {
+          replaceState(window.location.pathname + window.location.search, page.state);
+        } catch {
+          // The router is not ready: the fragment stays, as it came.
+        }
+      });
+    }
   });
 
   const errorText = $derived(form?.code === undefined ? null : m[resolveApiError(form.code)]());
@@ -47,7 +60,15 @@
     }
   }
   $effect(() => {
-    if (accepted || form?.code === 'friends.invite_not_found') forget();
+    // Accepted, or refused for good (no such invite, or friends already): another account in this
+    // tab must not find it. A busy or limited answer keeps it for a retry.
+    if (
+      accepted ||
+      form?.code === 'friends.invite_not_found' ||
+      form?.code === 'friends.already_friends'
+    ) {
+      forget();
+    }
   });
 
   // The preview is asked once per code, as soon as the reader can accept.

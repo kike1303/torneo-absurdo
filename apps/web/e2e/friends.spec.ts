@@ -67,6 +67,10 @@ test('friends: an invite by link, a challenge and its private replay', async ({
   await waitForHydration(guestPage);
   const invitePage = guestPage.getByTestId('friend-invite-page');
   await expect(invitePage).toHaveAttribute('data-state', 'anonymous');
+  // The code is kept in the tab and out of the address bar.
+  await expect(guestPage).toHaveURL(
+    (url) => url.pathname === '/es/friends/invite' && url.hash === '',
+  );
   await expect(invitePage).not.toContainText(hostName);
   await expect(guestPage.getByTestId('friend-invite-login')).toHaveAttribute(
     'href',
