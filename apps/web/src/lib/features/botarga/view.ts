@@ -1,14 +1,18 @@
 import type { BotargaView, PendingDraw } from '@torneo/protocol';
 import type { Locale } from '#lib/i18n/locale.js';
 import {
+  ACCESSORY_SLOTS,
   STAT_KEYS,
   STAT_MIN,
   STYLE_IDS,
   ability,
   abilityName,
+  accessory,
+  accessoryName,
   clipNumber,
   styleName,
   type AbilityKind,
+  type AccessorySlot,
   type StatKey,
 } from './catalog.js';
 
@@ -34,6 +38,35 @@ export interface BuildChoices {
   }[];
   readonly idles: readonly ClipLabel[];
   readonly victories: readonly ClipLabel[];
+  /** The wardrobe: per slot, the accessories the user owns, with what each moves. */
+  readonly wardrobe: readonly WardrobeSlot[];
+}
+
+export interface WardrobeOption {
+  readonly id: string;
+  readonly name: string;
+  /** The stats it moves, in the order of the stats: zero-sum. */
+  readonly deltas: readonly { readonly stat: StatKey; readonly delta: number }[];
+}
+
+export interface WardrobeSlot {
+  readonly slot: AccessorySlot;
+  readonly options: readonly WardrobeOption[];
+}
+
+function wardrobe(owned: readonly string[], locale: Locale): WardrobeSlot[] {
+  return ACCESSORY_SLOTS.map((slot) => ({
+    slot,
+    options: owned.flatMap((id): WardrobeOption[] => {
+      const item = accessory(id);
+      if (item === null || item.slot !== slot) return [];
+      const deltas = STAT_KEYS.flatMap((stat) => {
+        const delta = item.deltas[stat] ?? 0;
+        return delta === 0 ? [] : [{ stat, delta }];
+      });
+      return [{ id, name: accessoryName(id, locale), deltas }];
+    }),
+  }));
 }
 
 function clipLabel(code: string): ClipLabel | null {
@@ -61,6 +94,7 @@ export function buildChoices(botarga: BotargaView, locale: Locale): BuildChoices
     })),
     idles: clips(botarga.unlocks.cosmetics, 'idle'),
     victories: clips(botarga.unlocks.cosmetics, 'win'),
+    wardrobe: wardrobe(botarga.unlocks.accessories, locale),
   };
 }
 

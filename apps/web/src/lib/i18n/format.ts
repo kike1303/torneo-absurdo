@@ -12,6 +12,11 @@ export function formatInteger(n: number, locale: Locale): string {
   return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(n);
 }
 
+/** A short list in the locale's way ("a, b y c"): the effects of an accessory (021). */
+export function formatList(items: readonly string[], locale: Locale): string {
+  return new Intl.ListFormat(locale, { style: 'narrow', type: 'unit' }).format(items);
+}
+
 /** A change with its sign (`+12`, `−3`, `0`): a rating that moved (021). */
 export function formatSigned(n: number, locale: Locale): string {
   return new Intl.NumberFormat(locale, {

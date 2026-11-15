@@ -38,7 +38,8 @@ export function parseBuildForm(form: FormData): BotargaBuild | null {
   }
   const style = text(form, 'style_id');
   const abilities = texts(form, 'ability');
-  const accessories = texts(form, 'accessory');
+  // A slot left on "none" sends an empty value.
+  const accessories = texts(form, 'accessory')?.filter((id) => id !== '') ?? null;
   if (style === null || !isId(style) || abilities === null || accessories === null) return null;
   if (abilities.length > MAX_ABILITIES || accessories.length > MAX_ACCESSORIES) return null;
   if (![...abilities, ...accessories].every(isId)) return null;

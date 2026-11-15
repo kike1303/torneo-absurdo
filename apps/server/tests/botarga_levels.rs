@@ -379,6 +379,103 @@ async fn the_last_level_keeps_no_xp_and_every_draw_offers_something_new() {
     assert_eq!(levels.len(), 20);
 }
 
+/// 016 "Cada 10": each level that is a multiple of 10 unlocks one cosmetic the user does not own,
+/// with source `level`: an accessory of the tiers of the level, or a clip. Never one it owns.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn every_tenth_level_unlocks_a_cosmetic_the_user_does_not_own() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let (user, token) = user_with_botarga(app.addr, &pool).await;
+    let catalog = BotargaCatalog::embedded().unwrap();
+    let rewards = || async {
+        sqlx::query_as::<_, (String, String)>(
+            "SELECT kind, item_id FROM botarga_unlocks WHERE user_id = $1 AND source = 'level' \
+             ORDER BY unlocked_at, kind, item_id",
+        )
+        .bind(user)
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+    };
+    grant(&pool, user, xp_between(1, 9)).await;
+    assert!(rewards().await.is_empty(), "nothing before level 10");
+    grant(&pool, user, xp_between(9, 10)).await;
+    let first = rewards().await;
+    assert_eq!(first.len(), 1);
+    let (kind, item) = &first[0];
+    match kind.as_str() {
+        "accessory" => assert!(
+            catalog.rewardable_accessories(10).contains(&item.as_str()),
+            "{item}: tier 1 only"
+        ),
+        "cosmetic" => assert!(
+            item.starts_with("idle") || item.starts_with("win_"),
+            "{item}"
+        ),
+        other => panic!("{other}"),
+    }
+    // It shows in the inventory of the botarga at once, never equipped by itself.
+    let v = view(app.addr, &token).await;
+    let field = if kind == "accessory" {
+        "accessories"
+    } else {
+        "cosmetics"
+    };
+    assert!(strings(&v["unlocks"][field]).contains(item));
+    assert_eq!(v["build"]["accessories"], json!([]));
+    // All the way: one per tenth level, all different.
+    grant(&pool, user, u32::MAX).await;
+    let all = rewards().await;
+    assert_eq!(all.len(), 10);
+    assert_eq!(all.iter().collect::<HashSet<_>>().len(), 10);
+}
+
+/// A reward never takes an option of the draw that is open: choosing it later would give nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_reward_leaves_the_open_draw_alone() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let (user, token) = user_with_botarga(app.addr, &pool).await;
+    let catalog = BotargaCatalog::embedded().unwrap();
+    // Every attack owned, and every accessory of tier 1: the draw of level 5 offers clips, and so
+    // would the reward of level 10.
+    for (kind, ids) in [
+        ("ability", catalog.drawable_abilities(100)),
+        ("accessory", catalog.rewardable_accessories(100)),
+    ] {
+        for id in ids {
+            sqlx::query(
+                "INSERT INTO botarga_unlocks (user_id, kind, item_id, source) \
+                 VALUES ($1, $2, $3, 'draw') ON CONFLICT DO NOTHING",
+            )
+            .bind(user)
+            .bind(kind)
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    }
+    grant(&pool, user, xp_between(1, 5)).await;
+    let open = strings(&view(app.addr, &token).await["draws"][0]["options"]);
+    assert!(!open.is_empty());
+    grant(&pool, user, xp_between(5, 10)).await;
+    let rewarded: Vec<String> = sqlx::query_scalar(
+        "SELECT item_id FROM botarga_unlocks WHERE user_id = $1 AND source = 'level'",
+    )
+    .bind(user)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rewarded.len(), 1);
+    assert!(!open.contains(&rewarded[0]), "{rewarded:?} in {open:?}");
+    // The draw that was open is still the same one.
+    assert_eq!(
+        strings(&view(app.addr, &token).await["draws"][0]["options"]),
+        open
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_database_guards_the_draws_and_the_xp() {
     let db = TestDb::create().await;

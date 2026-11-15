@@ -59,6 +59,7 @@ fn canonical_key(text: &str) -> Option<Uuid> {
 struct Opponent {
     spec: CharacterSpec,
     defender: Option<Uuid>,
+    look: Option<protocol::PvpLook>,
     rival: Rival,
 }
 
@@ -171,6 +172,7 @@ async fn search(
             Opponent {
                 spec: defender.spec,
                 defender: Some(defender.user_id),
+                look: Some(defender.look),
                 rival: Rival::Player {
                     counts: !probation && !defender.probation && pair_open,
                     pair_open,
@@ -198,6 +200,7 @@ async fn search(
             Opponent {
                 spec,
                 defender: None,
+                look: None,
                 rival: Rival::Tournament,
             }
         }
@@ -237,6 +240,8 @@ async fn search(
             end_reason: fight.end_reason,
             rewards: &rewards,
             daily_index,
+            look_a: &botarga::look_of(&me.build),
+            look_b: opponent.look.as_ref(),
         },
     )
     .await?;

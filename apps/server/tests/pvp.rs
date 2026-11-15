@@ -249,6 +249,8 @@ fn assert_public(detail: &Value, users: &[Uuid], keys: &[String]) {
             "end_reason",
             "id",
             "log",
+            "look_a",
+            "look_b",
             "rating_delta",
             "ruleset_version",
             "seed",
@@ -407,6 +409,10 @@ async fn an_attack_between_two_users_is_resolved_paid_by_entry_and_public() {
     assert_eq!(detail.header("cache-control"), Some("no-store"));
     let detail = body(&detail);
     assert_public(&detail, &[a, b], &keys);
+    // What each wore (TA-67): the build of a new botarga, with the tournament animations.
+    let plain = serde_json::json!({"idle": null, "victory": null, "accessories": []});
+    assert_eq!(detail["look_a"], plain);
+    assert_eq!(detail["look_b"], plain);
     assert_replays(&detail);
 
     // The lists of both sides, as each one lived it.
@@ -688,6 +694,9 @@ async fn without_other_users_the_rival_is_a_character_of_the_tournament() {
         // XP only (TA-62), never rating nor coins.
         assert_eq!(created["reward"]["coins"], 0);
         assert_eq!(created["reward"]["rating_delta"], 0);
+        // The character of the tournament wears its own look: none is published for it (TA-67).
+        assert_eq!(created["fight"]["look_b"], Value::Null);
+        assert!(created["fight"]["look_a"].is_object());
         assert_replays(&created["fight"]);
         // Scaled to the level of the attacker: the budget and the slots of level 1.
         let spec: CharacterSpec =

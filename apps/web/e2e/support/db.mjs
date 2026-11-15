@@ -211,6 +211,26 @@ export async function seedOauthAccount(identity, provider, url = process.env.E2E
 }
 
 /**
+ * Unlocks an accessory for the botarga of a `dev` identity, as the reward of its level 10 would
+ * (021, TA-67): the e2e has no time to level a botarga up.
+ * @param {string} identity
+ * @param {string} accessory
+ * @param {string | undefined} [url]
+ */
+export async function seedAccessory(identity, accessory, url = process.env.E2E_DATABASE_URL) {
+  const target = assertE2eTarget(url);
+  const sql = connect(target.toString());
+  try {
+    await sql`
+      INSERT INTO botarga_unlocks (user_id, kind, item_id, source)
+      SELECT user_id, 'accessory', ${accessory}, 'level' FROM oauth_accounts
+      WHERE provider = 'dev' AND provider_user_id = ${identity}`;
+  } finally {
+    await sql.end({ timeout: 1 });
+  }
+}
+
+/**
  * Moves the authentication of every session of a `dev` identity back in time (009): the e2e has
  * no clock to wait for. Only `authenticated_at`, the column that the 10 minutes read.
  * @param {string} identity

@@ -3,7 +3,7 @@
   // read of the public detail, so what it plays and what it verifies is what the server publishes.
   import { onMount } from 'svelte';
   import PvpReplayView from '#lib/components/pvp/PvpReplayView.svelte';
-  import { pvpFighterName } from '#lib/features/pvp/fighter.js';
+  import { pvpFighterName, stageLooks } from '#lib/features/pvp/fighter.js';
   import { PvpReplayStore } from '#lib/features/pvp/replay-store.svelte.js';
   import { realDeps } from '#lib/features/replay/engine-loader.js';
   import { verdictAction } from '#lib/features/replay/verify.js';
@@ -46,6 +46,7 @@
   resultSeen={store.resultSeen}
   roundClock={store.roundClock}
   {names}
+  looks={store.detail === null ? null : stageLooks(store.detail)}
   source={store.source}
   onsnapshot={store.onSnapshot}
   onfailure={store.onStageFailure}

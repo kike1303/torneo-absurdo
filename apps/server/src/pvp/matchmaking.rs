@@ -53,6 +53,8 @@ pub struct Defender {
     pub rating: u16,
     pub rated_fights: u32,
     pub probation: bool,
+    /// What it wears in the fight.
+    pub look: protocol::PvpLook,
 }
 
 /// The rows of a step. `$1` the users left out (the attacker among them), `$2` the rating and `$3`
@@ -239,6 +241,7 @@ async fn lock(
         spec,
         rating: view.rating,
         rated_fights: view.rated_fights,
+        look: crate::botarga::look_of(&view.build),
         probation: probation(&mut *tx, id).await?,
     }))
 }

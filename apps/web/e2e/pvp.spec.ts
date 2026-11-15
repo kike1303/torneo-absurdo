@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import { seedAccessory } from './support/db.mjs';
 import { waitForHydration } from './support/hydration.js';
 import {
   expect,
@@ -47,7 +48,11 @@ test('find a fight: the replay is verified, and it shows in my fights and in pub
   await toBotarga(await rival.newPage(), identityFor(info, 'rival'), 'es');
   await rival.close();
 
+  // An accessory won at level 10 (TA-67), so the wardrobe has something to put on.
   await toBotarga(page, identityFor(info), 'es');
+  await seedAccessory(identityFor(info), 'oven_mitts');
+  await page.reload();
+  await waitForHydration(page);
   const botarga = page.getByTestId('botarga-page');
   await expect(botarga).toHaveAttribute('data-state', 'ready');
   await expect(page.getByTestId('botarga-level')).toHaveText(
@@ -59,11 +64,14 @@ test('find a fight: the replay is verified, and it shows in my fights and in pub
   });
   await expect(page.getByTestId('botarga-ability')).toHaveCount(1);
 
-  // A build saved by its form action: the server keeps the style picked.
+  // A build saved by its form action: the server keeps the style and the accessory picked, and the
+  // accessory moves its points (oven mitts: +8 attack, −8 speed).
   await page.getByLabel(text('es', 'botarga_style')).selectOption('aggressive');
+  await page.getByTestId('botarga-wear-hands').selectOption('oven_mitts');
   await press(page.getByTestId('botarga-save'));
   await expect(page.getByTestId('botarga-saved')).toHaveText(text('es', 'botarga_saved_build'));
   await expect(page.getByLabel(text('es', 'botarga_style'))).toHaveValue('aggressive');
+  await expect(page.getByTestId('botarga-wear-hands')).toHaveValue('oven_mitts');
 
   await press(page.getByTestId('pvp-search'));
   const attack = page.getByTestId('pvp-attack');
@@ -89,6 +97,12 @@ test('find a fight: the replay is verified, and it shows in my fights and in pub
     .getByRole('link', { name: text('es', 'pvp_fight_link') })
     .getAttribute('href');
   expect(link).toMatch(/^\/es\/pvp\/fights\/[1-9][0-9]*$/);
+  // What it wore travels with the fight, for the rival and the replays (TA-67, TA-84).
+  const fightId = (link ?? '').split('/').at(-1) ?? '';
+  const detail = (await (await page.request.get(`/api/pvp/fights/${fightId}`)).json()) as {
+    look_a: { accessories: string[] };
+  };
+  expect(detail.look_a.accessories).toEqual(['oven_mitts']);
   await expect(page.getByTestId('botarga-progress')).toContainText(
     text('es', 'botarga_daily', { n: '1' }),
   );

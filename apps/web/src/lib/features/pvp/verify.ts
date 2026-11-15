@@ -1,5 +1,6 @@
 import type { EndReason, PvpFightDetail, PvpFighter, Side } from '@torneo/protocol';
 import type { Verdict, VerifyCheck, VerifyDeps, VerifyEngine } from '../replay/verify.js';
+import { IDLE_CLIPS, VICTORY_CLIPS } from '../botarga/catalog.js';
 
 // What the browser proves of a player fight (021 "Lectura", 011): its log is what the engine gives
 // with its own published seed and specs. There is no commit nor snapshot to check: a player fight
@@ -22,6 +23,19 @@ function isFighter(value: unknown): value is PvpFighter {
   return false;
 }
 
+function isLook(value: unknown): boolean {
+  if (value === null) return true;
+  if (!isRecord(value)) return false;
+  const clip = (v: unknown, codes: readonly string[]) =>
+    v === null || (isText(v) && codes.includes(v));
+  return (
+    clip(value.idle, IDLE_CLIPS) &&
+    clip(value.victory, VICTORY_CLIPS) &&
+    Array.isArray(value.accessories) &&
+    value.accessories.every(isText)
+  );
+}
+
 /** The value as a `PvpFightDetail` if it has its shape; otherwise null. */
 export function parsePvpDetail(value: unknown): PvpFightDetail | null {
   if (!isRecord(value)) return null;
@@ -38,6 +52,8 @@ export function parsePvpDetail(value: unknown): PvpFightDetail | null {
     isText(value.end_reason) &&
     REASONS.includes(value.end_reason) &&
     Number.isInteger(value.rating_delta) &&
+    isLook(value.look_a) &&
+    isLook(value.look_b) &&
     isText(value.created_at);
   return shaped ? (value as unknown as PvpFightDetail) : null;
 }

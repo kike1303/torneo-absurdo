@@ -160,8 +160,15 @@ Ajustes de la implementación (fase 5, TA-65):
 - **Los accesorios** no se eligen todavía en la UI: la build los conserva tal como están (TA-67).
 - **La recompensa** de "buscar pelea" y el progreso que cambió (nivel, XP y sorteo nuevo) aparecen al ver el resultado, con la misma regla de spoilers que la repetición (owner, 2026-11-14). Hasta entonces la página no vuelve a leer sus datos. Sin JavaScript, el envío del formulario recarga la página entera y los muestra al momento.
 - **`/pvp/fights`** muestra el resultado y el cambio de rating de cada pelea, también el de las defensas que el usuario no vio (owner, 2026-11-14): es su historial. Las defensas van marcadas, pero no hay "lo que pasó desde la última visita": va al [backlog](../../backlog.md).
-- **Las repeticiones PvP** usan las animaciones del torneo en los dos lados: el reposo y la victoria elegidos solo se ven en `/botarga` (TA-84).
+- **Las repeticiones PvP** usaban las animaciones del torneo en los dos lados; desde TA-67 (TA-84) dibujan el reposo, la victoria y los accesorios de cada lado (ver "vestuario" abajo).
 - **El reloj del round** de la repetición sale de los límites del ruleset de la pelea, que da el motor WASM, y no de una constante.
+
+Ajustes de la implementación (vestuario, TA-67 y TA-84):
+- **El premio de cada 10 niveles** (016, "Cada 10") se da en la transacción que cruza el nivel. Es un cosmético que el usuario no tiene, sacado con `OsRng` entre los accesorios de los tiers del nivel y los códigos de clip de reposo y victoria. Se desbloquea al momento con fuente `level` y nunca se equipa solo. Sin nada que dar, no da nada. Los hitos de los niveles 25, 50, 75 y 100 ("un cosmético especial del tier") esperan a que haya cosméticos especiales en el catálogo.
+- **El inventario** ya viaja en `GET /api/botarga` (`unlocks`), así que no hay `GET /api/botarga/inventory`. Vestirse también es `PUT /api/botarga/build`: un accesorio por ranura, con las reglas de suma cero y de topes de `engine::loadout`.
+- **El vestuario** está dentro de la build de `/botarga`: un selector por ranura con lo que mueve cada accesorio. La vista 3D muestra lo elegido al cambiarlo, sin esperar a guardar.
+- **Lo que llevaba cada lado** se guarda con la pelea (`pvp_fights.look_a` y `look_b`: reposo, victoria y accesorios) y se publica en `PvpFightDetail`. Así el rival y las repeticiones ven la misma ropa y las mismas animaciones (TA-84). Queda fuera de lo que verifica el navegador, porque no cambia el resultado. El personaje del torneo no tiene look.
+- **Las caras y los tipos de cuerpo** no son ranuras todavía: la cara es siempre `rookie` y el cuerpo, `normal`. Llegan con las prendas en 3D (TA-66).
 
 ## Riesgos
 - **Monedas por volumen:** el `pvp_reward` sale de `issuance` y no de otro usuario, así que infla la masa. Lo acotan el escalón diario (tope duro de 10 recompensas completas por día), el tope por pareja, la carencia y el índice único por pelea; el test de conservación del ledger suma `pvp_reward` a los grants permitidos.

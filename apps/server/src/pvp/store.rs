@@ -3,8 +3,8 @@
 //! fight agree.
 
 use protocol::{
-    EndReason, PvpFightDetail, PvpFightSummary, PvpFighter, PvpFightsPage, PvpReward, PvpRole,
-    Side, TimestampMs,
+    EndReason, PvpFightDetail, PvpFightSummary, PvpFighter, PvpFightsPage, PvpLook, PvpReward,
+    PvpRole, Side, TimestampMs,
 };
 use sqlx::postgres::PgRow;
 use sqlx::{PgConnection, Row};
@@ -119,6 +119,9 @@ pub struct NewFight<'a> {
     pub end_reason: EndReason,
     pub rewards: &'a Rewards,
     pub daily_index: u16,
+    /// What each side wore (`look_b` only against a user).
+    pub look_a: &'a PvpLook,
+    pub look_b: Option<&'a PvpLook>,
 }
 
 const fn side_code(side: Side) -> &'static str {
@@ -154,6 +157,17 @@ fn reason_of(code: &str) -> Result<EndReason, sqlx::Error> {
     }
 }
 
+fn look_json(look: &PvpLook) -> Result<String, sqlx::Error> {
+    serde_json::to_string(look).map_err(|_| bad())
+}
+
+/// A look as stored, `None` without one; one that does not decode is a bad row.
+fn look_of(row: &PgRow, at: usize) -> Result<Option<PvpLook>, sqlx::Error> {
+    let text: Option<String> = row.try_get(at)?;
+    text.map(|text| serde_json::from_str(&text).map_err(|_| bad()))
+        .transpose()
+}
+
 /// Writes `fight` and returns its id. `created_at` and `season_id` are the database's.
 ///
 /// # Errors
@@ -170,9 +184,9 @@ pub async fn insert(tx: &mut PgConnection, fight: &NewFight<'_>) -> Result<i32, 
         "INSERT INTO pvp_fights (attacker_id, defender_id, defender_slug, client_key, \
          ruleset_version, spec_a, spec_b, seed, log, winner, end_reason, rating_delta, \
          xp_attacker, xp_defender, coins_attacker, daily_index, rated, defender_rating_delta, \
-         season_id, created_at) \
+         look_a, look_b, season_id, created_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, \
-         0, now()) \
+         $19::jsonb, $20::jsonb, 0, now()) \
          RETURNING id",
     )
     .bind(fight.attacker_id)
@@ -193,6 +207,8 @@ pub async fn insert(tx: &mut PgConnection, fight: &NewFight<'_>) -> Result<i32, 
     .bind(i16::try_from(fight.daily_index).map_err(|_| bad())?)
     .bind(r.rated)
     .bind(r.defender_rating_delta)
+    .bind(look_json(fight.look_a)?)
+    .bind(fight.look_b.map(look_json).transpose()?)
     .fetch_one(&mut *tx)
     .await
 }
@@ -269,6 +285,8 @@ fn detail_of(row: &PgRow) -> Result<PvpFightDetail, sqlx::Error> {
         winner: side_of(row.try_get(4)?)?,
         end_reason: reason_of(row.try_get(5)?)?,
         rating_delta: row.try_get(6)?,
+        look_a: look_of(row, 13)?,
+        look_b: look_of(row, 14)?,
         created_at: TimestampMs::from_ms(row.try_get(7)?),
     })
 }
@@ -282,7 +300,7 @@ pub async fn detail(
     id: i32,
 ) -> Result<Option<PvpFightDetail>, sqlx::Error> {
     let row = sqlx::query(fight_sql!(
-        ", f.spec_a, f.spec_b, f.seed, f.log, f.ruleset_version",
+        ", f.spec_a, f.spec_b, f.seed, f.log, f.ruleset_version, f.look_a::text, f.look_b::text",
         " WHERE f.id = $1"
     ))
     .bind(id)

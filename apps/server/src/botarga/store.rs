@@ -277,6 +277,7 @@ pub async fn grant_xp(
         level: new_level,
         xp: new_xp,
         draw_levels,
+        reward_levels,
     } = levels::gain(level, current, xp);
     sqlx::query("UPDATE botargas SET level = $2, xp = $3, updated_at = now() WHERE user_id = $1")
         .bind(user_id)
@@ -284,6 +285,9 @@ pub async fn grant_xp(
         .bind(i32::try_from(new_xp).map_err(|_| bad())?)
         .execute(&mut *tx)
         .await?;
+    for reward_level in reward_levels {
+        reward(tx, catalog, user_id, reward_level).await?;
+    }
     if draw_levels.is_empty() {
         return Ok(());
     }
@@ -299,6 +303,73 @@ pub async fn grant_xp(
         .await?;
     }
     draw_next(tx, catalog, user_id).await
+}
+
+/// The cosmetic of a level that is a multiple of [`levels::REWARD_EVERY`] (016 "Cada 10"): one item
+/// that `user_id` does not own, drawn with `OsRng` among the accessories of the tiers of the level
+/// and the clip codes, and unlocked at once with source `level`. With nothing left, nothing. The
+/// caller holds the row of `botargas` locked.
+async fn reward(
+    tx: &mut PgConnection,
+    catalog: &BotargaCatalog,
+    user_id: Uuid,
+    level: u8,
+) -> Result<(), sqlx::Error> {
+    let owned: Vec<(String, String)> =
+        sqlx::query_as("SELECT kind, item_id FROM botarga_unlocks WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_all(&mut *tx)
+            .await?;
+    // The options of a draw that is already open are left out too: a reward never makes one of
+    // them a choice of something already owned.
+    let open: Vec<String> = sqlx::query_scalar(
+        "SELECT unnest(options) FROM botarga_draws \
+         WHERE user_id = $1 AND chosen IS NULL AND options IS NOT NULL",
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    let has = |kind: &str, id: &str| {
+        open.iter().any(|o| o == id) || owned.iter().any(|(k, i)| k == kind && i == id)
+    };
+    let mut pool: Vec<(&'static str, String)> = catalog
+        .rewardable_accessories(level)
+        .into_iter()
+        .filter(|id| !has("accessory", id))
+        .map(|id| ("accessory", id.to_owned()))
+        .collect();
+    pool.extend(
+        IdleClip::ALL
+            .iter()
+            .map(|clip| clip.as_str())
+            .chain(VictoryClip::ALL.iter().map(|clip| clip.as_str()))
+            .filter(|code| !has("cosmetic", code))
+            .map(|code| ("cosmetic", code.to_owned())),
+    );
+    // Sorted, so the same pool and the same number give the same item.
+    pool.sort();
+    let Ok(len) = u64::try_from(pool.len()) else {
+        return Ok(());
+    };
+    if len == 0 {
+        return Ok(());
+    }
+    let at = crate::pvp::uniform(len)
+        .and_then(|at| usize::try_from(at).ok())
+        .ok_or_else(|| sqlx::Error::Protocol("os_rng".to_owned()))?;
+    let Some((kind, item)) = pool.get(at) else {
+        return Err(sqlx::Error::Protocol("os_rng".to_owned()));
+    };
+    sqlx::query(
+        "INSERT INTO botarga_unlocks (user_id, kind, item_id, source) VALUES ($1, $2, $3, 'level') \
+         ON CONFLICT (user_id, kind, item_id) DO NOTHING",
+    )
+    .bind(user_id)
+    .bind(*kind)
+    .bind(item)
+    .execute(&mut *tx)
+    .await?;
+    Ok(())
 }
 
 /// What `user_id` cannot be offered in a draw of `kind`: what they own.

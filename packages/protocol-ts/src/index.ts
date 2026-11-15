@@ -70,6 +70,7 @@ export type * from './generated/PvpFighter.js';
 export type * from './generated/PvpFightsPage.js';
 export type * from './generated/PvpLeaderboard.js';
 export type * from './generated/PvpLeaderboardEntry.js';
+export type * from './generated/PvpLook.js';
 export type * from './generated/PvpReward.js';
 export type * from './generated/PvpRole.js';
 export type * from './generated/ReauthStatus.js';

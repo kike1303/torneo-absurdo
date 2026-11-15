@@ -9,6 +9,7 @@
   import type { AdaptedTimeline } from '#lib/features/fight/timeline-from-fight-log.js';
   import type { ReplayLoad, ReplaySnapshot } from '#lib/features/replay/replay-store.svelte.js';
   import type { Verdict, VerdictAction } from '#lib/features/replay/verify.js';
+  import type { StageLooks } from '#lib/features/pvp/fighter.js';
   import type { Locale } from '#lib/i18n/locale.js';
   import { m } from '#lib/paraglide/messages.js';
   import FightNotice from '../fight/FightNotice.svelte';
@@ -31,6 +32,8 @@
     roundClock: number | null;
     /** The names of both sides, once the detail is in. */
     names: Readonly<{ a: string; b: string }> | null;
+    /** What each side wore (TA-67): read by the stage once, when it mounts. */
+    looks: StageLooks | null;
     source: () => Promise<AdaptedTimeline>;
     onsnapshot: (snapshot: ReplaySnapshot | null) => void;
     onfailure: (code: string) => void;
@@ -51,6 +54,7 @@
     resultSeen,
     roundClock,
     names,
+    looks,
     source,
     onsnapshot,
     onfailure,
@@ -105,6 +109,8 @@
         bind:phase
         fighters={{ a: 'dummy_a', b: 'dummy_b' }}
         displayNames={names}
+        cosmetics={looks?.cosmetics}
+        looks={looks?.looks}
         {source}
         showResult={false}
         {onsnapshot}
