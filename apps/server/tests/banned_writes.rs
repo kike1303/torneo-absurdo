@@ -436,3 +436,89 @@ async fn a_ban_during_a_tournament_stops_it() {
         assert_eq!(count, 0, "{table}");
     }
 }
+
+/// Two users with these names and a botarga each, for the friends tests (023).
+async fn friends_pair(pool: &PgPool, names: [&str; 2]) -> [(Uuid, String); 2] {
+    let catalog = server::botarga::BotargaCatalog::embedded().unwrap();
+    let mut users = Vec::new();
+    for name in names {
+        let (user, token) = support::app::user_with_session(pool).await;
+        sqlx::query("UPDATE users SET display_name = $2, display_name_key = $3 WHERE id = $1")
+            .bind(user)
+            .bind(name)
+            .bind(server::profile::name::key_of(name))
+            .execute(pool)
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        server::botarga::store::create(&mut tx, user, catalog.starter())
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        users.push((user, token));
+    }
+    [users[0].clone(), users[1].clone()]
+}
+
+async fn count_of(pool: &PgPool, sql: &'static str) -> i64 {
+    sqlx::query_scalar(sql).fetch_one(pool).await.unwrap()
+}
+
+async fn invite_of(pool: &PgPool, user: Uuid) -> String {
+    sqlx::query_scalar("SELECT code FROM friend_invites WHERE user_id = $1")
+        .bind(user)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// 023: a ban that commits while an accept waits on the users' locks stops it; nothing is written.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_ban_during_an_accept_stops_it() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let [(ana, token), (beto, _)] = friends_pair(&pool, ["Ana", "Beto"]).await;
+    let body = format!(r#"{{"code":"{}"}}"#, invite_of(&pool, beto).await);
+    let path = "/api/friends/accept";
+    let response = with_a_ban_in_between(&app, &pool, ana, "POST", path, &token, &body).await;
+    assert_unauthenticated(&response);
+    assert_eq!(count_of(&pool, "SELECT count(*) FROM friendships").await, 0);
+    let events = "SELECT count(*) FROM auth_events WHERE kind = 'friend_accept'";
+    assert_eq!(count_of(&pool, events).await, 0);
+}
+
+/// 023: a ban during a removal stops it: the friendship stays and no block is written.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_ban_during_a_removal_stops_it() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let [(ana, token), (beto, _)] = friends_pair(&pool, ["Ana", "Beto"]).await;
+    sqlx::query("INSERT INTO friendships (user_lo, user_hi) VALUES ($1, $2)")
+        .bind(ana.min(beto))
+        .bind(ana.max(beto))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let body = r#"{"display_name":"Beto"}"#;
+    let path = "/api/friends/remove";
+    let response = with_a_ban_in_between(&app, &pool, ana, "POST", path, &token, body).await;
+    assert_unauthenticated(&response);
+    assert_eq!(count_of(&pool, "SELECT count(*) FROM friendships").await, 1);
+    assert_eq!(
+        count_of(&pool, "SELECT count(*) FROM friend_blocks").await,
+        0
+    );
+}
+
+/// 023: a ban during a rotation stops it: the code stays the same.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_ban_during_a_rotation_stops_it() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let [(ana, token), _] = friends_pair(&pool, ["Ana", "Beto"]).await;
+    let before = invite_of(&pool, ana).await;
+    let path = "/api/friends/invite/rotate";
+    let response = with_a_ban_in_between(&app, &pool, ana, "POST", path, &token, "").await;
+    assert_unauthenticated(&response);
+    assert_eq!(invite_of(&pool, ana).await, before);
+}

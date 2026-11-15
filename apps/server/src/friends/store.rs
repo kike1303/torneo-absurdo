@@ -218,7 +218,8 @@ pub async fn friend_by_key(
 }
 
 /// The friends of `user_id` by name, each with its level and whether it can be challenged now (a
-/// build that resolves with this catalog, and no ban; one answer for both).
+/// build that resolves with this catalog, and no ban; one answer for both). Two statements, however
+/// many friends.
 ///
 /// # Errors
 /// The database error.
@@ -236,12 +237,19 @@ pub async fn friends_of(
     .bind(user_id)
     .fetch_all(&mut *conn)
     .await?;
+    let ids = rows
+        .iter()
+        .map(|row| row.try_get(0))
+        .collect::<Result<Vec<Uuid>, _>>()?;
+    let views: std::collections::BTreeMap<Uuid, protocol::BotargaView> =
+        botarga::store::views_of(&mut *conn, &ids)
+            .await?
+            .into_iter()
+            .collect();
     let mut friends = Vec::with_capacity(rows.len());
-    for row in &rows {
-        let id: Uuid = row.try_get(0)?;
+    for (row, id) in rows.iter().zip(&ids) {
         let not_banned: bool = row.try_get(2)?;
-        let view = botarga::store::view(&mut *conn, id).await?;
-        let (level, ready) = match &view {
+        let (level, ready) = match views.get(id) {
             Some(view) => (
                 view.progress.level,
                 not_banned && build::resolve(catalog, view.progress.level, &view.build).is_ok(),
