@@ -407,6 +407,7 @@
   "error_friends_limit": "Uno de los dos ya llegó al máximo de amigos.",
   "error_friends_not_friend": "Esa botarga no está entre tus amigos.",
   "error_friends_build_invalid": "Una de las dos builds ya no cumple las reglas: hay que guardarla de nuevo.",
+  "error_friends_tournament_invalid": "Ese torneo no se puede armar: elige 3 o 7 amigos distintos que puedan pelear.",
   "error_friends_daily_limit": "Ya retaste bastante por hoy: vuelve mañana (hora UTC).",
   "error_friends_not_found": "Esa pelea no existe.",
   "error_friends_busy": "La arena está ocupada. Inténtalo en un momento.",

@@ -11,6 +11,7 @@ export type FriendsErrorCode =
   | 'friends.limit'
   | 'friends.not_friend'
   | 'friends.build_invalid'
+  | 'friends.tournament_invalid'
   | 'friends.daily_limit'
   | 'friends.not_found'
   | 'friends.busy'

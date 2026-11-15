@@ -85,6 +85,7 @@ const ERROR_CODES: { readonly [K in ErrorCode]: true } = {
   'friends.limit': true,
   'friends.not_friend': true,
   'friends.build_invalid': true,
+  'friends.tournament_invalid': true,
   'friends.daily_limit': true,
   'friends.not_found': true,
   'friends.busy': true,

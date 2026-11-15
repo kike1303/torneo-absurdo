@@ -89,6 +89,7 @@ export const ERROR_TEXT = {
   'friends.limit': 'error_friends_limit',
   'friends.not_friend': 'error_friends_not_friend',
   'friends.build_invalid': 'error_friends_build_invalid',
+  'friends.tournament_invalid': 'error_friends_tournament_invalid',
   'friends.daily_limit': 'error_friends_daily_limit',
   'friends.not_found': 'error_friends_not_found',
   'friends.busy': 'error_friends_busy',

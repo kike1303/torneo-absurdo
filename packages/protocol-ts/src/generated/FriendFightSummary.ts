@@ -14,5 +14,9 @@ export type FriendFightSummary = {
   opponent: string;
   winner: Side | null;
   end_reason: EndReason;
+  /**
+   * The tournament of a match of a bracket; `null` for a challenge.
+   */
+  tournament_id: number | null;
   created_at: TimestampMs;
 };
