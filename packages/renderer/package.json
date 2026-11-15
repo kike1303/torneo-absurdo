@@ -44,7 +44,7 @@
     "bench:prepare": "node --experimental-strip-types scripts/bench-prepare.ts"
   },
   "dependencies": {
-    "pixi.js": "8.22.0",
+    "pixi.js": "8.23.0",
     "three": "0.187.0"
   },
   "devDependencies": {
@@ -57,7 +57,7 @@
     "globals": "17.14.0",
     "pngjs": "7.0.0",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.72.1",
+    "typescript-eslint": "8.72.2",
     "vitest": "5.1.0"
   }
 }
