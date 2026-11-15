@@ -79,6 +79,16 @@ const ERROR_CODES: { readonly [K in ErrorCode]: true } = {
   'pvp.daily_limit': true,
   'pvp.busy': true,
   'pvp.unavailable': true,
+  'friends.invalid_request': true,
+  'friends.invite_not_found': true,
+  'friends.already_friends': true,
+  'friends.limit': true,
+  'friends.not_friend': true,
+  'friends.build_invalid': true,
+  'friends.daily_limit': true,
+  'friends.not_found': true,
+  'friends.busy': true,
+  'friends.unavailable': true,
 };
 
 const CALLBACK_ERROR_CODES: { readonly [K in CallbackErrorCode]: true } = {

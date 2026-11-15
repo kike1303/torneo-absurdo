@@ -153,8 +153,10 @@ pub async fn rotate(
             return refusal(StatusCode::NOT_FOUND, BotargaErrorCode::NotCreated);
         }
         store::rotate_invite(&mut tx, user_id).await?;
-        let view = view_of(&mut tx, &state, user_id).await?;
         tx.commit().await?;
+        // Read after the commit, so the locks are not held while the list is built.
+        let mut conn = state.db.acquire().await?;
+        let view = view_of(&mut conn, &state, user_id).await?;
         Ok(view.map_or(Outcome::Gone, |view| Outcome::Done(StatusCode::OK, view)))
     }
     .await;
@@ -189,6 +191,10 @@ pub async fn preview(
     }
     let read = async {
         let mut conn = state.db.acquire().await?;
+        // The same order as `accept`: without a botarga, no invite is read.
+        if botarga::store::view(&mut conn, user_id).await?.is_none() {
+            return refusal(StatusCode::NOT_FOUND, BotargaErrorCode::NotCreated);
+        }
         match store::invite_owner(&mut conn, user_id, &request.code).await? {
             Some((_, display_name)) => Ok(Outcome::Done(
                 StatusCode::OK,
@@ -255,8 +261,10 @@ pub async fn accept(
         }
         store::befriend(&mut tx, user_id, owner).await?;
         audit::record(&mut tx, user_id, Event::FriendAccept, &ip_hash).await?;
-        let view = view_of(&mut tx, &state, user_id).await?;
         tx.commit().await?;
+        // Read after the commit, so the locks are not held while the list is built.
+        let mut conn = state.db.acquire().await?;
+        let view = view_of(&mut conn, &state, user_id).await?;
         Ok(view.map_or(Outcome::Gone, |view| Outcome::Done(StatusCode::OK, view)))
     }
     .await;
@@ -299,8 +307,10 @@ pub async fn remove(
         if !store::unfriend(&mut tx, user_id, other).await? {
             return refusal(StatusCode::NOT_FOUND, FriendsErrorCode::NotFriend);
         }
-        let view = view_of(&mut tx, &state, user_id).await?;
         tx.commit().await?;
+        // Read after the commit, so the locks are not held while the list is built.
+        let mut conn = state.db.acquire().await?;
+        let view = view_of(&mut conn, &state, user_id).await?;
         Ok(view.map_or(Outcome::Gone, |view| Outcome::Done(StatusCode::OK, view)))
     }
     .await;

@@ -294,6 +294,15 @@ async fn removing_a_friend_blocks_their_accept_until_the_remover_accepts_back() 
         404,
         "friends.invite_not_found",
     );
+    let preview = app
+        .send(
+            "POST",
+            "/api/friends/invite/preview",
+            Some(&beto),
+            &format!(r#"{{"code":"{code}"}}"#),
+        )
+        .await;
+    assert_code(&preview, 404, "friends.invite_not_found");
     let rotated = invite(
         &app.send("POST", "/api/friends/invite/rotate", Some(&ana), "")
             .await,

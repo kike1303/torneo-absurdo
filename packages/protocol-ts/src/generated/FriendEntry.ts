@@ -8,8 +8,8 @@ export type FriendEntry = {
   display_name: string;
   level: number;
   /**
-   * They can be challenged now. `false` says nothing of why (a build that no longer fits, or a
-   * ban): one answer for both.
+   * They can be challenged now: a build that fits the rules of this server and no ban. The list
+   * does not say which one failed.
    */
   ready: boolean;
 };
