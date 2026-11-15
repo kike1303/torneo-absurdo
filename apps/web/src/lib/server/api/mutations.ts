@@ -8,6 +8,8 @@ import type {
   FriendChallengeRequest,
   FriendFight,
   FriendInvitePreview,
+  FriendTournament,
+  FriendTournamentRequest,
   FriendsView,
   Me,
   PreferencesRequest,
@@ -99,5 +101,17 @@ export function postFriendChallenge(
   return apiRequest<FriendFight>(api, 'POST', '/api/friends/challenge', {
     body,
     timeoutMs: 10_000,
+  });
+}
+
+/** 201 for a new tournament, 200 for a repeated `client_key` (023): both carry the bracket. */
+export function postFriendTournament(
+  api: Api,
+  body: FriendTournamentRequest,
+): Promise<ApiResult<FriendTournament>> {
+  // Up to seven fights resolved by the engine in the request.
+  return apiRequest<FriendTournament>(api, 'POST', '/api/friends/tournaments', {
+    body,
+    timeoutMs: 15_000,
   });
 }

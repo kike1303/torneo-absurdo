@@ -7,6 +7,8 @@ import type {
   FightsPage,
   FriendFight,
   FriendFightsPage,
+  FriendTournament,
+  FriendTournamentsPage,
   FriendsView,
   Leaderboard,
   Me,
@@ -148,4 +150,19 @@ export function getFriendFights(
 /** A fight between friends (023): who fought, for the title; 404 for anybody else. */
 export function getFriendFight(api: Api, id: number): Promise<ApiResult<FriendFight>> {
   return apiRequest<FriendFight>(api, 'GET', `/api/friends/fights/${id}`);
+}
+
+/** The tournaments I played (023), private. */
+export function getFriendTournaments(
+  api: Api,
+  before: number | null,
+): Promise<ApiResult<FriendTournamentsPage>> {
+  const path =
+    before === null ? '/api/friends/tournaments' : `/api/friends/tournaments?before=${before}`;
+  return apiRequest<FriendTournamentsPage>(api, 'GET', path as `/api/${string}`);
+}
+
+/** A tournament and its bracket (023); 404 for anybody who did not play it. */
+export function getFriendTournament(api: Api, id: number): Promise<ApiResult<FriendTournament>> {
+  return apiRequest<FriendTournament>(api, 'GET', `/api/friends/tournaments/${id}`);
 }

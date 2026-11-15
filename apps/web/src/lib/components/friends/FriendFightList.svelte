@@ -1,6 +1,6 @@
 <script lang="ts">
-  // My challenges and matches between friends (023), the newest first, private to who fought. A
-  // match of a tournament says so. Pages are links.
+  // My challenges between friends (023), the newest first, private to who fought. The matches of a
+  // tournament are reached from its bracket, never listed here. Pages are links.
   import type { FriendFightSummary } from '@torneo/protocol';
   import { Badge } from '#lib/components/ui/badge/index.js';
   import { Button } from '#lib/components/ui/button/index.js';
@@ -56,9 +56,6 @@
                   ? m.friends_role_challenger()
                   : m.friends_role_challenged()}
               </Badge>
-              {#if fight.tournament_id !== null}
-                <Badge variant="outline">{m.friends_fight_tournament()}</Badge>
-              {/if}
               <span class="truncate font-semibold">{fight.opponent}</span>
             </div>
             <span class="text-sm text-muted-foreground">

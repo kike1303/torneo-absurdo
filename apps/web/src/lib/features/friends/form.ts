@@ -31,3 +31,25 @@ export function codeFromHash(hash: string): string | null {
 export function inviteLink(origin: string, locale: string, code: string): string {
   return `${origin}/${locale}/friends/invite#${code}`;
 }
+
+/** The sizes of a tournament (owner, 2026-11-15). */
+export const TOURNAMENT_SIZES = [4, 8] as const;
+
+const KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** The body of "set up a tournament", or null for one that cannot be: the size, `size - 1`
+ * distinct names and a key. The server checks that each name is a friend who can fight. */
+export function parseTournamentForm(
+  form: FormData,
+): { size: number; display_names: string[]; client_key: string } | null {
+  const size = Number(form.get('size'));
+  if (!TOURNAMENT_SIZES.some((s) => s === size)) return null;
+  const names = form
+    .getAll('display_names')
+    .map((v) => (typeof v === 'string' ? v.trim() : ''))
+    .filter((v) => v.length > 0 && v.length <= NAME_MAX);
+  if (names.length !== size - 1 || new Set(names).size !== names.length) return null;
+  const key = form.get('client_key');
+  if (typeof key !== 'string' || !KEY.test(key)) return null;
+  return { size, display_names: names, client_key: key };
+}

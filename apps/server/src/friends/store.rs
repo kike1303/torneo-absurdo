@@ -442,7 +442,9 @@ pub async fn detail(
     }))
 }
 
-/// A page of the fights of `user_id`, the newest first.
+/// A page of the challenges of `user_id`, the newest first. Never a match of a bracket: how many
+/// one played would say how far one went, which the bracket hides until asked (011 RF20); those
+/// are reached from their tournament.
 ///
 /// # Errors
 /// The database error, or a row the `CHECK`s forbid.
@@ -454,11 +456,11 @@ pub async fn page(
     let limit = i64::try_from(PAGE_SIZE + 1).unwrap_or(i64::MAX);
     let rows = sqlx::query(
         "SELECT f.id, f.attacker_id = $1, ua.display_name, ud.display_name, f.winner, \
-                f.end_reason, (extract(epoch FROM f.created_at) * 1000)::bigint, \
-                f.tournament_id \
+                f.end_reason, (extract(epoch FROM f.created_at) * 1000)::bigint \
          FROM friend_fights f JOIN users ua ON ua.id = f.attacker_id \
          JOIN users ud ON ud.id = f.defender_id \
-         WHERE (f.attacker_id = $1 OR f.defender_id = $1) AND ($2::int IS NULL OR f.id < $2) \
+         WHERE f.kind = 'challenge' AND (f.attacker_id = $1 OR f.defender_id = $1) \
+           AND ($2::int IS NULL OR f.id < $2) \
          ORDER BY f.id DESC LIMIT $3",
     )
     .bind(user_id)
@@ -480,10 +482,6 @@ pub async fn page(
             opponent: row.try_get(if attacker { 3 } else { 2 })?,
             winner: side_of(row.try_get(4)?)?,
             end_reason: reason_of(row.try_get(5)?)?,
-            tournament_id: row
-                .try_get::<Option<i32>, _>(7)?
-                .map(|id| u32::try_from(id).map_err(|_| bad()))
-                .transpose()?,
             created_at: TimestampMs::from_ms(row.try_get(6)?),
         });
     }

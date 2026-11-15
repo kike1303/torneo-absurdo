@@ -644,8 +644,10 @@ async fn a_tournament_of_4_and_one_of_8_are_whole_private_and_move_nothing_else(
         .send("GET", "/api/friends/tournaments", Some(&players[8].1), "")
         .await;
     assert_eq!(list["tournaments"].as_array().unwrap().len(), 0);
+    // The list of fights has only challenges: how many matches one played would tell how far one
+    // went in a bracket.
     let fights = app.send("GET", "/api/friends/fights", Some(ana), "").await;
-    assert_eq!(fights["fights"][0]["tournament_id"], eight["id"]);
+    assert_eq!(fights["fights"].as_array().unwrap().len(), 0);
 
     // Nothing of the ranked PvP, the progress nor the ledger.
     let botargas_after: Vec<String> =
