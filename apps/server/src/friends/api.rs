@@ -476,7 +476,8 @@ pub async fn fights(
     answer(done, &state, "friends.list_failed")
 }
 
-/// `GET /api/friends/fights/{id}`: only for its two sides; for anybody else, 404.
+/// `GET /api/friends/fights/{id}`: only for its two sides or, for a match of a bracket, the
+/// players of its tournament; for anybody else, 404.
 pub async fn fight_detail(
     State(state): State<AppState>,
     client: Option<Extension<ClientContext>>,
@@ -610,17 +611,22 @@ pub async fn tournament_create(
                 FriendsErrorCode::Unavailable,
             );
         }
-        let order: Vec<Uuid> = entrants.iter().map(|e| e.user_id).collect();
-        let id = store::insert_tournament(&mut tx, user_id, client_key, &order).await?;
+        // Every match is resolved before anything is written: the slots and the matches take
+        // `FOR KEY SHARE` on the botargas of the players, and that lock should last only as long
+        // as the inserts, not the fights.
         let ruleset = catalog.ruleset();
+        let mut played = Vec::with_capacity(entrants.len() - 1);
         // Indexes into `entrants`, in the order of the bracket; each round halves them.
         let mut alive: Vec<usize> = (0..entrants.len()).collect();
         let mut round = 1_u8;
         while alive.len() > 1 {
             let mut next = Vec::with_capacity(alive.len() / 2);
-            for (slot, pair) in alive.as_chunks::<2>().0.iter().enumerate() {
-                let (a, b) = (&entrants[pair[0]], &entrants[pair[1]]);
-                let fight = match crate::pvp::resolve::resolve(&a.spec, &b.spec, ruleset) {
+            for (slot, &[a, b]) in alive.as_chunks::<2>().0.iter().enumerate() {
+                let fight = match crate::pvp::resolve::resolve(
+                    &entrants[a].spec,
+                    &entrants[b].spec,
+                    ruleset,
+                ) {
                     Ok(fight) => fight,
                     Err(error_kind) => {
                         tracing::error!(event = "friends.tournament_failed", error_kind);
@@ -631,29 +637,42 @@ pub async fn tournament_create(
                     }
                 };
                 let side = advances(fight.winner, &fight.seed);
-                store::insert_match(
-                    &mut tx,
-                    &store::NewMatch {
-                        tournament_id: id,
-                        round,
-                        slot: u8::try_from(slot).unwrap_or(u8::MAX),
-                        attacker_id: a.user_id,
-                        defender_id: b.user_id,
-                        ruleset_version: ruleset.version(),
-                        fight: &fight,
-                        look_a: &a.look,
-                        look_b: &b.look,
-                        advances: side,
-                    },
-                )
-                .await?;
                 next.push(match side {
-                    protocol::Side::A => pair[0],
-                    protocol::Side::B => pair[1],
+                    protocol::Side::A => a,
+                    protocol::Side::B => b,
                 });
+                played.push((
+                    round,
+                    u8::try_from(slot).unwrap_or(u8::MAX),
+                    a,
+                    b,
+                    fight,
+                    side,
+                ));
             }
             alive = next;
             round += 1;
+        }
+        let order: Vec<Uuid> = entrants.iter().map(|e| e.user_id).collect();
+        let id = store::insert_tournament(&mut tx, user_id, client_key, &order).await?;
+        for (round, slot, a, b, fight, side) in &played {
+            let (a, b) = (&entrants[*a], &entrants[*b]);
+            store::insert_match(
+                &mut tx,
+                &store::NewMatch {
+                    tournament_id: id,
+                    round: *round,
+                    slot: *slot,
+                    attacker_id: a.user_id,
+                    defender_id: b.user_id,
+                    ruleset_version: ruleset.version(),
+                    fight,
+                    look_a: &a.look,
+                    look_b: &b.look,
+                    advances: *side,
+                },
+            )
+            .await?;
         }
         store::count_tournament(&mut tx, user_id).await?;
         audit::record(
