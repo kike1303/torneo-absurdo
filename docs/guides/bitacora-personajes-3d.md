@@ -6,7 +6,7 @@ status: draft
 risk: low
 author: codex
 created: 2026-11-04
-updated: 2026-11-09
+updated: 2026-11-11
 ---
 
 # Bitácora de personajes 3D
@@ -259,6 +259,18 @@ En los tres, alargar el brazo no mejora la cabeza (sus cabezas no son más ancha
 **La botarga base también (2026-11-09, noche).** Se injertó en `Botarga-Base-Animaciones.blend` y `Botarga-Base-Rig.blend` con escala ×1.0 (su muñeca mide casi lo mismo que la del fontanero); la mano pasa de 13 a 17 cm de largo. Como su material usa mapa de normales, la mano necesita UV reales: el modo `near` de `graft_hand_rig.py` le da a cada esquina el UV del punto más cercano de la mano vieja, y las caras que quedarían a caballo entre dos islas (un 25 %) van a un solo texel. Con el material real el fieltro se ve continuo; quedan unas marcas finas entre los dedos, que a tamaño de juego no se notan.
 
 El GLB del juego tiene 22 clips y texturas JPEG, y el `.blend` solo guarda 16 clips y PNG, así que no se reexportó entero: `glb_splice_mesh.py` toma la malla de un export del `.blend` injertado y la mete en el GLB anterior, dejando huesos, clips, imágenes, materiales y `extras` byte por byte (se niega si las poses de reposo difieren). Comprimir el GLB anterior con el comando del flujo da exactamente el archivo que estaba en el repo, así que el camino queda reproducible. El cuerpo pasa de 5 050 a 5 650 vértices y el GLB comprimido de 1 073 408 a 1 080 176 bytes. Los clips de la base se ajustaron con la mano chica y no se volvieron a ajustar; en `/dev/arena` la guardia y los golpes se ven bien. Respaldos en `base/_anterior/*.pre-manos.*`.
+
+**Pulido del lote de diez (2026-11-11).** Jesús vio que varios personajes nuevos se rompían al animarse, que algunos accesorios quedaban mal puestos y que la cara del astronauta se veía provisional. Se revisaron los quince rigs con los 22 clips; la métrica es cuántas aristas se estiran más de 2,5 veces en el peor cuadro de cada clip, sumada sobre todos los clips, y las hojas de cuadros confirman lo que marca.
+
+- **Hombro dentro de la cabeza.** `autorig.py` medía el hombro, el codo y la muñeca en el centro de la silueta a esa altura de x. Cuando la cabeza, la barba o las púas cuelgan sobre el brazo, la silueta los une: el hombro del gnomo quedaba 21 cm arriba, el del yeti 17, el de la fregona 13 y el codo del erizo 8. Ahora, si el tramo es 1,5 veces más grueso que el brazo, se usa la altura del brazo. Esos cuatro se volvieron a rigear.
+- **Cabeza más ancha que las axilas.** `autorig.py` solo deja rígida la cabeza dentro del ancho de las axilas; en el ninja la capucha conservaba pesos de brazo y se iba con cada golpe. `headfix_rig.py` (paso 4b2) deja todo lo que está sobre la articulación de la cabeza siguiendo solo a `Head`, salvo el tubo del brazo, y las piezas sueltas de la cabeza (mechones, púas) rígidas enteras. Debajo de la articulación relaja los pesos en una banda de 12 cm para que la cabeza se funda con el cuerpo: sin eso, la barba del gnomo y el pelo de la fregona se rasgaban en el escalón.
+- **Pies del yeti.** Con piernas tan cortas, todo el pie pesaba con `ToeBase` y parte de una pierna con los huesos de la otra. `toefix_rig.py` lo corrige; solo se corre en el yeti (`yeti/legs.json`).
+- Aristas rotas antes → después: ninja 13 177 → 694, gnomo 8 625 → 1 154, yeti 9 398 → 2 177, fregona 7 092 → 3 928, erizo 2 414 → 1 381. Los otros nueve no cambiaron: en ellos el arreglo toca menos de 30 vértices. El gorila marca alto por los mechones de pelo, pero en las hojas no se ve roto.
+- **Cara del astronauta.** La primera reconstrucción usaba primitivas sueltas. La nueva sigue a la lavadora y a la gelatina: cejas gruesas que montan sobre ojos saltones, nariz, pómulos y labio moldeados en la esfera, boca abierta con cuatro dientes grandes arriba y tres abajo, y lengua de dos lóbulos. Su forma vive en `scripts/personajes/astronaut_face.py`. El casco sigue opaco y sin pez; el modelo bajó de 78 653 a 49 768 triángulos.
+- **Encaje de accesorios.** `measure_fit.py` medía la mano con todo lo que hubiera más allá de la muñeca: los guantes del ninja salían ×4,9 y los del erizo ×3,1. Ahora mide la piel de la mano. La cabeza se mide sobre el cráneo (sin púas ni mechones sueltos), el gorro baja hasta la parte alta real (no hasta la punta de una pluma), su alto sigue a su ancho y una cabeza cuadrada lo agranda hasta cubrir las esquinas. El payaso, el fontanero, la rata y el ogro conservan su encaje de cabeza, ya revisado (`"keep": ["head"]` en su `accessory-fit.json`).
+- Sin resolver: los guantes del gorila (×1,98) y del yeti (×1,48) son fieles a sus manos, pero en guardia tapan la cara; reducirlos es decisión de Jesús. La cola de la capucha del ninja y las púas del erizo atraviesan los gorros.
+
+Los rigs y GLB anteriores están en `~/Documents/Blender/_backups/pulido-2026-11-11/`. El detalle de cada script está en los README de `scripts/botargas/` y `accessories/`.
 
 ## Cómo mantener esta bitácora
 

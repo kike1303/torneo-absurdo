@@ -8,7 +8,7 @@ author: claude
 linear: null
 depends_on: []
 created: 2026-11-08
-updated: 2026-11-10
+updated: 2026-11-11
 ---
 
 # Flujo de un personaje 3D, de la malla al GLB animado
@@ -94,6 +94,10 @@ Si el personaje tiene cola o accesorios en el lado izquierdo (+X), pasa `--side 
 ### 4b. Piezas rígidas (`rigidparts_rig.py`) → el mismo `final-<slug>-rig.blend`
 
 Las piezas sueltas chicas (costuras, dientes, ojos, botones) copian los pesos de la pieza grande a la que pertenecen, elegida por su hueso dominante, y la cabeza se queda solo con `Head` y `Neck`. Sin esto, el pesado por calor reparte una costura de la mejilla entre la cabeza, el cuello y el hombro y se alarga al mover la cabeza.
+
+### 4b2. Cabeza ancha y cuello (`headfix_rig.py`) → el mismo `final-<slug>-rig.blend`
+
+`autorig.py` solo deja rígida la cabeza dentro del ancho de las axilas. Si la cabeza es más ancha (una capucha, una barba, púas), sus lados conservan pesos de hombro y brazo y se estiran con cada golpe. Este paso deja todo lo que está sobre la articulación de la cabeza siguiendo solo a `Head`, salvo el brazo, y relaja los pesos en una banda de 12 cm debajo de ella para que la cabeza se funda con el cuerpo. Revisa con `frames_sheet.py` un golpe y un nocaut: nada de la cabeza debe irse con el brazo. Si el personaje tiene piernas muy cortas y el pie gira entero sobre los dedos, un `legs.json` en su carpeta activa `toefix_rig.py` (solo el yeti lo necesitó).
 
 ### 4c. Brazos (`stretch_rig.py`, opcional) y 4d. ajuste IK de los clips (`ikfix_rig.py`)
 
