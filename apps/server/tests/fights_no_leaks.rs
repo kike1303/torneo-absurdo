@@ -139,6 +139,24 @@ fn request_of(route: &RouteSpec, id: i32) -> (String, Vec<(&'static str, &'stati
             format!(r#"{{"client_key":"{}"}}"#, uuid::Uuid::new_v4()),
         ),
         Handler::PvpFights | Handler::PvpFightDetail => (vec![], String::new()),
+        // 023: the friends of the identity, a code nobody has, a name that is no friend, and the
+        // fights between friends (the identities are not friends, so the list is empty).
+        Handler::Friends
+        | Handler::FriendsInviteRotate
+        | Handler::FriendFights
+        | Handler::FriendFightDetail => (vec![], String::new()),
+        Handler::FriendsInvitePreview | Handler::FriendsAccept => (
+            vec![json],
+            r#"{"code":"AAAAAAAAAAAAAAAAAAAAAA"}"#.to_owned(),
+        ),
+        Handler::FriendsRemove => (vec![json], r#"{"display_name":"Nadie"}"#.to_owned()),
+        Handler::FriendsChallenge => (
+            vec![json],
+            format!(
+                r#"{{"display_name":"Nadie","client_key":"{}"}}"#,
+                uuid::Uuid::new_v4()
+            ),
+        ),
         // 012 RF25: a bet on the fight of the case, which the window may refuse.
         Handler::Bet => (
             vec![json],
@@ -253,12 +271,32 @@ fn expected_status(handler: Handler, identity: &str) -> Option<u16> {
         | Handler::PvpLeaderboard
         | Handler::PvpSeasons
         | Handler::AuthProviders => Some(200),
-        Handler::Me | Handler::Wallet | Handler::PvpFights | Handler::PvpFightCreate
+        Handler::Me
+        | Handler::Wallet
+        | Handler::PvpFights
+        | Handler::PvpFightCreate
+        | Handler::Friends
+        | Handler::FriendsInviteRotate
+        | Handler::FriendsInvitePreview
+        | Handler::FriendsAccept
+        | Handler::FriendsRemove
+        | Handler::FriendsChallenge
+        | Handler::FriendFights
+        | Handler::FriendFightDetail
             if identity == "anonymous" =>
         {
             Some(401)
         }
-        Handler::Me | Handler::Wallet | Handler::PvpFights => Some(200),
+        Handler::Me | Handler::Wallet | Handler::PvpFights | Handler::FriendFights => Some(200),
+        // 023: no invite has that code, no friend that name, and no fight between friends exists.
+        Handler::FriendsRemove | Handler::FriendFightDetail => Some(404),
+        // 023: they depend on whether the identity has a botarga, and the two of the invite on
+        // their quota of 5 a minute, which the states of this sweep share.
+        Handler::Friends
+        | Handler::FriendsInviteRotate
+        | Handler::FriendsChallenge
+        | Handler::FriendsInvitePreview
+        | Handler::FriendsAccept => None,
         // 021: a search is a real fight once the identity created its botarga above, until the
         // quota of the attacks; the id of the case may or may not be a player fight too.
         Handler::PvpFightCreate | Handler::PvpFightDetail => None,

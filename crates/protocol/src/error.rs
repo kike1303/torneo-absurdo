@@ -653,6 +653,76 @@ impl PvpErrorCode {
     }
 }
 
+/// Friends codes (`friends.*`, feature 023).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum FriendsErrorCode {
+    /// A body or a query that is not one of these routes: malformed, an unknown field, a code or a key out of form.
+    #[serde(rename = "friends.invalid_request")]
+    InvalidRequest,
+    /// No invite to accept: a code that does not exist, was rotated, is one's own, of a banned user or of someone who blocked the reader. One code for all, so it says nothing of any of them.
+    #[serde(rename = "friends.invite_not_found")]
+    InviteNotFound,
+    /// The two are friends already.
+    #[serde(rename = "friends.already_friends")]
+    AlreadyFriends,
+    /// One of the two has the most friends there can be.
+    #[serde(rename = "friends.limit")]
+    Limit,
+    /// That name is not among the friends of the user (or the friend is banned).
+    #[serde(rename = "friends.not_friend")]
+    NotFriend,
+    /// A build of the fight no longer fits the catalog of this release.
+    #[serde(rename = "friends.build_invalid")]
+    BuildInvalid,
+    /// The challenges (or the tournaments) of the UTC day reached their limit.
+    #[serde(rename = "friends.daily_limit")]
+    DailyLimit,
+    /// No fight or tournament of the user with that id.
+    #[serde(rename = "friends.not_found")]
+    NotFound,
+    /// A row was locked for more than the `lock_timeout`: the client retries with the same key.
+    #[serde(rename = "friends.busy")]
+    Busy,
+    /// The database failed.
+    #[serde(rename = "friends.unavailable")]
+    Unavailable,
+}
+
+impl FriendsErrorCode {
+    /// Every variant. A test with an exhaustive `match` keeps this list complete.
+    pub const ALL: &'static [Self] = &[
+        Self::InvalidRequest,
+        Self::InviteNotFound,
+        Self::AlreadyFriends,
+        Self::Limit,
+        Self::NotFriend,
+        Self::BuildInvalid,
+        Self::DailyLimit,
+        Self::NotFound,
+        Self::Busy,
+        Self::Unavailable,
+    ];
+    /// The only domain prefix this enum may use.
+    pub const PREFIX: &'static str = "friends.";
+
+    /// The serialized code (the same string serde writes).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidRequest => "friends.invalid_request",
+            Self::InviteNotFound => "friends.invite_not_found",
+            Self::AlreadyFriends => "friends.already_friends",
+            Self::Limit => "friends.limit",
+            Self::NotFriend => "friends.not_friend",
+            Self::BuildInvalid => "friends.build_invalid",
+            Self::DailyLimit => "friends.daily_limit",
+            Self::NotFound => "friends.not_found",
+            Self::Busy => "friends.busy",
+            Self::Unavailable => "friends.unavailable",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(untagged)]
@@ -669,6 +739,7 @@ pub enum ErrorCode {
     Season(SeasonErrorCode),
     Botarga(BotargaErrorCode),
     Pvp(PvpErrorCode),
+    Friends(FriendsErrorCode),
 }
 
 impl ErrorCode {
@@ -687,6 +758,7 @@ impl ErrorCode {
             Self::Season(code) => code.as_str(),
             Self::Botarga(code) => code.as_str(),
             Self::Pvp(code) => code.as_str(),
+            Self::Friends(code) => code.as_str(),
         }
     }
 }
@@ -742,6 +814,12 @@ impl From<SeasonErrorCode> for ErrorCode {
 impl From<BotargaErrorCode> for ErrorCode {
     fn from(code: BotargaErrorCode) -> Self {
         Self::Botarga(code)
+    }
+}
+
+impl From<FriendsErrorCode> for ErrorCode {
+    fn from(code: FriendsErrorCode) -> Self {
+        Self::Friends(code)
     }
 }
 
@@ -884,6 +962,21 @@ mod tests {
         }
     }
 
+    fn friends_index(code: FriendsErrorCode) -> usize {
+        match code {
+            FriendsErrorCode::InvalidRequest => 0,
+            FriendsErrorCode::InviteNotFound => 1,
+            FriendsErrorCode::AlreadyFriends => 2,
+            FriendsErrorCode::Limit => 3,
+            FriendsErrorCode::NotFriend => 4,
+            FriendsErrorCode::BuildInvalid => 5,
+            FriendsErrorCode::DailyLimit => 6,
+            FriendsErrorCode::NotFound => 7,
+            FriendsErrorCode::Busy => 8,
+            FriendsErrorCode::Unavailable => 9,
+        }
+    }
+
     fn pvp_index(code: PvpErrorCode) -> usize {
         match code {
             PvpErrorCode::InvalidRequest => 0,
@@ -940,6 +1033,7 @@ mod tests {
     const SEASON_COUNT: usize = 2;
     const BOTARGA_COUNT: usize = 18;
     const PVP_COUNT: usize = 7;
+    const FRIENDS_COUNT: usize = 10;
     const BET_COUNT: usize = 10;
     const BONUS_COUNT: usize = 1;
     const BAILOUT_COUNT: usize = 3;
@@ -989,6 +1083,12 @@ mod tests {
         let pvp: HashSet<usize> = PvpErrorCode::ALL.iter().map(|c| pvp_index(*c)).collect();
         assert_eq!(pvp.len(), PVP_COUNT);
         assert_eq!(PvpErrorCode::ALL.len(), PVP_COUNT);
+        let friends: HashSet<usize> = FriendsErrorCode::ALL
+            .iter()
+            .map(|c| friends_index(*c))
+            .collect();
+        assert_eq!(friends.len(), FRIENDS_COUNT);
+        assert_eq!(FriendsErrorCode::ALL.len(), FRIENDS_COUNT);
     }
 
     /// The codes of 012 RF38, each wrapped in its `ErrorCode` variant.
@@ -1325,6 +1425,13 @@ mod tests {
             assert!(code.as_str().starts_with(PvpErrorCode::PREFIX), "{code:?}");
             assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
         }
+        for code in FriendsErrorCode::ALL {
+            assert!(
+                code.as_str().starts_with(FriendsErrorCode::PREFIX),
+                "{code:?}"
+            );
+            assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
+        }
         for code in money_codes() {
             let prefix = match code {
                 ErrorCode::Bet(_) => BetErrorCode::PREFIX,
@@ -1346,6 +1453,7 @@ mod tests {
                 + SEASON_COUNT
                 + BOTARGA_COUNT
                 + PVP_COUNT
+                + FRIENDS_COUNT
                 + BET_COUNT
                 + BONUS_COUNT
                 + BAILOUT_COUNT
@@ -1418,6 +1526,14 @@ mod tests {
             assert_eq!(
                 serde_json::to_value(code).unwrap(),
                 serde_json::Value::from(code.as_str())
+            );
+            assert_eq!(ErrorCode::from(*code).as_str(), code.as_str());
+        }
+        for code in FriendsErrorCode::ALL {
+            let json = format!("\"{}\"", code.as_str());
+            assert_eq!(
+                serde_json::from_str::<ErrorCode>(&json).unwrap(),
+                ErrorCode::Friends(*code)
             );
             assert_eq!(ErrorCode::from(*code).as_str(), code.as_str());
         }

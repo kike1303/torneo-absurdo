@@ -55,6 +55,9 @@ pub async fn create(
         .bind(&starter.ability_id)
         .execute(&mut *tx)
         .await?;
+        // 023: the invite code is born with the botarga (a botarga from before has none until
+        // its owner rotates one).
+        crate::friends::store::create_invite(&mut *tx, user_id).await?;
     }
     Ok(created)
 }

@@ -27,9 +27,10 @@ use tokio_util::sync::CancellationToken;
 pub use clock::ServerClock;
 pub use quotas::{
     AUTH_IP, BET_IP, BET_USER, BOTARGA_READ_IP, BOTARGA_READ_USER, CLAIM_IP, CLAIM_USER,
-    FIGHT_READ_IP, FULL_RETRY_AFTER_SECS, MAX_KEYS, MUTATION_IP, MUTATION_USER, PVP_IP, PVP_USER,
-    QUOTE_IP, QUOTE_USER, WALLET_READ_IP, WALLET_READ_USER, WS_ANON_UPGRADE_IP,
-    WS_SESSION_UPGRADE_IP, WS_SESSION_UPGRADE_USER,
+    FIGHT_READ_IP, FRIENDS_ACCEPT_IP, FRIENDS_ACCEPT_USER, FRIENDS_IP, FRIENDS_USER,
+    FULL_RETRY_AFTER_SECS, MAX_KEYS, MUTATION_IP, MUTATION_USER, PVP_IP, PVP_USER, QUOTE_IP,
+    QUOTE_USER, WALLET_READ_IP, WALLET_READ_USER, WS_ANON_UPGRADE_IP, WS_SESSION_UPGRADE_IP,
+    WS_SESSION_UPGRADE_USER,
 };
 use store::CappedStore;
 
@@ -214,6 +215,12 @@ pub struct RateLimits {
     /// `POST /api/pvp/fights` (021).
     pub pvp_user: Arc<KeyedLimiter<Uuid>>,
     pub pvp_ip: Arc<KeyedLimiter>,
+    /// `POST /api/friends/challenge` (023).
+    pub friends_user: Arc<KeyedLimiter<Uuid>>,
+    pub friends_ip: Arc<KeyedLimiter>,
+    /// `POST /api/friends/invite/preview` and `accept` (023).
+    pub friends_accept_user: Arc<KeyedLimiter<Uuid>>,
+    pub friends_accept_ip: Arc<KeyedLimiter>,
 }
 
 impl RateLimits {
@@ -238,6 +245,10 @@ impl RateLimits {
             botarga_read_ip: Arc::new(KeyedLimiter::new(BOTARGA_READ_IP, settings)),
             pvp_user: Arc::new(KeyedLimiter::new(PVP_USER, settings)),
             pvp_ip: Arc::new(KeyedLimiter::new(PVP_IP, settings)),
+            friends_user: Arc::new(KeyedLimiter::new(FRIENDS_USER, settings)),
+            friends_ip: Arc::new(KeyedLimiter::new(FRIENDS_IP, settings)),
+            friends_accept_user: Arc::new(KeyedLimiter::new(FRIENDS_ACCEPT_USER, settings)),
+            friends_accept_ip: Arc::new(KeyedLimiter::new(FRIENDS_ACCEPT_IP, settings)),
         }
     }
 
@@ -261,6 +272,10 @@ impl RateLimits {
         self.botarga_read_ip.sweep();
         self.pvp_user.sweep();
         self.pvp_ip.sweep();
+        self.friends_user.sweep();
+        self.friends_ip.sweep();
+        self.friends_accept_user.sweep();
+        self.friends_accept_ip.sweep();
     }
 }
 

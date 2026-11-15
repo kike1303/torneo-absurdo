@@ -7,6 +7,7 @@ import type { BetErrorCode } from './BetErrorCode.js';
 import type { BonusErrorCode } from './BonusErrorCode.js';
 import type { BotargaErrorCode } from './BotargaErrorCode.js';
 import type { FightErrorCode } from './FightErrorCode.js';
+import type { FriendsErrorCode } from './FriendsErrorCode.js';
 import type { ProfileErrorCode } from './ProfileErrorCode.js';
 import type { PvpErrorCode } from './PvpErrorCode.js';
 import type { SeasonErrorCode } from './SeasonErrorCode.js';
@@ -25,4 +26,5 @@ export type ErrorCode =
   | WalletErrorCode
   | SeasonErrorCode
   | BotargaErrorCode
-  | PvpErrorCode;
+  | PvpErrorCode
+  | FriendsErrorCode;

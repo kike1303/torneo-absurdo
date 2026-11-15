@@ -22,6 +22,7 @@ mod coins;
 mod error;
 mod fight;
 mod fights;
+mod friends;
 mod health;
 mod me;
 mod pvp;
@@ -40,13 +41,17 @@ pub use botarga::{
 pub use coins::{CoinAmount, CoinAmountOutOfRange};
 pub use error::{
     ApiError, ApiErrorCode, AuthErrorCode, BailoutErrorCode, BetErrorCode, BonusErrorCode,
-    BotargaErrorCode, CallbackErrorCode, ErrorCode, FightErrorCode, ProfileErrorCode, PvpErrorCode,
-    SeasonErrorCode, WalletErrorCode, WsErrorCode,
+    BotargaErrorCode, CallbackErrorCode, ErrorCode, FightErrorCode, FriendsErrorCode,
+    ProfileErrorCode, PvpErrorCode, SeasonErrorCode, WalletErrorCode, WsErrorCode,
 };
 pub use fight::{AbilityKind, EndReason, FightEvent, FightLog, FighterInfo, MomentKind, Side};
 pub use fights::{
     CancelReason, FightDetail, FightFinal, FightState, FightSummary, FighterCard, FightsCurrent,
     FightsPage, TimestampMs, VoidReason, VoidStats,
+};
+pub use friends::{
+    FriendChallengeRequest, FriendEntry, FriendFight, FriendFightSummary, FriendFightsPage,
+    FriendInvitePreview, FriendInviteRequest, FriendRemoveRequest, FriendsView,
 };
 pub use health::HealthResponse;
 pub use me::{
