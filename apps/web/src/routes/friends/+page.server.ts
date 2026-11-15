@@ -44,7 +44,15 @@ export const load: PageServerLoad = async ({ fetch, url, locals, setHeaders }) =
     view: friends.data,
     fights: fights.ok ? fights.data.fights : null,
     nextBefore: fights.ok ? fights.data.next_before : null,
-    tournaments: tournaments.ok ? tournaments.data.tournaments : null,
+    // Without the champion: the list must not tell what the bracket hides (011 RF20).
+    tournaments: tournaments.ok
+      ? tournaments.data.tournaments.map(({ id, size, owner, created_at }) => ({
+          id,
+          size,
+          owner,
+          created_at,
+        }))
+      : null,
     tournamentsBefore: tournaments.ok ? tournaments.data.next_before : null,
     clientKey: crypto.randomUUID(),
     tournamentKey: crypto.randomUUID(),

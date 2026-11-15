@@ -6,7 +6,8 @@ import type { Side } from './Side.js';
 import type { TimestampMs } from './TimestampMs.js';
 
 /**
- * One fight of `GET /api/friends/fights`, from the side of the session's user.
+ * One challenge of `GET /api/friends/fights`, from the side of the session's user. The matches of
+ * a tournament are not listed: they are reached from its bracket.
  */
 export type FriendFightSummary = {
   id: number;
@@ -14,9 +15,5 @@ export type FriendFightSummary = {
   opponent: string;
   winner: Side | null;
   end_reason: EndReason;
-  /**
-   * The tournament of a match of a bracket; `null` for a challenge.
-   */
-  tournament_id: number | null;
   created_at: TimestampMs;
 };

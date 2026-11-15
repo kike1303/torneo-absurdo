@@ -69,13 +69,19 @@ test('tournaments: a bracket of 4, its hidden results and its private matches', 
   await page.reload();
   await waitForHydration(page);
   const form = page.getByTestId('tournament-new');
-  await expect(page.getByTestId('tournament-create')).toBeDisabled();
   for (const pick of await form.getByTestId('tournament-pick').all()) await pick.check();
   await press(page.getByTestId('tournament-create'));
   await page.waitForURL(/\/es\/friends\/tournaments\/[1-9][0-9]*$/, { timeout: 30_000 });
   await waitForHydration(page);
   const bracketUrl = new URL(page.url()).pathname;
   await expect(page.getByTestId('tournament-page')).toHaveAttribute('data-status', 'ready');
+
+  // No outcome travels in the HTML, of the bracket nor of my friends page (011 RF18, RF20).
+  for (const path of [bracketUrl, '/es/friends']) {
+    const html = await (await page.request.get(path)).text();
+    expect(html).not.toContain('champion');
+    expect(html).not.toContain('advances');
+  }
 
   // Hidden: round 1 has its two matches with names and links; the final has neither.
   await expect(page.getByTestId('tournament-champion')).toHaveCount(0);
@@ -117,14 +123,9 @@ test('tournaments: a bracket of 4, its hidden results and its private matches', 
   await waitForHydration(player);
   await expect(player.getByTestId('tournament-row')).toHaveCount(1);
   await expect(player.getByTestId('tournament-watch')).toHaveAttribute('href', bracketUrl);
-  // Its matches are in the list of fights without their outcome, which the bracket hides.
-  const matchRow = player
-    .locator('[data-testid="friend-fight-row"][data-tournament="true"]')
-    .first();
-  await expect(matchRow).toBeVisible();
-  for (const key of ['pvp_outcome_won', 'pvp_outcome_lost', 'friends_role_challenged']) {
-    await expect(matchRow).not.toContainText(text('es', key));
-  }
+  // The list of fights has no match of a tournament: how many one played would say how far one
+  // went.
+  await expect(player.getByTestId('friend-fight-row')).toHaveCount(0);
   const read = await player.goto(bracketUrl);
   expect(read?.status()).toBe(200);
   const strangerContext = await newContext(browser, info, 'stranger');

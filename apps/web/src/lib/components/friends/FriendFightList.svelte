@@ -1,7 +1,6 @@
 <script lang="ts">
-  // My challenges and matches between friends (023), the newest first, private to who fought. A
-  // match of a tournament says so and no more: neither a role (nobody challenged) nor its outcome,
-  // which the bracket hides until asked (011 RF20). Pages are links.
+  // My challenges between friends (023), the newest first, private to who fought. The matches of a
+  // tournament are reached from its bracket, never listed here. Pages are links.
   import type { FriendFightSummary } from '@torneo/protocol';
   import { Badge } from '#lib/components/ui/badge/index.js';
   import { Button } from '#lib/components/ui/button/index.js';
@@ -49,24 +48,18 @@
           class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-card-foreground sm:flex-row sm:items-center"
           data-testid="friend-fight-row"
           data-role={fight.role}
-          data-tournament={fight.tournament_id !== null}
         >
           <div class="flex min-w-0 flex-1 flex-col gap-1">
             <div class="flex flex-wrap items-center gap-2">
-              {#if fight.tournament_id === null}
-                <Badge variant={fight.role === 'defender' ? 'secondary' : 'outline'}>
-                  {fight.role === 'attacker'
-                    ? m.friends_role_challenger()
-                    : m.friends_role_challenged()}
-                </Badge>
-              {:else}
-                <Badge variant="outline">{m.friends_fight_tournament()}</Badge>
-              {/if}
+              <Badge variant={fight.role === 'defender' ? 'secondary' : 'outline'}>
+                {fight.role === 'attacker'
+                  ? m.friends_role_challenger()
+                  : m.friends_role_challenged()}
+              </Badge>
               <span class="truncate font-semibold">{fight.opponent}</span>
             </div>
             <span class="text-sm text-muted-foreground">
-              {#if fight.tournament_id === null}{outcome(fight)} ·
-              {/if}<FightDate ms={fight.created_at} {locale} />
+              {outcome(fight)} · <FightDate ms={fight.created_at} {locale} />
             </span>
           </div>
           <Button

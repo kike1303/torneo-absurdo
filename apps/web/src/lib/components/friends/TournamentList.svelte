@@ -3,14 +3,14 @@
   // results until asked (011 RF20). Pages are links.
   import type { FriendTournamentSummary } from '@torneo/protocol';
   import { Button } from '#lib/components/ui/button/index.js';
-  import { formatInteger } from '#lib/i18n/format.js';
+  import { formatDateWithZone, formatInteger } from '#lib/i18n/format.js';
   import type { Locale } from '#lib/i18n/locale.js';
   import { m } from '#lib/paraglide/messages.js';
   import FightDate from '../replay/FightDate.svelte';
 
   interface Props {
     /** Null: the API failed. */
-    tournaments: readonly FriendTournamentSummary[] | null;
+    tournaments: readonly Omit<FriendTournamentSummary, 'champion'>[] | null;
     nextBefore: number | null;
     locale: Locale;
   }
@@ -53,6 +53,10 @@
             variant="outline"
             class="min-h-11"
             href={`/${locale}/friends/tournaments/${tournament.id}`}
+            aria-label={`${m.pvp_fights_watch()}: ${m.tournament_summary({
+              owner: tournament.owner,
+              size: formatInteger(tournament.size, locale),
+            })}, ${formatDateWithZone(new Date(Number(tournament.created_at)), locale, 'UTC')}`}
             data-testid="tournament-watch"
           >
             {m.pvp_fights_watch()}

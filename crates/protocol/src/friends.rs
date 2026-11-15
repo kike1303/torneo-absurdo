@@ -60,7 +60,8 @@ pub struct FriendChallengeRequest {
     pub client_key: String,
 }
 
-/// One fight of `GET /api/friends/fights`, from the side of the session's user.
+/// One challenge of `GET /api/friends/fights`, from the side of the session's user. The matches of
+/// a tournament are not listed: they are reached from its bracket.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FriendFightSummary {
@@ -69,8 +70,6 @@ pub struct FriendFightSummary {
     pub opponent: String,
     pub winner: Option<Side>,
     pub end_reason: EndReason,
-    /// The tournament of a match of a bracket; `null` for a challenge.
-    pub tournament_id: Option<u32>,
     pub created_at: TimestampMs,
 }
 

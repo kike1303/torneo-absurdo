@@ -92,12 +92,7 @@
         </p>
       </fieldset>
       <div>
-        <Button
-          type="submit"
-          class="min-h-11"
-          disabled={pending || picked.length !== need}
-          data-testid="tournament-create"
-        >
+        <Button type="submit" class="min-h-11" disabled={pending} data-testid="tournament-create">
           {pending ? m.tournament_creating() : m.tournament_create()}
         </Button>
       </div>
