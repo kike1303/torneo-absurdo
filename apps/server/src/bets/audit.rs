@@ -22,6 +22,12 @@ pub enum Event {
     PvpAttack {
         fight: i32,
     },
+    /// A challenge between friends (023).
+    FriendChallenge {
+        fight: i32,
+    },
+    /// An invite accepted (023).
+    FriendAccept,
 }
 
 /// One row of `auth_events`, inside the transaction of the change.
@@ -34,21 +40,25 @@ pub async fn record(
     event: Event,
     ip_hash: &[u8; 32],
 ) -> Result<(), sqlx::Error> {
-    let (kind, entry, bet, fight) = match event {
-        Event::Grant { entry } => ("grant", Some(entry), None, None),
-        Event::Bailout { entry } => ("bailout", Some(entry), None, None),
-        Event::Bet { bet } => ("bet", None, Some(bet), None),
-        Event::PvpAttack { fight } => ("pvp_attack", None, None, Some(fight)),
+    let (kind, entry, bet, fight, friend_fight) = match event {
+        Event::Grant { entry } => ("grant", Some(entry), None, None, None),
+        Event::Bailout { entry } => ("bailout", Some(entry), None, None, None),
+        Event::Bet { bet } => ("bet", None, Some(bet), None, None),
+        Event::PvpAttack { fight } => ("pvp_attack", None, None, Some(fight), None),
+        Event::FriendChallenge { fight } => ("friend_challenge", None, None, None, Some(fight)),
+        Event::FriendAccept => ("friend_accept", None, None, None, None),
     };
     sqlx::query(
-        "INSERT INTO auth_events (user_id, kind, ledger_entry_id, bet_id, pvp_fight_id, ip_hash) \
-         VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO auth_events \
+         (user_id, kind, ledger_entry_id, bet_id, pvp_fight_id, friend_fight_id, ip_hash) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(user_id)
     .bind(kind)
     .bind(entry)
     .bind(bet)
     .bind(fight)
+    .bind(friend_fight)
     .bind(ip_hash.as_slice())
     .execute(tx)
     .await?;

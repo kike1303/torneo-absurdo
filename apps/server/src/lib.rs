@@ -12,6 +12,7 @@ mod cli;
 pub mod config;
 pub mod db;
 pub mod fights;
+pub mod friends;
 pub mod healthcheck;
 pub mod http;
 pub mod jobs;

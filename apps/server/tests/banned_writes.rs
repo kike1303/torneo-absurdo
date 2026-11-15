@@ -333,3 +333,53 @@ async fn a_ban_during_an_attack_stops_it() {
             .unwrap();
     assert_eq!(events, 0);
 }
+
+/// 023: a ban that commits while a challenge waits on the user's lock stops it, and nothing of the
+/// fight is written: no row, no counter of the day and no event.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_ban_during_a_challenge_stops_it() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let catalog = server::botarga::BotargaCatalog::embedded().unwrap();
+    let mut users = Vec::new();
+    for name in ["Ana", "Beto"] {
+        let (user, token) = support::app::user_with_session(&pool).await;
+        sqlx::query("UPDATE users SET display_name = $2, display_name_key = $3 WHERE id = $1")
+            .bind(user)
+            .bind(name)
+            .bind(server::profile::name::key_of(name))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        server::botarga::store::create(&mut tx, user, catalog.starter())
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        users.push((user, token));
+    }
+    let (lo, hi) = (users[0].0.min(users[1].0), users[0].0.max(users[1].0));
+    sqlx::query("INSERT INTO friendships (user_lo, user_hi) VALUES ($1, $2)")
+        .bind(lo)
+        .bind(hi)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (user, token) = &users[0];
+    let body = r#"{"display_name":"Beto","client_key":"0b0e8e5e-8a43-4c3c-9b55-0e6e3e1b2a10"}"#;
+    let path = "/api/friends/challenge";
+    let response = with_a_ban_in_between(&app, &pool, *user, "POST", path, token, body).await;
+    assert_unauthenticated(&response);
+    for table in [
+        "friend_fights",
+        "friend_daily",
+        "auth_events WHERE kind = 'friend_challenge'",
+    ] {
+        let count: i64 =
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT count(*) FROM {table}")))
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(count, 0, "{table}");
+    }
+}

@@ -50,6 +50,15 @@ pub const BOTARGA_READ_IP: Quota = Quota::per_minute(nonzero(600));
 pub const PVP_USER: Quota = Quota::per_minute(nonzero(10)).allow_burst(nonzero(3));
 pub const PVP_IP: Quota = Quota::per_minute(nonzero(120));
 
+/// `POST /api/friends/challenge` (023): the numbers of the PvP attack, in its own buckets.
+pub const FRIENDS_USER: Quota = Quota::per_minute(nonzero(10)).allow_burst(nonzero(3));
+pub const FRIENDS_IP: Quota = Quota::per_minute(nonzero(120));
+
+/// `POST /api/friends/invite/preview` and `accept` (023): 5/min per user and 20/min per IP, so a
+/// code of 128 bits cannot be guessed and a session cannot sweep names.
+pub const FRIENDS_ACCEPT_USER: Quota = Quota::per_minute(nonzero(5));
+pub const FRIENDS_ACCEPT_IP: Quota = Quota::per_minute(nonzero(20));
+
 /// `quote` (012 RF37): 120/min per user and 600/min per IP.
 pub const QUOTE_USER: Quota = Quota::per_minute(nonzero(120));
 pub const QUOTE_IP: Quota = Quota::per_minute(nonzero(600));

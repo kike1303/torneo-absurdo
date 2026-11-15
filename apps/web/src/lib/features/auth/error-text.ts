@@ -83,6 +83,16 @@ export const ERROR_TEXT = {
   'pvp.daily_limit': 'error_pvp_daily_limit',
   'pvp.busy': 'error_pvp_busy',
   'pvp.unavailable': 'error_pvp_unavailable',
+  'friends.invalid_request': 'error_friends_invalid_request',
+  'friends.invite_not_found': 'error_friends_invite_not_found',
+  'friends.already_friends': 'error_friends_already_friends',
+  'friends.limit': 'error_friends_limit',
+  'friends.not_friend': 'error_friends_not_friend',
+  'friends.build_invalid': 'error_friends_build_invalid',
+  'friends.daily_limit': 'error_friends_daily_limit',
+  'friends.not_found': 'error_friends_not_found',
+  'friends.busy': 'error_friends_busy',
+  'friends.unavailable': 'error_friends_unavailable',
 } as const satisfies { readonly [K in ErrorCode]: MessageKey };
 
 /** The closed list of `/login?error=` (ADR-0008, amendment 2026-10-28). */

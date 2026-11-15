@@ -101,6 +101,14 @@ pub enum Handler {
     PvpFightDetail,
     PvpLeaderboard,
     PvpSeasons,
+    Friends,
+    FriendsInviteRotate,
+    FriendsInvitePreview,
+    FriendsAccept,
+    FriendsRemove,
+    FriendsChallenge,
+    FriendFights,
+    FriendFightDetail,
     #[cfg(feature = "dev-auth")]
     DevAuthorize,
     #[cfg(feature = "dev-auth")]
@@ -342,6 +350,54 @@ pub const ROUTES: &[RouteSpec] = &[
         effect: Effect::Read,
         handler: Handler::PvpSeasons,
     },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/friends",
+        effect: Effect::Read,
+        handler: Handler::Friends,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/friends/invite/rotate",
+        effect: Effect::Mutate,
+        handler: Handler::FriendsInviteRotate,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/friends/invite/preview",
+        effect: Effect::Mutate,
+        handler: Handler::FriendsInvitePreview,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/friends/accept",
+        effect: Effect::Mutate,
+        handler: Handler::FriendsAccept,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/friends/remove",
+        effect: Effect::Mutate,
+        handler: Handler::FriendsRemove,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/friends/challenge",
+        effect: Effect::Mutate,
+        handler: Handler::FriendsChallenge,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/friends/fights",
+        effect: Effect::Read,
+        handler: Handler::FriendFights,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/friends/fights/{id}",
+        effect: Effect::Read,
+        handler: Handler::FriendFightDetail,
+    },
     #[cfg(feature = "dev-auth")]
     RouteSpec {
         method: RouteMethod::Get,
@@ -481,6 +537,15 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         // 021 phase 4: public reads, as the leaderboard of 020.
         Handler::PvpLeaderboard => fight_read(on(filter, crate::pvp::api::leaderboard), state),
         Handler::PvpSeasons => fight_read(on(filter, crate::pvp::api::seasons), state),
+        // 023: everything private; over `MAX_FORM_BYTES`, 422 `friends.invalid_request`.
+        Handler::Friends => on(filter, crate::friends::api::get),
+        Handler::FriendsInviteRotate => on(filter, crate::friends::api::rotate).layer(body),
+        Handler::FriendsInvitePreview => on(filter, crate::friends::api::preview).layer(body),
+        Handler::FriendsAccept => on(filter, crate::friends::api::accept).layer(body),
+        Handler::FriendsRemove => on(filter, crate::friends::api::remove).layer(body),
+        Handler::FriendsChallenge => on(filter, crate::friends::api::challenge).layer(body),
+        Handler::FriendFights => on(filter, crate::friends::api::fights),
+        Handler::FriendFightDetail => on(filter, crate::friends::api::fight_detail),
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize => on(filter, auth::dev::authorize),
         #[cfg(feature = "dev-auth")]
