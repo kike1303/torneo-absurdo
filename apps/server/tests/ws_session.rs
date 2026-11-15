@@ -476,10 +476,13 @@ async fn a_hung_revalidation_times_out_and_the_next_one_starts() {
     );
 }
 
-/// Polls `pg_stat_activity` (up to 5 s) until at least `n` revalidation queries of the app wait
+/// Polls `pg_stat_activity` (up to [`HUNG_CHECK_DEADLINE`]) until at least `n` revalidation queries of the app wait
 /// on the lock of `users`.
 async fn hung_checks_reach(admin: &PgPool, n: i64) -> bool {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // A condition, not a delay: it returns as soon as the revalidation waits on the lock. The
+    // deadline only bounds a real failure; under heavy CPU load the first revalidation can take
+    // well over 5 s to reach the lock (TA-85).
+    let deadline = Instant::now() + HUNG_CHECK_DEADLINE;
     while Instant::now() < deadline {
         let (waiting,): (i64,) = sqlx::query_as(
             "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() \
@@ -495,6 +498,9 @@ async fn hung_checks_reach(admin: &PgPool, n: i64) -> bool {
     }
     false
 }
+
+/// How long [`hung_checks_reach`] waits for the revalidations to reach the lock.
+const HUNG_CHECK_DEADLINE: Duration = Duration::from_secs(30);
 
 /// A connection outside the app's pool (the app's may be all waiting on the lock).
 async fn db_admin(db: &TestDb) -> PgPool {
