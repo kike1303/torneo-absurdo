@@ -48,12 +48,10 @@ export const actions: Actions = {
 
   accept: async ({ request, locals, fetch }) => {
     if (!locals.user) return noSession(locals.session);
-    const form = await request.formData();
-    const code = parseInviteCode(form);
+    const code = parseInviteCode(await request.formData());
     if (code === null) return notFound();
     const result = await postInviteAccept(internalApi(fetch), code);
     if (!result.ok) return apiFailure(result);
-    const name = form.get('display_name');
-    return { accepted: typeof name === 'string' ? name : '' };
+    return { accepted: true as const };
   },
 };

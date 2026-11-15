@@ -541,7 +541,7 @@
   "friends_remove_cancel": "Cancelar",
   "friends_fight_link": "Enlace a este reto",
   "friends_fights_title": "Tus retos",
-  "friends_fights_lead": "Los retos que hiciste y los que te hicieron. Solo los ven ustedes dos.",
+  "friends_fights_lead": "Los retos que hiciste y los que te hicieron, y los combates de tus torneos. Solo los ven quienes pelearon o jugaron ese torneo.",
   "friends_fights_empty": "Todavía no hay retos.",
   "friends_fights_error": "No pudimos cargar tus retos. Inténtalo en un momento.",
   "friends_fights_more": "Retos anteriores",
@@ -553,9 +553,10 @@
   "friends_invite_missing": "Este enlace no trae una invitación válida. Pide a tu amigo que te lo comparta de nuevo.",
   "friends_invite_need_botarga": "Para aceptar necesitas una botarga. Créala y seguimos con la invitación.",
   "friends_invite_loading": "Buscando la invitación…",
+  "friends_invite_retry": "Reintentar",
   "friends_invite_from": "{name} te invita a ser su amigo.",
   "friends_invite_accept": "Aceptar",
   "friends_invite_accepted": "Ahora {name} y tú son amigos.",
   "friends_go": "Ir a mis amigos",
-  "friends_private_note": "Este reto es privado: solo lo ven quienes pelearon."
+  "friends_private_note": "Esta pelea es privada: solo la ven quienes pelearon o jugaron su torneo."
 }

@@ -5,7 +5,6 @@
   // waits for a click on "accept": it never accepts on its own.
   import { onMount, tick } from 'svelte';
   import { enhance } from '$app/forms';
-  import { invalidateAll } from '$app/navigation';
   import * as Alert from '#lib/components/ui/alert/index.js';
   import { Button } from '#lib/components/ui/button/index.js';
   import { resolveApiError } from '#lib/features/auth/error-text.js';
@@ -31,16 +30,24 @@
   });
 
   const errorText = $derived(form?.code === undefined ? null : m[resolveApiError(form.code)]());
-  const owner = $derived(form?.preview ?? null);
-  const accepted = $derived(form?.accepted ?? null);
-
+  // Whose invite it is, kept once the server said it: a failed accept leaves it on screen, so the
+  // reader can try again without asking for it once more.
+  let owner = $state<string | null>(null);
   $effect(() => {
-    if (accepted === null) return;
+    if (form?.preview !== undefined) owner = form.preview;
+  });
+  const accepted = $derived(form?.accepted === true);
+
+  /** Forgets the code of this tab: accepted, or one no invite has. */
+  function forget(): void {
     try {
       window.sessionStorage.removeItem(STORAGE_KEY);
     } catch {
       // Nothing kept, nothing to forget.
     }
+  }
+  $effect(() => {
+    if (accepted || form?.code === 'friends.invite_not_found') forget();
   });
 
   // The preview is asked once per code, as soon as the reader can accept.
@@ -101,7 +108,6 @@
         pending = true;
         return async ({ update }) => {
           await update();
-          await invalidateAll();
           pending = false;
         };
       }}
@@ -111,9 +117,9 @@
         {m.botarga_create()}
       </Button>
     </form>
-  {:else if accepted !== null}
+  {:else if accepted}
     <p role="status" data-testid="friend-invite-accepted">
-      {m.friends_invite_accepted({ name: accepted })}
+      {m.friends_invite_accepted({ name: owner ?? '' })}
     </p>
     <div>
       <Button class="min-h-11" href={`/${locale}/friends`} data-testid="friend-invite-go">
@@ -153,7 +159,6 @@
       >
         <p data-testid="friend-invite-owner">{m.friends_invite_from({ name: owner })}</p>
         <input type="hidden" name="code" value={code ?? ''} />
-        <input type="hidden" name="display_name" value={owner} />
         <Button
           type="submit"
           size="lg"
@@ -166,6 +171,18 @@
       </form>
     {:else if errorText === null}
       <p role="status" class="text-muted-foreground">{m.friends_invite_loading()}</p>
+    {:else if form?.code !== 'friends.invite_not_found'}
+      <div>
+        <Button
+          type="button"
+          variant="outline"
+          class="min-h-11"
+          onclick={() => previewForm?.requestSubmit()}
+          data-testid="friend-invite-retry"
+        >
+          {m.friends_invite_retry()}
+        </Button>
+      </div>
     {/if}
   {/if}
 

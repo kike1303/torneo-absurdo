@@ -92,6 +92,12 @@ test('friends: an invite by link, a challenge and its private replay', async ({
   await press(row.getByTestId('friend-challenge'));
   const fight = page.getByTestId('friend-challenge-fight');
   await expect(fight).toBeVisible({ timeout: 20_000 });
+  // A second challenge before the result is seen is a new fight, never the first one again.
+  const first = await page.getByTestId('friend-fight-link').getAttribute('href');
+  await press(row.getByTestId('friend-challenge'));
+  await expect(page.getByTestId('friend-fight-link')).not.toHaveAttribute('href', first ?? '', {
+    timeout: 20_000,
+  });
   await expect(page.getByTestId('pvp-result')).toHaveCount(0);
   await expect(page.getByTestId('pvp-verdict')).toHaveAttribute('data-status', 'match', {
     timeout: 60_000,
@@ -118,6 +124,15 @@ test('friends: an invite by link, a challenge and its private replay', async ({
   await expect(guestPage.getByTestId('pvp-verdict')).toHaveAttribute('data-status', 'match', {
     timeout: 60_000,
   });
+
+  // Changing the link: the old one stops working, the friendship stays.
+  await guestPage.goto('/es/friends');
+  await waitForHydration(guestPage);
+  await press(guestPage.getByTestId('friends-invite-rotate'));
+  await expect(guestPage.getByTestId('friends-saved')).toHaveText(
+    text('es', 'friends_saved_rotated'),
+  );
+  await expect(guestPage.getByTestId('friend-row')).toHaveCount(1);
 
   // Private: a third user gets a 404, and without a session it goes to the login.
   const stranger = await newContext(browser, info, 'stranger');
@@ -158,5 +173,16 @@ test('friends: an invite by link, a challenge and its private replay', async ({
       }
     }
   }
+
+  // Removing: after the confirmation, both lists are empty.
+  await page.goto('/es/friends');
+  await waitForHydration(page);
+  await press(page.getByTestId('friend-remove'));
+  await press(page.getByTestId('friend-remove-yes'));
+  await expect(page.getByTestId('friends-saved')).toHaveText(text('es', 'friends_saved_removed'));
+  await expect(page.getByTestId('friends-empty')).toBeVisible();
+  await guestPage.goto('/es/friends');
+  await waitForHydration(guestPage);
+  await expect(guestPage.getByTestId('friends-empty')).toBeVisible();
   await guest.close();
 });

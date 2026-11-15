@@ -26,6 +26,19 @@
   const saved = $derived(form?.saved ?? null);
   const challenged = $derived(form?.challenged ?? null);
 
+  // The key of the next challenge. The load gives one; every challenge that went through takes a
+  // new one at once, so a second challenge (to anybody) before the reload is never answered with
+  // the first fight. A failed or unanswered one keeps its key: its retry is the same fight.
+  let freshKey = $state<string | null>(null);
+  let keyedFor = $state<number | null>(null);
+  $effect(() => {
+    const id = challenged?.id ?? null;
+    if (id === null || id === keyedFor) return;
+    keyedFor = id;
+    freshKey = crypto.randomUUID();
+  });
+  const clientKey = $derived(freshKey ?? (data.state === 'ready' ? data.clientKey : ''));
+
   // The link is built in the browser, with its own origin.
   let origin = $state('');
   onMount(() => {
@@ -122,7 +135,7 @@
     <div class="flex flex-col gap-6 lg:grid lg:grid-cols-2 lg:items-start">
       <div class="flex min-w-0 flex-col gap-6">
         <InviteLink {link} />
-        <FriendList friends={data.view.friends} clientKey={data.clientKey} {locale} />
+        <FriendList friends={data.view.friends} {clientKey} {locale} />
       </div>
       <FriendFightList fights={data.fights} nextBefore={data.nextBefore} {locale} />
     </div>

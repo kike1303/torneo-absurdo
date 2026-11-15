@@ -541,7 +541,7 @@
   "friends_remove_cancel": "Cancel",
   "friends_fight_link": "Link to this challenge",
   "friends_fights_title": "Your challenges",
-  "friends_fights_lead": "The challenges you made and the ones made to you. Only the two of you can see them.",
+  "friends_fights_lead": "The challenges you made and the ones made to you, and the matches of your tournaments. Only those who fought or played that tournament can see them.",
   "friends_fights_empty": "No challenges yet.",
   "friends_fights_error": "We couldn't load your challenges. Try again in a moment.",
   "friends_fights_more": "Older challenges",
@@ -553,9 +553,10 @@
   "friends_invite_missing": "This link doesn't carry a valid invite. Ask your friend to share it again.",
   "friends_invite_need_botarga": "You need a botarga to accept. Create it and we'll carry on with the invite.",
   "friends_invite_loading": "Looking up the invite…",
+  "friends_invite_retry": "Try again",
   "friends_invite_from": "{name} invites you to be friends.",
   "friends_invite_accept": "Accept",
   "friends_invite_accepted": "You and {name} are now friends.",
   "friends_go": "Go to my friends",
-  "friends_private_note": "This challenge is private: only the two who fought can see it."
+  "friends_private_note": "This fight is private: only those who fought it or played its tournament can see it."
 }
