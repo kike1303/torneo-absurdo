@@ -240,6 +240,7 @@ server pvp exclude <YYYYMM> <user_id> --by <admin_user_id> --reason <farm_signal
   - `one_way_new`: una cuenta nueva que pierde el 90 % contra una y gana el 40 % contra el resto.
   - `sink_and_rebound`: cae más de 200 en 30 peleas puntuadas y gana el 80 % de las 30 siguientes.
   - `tournament_streaks`: informativa.
+  - `pvp_coins_against_top`: una cuenta que cobró monedas PvP y, en 5 o más peleas del torneo del mes en las que apostó junto a una del top 20, apostó del lado contrario en el 90 % o más, contando como su lado aquel donde puso más monedas (sus pérdidas alimentan a esa cuenta). Las peleas anuladas no cuentan.
   - `counterpart_concentration`: el top 20, con el rating que ganó de sus 5 contrapartes principales y su `ip_group` opaco.
 - Ninguna señal es prueba.
 - **`exclude`** saca a un usuario del leaderboard de una temporada, la actual o una cerrada. No se deshace.

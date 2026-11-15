@@ -8,7 +8,8 @@
 //! `farm-report` reads one snapshot of the season and prints the signals of 021 "Números". They are
 //! signals, never proof: the sanction stays manual (`exclude`). Users are named by their id, as in
 //! 020, and the accounts that share an `ip_hash` by opaque labels (`ip_group: 1, 2…`): the values of
-//! `ip_hash` never leave Postgres.
+//! `ip_hash` never leave Postgres. `pvp_coins_against_top` (TA-83) crosses the PvP coins with the
+//! bets of the tournament: an account that earns them and loses them betting against one of the top.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
@@ -55,6 +56,12 @@ pub const REBOUND_WIN_BP: i64 = 8000;
 /// from [`TOURNAMENT_MIN_ATTACKS`] attacks on.
 pub const TOURNAMENT_SHARE_BP: i64 = 5000;
 pub const TOURNAMENT_MIN_ATTACKS: usize = 10;
+
+/// PvP coins against the top (TA-83): an account that earned PvP coins in the season and, in the
+/// tournament fights where it and an account of the top 20 both bet, bet against it in at least
+/// [`COINS_OPPOSITE_BP`] of [`COINS_MIN_SHARED`] fights or more: its losses feed that account.
+pub const COINS_MIN_SHARED: i64 = 5;
+pub const COINS_OPPOSITE_BP: i64 = 9000;
 
 /// What a `server pvp` command does.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -572,6 +579,58 @@ WHERE r.season_id = $1 AND r.rated_fights >= $2 AND u.banned_at IS NULL \
   AND NOT EXISTS (SELECT 1 FROM pvp_exclusions x WHERE x.season_id = $1 AND x.user_id = r.user_id) \
 ORDER BY r.rating DESC, r.rated_fights DESC, r.user_id LIMIT $3";
 
+/// An account with PvP coins that bets against an account of the top (TA-83).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CoinsAgainstTop {
+    pub user_id: String,
+    pub counterpart: String,
+    /// The PvP coins it earned in the season.
+    pub pvp_coins: i64,
+    pub shared_fights: i64,
+    pub opposite_bp: i64,
+}
+
+/// The rows of [`COINS_SQL`] that are a signal: enough shared fights, almost all against.
+#[must_use]
+pub fn coins_against_top(rows: &[(Uuid, Uuid, i64, i64, i64)]) -> Vec<CoinsAgainstTop> {
+    rows.iter()
+        .filter(|(_, _, _, shared, _)| *shared >= COINS_MIN_SHARED)
+        .filter_map(|(user, top, coins, shared, opposite)| {
+            let bp = i64::try_from(i128::from(*opposite) * 10_000 / i128::from(*shared)).ok()?;
+            (bp >= COINS_OPPOSITE_BP).then(|| CoinsAgainstTop {
+                user_id: user.to_string(),
+                counterpart: top.to_string(),
+                pvp_coins: *coins,
+                shared_fights: *shared,
+                opposite_bp: bp,
+            })
+        })
+        .collect()
+}
+
+/// For each account with PvP coins in season `$1` and each account of `$2` (the top), the
+/// tournament fights of the month where both bet and how many of them on opposite sides. The side
+/// of a user in a fight is the one where it put more coins (a small bet on the other side to hide
+/// does not change it); a user with as much on both sides has no side and counts nowhere. Voided
+/// fights are left out: they were refunded and moved nothing. The fights of the month by
+/// `closes_at`, as the leaderboard of 020.
+const COINS_SQL: &str = "\
+WITH win AS (SELECT starts_at AS s, ends_at AS e FROM pvp_seasons WHERE id = $1), \
+earners AS (SELECT attacker_id AS user_id, sum(coins_attacker)::bigint AS coins FROM pvp_fights \
+  WHERE season_id = $1 GROUP BY attacker_id HAVING sum(coins_attacker) > 0), \
+sides AS (SELECT b.fight_id, b.user_id, \
+    sign(sum(CASE WHEN b.side = 'a' THEN b.stake ELSE -b.stake END))::int AS side \
+  FROM bets b JOIN fights f ON f.id = b.fight_id, win \
+  WHERE f.closes_at >= win.s AND f.closes_at < win.e AND f.void_reason IS NULL \
+  GROUP BY b.fight_id, b.user_id) \
+SELECT e.user_id, t.user_id, e.coins, count(*)::bigint, \
+       count(*) FILTER (WHERE c.side = -t.side)::bigint \
+FROM earners e JOIN sides c ON c.user_id = e.user_id AND c.side <> 0 \
+JOIN sides t ON t.fight_id = c.fight_id AND t.user_id = ANY($2) AND t.user_id <> e.user_id \
+  AND t.side <> 0 \
+GROUP BY e.user_id, t.user_id, e.coins \
+ORDER BY e.user_id, t.user_id";
+
 #[derive(Serialize)]
 struct Report {
     season: i32,
@@ -579,6 +638,7 @@ struct Report {
     fights: usize,
     #[serde(flatten)]
     signals: Signals,
+    pvp_coins_against_top: Vec<CoinsAgainstTop>,
     counterpart_concentration: Concentration,
 }
 
@@ -750,6 +810,28 @@ async fn farm_report(tx: &mut PgConnection, command: &PvpCommand) -> Result<Stri
         });
     }
 
+    let top_ids: Vec<Uuid> = top_rows
+        .iter()
+        .map(|row| row.try_get::<Uuid, _>(0))
+        .collect::<Result<_, _>>()?;
+    let coin_rows = sqlx::query(COINS_SQL)
+        .bind(season)
+        .bind(&top_ids)
+        .fetch_all(&mut *tx)
+        .await?
+        .iter()
+        .map(|row| {
+            Ok((
+                row.try_get(0)?,
+                row.try_get(1)?,
+                row.try_get(2)?,
+                row.try_get(3)?,
+                row.try_get(4)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()?;
+    let coins = coins_against_top(&coin_rows);
+
     let flagged: Vec<&str> = top
         .iter()
         .filter(|r| r.flagged)
@@ -763,6 +845,7 @@ async fn farm_report(tx: &mut PgConnection, command: &PvpCommand) -> Result<Stri
         "one_way_new": signals.one_way_new.len(),
         "sink_and_rebound": signals.sink_and_rebound.len(),
         "tournament_streaks": signals.tournament_streaks.len(),
+        "pvp_coins_against_top": coins.len(),
         "reviewed": top.len(),
         "flagged": flagged,
     });
@@ -772,6 +855,7 @@ async fn farm_report(tx: &mut PgConnection, command: &PvpCommand) -> Result<Stri
         coverage,
         fights: fights.len(),
         signals,
+        pvp_coins_against_top: coins,
         counterpart_concentration: Concentration {
             threshold_bp: CONCENTRATION_THRESHOLD_BP,
             top,
@@ -921,6 +1005,25 @@ mod tests {
                 attacks: 10,
                 tournament: 5
             }]
+        );
+    }
+
+    #[test]
+    fn coins_against_the_top_needs_enough_fights_almost_all_against() {
+        let row = |shared, opposite| (id(1), id(2), 30, shared, opposite);
+        assert_eq!(coins_against_top(&[row(5, 5)]).len(), 1);
+        assert_eq!(coins_against_top(&[row(10, 9)])[0].opposite_bp, 9000);
+        assert!(coins_against_top(&[row(10, 8)]).is_empty());
+        assert!(coins_against_top(&[row(4, 4)]).is_empty());
+        assert!(coins_against_top(&[]).is_empty());
+        let hit = &coins_against_top(&[row(6, 6)])[0];
+        assert_eq!(
+            (
+                hit.user_id.as_str(),
+                hit.counterpart.as_str(),
+                hit.pvp_coins
+            ),
+            (id(1).to_string().as_str(), id(2).to_string().as_str(), 30)
         );
     }
 

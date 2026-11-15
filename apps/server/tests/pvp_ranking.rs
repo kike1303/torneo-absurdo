@@ -747,3 +747,116 @@ async fn a_rated_fight_never_lands_in_a_closed_month() {
     let error = insert(true, 10).execute(&mut *tx).await.unwrap_err();
     assert_eq!(sqlstate(&error).as_deref(), Some("TA013"));
 }
+
+/// 2026-09-10T00:00:00Z: the tournament fights of September (020), a multiple of the cadence.
+const SEPTEMBER_MS: i64 = 1_788_998_400_000;
+
+/// A bet straight in the database, with the guards of `bets` off for it (the window is long gone).
+async fn seed_bet(pool: &PgPool, fight: i32, user: Uuid, side: &str) {
+    seed_stake(pool, fight, user, side, 100).await;
+}
+
+async fn seed_stake(pool: &PgPool, fight: i32, user: Uuid, side: &str, stake: i64) {
+    let mut tx = begin_privileged(pool).await;
+    sqlx::query("ALTER TABLE bets DISABLE TRIGGER USER")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO bets (id, fight_id, user_id, side, stake, ranked_stake, client_key) \
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, true, gen_random_uuid())",
+    )
+    .bind(fight)
+    .bind(user)
+    .bind(side)
+    .bind(stake)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query("ALTER TABLE bets ENABLE TRIGGER USER")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+}
+
+/// TA-83: an account that earns PvP coins and, in the tournament fights it shares with one of the
+/// top, always bets the other side, shows in `pvp_coins_against_top`; one that bets the same side
+/// does not.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_report_shows_pvp_coins_bet_against_the_top() {
+    let db = TestDb::create().await;
+    let pool = db.migrated_pool().await;
+    let pool = &pool;
+    let Closing { a, b, .. } = closing(pool).await;
+    let by = admin(pool).await;
+    let (earner, honest) = (player(pool).await, player(pool).await);
+    // Both earn PvP coins in September: a victory against `b` that paid.
+    for user in [earner, honest] {
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("ALTER TABLE pvp_fights DISABLE TRIGGER pvp_fights_guard")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO pvp_fights (attacker_id, defender_id, client_key, ruleset_version, \
+             spec_a, spec_b, seed, log, winner, end_reason, rating_delta, xp_attacker, \
+             xp_defender, coins_attacker, daily_index, season_id, created_at) \
+             VALUES ($1, $2, gen_random_uuid(), 2, '\\x7b7d', '\\x7b7d', \
+             decode(repeat('00', 32), 'hex'), '\\x7b7d', 'a', 'ko', 0, 0, 0, 15, 1, $3, \
+             '2026-09-15T12:00:00Z')",
+        )
+        .bind(user)
+        .bind(b)
+        .bind(SEPTEMBER)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        sqlx::query("ALTER TABLE pvp_fights ENABLE TRIGGER pvp_fights_guard")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+    }
+    // Five tournament fights of September: `a` (first of the top) bets `a`; the earner always the
+    // other side, the honest one always the same.
+    for k in 0..5 {
+        let spec = support::fights::golden_spec("striker");
+        let other = support::fights::golden_spec("tank");
+        let fight = support::fights::announce(
+            pool,
+            SEPTEMBER_MS + k * support::fights::CADENCE,
+            &spec,
+            &other,
+        )
+        .await;
+        seed_bet(pool, fight, a, "a").await;
+        seed_bet(pool, fight, earner, "b").await;
+        // A small bet on the side of the top does not hide it: its side is where it put more.
+        seed_stake(pool, fight, earner, "a", 25).await;
+        seed_bet(pool, fight, honest, "a").await;
+    }
+    season::close_due(pool).await.unwrap();
+
+    let text = pvp_cli(&db, SEPTEMBER, by, PvpAction::FarmReport)
+        .await
+        .unwrap();
+    let report: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        report["pvp_coins_against_top"],
+        serde_json::json!([{
+            "user_id": earner.to_string(),
+            "counterpart": a.to_string(),
+            "pvp_coins": 15,
+            "shared_fights": 5,
+            "opposite_bp": 10000,
+        }])
+    );
+    let payload: Value = sqlx::query_scalar(
+        "SELECT payload FROM admin_audit WHERE action = 'pvp_review' ORDER BY id DESC LIMIT 1",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(payload["pvp_coins_against_top"], 1);
+}
