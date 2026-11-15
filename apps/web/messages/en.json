@@ -491,5 +491,16 @@
   "pvp_verify_more_text": "The seed and both botargas are public: anyone can rerun the fight with the engine and compare the result.",
   "pvp_verify_field_spec_a": "Attacker's botarga",
   "pvp_verify_field_spec_b": "Defender's botarga",
-  "pvp_verify_match": "It matches. With this seed and these two botargas, the engine gives exactly this fight, down to the result."
+  "pvp_verify_match": "It matches. With this seed and these two botargas, the engine gives exactly this fight, down to the result.",
+  "botarga_wardrobe": "Wardrobe",
+  "botarga_wardrobe_hint": "One accessory per slot. Each one moves points between your stats without adding any.",
+  "botarga_wardrobe_empty": "You have no accessories yet: you earn one every 10 levels.",
+  "botarga_wear_none": "Nothing",
+  "botarga_slot_head": "Head",
+  "botarga_slot_hands": "Hands",
+  "botarga_slot_torso": "Torso",
+  "botarga_slot_legs": "Legs",
+  "botarga_slot_feet": "Feet",
+  "botarga_wear_option": "{name} ({deltas})",
+  "botarga_wear_delta": "{delta} {stat}"
 }

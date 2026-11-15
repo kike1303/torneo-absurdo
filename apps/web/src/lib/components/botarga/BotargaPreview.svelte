@@ -12,17 +12,19 @@
   interface Props {
     name: string;
     cosmetics: FighterCosmetics;
+    /** The accessories it wears, by catalog id (their 3D model in content/models/accessories). */
+    wear: readonly string[];
     /** The showcase timeline (`features/botarga/showcase.ts`). */
     source: () => Promise<AdaptedTimeline>;
   }
 
-  let { name, cosmetics, source }: Props = $props();
+  let { name, cosmetics, wear, source }: Props = $props();
 
   let stage = $state<FightStage | null>(null);
   let phase = $state<FightStageState>('loading');
   let failed = $state<string | null>(null);
 
-  // The renderer reads `cosmetics` once, on mount; the page keys this by them.
+  // The renderer reads `cosmetics` and `looks` once, on mount; the page keys this by them.
   const picked = $derived({
     a: {
       ...(cosmetics.idle === null ? {} : { idle: cosmetics.idle }),
@@ -43,6 +45,7 @@
       fighters={{ a: 'dummy_a', b: 'dummy_b' }}
       displayNames={{ a: name, b: m.botarga_sparring() }}
       cosmetics={picked}
+      looks={wear.length === 0 ? undefined : { a: { wear } }}
       {source}
       showResult={false}
       onfailure={(code) => (failed = code)}

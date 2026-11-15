@@ -491,5 +491,16 @@
   "pvp_verify_more_text": "La semilla y las dos botargas son públicas: cualquiera puede repetir la pelea con el motor y comparar el resultado.",
   "pvp_verify_field_spec_a": "Botarga del atacante",
   "pvp_verify_field_spec_b": "Botarga del defensor",
-  "pvp_verify_match": "Coincide. Con esta semilla y estas dos botargas, el motor da exactamente esta pelea, hasta el resultado."
+  "pvp_verify_match": "Coincide. Con esta semilla y estas dos botargas, el motor da exactamente esta pelea, hasta el resultado.",
+  "botarga_wardrobe": "Vestuario",
+  "botarga_wardrobe_hint": "Un accesorio por ranura. Cada uno mueve puntos entre tus stats, sin darte más.",
+  "botarga_wardrobe_empty": "Todavía no tienes accesorios: se ganan cada 10 niveles.",
+  "botarga_wear_none": "Nada",
+  "botarga_slot_head": "Cabeza",
+  "botarga_slot_hands": "Manos",
+  "botarga_slot_torso": "Torso",
+  "botarga_slot_legs": "Piernas",
+  "botarga_slot_feet": "Pies",
+  "botarga_wear_option": "{name} ({deltas})",
+  "botarga_wear_delta": "{delta} {stat}"
 }

@@ -35,6 +35,12 @@
   // the draw it changed, show only then, as the result itself (011 RF20). Then the page data is
   // read again, with a new key for the next search.
   let seen = $state<number | null>(null);
+
+  // What the form has on, before saving: the 3D preview follows it.
+  let previewWear = $state<readonly string[] | null>(null);
+  const wear = $derived(
+    previewWear ?? (data.state === 'ready' ? data.botarga.build.accessories : []),
+  );
   const resultSeen = $derived(attacked !== null && seen === attacked.id);
   function onResultSeen(id: number): void {
     if (seen === id) return;
@@ -123,10 +129,11 @@
       class="flex flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start"
     >
       <div class="flex min-w-0 flex-col gap-4">
-        {#key `${botarga.build.cosmetics.idle}/${botarga.build.cosmetics.victory}`}
+        {#key `${botarga.build.cosmetics.idle}/${botarga.build.cosmetics.victory}/${wear.join(',')}`}
           <BotargaPreview
             name={m.botarga_title()}
             cosmetics={botarga.build.cosmetics}
+            {wear}
             source={() => Promise.resolve(SHOWCASE)}
           />
         {/key}
@@ -147,7 +154,12 @@
 
     {#if draw === null}
       {#key JSON.stringify(botarga.build)}
-        <BuildForm {botarga} choices={buildChoices(botarga, locale)} {locale} />
+        <BuildForm
+          {botarga}
+          choices={buildChoices(botarga, locale)}
+          {locale}
+          onwear={(ids) => (previewWear = ids)}
+        />
       {/key}
     {:else}
       <p class="text-sm text-muted-foreground" data-testid="botarga-build-waits">

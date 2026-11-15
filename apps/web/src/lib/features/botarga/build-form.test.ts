@@ -24,6 +24,7 @@ describe('parseBuildForm', () => {
         ['ability', 'foam_headbutt'],
         ['ability', 'spicy_slap'],
         ['accessory', 'party_hat'],
+        ['accessory', ''],
         ['idle', 'idle_2'],
         ['victory', ''],
       ]),

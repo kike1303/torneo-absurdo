@@ -11,9 +11,9 @@
   import * as Card from '#lib/components/ui/card/index.js';
   import { Input } from '#lib/components/ui/input/index.js';
   import { Label } from '#lib/components/ui/label/index.js';
-  import type { BuildChoices, ClipLabel } from '#lib/features/botarga/view.js';
+  import type { BuildChoices, ClipLabel, WardrobeSlot } from '#lib/features/botarga/view.js';
   import type { StatKey } from '#lib/features/botarga/catalog.js';
-  import { formatInteger } from '#lib/i18n/format.js';
+  import { formatInteger, formatList, formatSigned } from '#lib/i18n/format.js';
   import type { Locale } from '#lib/i18n/locale.js';
   import { m } from '#lib/paraglide/messages.js';
 
@@ -21,9 +21,19 @@
     botarga: BotargaView;
     choices: BuildChoices;
     locale: Locale;
+    /** The accessories picked in the form, before saving: the page shows them in 3D. */
+    onwear?: (ids: readonly string[]) => void;
   }
 
-  let { botarga, choices, locale }: Props = $props();
+  let { botarga, choices, locale, onwear }: Props = $props();
+
+  const SLOT_LABEL: Record<WardrobeSlot['slot'], () => string> = {
+    head: m.botarga_slot_head,
+    hands: m.botarga_slot_hands,
+    torso: m.botarga_slot_torso,
+    legs: m.botarga_slot_legs,
+    feet: m.botarga_slot_feet,
+  };
 
   const STAT_LABEL: Record<StatKey, () => string> = {
     hp: m.botarga_stat_hp,
@@ -37,11 +47,33 @@
   let stats = $state({ ...botarga.build.stats });
   // svelte-ignore state_referenced_locally
   let equipped = $state<string[]>([...botarga.build.abilities]);
+  // One accessory per slot, `''` for none; the saved ones to start.
+  // svelte-ignore state_referenced_locally
+  let worn = $state<Record<string, string>>(
+    Object.fromEntries(
+      choices.wardrobe.map(({ slot, options }) => [
+        slot,
+        options.find((o) => botarga.build.accessories.includes(o.id))?.id ?? '',
+      ]),
+    ),
+  );
+  const wearing = $derived(Object.values(worn).filter((id) => id !== ''));
+
+  function deltasText(option: WardrobeSlot['options'][number]): string {
+    return formatList(
+      option.deltas.map(({ stat, delta }) =>
+        m.botarga_wear_delta({ delta: formatSigned(delta, locale), stat: STAT_LABEL[stat]() }),
+      ),
+      locale,
+    );
+  }
   let pending = $state(false);
   // Without JavaScript nothing is disabled: the server checks the slots and answers with a code.
   let hydrated = $state(false);
   onMount(() => {
     hydrated = true;
+    // A form that mounts again starts from the saved build: the preview follows it.
+    onwear?.(wearing);
   });
 
   const budget = $derived(
@@ -160,9 +192,40 @@
         </ul>
       </fieldset>
 
-      {#each botarga.build.accessories as id (id)}
-        <input type="hidden" name="accessory" value={id} />
-      {/each}
+      <fieldset class="flex flex-col gap-3" data-testid="botarga-wardrobe">
+        <legend class="mb-1 text-sm font-medium">{m.botarga_wardrobe()}</legend>
+        <p class="text-sm text-muted-foreground">{m.botarga_wardrobe_hint()}</p>
+        {#if choices.wardrobe.every((slot) => slot.options.length === 0)}
+          <p class="text-sm" data-testid="botarga-wardrobe-empty">{m.botarga_wardrobe_empty()}</p>
+        {/if}
+        <div class="grid gap-3 sm:grid-cols-2">
+          {#each choices.wardrobe as { slot, options } (slot)}
+            {#if options.length > 0}
+              <div class="grid gap-2">
+                <Label for={`wear-${slot}`}>{SLOT_LABEL[slot]()}</Label>
+                <select
+                  id={`wear-${slot}`}
+                  name="accessory"
+                  class="h-11 rounded-md border border-input bg-background px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  bind:value={worn[slot]}
+                  onchange={() => onwear?.(wearing)}
+                  data-testid={`botarga-wear-${slot}`}
+                >
+                  <option value="">{m.botarga_wear_none()}</option>
+                  {#each options as option (option.id)}
+                    <option value={option.id}
+                      >{m.botarga_wear_option({
+                        name: option.name,
+                        deltas: deltasText(option),
+                      })}</option
+                    >
+                  {/each}
+                </select>
+              </div>
+            {/if}
+          {/each}
+        </div>
+      </fieldset>
 
       <fieldset class="grid gap-3 sm:grid-cols-2">
         <legend class="mb-1 text-sm font-medium">{m.botarga_cosmetics()}</legend>

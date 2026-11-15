@@ -20,7 +20,7 @@ const botarga = {
   },
   unlocks: {
     abilities: ['foam_headbutt', 'not_in_catalog'],
-    accessories: [],
+    accessories: ['oven_mitts', 'bunny_slippers', 'mismatched_mitts', 'ghost_hat'],
     cosmetics: ['idle_3', 'win_2', 'nonsense'],
   },
   draws: [],
@@ -42,6 +42,29 @@ describe('buildChoices', () => {
     expect(es.idles).toEqual([{ code: 'idle_3', clip: 'idle', n: 3 }]);
     expect(es.victories).toEqual([{ code: 'win_2', clip: 'win', n: 2 }]);
     expect(es.statMin).toBe(20);
+    // The wardrobe: every slot in order, with what the user owns of it and what each one moves.
+    expect(es.wardrobe.map((w) => w.slot)).toEqual(['head', 'hands', 'torso', 'legs', 'feet']);
+    expect(es.wardrobe.find((w) => w.slot === 'hands')?.options).toEqual([
+      {
+        id: 'oven_mitts',
+        name: es.wardrobe.find((w) => w.slot === 'hands')?.options[0]?.name,
+        deltas: [
+          { stat: 'attack', delta: 8 },
+          { stat: 'speed', delta: -8 },
+        ],
+      },
+      {
+        id: 'mismatched_mitts',
+        name: es.wardrobe.find((w) => w.slot === 'hands')?.options[1]?.name,
+        deltas: [
+          { stat: 'attack', delta: 10 },
+          { stat: 'defense', delta: -10 },
+        ],
+      },
+    ]);
+    expect(es.wardrobe.find((w) => w.slot === 'head')?.options).toEqual([]);
+    // An id the catalog does not have is in no slot.
+    expect(es.wardrobe.flatMap((w) => w.options.map((o) => o.id))).not.toContain('ghost_hat');
     expect(buildChoices(botarga, 'en').abilities[0]?.name).not.toBe(es.abilities[0]?.name);
   });
 });

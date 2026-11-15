@@ -25,6 +25,8 @@ function detail(overrides: Record<string, unknown> = {}) {
     winner: 'a',
     end_reason: 'ko',
     rating_delta: 0,
+    look_a: { idle: null, victory: 'win_2', accessories: ['oven_mitts'] },
+    look_b: null,
     created_at: '1700000000000',
     ...overrides,
   };
@@ -109,6 +111,10 @@ describe('verifyPvpFight', () => {
       detail({ end_reason: 'forfeit' }),
       detail({ log: null }),
       detail({ id: '7' }),
+      detail({ look_a: { idle: 3, victory: null, accessories: [] } }),
+      detail({ look_b: { idle: null, victory: null, accessories: [1] } }),
+      detail({ look_a: undefined }),
+      detail({ look_a: { idle: 'dance', victory: null, accessories: [] } }),
     ]) {
       expect(parsePvpDetail(bad)).toBeNull();
     }

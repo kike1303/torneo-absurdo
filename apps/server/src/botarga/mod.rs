@@ -21,6 +21,16 @@ pub const RULESET_VERSION: u16 = 2;
 /// Longest id of a build, in bytes (021 "Build").
 pub const MAX_ID_BYTES: usize = 64;
 
+/// What a build wears in a fight (TA-67): its idle, its victory and its accessories.
+#[must_use]
+pub fn look_of(build: &protocol::BotargaBuild) -> protocol::PvpLook {
+    protocol::PvpLook {
+        idle: build.cosmetics.idle,
+        victory: build.cosmetics.victory,
+        accessories: build.accessories.clone(),
+    }
+}
+
 /// Most accessories of a build: one per slot.
 pub const MAX_ACCESSORIES: usize = 5;
 
@@ -163,6 +173,21 @@ impl BotargaCatalog {
             .iter()
             .filter(|entry| entry.tier <= top)
             .map(|entry| entry.ability.id.as_str())
+            .collect()
+    }
+
+    /// The accessories a reward of `level` may give: the ones of its tier or a lower one (016
+    /// "Cada 10"). The caller leaves out what the user owns.
+    #[must_use]
+    pub fn rewardable_accessories(&self, level: u8) -> Vec<&str> {
+        let Some(top) = tier(level) else {
+            return Vec::new();
+        };
+        self.catalog
+            .accessories
+            .iter()
+            .filter(|entry| entry.tier <= top)
+            .map(|entry| entry.accessory.id.as_str())
             .collect()
     }
 

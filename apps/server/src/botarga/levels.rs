@@ -9,6 +9,10 @@ use super::xp_to_next;
 /// Most options of a draw.
 pub const DRAW_OPTIONS: usize = 3;
 
+/// Every level that is a multiple of this gives a cosmetic (016 "Recompensas por nivel"): an
+/// accessory, an idle or a victory the user does not own, drawn by the server.
+pub const REWARD_EVERY: u8 = 10;
+
 /// Where a botarga stands after earning some XP.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Gain {
@@ -17,6 +21,8 @@ pub struct Gain {
     pub xp: u32,
     /// The levels crossed that draw, in order.
     pub draw_levels: Vec<u8>,
+    /// The levels crossed that give a cosmetic, in order.
+    pub reward_levels: Vec<u8>,
 }
 
 /// `add` XP on a botarga of `level` with `xp` inside it. Every level crossed takes its
@@ -26,6 +32,7 @@ pub fn gain(level: u8, xp: u32, add: u32) -> Gain {
     let mut level = level.clamp(1, LEVEL_MAX);
     let mut xp = xp.saturating_add(add);
     let mut draw_levels = Vec::new();
+    let mut reward_levels = Vec::new();
     while level < LEVEL_MAX {
         let need = xp_to_next(level);
         if xp < need {
@@ -36,6 +43,9 @@ pub fn gain(level: u8, xp: u32, add: u32) -> Gain {
         if level.is_multiple_of(DRAW_EVERY) {
             draw_levels.push(level);
         }
+        if level.is_multiple_of(REWARD_EVERY) {
+            reward_levels.push(level);
+        }
     }
     if level >= LEVEL_MAX {
         xp = 0;
@@ -44,6 +54,7 @@ pub fn gain(level: u8, xp: u32, add: u32) -> Gain {
         level,
         xp,
         draw_levels,
+        reward_levels,
     }
 }
 
@@ -84,7 +95,8 @@ mod tests {
             Gain {
                 level: 1,
                 xp: 100,
-                draw_levels: vec![]
+                draw_levels: vec![],
+                reward_levels: vec![]
             }
         );
         assert_eq!(gain(1, 100, 20).level, 2);
@@ -101,6 +113,7 @@ mod tests {
         let g = gain(4, 0, to_ten);
         assert_eq!(g.level, 10);
         assert_eq!(g.draw_levels, vec![5, 10]);
+        assert_eq!(g.reward_levels, vec![10]);
         assert!(gain(5, 0, 10).draw_levels.is_empty());
     }
 
@@ -114,6 +127,11 @@ mod tests {
         assert!(gain(100, 0, 500).draw_levels.is_empty());
         // From level 1 all the way: 20 draws, as 016 counts them.
         assert_eq!(gain(1, 0, u32::MAX).draw_levels.len(), 20);
+        // And 10 cosmetics, one every 10 levels.
+        assert_eq!(
+            gain(1, 0, u32::MAX).reward_levels,
+            (1..=10).map(|n| n * 10).collect::<Vec<u8>>()
+        );
     }
 
     fn ids(list: &[&str]) -> Vec<String> {

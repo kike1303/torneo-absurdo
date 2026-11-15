@@ -3,6 +3,7 @@
 // are catalog content already translated in content/catalog/names.<locale>.json; an id without a
 // name shows as itself (data, not a UI string), as `wardrobe-name.ts` does.
 import abilitiesFile from '../../../../../../content/catalog/abilities.json';
+import accessoriesFile from '../../../../../../content/catalog/accessories.json';
 import namesEn from '../../../../../../content/catalog/names.en.json';
 import namesEs from '../../../../../../content/catalog/names.es.json';
 import stylesFile from '../../../../../../content/catalog/styles.json';
@@ -25,6 +26,36 @@ const ABILITIES: ReadonlyMap<string, CatalogAbility> = new Map(
     { id: a.id, kind: a.kind as AbilityKind, tier: a.tier, element: a.element },
   ]),
 );
+
+/** The clothing slots of an accessory (016), in the order the wardrobe shows them. */
+export const ACCESSORY_SLOTS = ['head', 'hands', 'torso', 'legs', 'feet'] as const;
+export type AccessorySlot = (typeof ACCESSORY_SLOTS)[number];
+
+export interface CatalogAccessory {
+  readonly id: string;
+  readonly slot: AccessorySlot;
+  /** What it moves between stats: zero-sum (016). Only the stats it changes. */
+  readonly deltas: Readonly<Partial<Record<StatKey, number>>>;
+}
+
+const ACCESSORIES: ReadonlyMap<string, CatalogAccessory> = new Map(
+  accessoriesFile.accessories.map((a) => [
+    a.id,
+    {
+      id: a.id,
+      slot: a.slot as AccessorySlot,
+      deltas: a.deltas as Partial<Record<StatKey, number>>,
+    },
+  ]),
+);
+
+export function accessory(id: string): CatalogAccessory | null {
+  return ACCESSORIES.get(id) ?? null;
+}
+
+export function accessoryName(id: string, locale: Locale): string {
+  return (NAMES[locale].accessories as Record<string, string>)[id] ?? id;
+}
 
 /** The styles of the catalog, in its order. */
 export const STYLE_IDS: readonly string[] = stylesFile.styles.map((s) => s.id);

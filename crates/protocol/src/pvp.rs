@@ -5,7 +5,7 @@
 //! ([`PvpReward`]) only travels in the private answers.
 use serde::{Deserialize, Serialize};
 
-use crate::botarga::BotargaProgress;
+use crate::botarga::{BotargaProgress, IdleClip, VictoryClip};
 use crate::fight::{EndReason, Side};
 use crate::fights::TimestampMs;
 use crate::seasons::SeasonView;
@@ -29,11 +29,23 @@ pub enum PvpFighter {
     Tournament { slug: String },
 }
 
+/// What a botarga wore in a fight (021, TA-67): the idle and the victory it picked (`null`: the
+/// tournament ones) and its accessories, by catalog id. Outside what the fight hashes: it changes
+/// nothing of the result, so the browser does not verify it, it only draws it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct PvpLook {
+    pub idle: Option<IdleClip>,
+    pub victory: Option<VictoryClip>,
+    pub accessories: Vec<String>,
+}
+
 /// `GET /api/pvp/fights/{id}` (public) and the fight of [`PvpFightCreated`]. The attacker is always
 /// side `a`. `spec_a`, `spec_b` and `log` are the canonical JSON of the engine and `seed` is
 /// lowercase hexadecimal: the same bytes as a tournament fight, so the browser re-simulates them.
 /// `rating_delta` is the change of the attacker; the defender's, with its own K, is in its private
-/// [`PvpReward`].
+/// [`PvpReward`]. `look_a` and `look_b` are what each botarga wore; `null` for a character of the
+/// tournament and for the fights of before TA-67.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PvpFightDetail {
@@ -48,6 +60,8 @@ pub struct PvpFightDetail {
     pub winner: Option<Side>,
     pub end_reason: EndReason,
     pub rating_delta: i16,
+    pub look_a: Option<PvpLook>,
+    pub look_b: Option<PvpLook>,
     pub created_at: TimestampMs,
 }
 
@@ -149,6 +163,12 @@ mod tests {
             winner: Some(Side::A),
             end_reason: EndReason::Ko,
             rating_delta: 0,
+            look_a: Some(PvpLook {
+                idle: None,
+                victory: Some(VictoryClip::Win2),
+                accessories: vec!["oven_mitts".to_owned()],
+            }),
+            look_b: None,
             created_at: TimestampMs::from_ms(1_700_000_000_000),
         }
     }
@@ -172,6 +192,8 @@ mod tests {
                 "end_reason",
                 "id",
                 "log",
+                "look_a",
+                "look_b",
                 "rating_delta",
                 "ruleset_version",
                 "seed",
@@ -189,6 +211,11 @@ mod tests {
             serde_json::json!({"kind": "tournament", "slug": "rata-electrica"})
         );
         assert_eq!(json["created_at"], "1700000000000");
+        assert_eq!(
+            json["look_a"],
+            serde_json::json!({"idle": null, "victory": "win_2", "accessories": ["oven_mitts"]})
+        );
+        assert_eq!(json["look_b"], serde_json::Value::Null);
         let text = json.to_string();
         for private in ["user", "daily", "coins", "xp", "client_key"] {
             assert!(!text.contains(private), "{private}");
