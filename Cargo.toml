@@ -40,7 +40,7 @@ serde_json = "=1.0.154"
 ts-rs = "=12.0.1"
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["std", "fmt", "env-filter", "registry"] }
-uuid = { version = "=1.29.0", features = ["v4"] }
+uuid = { version = "=1.29.2", features = ["v4"] }
 mimalloc = "=0.1.52"
 thiserror = "=2.0.21"
 tokio-tungstenite = "=0.29.0"
@@ -72,7 +72,7 @@ oauth2 = { version = "=5.0.0", default-features = false }
 # `aws_lc_rs` and `logging`; rustls and webpki-roots were already in the lock via sqlx.
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
-webpki-roots = "=1.0.11"
+webpki-roots = "=1.0.12"
 # Certificates generated on the fly for the TLS unit tests (dev-dependency only).
 rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "ring", "pem"] }
 # Property tests of the server (dev-dependency only): no fork, timeout nor tempfile.
