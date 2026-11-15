@@ -5,6 +5,9 @@ import type {
   FightPool,
   FightsCurrent,
   FightsPage,
+  FriendFight,
+  FriendFightsPage,
+  FriendsView,
   Leaderboard,
   Me,
   MyFightBets,
@@ -126,4 +129,23 @@ export function getPvpSeasons(api: Api): Promise<ApiResult<SeasonView[]>> {
 /** A player fight, public (021): who fought, for the title. The browser reads the rest itself. */
 export function getPvpFightDetail(api: Api, id: number): Promise<ApiResult<PvpFightDetail>> {
   return apiRequest<PvpFightDetail>(api, 'GET', `/api/pvp/fights/${id}`);
+}
+
+/** My friends and my invite code (023); 404 `botarga.not_created` without a botarga. */
+export function getFriends(api: Api): Promise<ApiResult<FriendsView>> {
+  return apiRequest<FriendsView>(api, 'GET', '/api/friends');
+}
+
+/** My challenges and matches between friends (023), private. */
+export function getFriendFights(
+  api: Api,
+  before: number | null,
+): Promise<ApiResult<FriendFightsPage>> {
+  const path = before === null ? '/api/friends/fights' : `/api/friends/fights?before=${before}`;
+  return apiRequest<FriendFightsPage>(api, 'GET', path as `/api/${string}`);
+}
+
+/** A fight between friends (023): who fought, for the title; 404 for anybody else. */
+export function getFriendFight(api: Api, id: number): Promise<ApiResult<FriendFight>> {
+  return apiRequest<FriendFight>(api, 'GET', `/api/friends/fights/${id}`);
 }

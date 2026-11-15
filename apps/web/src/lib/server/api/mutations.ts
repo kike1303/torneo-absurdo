@@ -5,6 +5,10 @@ import type {
   BotargaDrawChoice,
   BotargaView,
   DisplayNameRequest,
+  FriendChallengeRequest,
+  FriendFight,
+  FriendInvitePreview,
+  FriendsView,
   Me,
   PreferencesRequest,
   Provider,
@@ -62,4 +66,38 @@ export function postDrawChoice(api: Api, body: BotargaDrawChoice): Promise<ApiRe
 export function postPvpFight(api: Api, body: PvpFightRequest): Promise<ApiResult<PvpFightCreated>> {
   // The fight is resolved by the engine in the request: more time than a read.
   return apiRequest<PvpFightCreated>(api, 'POST', '/api/pvp/fights', { body, timeoutMs: 10_000 });
+}
+
+/** A new invite code (023): the old one stops working. */
+export function postInviteRotate(api: Api): Promise<ApiResult<FriendsView>> {
+  return apiRequest<FriendsView>(api, 'POST', '/api/friends/invite/rotate');
+}
+
+/** Whose invite a code is (023): a POST, so the code never travels in a URL. */
+export function postInvitePreview(api: Api, code: string): Promise<ApiResult<FriendInvitePreview>> {
+  return apiRequest<FriendInvitePreview>(api, 'POST', '/api/friends/invite/preview', {
+    body: { code },
+  });
+}
+
+export function postInviteAccept(api: Api, code: string): Promise<ApiResult<FriendsView>> {
+  return apiRequest<FriendsView>(api, 'POST', '/api/friends/accept', { body: { code } });
+}
+
+export function postFriendRemove(api: Api, displayName: string): Promise<ApiResult<FriendsView>> {
+  return apiRequest<FriendsView>(api, 'POST', '/api/friends/remove', {
+    body: { display_name: displayName },
+  });
+}
+
+/** 201 for a new challenge, 200 for a repeated `client_key` (023): both carry `FriendFight`. */
+export function postFriendChallenge(
+  api: Api,
+  body: FriendChallengeRequest,
+): Promise<ApiResult<FriendFight>> {
+  // The fight is resolved by the engine in the request: more time than a read.
+  return apiRequest<FriendFight>(api, 'POST', '/api/friends/challenge', {
+    body,
+    timeoutMs: 10_000,
+  });
 }
