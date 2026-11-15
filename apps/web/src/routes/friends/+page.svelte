@@ -2,6 +2,8 @@
   import FriendFightList from '#lib/components/friends/FriendFightList.svelte';
   import FriendList from '#lib/components/friends/FriendList.svelte';
   import InviteLink from '#lib/components/friends/InviteLink.svelte';
+  import TournamentForm from '#lib/components/friends/TournamentForm.svelte';
+  import TournamentList from '#lib/components/friends/TournamentList.svelte';
   import * as Alert from '#lib/components/ui/alert/index.js';
   import { Button } from '#lib/components/ui/button/index.js';
   import { resolveApiError } from '#lib/features/auth/error-text.js';
@@ -137,7 +139,15 @@
         <InviteLink {link} />
         <FriendList friends={data.view.friends} {clientKey} {locale} />
       </div>
-      <FriendFightList fights={data.fights} nextBefore={data.nextBefore} {locale} />
+      <div class="flex min-w-0 flex-col gap-6">
+        <TournamentForm friends={data.view.friends} clientKey={data.tournamentKey} {locale} />
+        <TournamentList
+          tournaments={data.tournaments}
+          nextBefore={data.tournamentsBefore}
+          {locale}
+        />
+        <FriendFightList fights={data.fights} nextBefore={data.nextBefore} {locale} />
+      </div>
     </div>
   {/if}
 

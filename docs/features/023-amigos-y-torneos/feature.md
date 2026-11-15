@@ -2,7 +2,7 @@
 id: "023"
 title: Amigos, retos y torneos privados
 type: feature
-status: approved
+status: done
 risk: high
 author: claude
 linear: TA-69
@@ -108,10 +108,10 @@ El enlace es `/friends/invite#<code>`: el fragmento nunca llega al servidor ni a
 - **Volumen por destinatario:** un amigo puede retarme hasta 50 veces al día, pero esas peleas son privadas y solo pesan en almacenamiento. No hay tope por pareja.
 
 ## Pruebas
-- [ ] `just check` en verde.
-- [ ] Integración: aceptar hace amigos una sola vez. Un código rotado, propio, inventado, de un baneado o del que me bloqueó da el mismo 404. Quitar bloquea que vuelva a aceptar. Dos aceptaciones concurrentes respetan el tope de 200.
-- [ ] Integración: un reto guarda una `friend_fights` y deja idénticos `botargas`, `botarga_draws`, `botarga_unlocks`, `pvp_daily`, `pvp_fights` y `ledger_entries`. Repetir el `client_key` devuelve la misma pelea. Retar a quien no es amigo da 404. El reto 51 del día da 429. Diez retos no sacan de la carencia PvP.
-- [ ] Integración: un torneo de 4 y uno de 8 tienen 3 y 7 combates, ganadores encadenados y un campeón. Un empate pasa por el bit de la semilla. Repetir el `client_key` devuelve el mismo torneo. El torneo 11 del día da 429. Un ajeno o un usuario sin sesión ve 404 en el torneo y en sus peleas.
-- [ ] Concurrencia: dos torneos cruzados y dos retos cruzados terminan sin `40P01`.
-- [ ] `banned_writes.rs` y `fights_no_leaks.rs` cubren las rutas nuevas, `preview` incluida. Los `GET` no escriben. `preview` responde el mismo 404 en los mismos casos que `accept`.
-- [ ] e2e: dos usuarios se hacen amigos por el enlace, uno reta al otro y ve la repetición verificada, y arman un torneo de 4. A 375 px y escritorio, claro y oscuro.
+- [x] `just check` en verde.
+- [x] Integración: aceptar hace amigos una sola vez. Un código rotado, propio, inventado, de un baneado o del que me bloqueó da el mismo 404. Quitar bloquea que vuelva a aceptar. Dos aceptaciones concurrentes respetan el tope de 200.
+- [x] Integración: un reto guarda una `friend_fights` y deja idénticos `botargas`, `botarga_draws`, `botarga_unlocks`, `pvp_daily`, `pvp_fights` y `ledger_entries`. Repetir el `client_key` devuelve la misma pelea. Retar a quien no es amigo da 404. El reto 51 del día da 429. Diez retos no sacan de la carencia PvP.
+- [x] Integración: un torneo de 4 y uno de 8 tienen 3 y 7 combates, ganadores encadenados y un campeón. Un empate pasa por el bit de la semilla. Repetir el `client_key` devuelve el mismo torneo. El torneo 11 del día da 429. Un ajeno o un usuario sin sesión ve 404 en el torneo y en sus peleas.
+- [x] Concurrencia: dos torneos cruzados y dos retos cruzados terminan sin `40P01`.
+- [x] `banned_writes.rs` y `fights_no_leaks.rs` cubren las rutas nuevas, `preview` incluida. Los `GET` no escriben. `preview` responde el mismo 404 en los mismos casos que `accept`.
+- [x] e2e: dos usuarios se hacen amigos por el enlace, uno reta al otro y ve la repetición verificada, y arman un torneo de 4. A 375 px y escritorio, claro y oscuro.
