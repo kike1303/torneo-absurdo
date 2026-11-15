@@ -675,6 +675,9 @@ pub enum FriendsErrorCode {
     /// A build of the fight no longer fits the catalog of this release.
     #[serde(rename = "friends.build_invalid")]
     BuildInvalid,
+    /// A tournament that cannot be: a size other than 4 or 8, a name twice, or one that is not a friend or is banned. One code for all.
+    #[serde(rename = "friends.tournament_invalid")]
+    TournamentInvalid,
     /// The challenges (or the tournaments) of the UTC day reached their limit.
     #[serde(rename = "friends.daily_limit")]
     DailyLimit,
@@ -698,6 +701,7 @@ impl FriendsErrorCode {
         Self::Limit,
         Self::NotFriend,
         Self::BuildInvalid,
+        Self::TournamentInvalid,
         Self::DailyLimit,
         Self::NotFound,
         Self::Busy,
@@ -715,6 +719,7 @@ impl FriendsErrorCode {
             Self::Limit => "friends.limit",
             Self::NotFriend => "friends.not_friend",
             Self::BuildInvalid => "friends.build_invalid",
+            Self::TournamentInvalid => "friends.tournament_invalid",
             Self::DailyLimit => "friends.daily_limit",
             Self::NotFound => "friends.not_found",
             Self::Busy => "friends.busy",
@@ -970,10 +975,11 @@ mod tests {
             FriendsErrorCode::Limit => 3,
             FriendsErrorCode::NotFriend => 4,
             FriendsErrorCode::BuildInvalid => 5,
-            FriendsErrorCode::DailyLimit => 6,
-            FriendsErrorCode::NotFound => 7,
-            FriendsErrorCode::Busy => 8,
-            FriendsErrorCode::Unavailable => 9,
+            FriendsErrorCode::TournamentInvalid => 6,
+            FriendsErrorCode::DailyLimit => 7,
+            FriendsErrorCode::NotFound => 8,
+            FriendsErrorCode::Busy => 9,
+            FriendsErrorCode::Unavailable => 10,
         }
     }
 
@@ -1033,7 +1039,7 @@ mod tests {
     const SEASON_COUNT: usize = 2;
     const BOTARGA_COUNT: usize = 18;
     const PVP_COUNT: usize = 7;
-    const FRIENDS_COUNT: usize = 10;
+    const FRIENDS_COUNT: usize = 11;
     const BET_COUNT: usize = 10;
     const BONUS_COUNT: usize = 1;
     const BAILOUT_COUNT: usize = 3;

@@ -109,6 +109,9 @@ pub enum Handler {
     FriendsChallenge,
     FriendFights,
     FriendFightDetail,
+    FriendTournamentCreate,
+    FriendTournaments,
+    FriendTournamentDetail,
     #[cfg(feature = "dev-auth")]
     DevAuthorize,
     #[cfg(feature = "dev-auth")]
@@ -398,6 +401,24 @@ pub const ROUTES: &[RouteSpec] = &[
         effect: Effect::Read,
         handler: Handler::FriendFightDetail,
     },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/friends/tournaments",
+        effect: Effect::Mutate,
+        handler: Handler::FriendTournamentCreate,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/friends/tournaments",
+        effect: Effect::Read,
+        handler: Handler::FriendTournaments,
+    },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/friends/tournaments/{id}",
+        effect: Effect::Read,
+        handler: Handler::FriendTournamentDetail,
+    },
     #[cfg(feature = "dev-auth")]
     RouteSpec {
         method: RouteMethod::Get,
@@ -546,6 +567,11 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         Handler::FriendsChallenge => on(filter, crate::friends::api::challenge).layer(body),
         Handler::FriendFights => on(filter, crate::friends::api::fights),
         Handler::FriendFightDetail => on(filter, crate::friends::api::fight_detail),
+        Handler::FriendTournamentCreate => {
+            on(filter, crate::friends::api::tournament_create).layer(body)
+        }
+        Handler::FriendTournaments => on(filter, crate::friends::api::tournaments),
+        Handler::FriendTournamentDetail => on(filter, crate::friends::api::tournament_detail),
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize => on(filter, auth::dev::authorize),
         #[cfg(feature = "dev-auth")]

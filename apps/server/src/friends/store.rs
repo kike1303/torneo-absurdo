@@ -2,8 +2,9 @@
 //! caller; the ones that write expect the locks [`super::api`] takes.
 
 use protocol::{
-    EndReason, FriendEntry, FriendFightSummary, FriendFightsPage, PvpFightDetail, PvpFighter,
-    PvpLook, PvpRole, Side, TimestampMs,
+    BracketMatch, EndReason, FriendEntry, FriendFightSummary, FriendFightsPage, FriendTournament,
+    FriendTournamentSummary, FriendTournamentsPage, PvpFightDetail, PvpFighter, PvpLook, PvpRole,
+    Side, TimestampMs,
 };
 use sqlx::postgres::PgRow;
 use sqlx::{PgConnection, Row};
@@ -391,8 +392,8 @@ fn text(row: &PgRow, at: usize) -> Result<String, sqlx::Error> {
     String::from_utf8(row.try_get(at)?).map_err(|_| bad())
 }
 
-/// The detail of fight `id` for `reader`, who must be one of its two sides: `None` otherwise, as
-/// for a fight that does not exist.
+/// The detail of fight `id` for `reader`, who must be one of its two sides or, for a match of a
+/// bracket, a player of its tournament: `None` otherwise, as for a fight that does not exist.
 ///
 /// # Errors
 /// The database error, or a row the `CHECK`s forbid.
@@ -407,7 +408,9 @@ pub async fn detail(
                 (extract(epoch FROM f.created_at) * 1000)::bigint \
          FROM friend_fights f JOIN users ua ON ua.id = f.attacker_id \
          JOIN users ud ON ud.id = f.defender_id \
-         WHERE f.id = $1 AND (f.attacker_id = $2 OR f.defender_id = $2)",
+         WHERE f.id = $1 AND (f.attacker_id = $2 OR f.defender_id = $2 \
+           OR EXISTS (SELECT 1 FROM friend_tournament_slots s \
+                      WHERE s.tournament_id = f.tournament_id AND s.user_id = $2))",
     )
     .bind(id)
     .bind(reader)
@@ -451,7 +454,8 @@ pub async fn page(
     let limit = i64::try_from(PAGE_SIZE + 1).unwrap_or(i64::MAX);
     let rows = sqlx::query(
         "SELECT f.id, f.attacker_id = $1, ua.display_name, ud.display_name, f.winner, \
-                f.end_reason, (extract(epoch FROM f.created_at) * 1000)::bigint \
+                f.end_reason, (extract(epoch FROM f.created_at) * 1000)::bigint, \
+                f.tournament_id \
          FROM friend_fights f JOIN users ua ON ua.id = f.attacker_id \
          JOIN users ud ON ud.id = f.defender_id \
          WHERE (f.attacker_id = $1 OR f.defender_id = $1) AND ($2::int IS NULL OR f.id < $2) \
@@ -476,6 +480,10 @@ pub async fn page(
             opponent: row.try_get(if attacker { 3 } else { 2 })?,
             winner: side_of(row.try_get(4)?)?,
             end_reason: reason_of(row.try_get(5)?)?,
+            tournament_id: row
+                .try_get::<Option<i32>, _>(7)?
+                .map(|id| u32::try_from(id).map_err(|_| bad()))
+                .transpose()?,
             created_at: TimestampMs::from_ms(row.try_get(6)?),
         });
     }
@@ -486,6 +494,256 @@ pub async fn page(
     };
     Ok(FriendFightsPage {
         fights,
+        next_before,
+    })
+}
+
+/// The tournaments of `user_id` today (UTC).
+///
+/// # Errors
+/// The database error.
+pub async fn tournaments_today(tx: &mut PgConnection, user_id: Uuid) -> Result<i16, sqlx::Error> {
+    let n: Option<i16> = sqlx::query_scalar(
+        "SELECT tournaments FROM friend_daily \
+         WHERE user_id = $1 AND day = (now() AT TIME ZONE 'UTC')::date",
+    )
+    .bind(user_id)
+    .fetch_optional(tx)
+    .await?;
+    Ok(n.unwrap_or(0))
+}
+
+/// One more tournament of `user_id` today.
+///
+/// # Errors
+/// The database error (the `CHECK` of the cap included).
+pub async fn count_tournament(tx: &mut PgConnection, user_id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO friend_daily (user_id, day, tournaments) \
+         VALUES ($1, (now() AT TIME ZONE 'UTC')::date, 1) \
+         ON CONFLICT (user_id, day) DO UPDATE SET tournaments = friend_daily.tournaments + 1",
+    )
+    .bind(user_id)
+    .execute(tx)
+    .await?;
+    Ok(())
+}
+
+/// The tournament `owner` already made with `client_key`.
+///
+/// # Errors
+/// The database error.
+pub async fn tournament_by_key(
+    tx: &mut PgConnection,
+    owner: Uuid,
+    client_key: Uuid,
+) -> Result<Option<i32>, sqlx::Error> {
+    sqlx::query_scalar("SELECT id FROM friend_tournaments WHERE owner_id = $1 AND client_key = $2")
+        .bind(owner)
+        .bind(client_key)
+        .fetch_optional(tx)
+        .await
+}
+
+/// Writes a tournament and its slots, `players` in the order of the bracket, and returns its id.
+///
+/// # Errors
+/// The database error.
+pub async fn insert_tournament(
+    tx: &mut PgConnection,
+    owner: Uuid,
+    client_key: Uuid,
+    players: &[Uuid],
+) -> Result<i32, sqlx::Error> {
+    let size = i16::try_from(players.len()).map_err(|_| bad())?;
+    let id: i32 = sqlx::query_scalar(
+        "INSERT INTO friend_tournaments (owner_id, size, client_key) VALUES ($1, $2, $3) \
+         RETURNING id",
+    )
+    .bind(owner)
+    .bind(size)
+    .bind(client_key)
+    .fetch_one(&mut *tx)
+    .await?;
+    let slots: Vec<i16> = (0..size).collect();
+    sqlx::query(
+        "INSERT INTO friend_tournament_slots (tournament_id, slot, user_id) \
+         SELECT $1, * FROM UNNEST($2::smallint[], $3::uuid[])",
+    )
+    .bind(id)
+    .bind(&slots)
+    .bind(players)
+    .execute(&mut *tx)
+    .await?;
+    Ok(id)
+}
+
+/// A match of a bracket, as written. `attacker_id` is side `a`.
+pub struct NewMatch<'a> {
+    pub tournament_id: i32,
+    pub round: u8,
+    pub slot: u8,
+    pub attacker_id: Uuid,
+    pub defender_id: Uuid,
+    pub ruleset_version: u16,
+    pub fight: &'a crate::pvp::resolve::Resolved,
+    pub look_a: &'a PvpLook,
+    pub look_b: &'a PvpLook,
+    pub advances: Side,
+}
+
+/// Writes a match of a bracket and returns its id.
+///
+/// # Errors
+/// The database error (the `CHECK` of `advances` included).
+pub async fn insert_match(tx: &mut PgConnection, m: &NewMatch<'_>) -> Result<i32, sqlx::Error> {
+    sqlx::query_scalar(
+        "INSERT INTO friend_fights (kind, attacker_id, defender_id, ruleset_version, spec_a, \
+         spec_b, seed, log, winner, end_reason, look_a, look_b, tournament_id, round, slot, \
+         advances) \
+         VALUES ('bracket', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, \
+                 $14, $15) \
+         RETURNING id",
+    )
+    .bind(m.attacker_id)
+    .bind(m.defender_id)
+    .bind(i16::try_from(m.ruleset_version).map_err(|_| bad())?)
+    .bind(&m.fight.spec_a)
+    .bind(&m.fight.spec_b)
+    .bind(m.fight.seed.as_slice())
+    .bind(&m.fight.log)
+    .bind(m.fight.winner.map(side_code))
+    .bind(reason_code(m.fight.end_reason))
+    .bind(look_json(m.look_a)?)
+    .bind(look_json(m.look_b)?)
+    .bind(m.tournament_id)
+    .bind(i16::from(m.round))
+    .bind(i16::from(m.slot))
+    .bind(side_code(m.advances))
+    .fetch_one(tx)
+    .await
+}
+
+fn small(value: i16) -> Result<u8, sqlx::Error> {
+    u8::try_from(value).map_err(|_| bad())
+}
+
+fn id_of(value: i32) -> Result<u32, sqlx::Error> {
+    u32::try_from(value).map_err(|_| bad())
+}
+
+/// Tournament `id` for `reader`, who must hold one of its slots: `None` otherwise, as for a
+/// tournament that does not exist.
+///
+/// # Errors
+/// The database error, or rows the `CHECK`s forbid (a bracket without its final, say).
+pub async fn tournament(
+    conn: &mut PgConnection,
+    reader: Uuid,
+    id: i32,
+) -> Result<Option<FriendTournament>, sqlx::Error> {
+    let head = sqlx::query(
+        "SELECT t.size, u.display_name, (extract(epoch FROM t.created_at) * 1000)::bigint \
+         FROM friend_tournaments t JOIN users u ON u.id = t.owner_id \
+         WHERE t.id = $1 AND EXISTS (SELECT 1 FROM friend_tournament_slots s \
+                                     WHERE s.tournament_id = t.id AND s.user_id = $2)",
+    )
+    .bind(id)
+    .bind(reader)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(head) = head else {
+        return Ok(None);
+    };
+    let players: Vec<String> = sqlx::query_scalar(
+        "SELECT u.display_name FROM friend_tournament_slots s JOIN users u ON u.id = s.user_id \
+         WHERE s.tournament_id = $1 ORDER BY s.slot",
+    )
+    .bind(id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let rows = sqlx::query(
+        "SELECT f.round, f.slot, ua.display_name, ud.display_name, f.id, f.advances \
+         FROM friend_fights f JOIN users ua ON ua.id = f.attacker_id \
+         JOIN users ud ON ud.id = f.defender_id \
+         WHERE f.tournament_id = $1 ORDER BY f.round, f.slot",
+    )
+    .bind(id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut matches = Vec::with_capacity(rows.len());
+    for row in &rows {
+        matches.push(BracketMatch {
+            round: small(row.try_get(0)?)?,
+            slot: small(row.try_get(1)?)?,
+            a: row.try_get(2)?,
+            b: row.try_get(3)?,
+            fight_id: id_of(row.try_get(4)?)?,
+            advances: side_of(row.try_get(5)?)?.ok_or_else(bad)?,
+        });
+    }
+    let last = matches.last().ok_or_else(bad)?;
+    let champion = match last.advances {
+        Side::A => last.a.clone(),
+        Side::B => last.b.clone(),
+    };
+    Ok(Some(FriendTournament {
+        id: id_of(id)?,
+        size: small(head.try_get(0)?)?,
+        owner: head.try_get(1)?,
+        players,
+        matches,
+        champion,
+        created_at: TimestampMs::from_ms(head.try_get(2)?),
+    }))
+}
+
+/// A page of the tournaments `user_id` played, the newest first.
+///
+/// # Errors
+/// The database error, or a row the `CHECK`s forbid.
+pub async fn tournaments_page(
+    conn: &mut PgConnection,
+    user_id: Uuid,
+    before: Option<i32>,
+) -> Result<FriendTournamentsPage, sqlx::Error> {
+    let limit = i64::try_from(PAGE_SIZE + 1).unwrap_or(i64::MAX);
+    // The champion is the side that advances from the last match (the final).
+    let rows = sqlx::query(
+        "SELECT t.id, t.size, uo.display_name, \
+                CASE fin.advances WHEN 'a' THEN ua.display_name ELSE ud.display_name END, \
+                (extract(epoch FROM t.created_at) * 1000)::bigint \
+         FROM friend_tournament_slots s JOIN friend_tournaments t ON t.id = s.tournament_id \
+         JOIN users uo ON uo.id = t.owner_id \
+         JOIN LATERAL (SELECT f.attacker_id, f.defender_id, f.advances FROM friend_fights f \
+                       WHERE f.tournament_id = t.id ORDER BY f.round DESC LIMIT 1) fin ON true \
+         JOIN users ua ON ua.id = fin.attacker_id JOIN users ud ON ud.id = fin.defender_id \
+         WHERE s.user_id = $1 AND ($2::int IS NULL OR t.id < $2) \
+         ORDER BY t.id DESC LIMIT $3",
+    )
+    .bind(user_id)
+    .bind(before)
+    .bind(limit)
+    .fetch_all(conn)
+    .await?;
+    let more = rows.len() > PAGE_SIZE;
+    let mut tournaments = Vec::with_capacity(PAGE_SIZE);
+    for row in rows.iter().take(PAGE_SIZE) {
+        tournaments.push(FriendTournamentSummary {
+            id: id_of(row.try_get(0)?)?,
+            size: small(row.try_get(1)?)?,
+            owner: row.try_get(2)?,
+            champion: row.try_get(3)?,
+            created_at: TimestampMs::from_ms(row.try_get(4)?),
+        });
+    }
+    let next_before = if more {
+        tournaments.last().map(|t| t.id)
+    } else {
+        None
+    };
+    Ok(FriendTournamentsPage {
+        tournaments,
         next_before,
     })
 }

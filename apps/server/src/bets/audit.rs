@@ -28,6 +28,10 @@ pub enum Event {
     },
     /// An invite accepted (023).
     FriendAccept,
+    /// A tournament between friends (023 phase 2), of its owner.
+    FriendTournament {
+        tournament: i32,
+    },
 }
 
 /// One row of `auth_events`, inside the transaction of the change.
@@ -40,18 +44,29 @@ pub async fn record(
     event: Event,
     ip_hash: &[u8; 32],
 ) -> Result<(), sqlx::Error> {
-    let (kind, entry, bet, fight, friend_fight) = match event {
-        Event::Grant { entry } => ("grant", Some(entry), None, None, None),
-        Event::Bailout { entry } => ("bailout", Some(entry), None, None, None),
-        Event::Bet { bet } => ("bet", None, Some(bet), None, None),
-        Event::PvpAttack { fight } => ("pvp_attack", None, None, Some(fight), None),
-        Event::FriendChallenge { fight } => ("friend_challenge", None, None, None, Some(fight)),
-        Event::FriendAccept => ("friend_accept", None, None, None, None),
+    let (kind, entry, bet, fight, friend_fight, tournament) = match event {
+        Event::Grant { entry } => ("grant", Some(entry), None, None, None, None),
+        Event::Bailout { entry } => ("bailout", Some(entry), None, None, None, None),
+        Event::Bet { bet } => ("bet", None, Some(bet), None, None, None),
+        Event::PvpAttack { fight } => ("pvp_attack", None, None, Some(fight), None, None),
+        Event::FriendChallenge { fight } => {
+            ("friend_challenge", None, None, None, Some(fight), None)
+        }
+        Event::FriendAccept => ("friend_accept", None, None, None, None, None),
+        Event::FriendTournament { tournament } => (
+            "friend_tournament",
+            None,
+            None,
+            None,
+            None,
+            Some(tournament),
+        ),
     };
     sqlx::query(
         "INSERT INTO auth_events \
-         (user_id, kind, ledger_entry_id, bet_id, pvp_fight_id, friend_fight_id, ip_hash) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+         (user_id, kind, ledger_entry_id, bet_id, pvp_fight_id, friend_fight_id, \
+          friend_tournament_id, ip_hash) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(user_id)
     .bind(kind)
@@ -59,6 +74,7 @@ pub async fn record(
     .bind(bet)
     .bind(fight)
     .bind(friend_fight)
+    .bind(tournament)
     .bind(ip_hash.as_slice())
     .execute(tx)
     .await?;

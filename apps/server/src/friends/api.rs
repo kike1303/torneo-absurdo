@@ -1,4 +1,4 @@
-//! The routes of friends (023, phase 1). Every answer is private (`private, no-store`, `Vary:
+//! The routes of friends (023, phases 1 and 2). Every answer is private (`private, no-store`, `Vary:
 //! Cookie`) and names friends only by `display_name`. A rejection of an invite is always the same
 //! 404, so the routes are no oracle of bans nor of blocks. No log carries a code, a key, a name or
 //! a seed: only `event` and `error_kind` (ADR-0012 A8).
@@ -8,15 +8,20 @@ use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Json, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use engine::CharacterSpec;
 use protocol::{
     BotargaErrorCode, ErrorCode, FriendChallengeRequest, FriendFight, FriendInvitePreview,
-    FriendInviteRequest, FriendRemoveRequest, FriendsErrorCode, FriendsView,
+    FriendInviteRequest, FriendRemoveRequest, FriendTournamentRequest, FriendsErrorCode,
+    FriendsView, PvpLook,
 };
 use serde::Deserialize;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-use super::{DAILY_CHALLENGES, MAX_FRIENDS, name_key, store, well_formed};
+use super::{
+    DAILY_CHALLENGES, DAILY_TOURNAMENTS, MAX_FRIENDS, advances, name_key, shuffle, store,
+    well_formed,
+};
 use crate::app::AppState;
 use crate::bets::audit::{self, Event};
 use crate::bets::http::{Quota, authorize, ip_key, lock_user, private, refused, unavailable};
@@ -122,9 +127,11 @@ pub async fn get(
             Some(view) => Outcome::Done(StatusCode::OK, view),
             None => Outcome::Refused(StatusCode::NOT_FOUND, BotargaErrorCode::NotCreated.into()),
         })
-    }
-    .await;
-    answer(read, &state, "friends.read_failed")
+    };
+    let done = tokio::time::timeout(ACQUIRE_TIMEOUT.saturating_mul(3), read)
+        .await
+        .unwrap_or(Err(sqlx::Error::PoolTimedOut));
+    answer(done, &state, "friends.read_failed")
 }
 
 /// `POST /api/friends/invite/rotate`: a new code; the old one stops working.
@@ -346,7 +353,10 @@ pub async fn challenge(
         if !lock_user(&mut tx, user_id).await? {
             return Ok(Outcome::Gone);
         }
-        let Some(me) = botarga::store::view_locked(&mut tx, user_id).await? else {
+        // Read, not locked: `lock_user` already serializes the actor, and a lock on the botarga
+        // would block the foreign keys of a friend's fight that names it (`FOR KEY SHARE`), so two
+        // crossed fights would wait on each other until the `lock_timeout`.
+        let Some(me) = botarga::store::view(&mut tx, user_id).await? else {
             return refusal(StatusCode::NOT_FOUND, BotargaErrorCode::NotCreated);
         };
         // Under the lock, a retry cannot race its first try.
@@ -422,6 +432,15 @@ pub struct ListQuery {
     before: Option<String>,
 }
 
+/// The `before` of a list: `Some(None)` without one, `None` for a query out of form.
+fn before_of(query: Result<Query<ListQuery>, QueryRejection>) -> Option<Option<i32>> {
+    match query {
+        Ok(Query(ListQuery { before: None })) => Some(None),
+        Ok(Query(ListQuery { before: Some(text) })) => crate::fights::canonical_id(&text).map(Some),
+        Err(_) => None,
+    }
+}
+
 fn read_quota(state: &AppState) -> Quota<'_> {
     Quota {
         ip: &state.rate.botarga_read_ip,
@@ -441,13 +460,8 @@ pub async fn fights(
         Ok(session) => session,
         Err(response) => return *response,
     };
-    let before = match query {
-        Ok(Query(ListQuery { before: None })) => None,
-        Ok(Query(ListQuery { before: Some(text) })) => match crate::fights::canonical_id(&text) {
-            Some(id) => Some(id),
-            None => return invalid(),
-        },
-        Err(_) => return invalid(),
+    let Some(before) = before_of(query) else {
+        return invalid();
     };
     let read = async {
         let mut conn = state.db.acquire().await?;
@@ -491,6 +505,229 @@ pub async fn fight_detail(
         .await
         .unwrap_or(Err(sqlx::Error::PoolTimedOut));
     answer(done, &state, "friends.detail_failed")
+}
+
+/// Tournament sizes (owner, 2026-11-15).
+const SIZES: [usize; 2] = [4, 8];
+
+/// One player of a tournament: who, and what they fight with.
+struct Entrant {
+    user_id: Uuid,
+    spec: CharacterSpec,
+    look: PvpLook,
+}
+
+/// `POST /api/friends/tournaments`: a knockout of the owner and `size - 1` friends, resolved whole
+/// in one transaction. Locks only the owner; the friends' botargas are read, never written. The
+/// order of the bracket is drawn with `OsRng`; in every match `a` is the side of the lower slot.
+pub async fn tournament_create(
+    State(state): State<AppState>,
+    client: Option<Extension<ClientContext>>,
+    headers: HeaderMap,
+    body: Result<Json<FriendTournamentRequest>, JsonRejection>,
+) -> Response {
+    let quota = Quota {
+        ip: &state.rate.friends_ip,
+        user: &state.rate.friends_user,
+    };
+    let (user_id, ip_hash) = match session_of(&state, &quota, client.as_ref(), &headers).await {
+        Ok(session) => session,
+        Err(response) => return *response,
+    };
+    let Ok(Json(request)) = body else {
+        return invalid();
+    };
+    let Some(client_key) = canonical_key(&request.client_key) else {
+        return invalid();
+    };
+    let done = async {
+        let mut tx = state.db.begin().await?;
+        if !lock_user(&mut tx, user_id).await? {
+            return Ok(Outcome::Gone);
+        }
+        // Read, not locked: `lock_user` already serializes the actor, and a lock on the botarga
+        // would block the foreign keys of a friend's fight that names it (`FOR KEY SHARE`), so two
+        // crossed fights would wait on each other until the `lock_timeout`.
+        let Some(me) = botarga::store::view(&mut tx, user_id).await? else {
+            return refusal(StatusCode::NOT_FOUND, BotargaErrorCode::NotCreated);
+        };
+        // Under the lock, a retry cannot race its first try, and it finds its tournament even
+        // after the cap of the day.
+        if let Some(id) = store::tournament_by_key(&mut tx, user_id, client_key).await? {
+            let tournament = store::tournament(&mut tx, user_id, id).await?;
+            return Ok(tournament.map_or(Outcome::Gone, |t| Outcome::Done(StatusCode::OK, t)));
+        }
+        let size = usize::from(request.size);
+        let tournament_invalid = || {
+            refusal(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                FriendsErrorCode::TournamentInvalid,
+            )
+        };
+        if !SIZES.contains(&size) || request.display_names.len() + 1 != size {
+            return tournament_invalid();
+        }
+        let mut players = vec![user_id];
+        for name in &request.display_names {
+            let Some(key) = name_key(name) else {
+                return tournament_invalid();
+            };
+            let Some(friend) = store::friend_by_key(&mut tx, user_id, &key, true).await? else {
+                return tournament_invalid();
+            };
+            if players.contains(&friend) {
+                return tournament_invalid();
+            }
+            players.push(friend);
+        }
+        if store::tournaments_today(&mut tx, user_id).await? >= DAILY_TOURNAMENTS {
+            return refusal(StatusCode::TOO_MANY_REQUESTS, FriendsErrorCode::DailyLimit);
+        }
+        let catalog = &state.botarga;
+        let mut entrants = Vec::with_capacity(size);
+        for &player in &players {
+            let view = if player == user_id {
+                Some(me.clone())
+            } else {
+                botarga::store::view(&mut tx, player).await?
+            };
+            let Some(view) = view else {
+                return refusal(StatusCode::CONFLICT, FriendsErrorCode::BuildInvalid);
+            };
+            let Ok(spec) = build::resolve(catalog, view.progress.level, &view.build) else {
+                return refusal(StatusCode::CONFLICT, FriendsErrorCode::BuildInvalid);
+            };
+            entrants.push(Entrant {
+                user_id: player,
+                spec,
+                look: botarga::look_of(&view.build),
+            });
+        }
+        if shuffle(&mut entrants).is_none() {
+            tracing::error!(event = "friends.tournament_failed", error_kind = "os_rng");
+            return refusal(
+                StatusCode::SERVICE_UNAVAILABLE,
+                FriendsErrorCode::Unavailable,
+            );
+        }
+        let order: Vec<Uuid> = entrants.iter().map(|e| e.user_id).collect();
+        let id = store::insert_tournament(&mut tx, user_id, client_key, &order).await?;
+        let ruleset = catalog.ruleset();
+        // Indexes into `entrants`, in the order of the bracket; each round halves them.
+        let mut alive: Vec<usize> = (0..entrants.len()).collect();
+        let mut round = 1_u8;
+        while alive.len() > 1 {
+            let mut next = Vec::with_capacity(alive.len() / 2);
+            for (slot, pair) in alive.as_chunks::<2>().0.iter().enumerate() {
+                let (a, b) = (&entrants[pair[0]], &entrants[pair[1]]);
+                let fight = match crate::pvp::resolve::resolve(&a.spec, &b.spec, ruleset) {
+                    Ok(fight) => fight,
+                    Err(error_kind) => {
+                        tracing::error!(event = "friends.tournament_failed", error_kind);
+                        return refusal(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            FriendsErrorCode::Unavailable,
+                        );
+                    }
+                };
+                let side = advances(fight.winner, &fight.seed);
+                store::insert_match(
+                    &mut tx,
+                    &store::NewMatch {
+                        tournament_id: id,
+                        round,
+                        slot: u8::try_from(slot).unwrap_or(u8::MAX),
+                        attacker_id: a.user_id,
+                        defender_id: b.user_id,
+                        ruleset_version: ruleset.version(),
+                        fight: &fight,
+                        look_a: &a.look,
+                        look_b: &b.look,
+                        advances: side,
+                    },
+                )
+                .await?;
+                next.push(match side {
+                    protocol::Side::A => pair[0],
+                    protocol::Side::B => pair[1],
+                });
+            }
+            alive = next;
+            round += 1;
+        }
+        store::count_tournament(&mut tx, user_id).await?;
+        audit::record(
+            &mut tx,
+            user_id,
+            Event::FriendTournament { tournament: id },
+            &ip_hash,
+        )
+        .await?;
+        let tournament = store::tournament(&mut tx, user_id, id).await?;
+        tx.commit().await?;
+        Ok(tournament.map_or(Outcome::Gone, |t| Outcome::Done(StatusCode::CREATED, t)))
+    }
+    .await;
+    answer(done, &state, "friends.tournament_failed")
+}
+
+/// `GET /api/friends/tournaments?before=`: the tournaments the session's user played.
+pub async fn tournaments(
+    State(state): State<AppState>,
+    client: Option<Extension<ClientContext>>,
+    headers: HeaderMap,
+    query: Result<Query<ListQuery>, QueryRejection>,
+) -> Response {
+    let quota = read_quota(&state);
+    let (user_id, _) = match session_of(&state, &quota, client.as_ref(), &headers).await {
+        Ok(session) => session,
+        Err(response) => return *response,
+    };
+    let Some(before) = before_of(query) else {
+        return invalid();
+    };
+    let read = async {
+        let mut conn = state.db.acquire().await?;
+        Ok(Outcome::Done(
+            StatusCode::OK,
+            store::tournaments_page(&mut conn, user_id, before).await?,
+        ))
+    };
+    let done = tokio::time::timeout(ACQUIRE_TIMEOUT.saturating_mul(3), read)
+        .await
+        .unwrap_or(Err(sqlx::Error::PoolTimedOut));
+    answer(done, &state, "friends.tournaments_failed")
+}
+
+/// `GET /api/friends/tournaments/{id}`: only for its players; for anybody else, 404.
+pub async fn tournament_detail(
+    State(state): State<AppState>,
+    client: Option<Extension<ClientContext>>,
+    headers: HeaderMap,
+    segment: Result<Path<String>, PathRejection>,
+) -> Response {
+    let quota = read_quota(&state);
+    let (user_id, _) = match session_of(&state, &quota, client.as_ref(), &headers).await {
+        Ok(session) => session,
+        Err(response) => return *response,
+    };
+    let Some(id) = segment
+        .ok()
+        .and_then(|Path(segment)| crate::fights::canonical_id(&segment))
+    else {
+        return refused(StatusCode::NOT_FOUND, FriendsErrorCode::NotFound);
+    };
+    let read = async {
+        let mut conn = state.db.acquire().await?;
+        match store::tournament(&mut conn, user_id, id).await? {
+            Some(tournament) => Ok(Outcome::Done(StatusCode::OK, tournament)),
+            None => refusal(StatusCode::NOT_FOUND, FriendsErrorCode::NotFound),
+        }
+    };
+    let done = tokio::time::timeout(ACQUIRE_TIMEOUT.saturating_mul(3), read)
+        .await
+        .unwrap_or(Err(sqlx::Error::PoolTimedOut));
+    answer(done, &state, "friends.tournament_read_failed")
 }
 
 #[cfg(test)]

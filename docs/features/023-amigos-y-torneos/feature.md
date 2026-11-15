@@ -44,7 +44,7 @@ Hoy un jugador solo pelea contra quien le toca el emparejamiento del PvP. Con es
 - `friend_tournaments (id, owner_id, size 4|8, client_key, created_at)`, con `UNIQUE (owner_id, client_key)`. `friend_tournament_slots (tournament_id, slot 0..size−1, user_id)`, con `UNIQUE (tournament_id, user_id)`. El dueño ocupa un slot.
 - `friend_daily (user_id, day, challenges ≤ 50, tournaments ≤ 10)`, con sus `CHECK`.
 
-**Locks.** El reto y el torneo bloquean solo al actor: `lock_user` (que exige `banned_at IS NULL`) y su botarga, con `lock_timeout` de 1 s. Las botargas de los amigos se leen sin lock, porque no se escriben. Se conserva así el invariante de 021: el actor es la única fila bloqueada con espera, y no hay ciclos con las peleas ni con el cierre de temporada. Aceptar y quitar bloquean las dos filas de `users` en orden de `user_id`. Aceptar cuenta el tope de 200 amigos de los dos bajo ese lock. Si A y B se quitan a la vez, el segundo ya no ve la amistad y no escribe su bloqueo. En el reto y el torneo, el `client_key` se busca antes de mirar el tope de `friend_daily`, como en 021, así que un reintento después del tope devuelve su pelea.
+**Locks.** El reto y el torneo bloquean solo la fila de `users` del actor, con `lock_user` (que exige `banned_at IS NULL`) y un `lock_timeout` de 1 s. Ninguna botarga se bloquea, ni la del actor: las FK de `friend_fights` toman `FOR KEY SHARE` sobre las botargas que nombra, así que una botarga en `FOR UPDATE` haría esperar a la pelea cruzada de otro actor. No se escriben, así que leerlas sin lock basta. Se conserva así el invariante de 021: el actor es la única fila bloqueada con espera, y no hay ciclos con las peleas ni con el cierre de temporada. Aceptar y quitar bloquean las dos filas de `users` en orden de `user_id`. Aceptar cuenta el tope de 200 amigos de los dos bajo ese lock. Si A y B se quitan a la vez, el segundo ya no ve la amistad y no escribe su bloqueo. En el reto y el torneo, el `client_key` se busca antes de mirar el tope de `friend_daily`, como en 021, así que un reintento después del tope devuelve su pelea.
 
 **Rutas** (con sesión; las escrituras con `Effect::Mutate`, `Origin` y respuestas `private, no-store`; nunca un id de usuario; los amigos se nombran por `display_name` y se buscan por `display_name_key` solo entre mis amigos):
 - `GET /api/friends`: mis amigos (`display_name`, nivel y `ready`) y mi código (o `null`). `ready` es un booleano sin motivo: un baneado y una build que ya no resuelve se ven igual.
@@ -68,7 +68,7 @@ Hoy un jugador solo pelea contra quien le toca el emparejamiento del PvP. Con es
   - Repetir el `client_key` devuelve el mismo torneo.
 - `GET /api/friends/tournaments`: los torneos donde participé, paginados.
 - `GET /api/friends/tournaments/{id}`: el bracket, con cada combate (ronda, slot, nombres, id de la pelea y quién pasó) y el campeón. 404 si no participé.
-- `GET /api/friends/fights?before=` y `GET /api/friends/fights/{id}`: mis retos y combates, y su detalle con la forma de `PvpFightDetail` (lo que necesita `verifyFight`). 404 si no participé.
+- `GET /api/friends/fights?before=` y `GET /api/friends/fights/{id}`: mis retos y combates, y su detalle con la forma de `PvpFightDetail` (lo que necesita `verifyFight`). 404 si no participé; un combate de torneo lo lee cualquier jugador de ese torneo, para que el bracket enlace a todos.
 - `GET /api/friends/fights` y `GET /api/friends/tournaments` responden `FriendFightsPage` y `FriendTournamentsPage`, de 20 en 20.
 - Cuotas:
   - `FRIENDS_USER` (10/min, ráfaga 3): retos y torneos.
@@ -94,7 +94,7 @@ El enlace es `/friends/invite#<code>`: el fragmento nunca llega al servidor ni a
 4. Web B: torneos y bracket, con el e2e.
 
 ## Riesgos
-- **Grafo de amistades:** no sale en ninguna lectura pública. Las peleas entre amigos y los torneos son privados (404 para los ajenos, sin sesión incluidos), y sus ids no se cruzan con los de `pvp_fights`. Dentro de un torneo, cada participante ve a los demás: es inherente al torneo, y lo decide el dueño al armarlo.
+- **Grafo de amistades:** no sale en ninguna lectura pública. Las peleas entre amigos y los torneos son privados (404 para los ajenos; sin sesión, el 401 de siempre, que no depende del id), y sus ids no se cruzan con los de `pvp_fights`. Dentro de un torneo, cada participante ve a los demás: es inherente al torneo, y lo decide el dueño al armarlo.
 - **Códigos:**
   - el formato se valida en el borde;
   - nunca van a `tracing`;

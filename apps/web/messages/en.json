@@ -407,6 +407,7 @@
   "error_friends_limit": "One of you already has the most friends allowed.",
   "error_friends_not_friend": "That botarga is not one of your friends.",
   "error_friends_build_invalid": "One of the two builds no longer fits the rules: it has to be saved again.",
+  "error_friends_tournament_invalid": "That tournament can't be set up: pick 3 or 7 different friends who can fight.",
   "error_friends_daily_limit": "You challenged enough for today: come back tomorrow (UTC).",
   "error_friends_not_found": "That fight does not exist.",
   "error_friends_busy": "The arena is busy. Try again in a moment.",

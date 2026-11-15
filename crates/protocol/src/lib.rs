@@ -50,8 +50,10 @@ pub use fights::{
     FightsPage, TimestampMs, VoidReason, VoidStats,
 };
 pub use friends::{
-    FriendChallengeRequest, FriendEntry, FriendFight, FriendFightSummary, FriendFightsPage,
-    FriendInvitePreview, FriendInviteRequest, FriendRemoveRequest, FriendsView,
+    BracketMatch, FriendChallengeRequest, FriendEntry, FriendFight, FriendFightSummary,
+    FriendFightsPage, FriendInvitePreview, FriendInviteRequest, FriendRemoveRequest,
+    FriendTournament, FriendTournamentRequest, FriendTournamentSummary, FriendTournamentsPage,
+    FriendsView,
 };
 pub use health::HealthResponse;
 pub use me::{

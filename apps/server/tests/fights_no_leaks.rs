@@ -144,7 +144,16 @@ fn request_of(route: &RouteSpec, id: i32) -> (String, Vec<(&'static str, &'stati
         Handler::Friends
         | Handler::FriendsInviteRotate
         | Handler::FriendFights
-        | Handler::FriendFightDetail => (vec![], String::new()),
+        | Handler::FriendFightDetail
+        | Handler::FriendTournaments
+        | Handler::FriendTournamentDetail => (vec![], String::new()),
+        Handler::FriendTournamentCreate => (
+            vec![json],
+            format!(
+                r#"{{"size":4,"display_names":["Nadie","Otro","Uno"],"client_key":"{}"}}"#,
+                uuid::Uuid::new_v4()
+            ),
+        ),
         Handler::FriendsInvitePreview | Handler::FriendsAccept => (
             vec![json],
             r#"{"code":"AAAAAAAAAAAAAAAAAAAAAA"}"#.to_owned(),
@@ -283,18 +292,29 @@ fn expected_status(handler: Handler, identity: &str) -> Option<u16> {
         | Handler::FriendsChallenge
         | Handler::FriendFights
         | Handler::FriendFightDetail
+        | Handler::FriendTournamentCreate
+        | Handler::FriendTournaments
+        | Handler::FriendTournamentDetail
             if identity == "anonymous" =>
         {
             Some(401)
         }
-        Handler::Me | Handler::Wallet | Handler::PvpFights | Handler::FriendFights => Some(200),
-        // 023: no invite has that code, no friend that name, and no fight between friends exists.
-        Handler::FriendsRemove | Handler::FriendFightDetail => Some(404),
+        Handler::Me
+        | Handler::Wallet
+        | Handler::PvpFights
+        | Handler::FriendFights
+        | Handler::FriendTournaments => Some(200),
+        // 023: no invite has that code, no friend that name, and no fight nor tournament between
+        // friends exists.
+        Handler::FriendsRemove | Handler::FriendFightDetail | Handler::FriendTournamentDetail => {
+            Some(404)
+        }
         // 023: they depend on whether the identity has a botarga, and the two of the invite on
         // their quota of 5 a minute, which the states of this sweep share.
         Handler::Friends
         | Handler::FriendsInviteRotate
         | Handler::FriendsChallenge
+        | Handler::FriendTournamentCreate
         | Handler::FriendsInvitePreview
         | Handler::FriendsAccept => None,
         // 021: a search is a real fight once the identity created its botarga above, until the
