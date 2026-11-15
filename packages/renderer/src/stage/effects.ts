@@ -10,6 +10,11 @@ import { roleColor } from './colors.ts';
 const NUMBER_POOL = 8;
 /** CSS px of a damage number at scale 1; crits are bigger through the effect's scale. */
 const NUMBER_CSS_PX = 18;
+/**
+ * The outline of a damage number, as a share of its font size, in the background color of the
+ * arena (TA-36): the number reads over any sprite, dark or light, in both themes.
+ */
+export const NUMBER_HALO = 0.22;
 
 export interface EffectLayer {
   readonly particles: Container;
@@ -27,6 +32,13 @@ export interface EffectLayer {
 interface NumberSlot {
   readonly text: Text;
   cue: number;
+  /** The color of its halo now: it changes with the theme. */
+  halo: number;
+}
+
+function setHalo(slot: NumberSlot, color: number, fontSize: number): void {
+  slot.halo = color;
+  slot.text.style.stroke = { color, width: fontSize * NUMBER_HALO, join: 'round' };
 }
 
 export function createEffectLayer(theme: RendererTheme): EffectLayer {
@@ -44,12 +56,17 @@ export function createEffectLayer(theme: RendererTheme): EffectLayer {
   for (let i = 0; i < NUMBER_POOL; i++) {
     const text = new Text({
       text: '',
-      style: { fontFamily: theme.fonts.display, fontSize: NUMBER_CSS_PX, fontWeight: '700' },
+      style: {
+        fontFamily: theme.fonts.display,
+        fontSize: NUMBER_CSS_PX,
+        fontWeight: '700',
+        stroke: { color: theme.colors.bg, width: NUMBER_CSS_PX * NUMBER_HALO, join: 'round' },
+      },
     });
     text.anchor.set(0.5);
     text.visible = false;
     numbers.addChild(text);
-    slots.push({ text, cue: -1 });
+    slots.push({ text, cue: -1, halo: theme.colors.bg });
   }
 
   return {
@@ -59,6 +76,7 @@ export function createEffectLayer(theme: RendererTheme): EffectLayer {
       const size = stageScale > 0 ? NUMBER_CSS_PX / stageScale : NUMBER_CSS_PX;
       for (const slot of slots) {
         slot.text.style.fontSize = size;
+        setHalo(slot, slot.halo, size);
         slot.text.resolution = resolution * Math.max(1, stageScale);
       }
     },
@@ -104,6 +122,9 @@ export function createEffectLayer(theme: RendererTheme): EffectLayer {
         slot.text.alpha = n.alpha;
         const fill = roleColor(current, n.color);
         if (slot.text.style.fill !== fill) slot.text.style.fill = fill;
+        if (slot.halo !== current.colors.bg) {
+          setHalo(slot, current.colors.bg, Number(slot.text.style.fontSize));
+        }
         slot.text.visible = true;
       }
     },
