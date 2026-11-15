@@ -148,7 +148,7 @@ Ajustes de la implementación (fase 4, TA-64):
   - "Pareja repetida" por proporción exige que el atacante tenga 10 o más ataques contra usuarios.
   - "Cuenta nueva unidireccional" exige al menos 5 peleas contra esa cuenta y 5 contra el resto.
   - La concentración mide el rating ganado (la suma de los cambios positivos) de las 5 contrapartes principales del top 20.
-  - La señal de las monedas PvP de una cuenta que apuesta contra una del top 20 se mide aparte (TA-83).
+  - "Monedas PvP contra el top" (TA-83): una cuenta con monedas PvP en la temporada que, en 5 o más peleas del torneo del mes compartidas con una cuenta del top 20, apostó en el 90 % o más del lado contrario. El lado de una cuenta en una pelea es donde puso más monedas, así que una apuesta chica del otro lado no la esconde, y las peleas anuladas no cuentan. Cruza `pvp_fights.coins_attacker` con `bets`; las peleas del mes por `closes_at`, como el leaderboard de 020.
 - El cierre corre cada hora y no cada 24 h, para que el reinicio suave no espere un día.
 
 Ajustes de la implementación (fase 5, TA-65):
