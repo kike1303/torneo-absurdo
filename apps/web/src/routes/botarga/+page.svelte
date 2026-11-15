@@ -148,6 +148,9 @@
           <Button variant="outline" href={`/${locale}/pvp/leaderboard`}>
             {m.pvp_leaderboard_title()}
           </Button>
+          <Button variant="outline" href={`/${locale}/friends`} data-testid="botarga-friends">
+            {m.friends_title()}
+          </Button>
         </div>
       </div>
     </div>

@@ -15,16 +15,33 @@ const LOAD_TIMEOUT_MS = 10_000;
 export type PvpLoaded =
   { readonly kind: 'loaded'; readonly body: unknown } | { readonly kind: 'unavailable' };
 
+/** Where a replay reads its fight: a public player fight (021), or a private one between friends
+ * (023), whose answer wraps the same detail in `{ fight }`. */
+export type PvpReplayKind = 'pvp' | 'friends';
+
+/** The detail inside a body of `kind`, as the server sent it (still unchecked). */
+export function detailBody(kind: PvpReplayKind, body: unknown): unknown {
+  if (kind === 'pvp') return body;
+  return typeof body === 'object' && body !== null && 'fight' in body
+    ? (body as { fight: unknown }).fight
+    : null;
+}
+
 /** The one read of a page. */
-export async function loadPvpDetail(id: number, fetcher: typeof fetch): Promise<PvpLoaded> {
+export async function loadPvpDetail(
+  id: number,
+  fetcher: typeof fetch,
+  kind: PvpReplayKind = 'pvp',
+): Promise<PvpLoaded> {
   try {
-    const response = await fetcher(`/api/pvp/fights/${id}`, {
+    const path = kind === 'pvp' ? `/api/pvp/fights/${id}` : `/api/friends/fights/${id}`;
+    const response = await fetcher(path, {
       headers: { accept: 'application/json' },
       cache: 'no-store',
       signal: AbortSignal.timeout(LOAD_TIMEOUT_MS),
     });
     if (response.status !== 200) return { kind: 'unavailable' };
-    return { kind: 'loaded', body: (await response.json()) as unknown };
+    return { kind: 'loaded', body: detailBody(kind, (await response.json()) as unknown) };
   } catch {
     return { kind: 'unavailable' };
   }
@@ -49,6 +66,7 @@ export class PvpReplayStore {
     private readonly id: number,
     private readonly fetcher: typeof fetch,
     private readonly deps: VerifyDeps,
+    private readonly kind: PvpReplayKind = 'pvp',
   ) {}
 
   readonly stageVisible = $derived(
@@ -87,7 +105,7 @@ export class PvpReplayStore {
 
   start = async (): Promise<void> => {
     this.load = 'loading';
-    const loaded = await loadPvpDetail(this.id, this.fetcher);
+    const loaded = await loadPvpDetail(this.id, this.fetcher, this.kind);
     if (loaded.kind === 'unavailable') {
       this.load = 'unavailable';
       return;

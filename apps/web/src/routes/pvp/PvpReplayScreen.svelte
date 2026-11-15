@@ -4,7 +4,7 @@
   import { onMount } from 'svelte';
   import PvpReplayView from '#lib/components/pvp/PvpReplayView.svelte';
   import { pvpFighterName, stageLooks } from '#lib/features/pvp/fighter.js';
-  import { PvpReplayStore } from '#lib/features/pvp/replay-store.svelte.js';
+  import { PvpReplayStore, type PvpReplayKind } from '#lib/features/pvp/replay-store.svelte.js';
   import { realDeps } from '#lib/features/replay/engine-loader.js';
   import { verdictAction } from '#lib/features/replay/verify.js';
   import type { Locale } from '#lib/i18n/locale.js';
@@ -12,14 +12,16 @@
   interface Props {
     id: number;
     locale: Locale;
+    /** A public player fight (the default) or a private one between friends (023). */
+    kind?: PvpReplayKind;
     /** Once the result has been seen: the end of the fight or "see the result". */
     onresultseen?: () => void;
   }
 
-  let { id, locale, onresultseen }: Props = $props();
+  let { id, locale, kind = 'pvp', onresultseen }: Props = $props();
 
   // svelte-ignore state_referenced_locally
-  const store = new PvpReplayStore(id, (input, init) => fetch(input, init), realDeps());
+  const store = new PvpReplayStore(id, (input, init) => fetch(input, init), realDeps(), kind);
   onMount(() => {
     void store.start();
   });
