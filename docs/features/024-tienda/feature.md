@@ -67,29 +67,45 @@ El precio de un accesorio va por tier, no por cuánto mueve sus stats: son de su
 Los nombres salen de `names.{es,en}.json`. Para los trajes se agrega una sección `skins`.
 
 **Datos** (migración aditiva, códigos SQLSTATE fijos):
-- **Ledger:**
-  - una cuenta `shop_sink`, creada por la migración (`SHOP_SINK_ACCOUNT`);
-  - un asiento `shop_purchase`, del usuario (−precio) al sumidero (+precio).
+- **Ledger:** una cuenta `shop_sink`, creada por la migración (`SHOP_SINK_ACCOUNT`), y un asiento `shop_purchase` del usuario (−precio) al sumidero (+precio). La base lo garantiza como en `pvp_reward`:
+  - `shop_sink` entra en `ledger_accounts_kind_ck` y `shop_purchase` en `ledger_entries_kind_ck`.
+  - `ledger_posting_rules` gana una rama: `shop_sink` solo recibe montos positivos y solo de un `shop_purchase` (TA008). En un `shop_purchase`, el `user` es el dueño del asiento con −precio y el sumidero recibe +precio, el precio de su compra. Así unos signos invertidos o un monto distinto del precio fallan. `issuance` sigue sin poder pagar un `shop_purchase`.
+  - `ledger_entries.shop_purchase_id`, con `CHECK ((kind = 'shop_purchase') = (shop_purchase_id IS NOT NULL))`, una FK de dueño `(shop_purchase_id, user_id)` hacia `shop_purchases (id, user_id)` y un índice único parcial: un cobro por compra y una compra por cobro.
+- **Compras:** `shop_purchases (id, user_id, kind, item_id, price, client_key, created_at)`, inmutable (guard), con:
+  - `UNIQUE (user_id, kind, item_id)`, porque nada se compra dos veces;
+  - `UNIQUE (user_id, client_key)`;
+  - `UNIQUE (id, user_id)`, para la FK.
   
-  El sumidero nunca devuelve monedas, como `rake_sink`.
-- **Compras:** `shop_purchases (id, user_id, kind, item_id, price, ledger_entry_id, client_key, created_at)`, inmutable (guard). Tiene `UNIQUE (user_id, kind, item_id)`, porque nada se compra dos veces, y `UNIQUE (user_id, client_key)`.
-- **Inventario:** `botarga_unlocks` acepta `kind = 'skin'` y `source = 'shop'`. Lo comprado entra al inventario como cualquier desbloqueo. Un sorteo nunca ofrece lo que ya se tiene, así que ese sorteo da otra cosa.
+  Esta tabla y el ledger son el registro duradero de las compras.
+- **Inventario:** `botarga_unlocks` acepta `kind = 'skin'` y `source = 'shop'`. Lo comprado entra al inventario como cualquier desbloqueo, y un sorteo nunca ofrece lo que ya se tiene. Un guard rechaza `UPDATE` y `DELETE` de las filas con `source = 'shop'`: lo pagado no se borra.
 - **Build:** `botargas.skin text NULL` es el traje equipado. `null` es la botarga base.
-- **Auditoría:** un `auth_events` de tipo `purchase` por compra, con su `ledger_entry_id` y el `ip_hash`, como `bet` y `grant`.
+- **Auditoría:** un `auth_events` de tipo `purchase` por compra, con su `ledger_entry_id` y el `ip_hash`, como `bet` y `grant`. Lleva `CHECK ((kind = 'purchase') = (ledger_entry_id IS NOT NULL))`, como en `auth_events_pvp_ck`. `auth_events` se borra a los 38 días: el registro duradero son `shop_purchases` y el ledger.
 
-**Compra:** `POST /api/shop/buy { kind, item_id, client_key }`, con sesión, `Effect::Mutate`, `Origin` y la cuota `SHOP_USER`. En una transacción:
-1. `lock_user` (exige `banned_at IS NULL`) y la botarga, con un `lock_timeout` de 1 s.
-2. Si el `client_key` ya existe, se devuelve esa compra con 200, aunque el precio haya cambiado.
+**Compra:** `POST /api/shop/buy { kind, item_id, expected_price, client_key }`, con sesión, `Effect::Mutate`, `Origin` y las cuotas `SHOP_USER` y `SHOP_IP`.
+
+En el borde, antes de tocar la base, se rechaza con 422 `shop.invalid_request` (sin el texto de serde):
+- un cuerpo inválido;
+- un `kind` que no es del enum;
+- un `item_id` fuera de 1–64 caracteres de `[a-z0-9_-]`;
+- un `client_key` no canónico.
+
+Después, en una transacción:
+1. `lock_user` (exige `banned_at IS NULL`) y después la botarga, con un `lock_timeout` de 1 s. Sin botarga, 404 `botarga.not_created`.
+2. Si el `client_key` ya existe:
+   - con el mismo `kind` e `item_id`, se devuelve esa compra con 200, aunque el precio haya cambiado;
+   - con otro artículo, 409 `shop.key_reused`.
 3. Se valida el artículo:
    - 404 `shop.not_found` si no está en el catálogo;
    - 409 `shop.owned` si ya lo tengo (comprado o ganado);
-   - 422 `shop.level` si es un accesorio de un tier fuera de mi nivel.
-4. El saldo se lee bajo el lock, y si no alcanza se responde 402 `shop.insufficient`.
-5. Se escriben el asiento, la fila de `shop_purchases`, el desbloqueo y el evento.
+   - 409 `shop.in_draw` si es una opción de mi sorteo abierto: se consigue eligiéndolo ahí, y comprarlo vaciaría el sorteo;
+   - 422 `shop.level` si es un accesorio de un tier fuera de mi nivel;
+   - 409 `shop.price_changed` si `expected_price` no es el precio actual: la UI cobra solo lo que mostró.
+4. El saldo se lee con el mismo `facts::read` de las apuestas, en la transacción y después del lock. Nunca con `ledger::balance`, que va fuera de la transacción. Si no alcanza, 402 `shop.insufficient`.
+5. Se escriben la fila de `shop_purchases`, el asiento con el precio de esa fila, el desbloqueo y el evento.
 
 La respuesta trae la compra, el saldo nuevo y la `BotargaView`. Los errores de base de datos y el `lock_timeout` siguen el patrón de amigos y PvP (`shop.busy` y `shop.unavailable`).
 
-**Lectura:** `GET /api/shop`, con sesión. Devuelve:
+**Lectura:** `GET /api/shop`, con sesión y respuesta `private, no-store`. Devuelve:
 - los artículos con su precio;
 - si ya lo tengo;
 - si mi nivel lo permite;
@@ -106,7 +122,7 @@ El motor no cambia: el traje es solo cosmético y no entra en el `CharacterSpec`
 - `/botarga`: elegir el traje entre los que tengo.
 
 **Protocolo:**
-- tipos nuevos: `ShopView`, `ShopItem`, `ShopItemKind`, `ShopBuyRequest`, `ShopPurchase` y `ShopErrorCode`;
+- tipos nuevos: `ShopView`, `ShopItem`, `ShopItemKind`, `ShopBuyRequest`, `ShopPurchase` y `ShopErrorCode` (`invalid_request`, `not_found`, `owned`, `in_draw`, `level`, `price_changed`, `insufficient`, `key_reused`, `busy` y `unavailable`);
 - campos nuevos: `skin` en `BotargaBuild`, en `BotargaUnlocks` y en `PvpLook`.
 
 ## Fases
@@ -115,23 +131,30 @@ El motor no cambia: el traje es solo cosmético y no entra en el `CharacterSpec`
 3. Contenido: los trajes de la primera tanda que apruebe el owner, cada uno con `skin.json` (fit y zonas) y `provenance`, en sus propios PR de contenido.
 
 ## Riesgos
-- **Doble cobro.** Lo evitan la idempotencia por `client_key`, la unicidad `(user, kind, item)` y el lock del usuario. Un test concurrente compra lo mismo dos veces a la vez y comprueba que hay un solo asiento.
-- **Saldo negativo.** El saldo se lee y se descuenta bajo el lock del usuario, en la misma transacción. Un test comprueba que el ledger se conserva: la suma de todas las cuentas sigue en cero con compras.
+- **Doble cobro.** Lo evitan la idempotencia por `client_key`, la unicidad `(user, kind, item)` y el lock del usuario. La base además ata un cobro a una compra y el monto a su precio.
+- **Saldo negativo.** No hay ninguna barrera en la base: lo evita solo leer el saldo bajo `lock_user`, el mismo que toman las apuestas. Lo prueban compras concurrentes de artículos distintos que juntas superan el saldo, y una apuesta y una compra a la vez.
 - **Inflación.** La tienda absorbe monedas, pero cada artículo se compra una sola vez, así que el sumidero se agota para quien ya lo tiene todo. No reemplaza la revisión del rake (TA-59). Revisarlo en D30 con tres medidas: qué parte de lo emitido absorbe la tienda, el saldo mediano y cuántos se quedan sin saldo.
-- **Granjas.** Lo comprado no se transfiere, así que una granja solo viste a su dueño. El daño es cosmético. Se vigila con `farm-report`.
+- **Granjas.** Lo comprado no se transfiere, pero el daño no es solo cosmético: con monedas pasadas desde cuentas granja, una cuenta compra de una vez todos los accesorios de sus tiers. Así gana opciones de build para contraelegir en el PvP con ranking, aunque sin poder neto. La v1 no suma las compras a `farm-report`: el patrón de las granjas ya sale en sus señales de apuestas y de PvP. Se revisa en D30, con `shop_purchases` como fuente.
 - **Contenido.** Los disfraces del torneo son contenido propio (`LICENSE-CONTENT.md`). Cada traje nuevo pasa la lista de "¿demasiado parecido?" de `write-character` antes de publicarse.
 
 ## Pruebas
 - [ ] `just check` en verde
 - [ ] Integración:
   - [ ] una compra mueve monedas solo por un asiento y desbloquea el artículo;
-  - [ ] el ledger se conserva;
-  - [ ] repetir el `client_key` devuelve la misma compra;
+  - [ ] el ledger se conserva, y el saldo de `shop_sink` es igual a `SUM(shop_purchases.price)`;
+  - [ ] repetir el `client_key` devuelve la misma compra, y con otro artículo da 409 `shop.key_reused`;
   - [ ] comprar algo que ya tengo da 409 y no escribe nada;
+  - [ ] comprar algo de mi sorteo abierto da 409 `shop.in_draw`;
+  - [ ] un precio esperado viejo da 409 `shop.price_changed`;
   - [ ] un saldo insuficiente da 402 y no escribe nada;
   - [ ] un accesorio fuera de tier da 422;
   - [ ] un artículo inexistente da 404;
-  - [ ] dos compras concurrentes de lo mismo dejan un solo asiento.
+  - [ ] un cuerpo inválido da 422 `shop.invalid_request`.
+- [ ] Concurrencia:
+  - [ ] N compras de artículos distintos que juntas superan el saldo dejan un saldo ≥ 0 y solo los asientos que caben;
+  - [ ] una apuesta y una compra a la vez que juntas superan el saldo: una de las dos da `insufficient`;
+  - [ ] dos compras de lo mismo dejan un solo asiento.
+- [ ] La base rechaza un asiento `shop_purchase` con los signos invertidos, con un monto distinto del precio o sin su compra, y el `UPDATE` o `DELETE` de un desbloqueo comprado.
 - [ ] `banned_writes.rs` y `fights_no_leaks.rs` cubren las rutas nuevas.
 - [ ] Un traje no desbloqueado no se puede equipar. Uno equipado viaja en el `look` de la pelea y en su repetición.
 - [ ] e2e: comprar una animación y un accesorio, ver el saldo bajar, equiparlos y verlos en la vista previa y en una pelea. Capturas a 375 px y en escritorio, claro y oscuro.
