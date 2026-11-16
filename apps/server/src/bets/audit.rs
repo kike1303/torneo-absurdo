@@ -28,6 +28,10 @@ pub enum Event {
     },
     /// An invite accepted (023).
     FriendAccept,
+    /// A purchase of the shop (024), with its ledger entry.
+    Purchase {
+        entry: Uuid,
+    },
     /// A tournament between friends (023 phase 2), of its owner.
     FriendTournament {
         tournament: i32,
@@ -53,6 +57,7 @@ pub async fn record(
             ("friend_challenge", None, None, None, Some(fight), None)
         }
         Event::FriendAccept => ("friend_accept", None, None, None, None, None),
+        Event::Purchase { entry } => ("purchase", Some(entry), None, None, None, None),
         Event::FriendTournament { tournament } => (
             "friend_tournament",
             None,

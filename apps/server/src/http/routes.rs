@@ -112,6 +112,8 @@ pub enum Handler {
     FriendTournamentCreate,
     FriendTournaments,
     FriendTournamentDetail,
+    Shop,
+    ShopBuy,
     #[cfg(feature = "dev-auth")]
     DevAuthorize,
     #[cfg(feature = "dev-auth")]
@@ -419,6 +421,18 @@ pub const ROUTES: &[RouteSpec] = &[
         effect: Effect::Read,
         handler: Handler::FriendTournamentDetail,
     },
+    RouteSpec {
+        method: RouteMethod::Get,
+        path: "/api/shop",
+        effect: Effect::Read,
+        handler: Handler::Shop,
+    },
+    RouteSpec {
+        method: RouteMethod::Post,
+        path: "/api/shop/buy",
+        effect: Effect::Mutate,
+        handler: Handler::ShopBuy,
+    },
     #[cfg(feature = "dev-auth")]
     RouteSpec {
         method: RouteMethod::Get,
@@ -572,6 +586,8 @@ fn route_for(spec: &RouteSpec, state: &AppState) -> MethodRouter<AppState> {
         }
         Handler::FriendTournaments => on(filter, crate::friends::api::tournaments),
         Handler::FriendTournamentDetail => on(filter, crate::friends::api::tournament_detail),
+        Handler::Shop => on(filter, crate::shop::api::get),
+        Handler::ShopBuy => on(filter, crate::shop::api::buy).layer(body),
         #[cfg(feature = "dev-auth")]
         Handler::DevAuthorize => on(filter, auth::dev::authorize),
         #[cfg(feature = "dev-auth")]

@@ -94,6 +94,16 @@ export const ERROR_TEXT = {
   'friends.not_found': 'error_friends_not_found',
   'friends.busy': 'error_friends_busy',
   'friends.unavailable': 'error_friends_unavailable',
+  'shop.invalid_request': 'error_shop_invalid_request',
+  'shop.not_found': 'error_shop_not_found',
+  'shop.owned': 'error_shop_owned',
+  'shop.in_draw': 'error_shop_in_draw',
+  'shop.level': 'error_shop_level',
+  'shop.price_changed': 'error_shop_price_changed',
+  'shop.insufficient': 'error_shop_insufficient',
+  'shop.key_reused': 'error_shop_key_reused',
+  'shop.busy': 'error_shop_busy',
+  'shop.unavailable': 'error_shop_unavailable',
 } as const satisfies { readonly [K in ErrorCode]: MessageKey };
 
 /** The closed list of `/login?error=` (ADR-0008, amendment 2026-10-28). */

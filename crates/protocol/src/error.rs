@@ -728,6 +728,76 @@ impl FriendsErrorCode {
     }
 }
 
+/// Shop codes (`shop.*`, feature 024).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum ShopErrorCode {
+    /// A body that is not one of these routes: malformed, an unknown field or kind, an id or a key out of form.
+    #[serde(rename = "shop.invalid_request")]
+    InvalidRequest,
+    /// No item of the catalog with that kind and id.
+    #[serde(rename = "shop.not_found")]
+    NotFound,
+    /// The user already has the item, bought or won.
+    #[serde(rename = "shop.owned")]
+    Owned,
+    /// The item is a choice of the open draw: it is had by choosing it there.
+    #[serde(rename = "shop.in_draw")]
+    InDraw,
+    /// An accessory of a tier the level of the user does not reach yet.
+    #[serde(rename = "shop.level")]
+    Level,
+    /// The price is not the one the client showed: nothing was charged.
+    #[serde(rename = "shop.price_changed")]
+    PriceChanged,
+    /// The balance does not reach the price.
+    #[serde(rename = "shop.insufficient")]
+    Insufficient,
+    /// The key of the request is of another purchase.
+    #[serde(rename = "shop.key_reused")]
+    KeyReused,
+    /// A row was locked for more than the `lock_timeout`: the client retries with the same key.
+    #[serde(rename = "shop.busy")]
+    Busy,
+    /// The database failed.
+    #[serde(rename = "shop.unavailable")]
+    Unavailable,
+}
+
+impl ShopErrorCode {
+    /// Every variant. A test with an exhaustive `match` keeps this list complete.
+    pub const ALL: &'static [Self] = &[
+        Self::InvalidRequest,
+        Self::NotFound,
+        Self::Owned,
+        Self::InDraw,
+        Self::Level,
+        Self::PriceChanged,
+        Self::Insufficient,
+        Self::KeyReused,
+        Self::Busy,
+        Self::Unavailable,
+    ];
+    /// The only domain prefix this enum may use.
+    pub const PREFIX: &'static str = "shop.";
+
+    /// The serialized code (the same string serde writes).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidRequest => "shop.invalid_request",
+            Self::NotFound => "shop.not_found",
+            Self::Owned => "shop.owned",
+            Self::InDraw => "shop.in_draw",
+            Self::Level => "shop.level",
+            Self::PriceChanged => "shop.price_changed",
+            Self::Insufficient => "shop.insufficient",
+            Self::KeyReused => "shop.key_reused",
+            Self::Busy => "shop.busy",
+            Self::Unavailable => "shop.unavailable",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(untagged)]
@@ -745,6 +815,7 @@ pub enum ErrorCode {
     Botarga(BotargaErrorCode),
     Pvp(PvpErrorCode),
     Friends(FriendsErrorCode),
+    Shop(ShopErrorCode),
 }
 
 impl ErrorCode {
@@ -764,6 +835,7 @@ impl ErrorCode {
             Self::Botarga(code) => code.as_str(),
             Self::Pvp(code) => code.as_str(),
             Self::Friends(code) => code.as_str(),
+            Self::Shop(code) => code.as_str(),
         }
     }
 }
@@ -825,6 +897,12 @@ impl From<BotargaErrorCode> for ErrorCode {
 impl From<FriendsErrorCode> for ErrorCode {
     fn from(code: FriendsErrorCode) -> Self {
         Self::Friends(code)
+    }
+}
+
+impl From<ShopErrorCode> for ErrorCode {
+    fn from(code: ShopErrorCode) -> Self {
+        Self::Shop(code)
     }
 }
 
@@ -983,6 +1061,21 @@ mod tests {
         }
     }
 
+    fn shop_index(code: ShopErrorCode) -> usize {
+        match code {
+            ShopErrorCode::InvalidRequest => 0,
+            ShopErrorCode::NotFound => 1,
+            ShopErrorCode::Owned => 2,
+            ShopErrorCode::InDraw => 3,
+            ShopErrorCode::Level => 4,
+            ShopErrorCode::PriceChanged => 5,
+            ShopErrorCode::Insufficient => 6,
+            ShopErrorCode::KeyReused => 7,
+            ShopErrorCode::Busy => 8,
+            ShopErrorCode::Unavailable => 9,
+        }
+    }
+
     fn pvp_index(code: PvpErrorCode) -> usize {
         match code {
             PvpErrorCode::InvalidRequest => 0,
@@ -1040,6 +1133,7 @@ mod tests {
     const BOTARGA_COUNT: usize = 18;
     const PVP_COUNT: usize = 7;
     const FRIENDS_COUNT: usize = 11;
+    const SHOP_COUNT: usize = 10;
     const BET_COUNT: usize = 10;
     const BONUS_COUNT: usize = 1;
     const BAILOUT_COUNT: usize = 3;
@@ -1095,6 +1189,9 @@ mod tests {
             .collect();
         assert_eq!(friends.len(), FRIENDS_COUNT);
         assert_eq!(FriendsErrorCode::ALL.len(), FRIENDS_COUNT);
+        let shop: HashSet<usize> = ShopErrorCode::ALL.iter().map(|c| shop_index(*c)).collect();
+        assert_eq!(shop.len(), SHOP_COUNT);
+        assert_eq!(ShopErrorCode::ALL.len(), SHOP_COUNT);
     }
 
     /// The codes of 012 RF38, each wrapped in its `ErrorCode` variant.
@@ -1438,6 +1535,10 @@ mod tests {
             );
             assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
         }
+        for code in ShopErrorCode::ALL {
+            assert!(code.as_str().starts_with(ShopErrorCode::PREFIX), "{code:?}");
+            assert!(seen.insert(code.as_str()), "duplicate {}", code.as_str());
+        }
         for code in money_codes() {
             let prefix = match code {
                 ErrorCode::Bet(_) => BetErrorCode::PREFIX,
@@ -1460,6 +1561,7 @@ mod tests {
                 + BOTARGA_COUNT
                 + PVP_COUNT
                 + FRIENDS_COUNT
+                + SHOP_COUNT
                 + BET_COUNT
                 + BONUS_COUNT
                 + BAILOUT_COUNT
@@ -1540,6 +1642,14 @@ mod tests {
             assert_eq!(
                 serde_json::from_str::<ErrorCode>(&json).unwrap(),
                 ErrorCode::Friends(*code)
+            );
+            assert_eq!(ErrorCode::from(*code).as_str(), code.as_str());
+        }
+        for code in ShopErrorCode::ALL {
+            let json = format!("\"{}\"", code.as_str());
+            assert_eq!(
+                serde_json::from_str::<ErrorCode>(&json).unwrap(),
+                ErrorCode::Shop(*code)
             );
             assert_eq!(ErrorCode::from(*code).as_str(), code.as_str());
         }

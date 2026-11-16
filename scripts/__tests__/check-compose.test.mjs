@@ -757,6 +757,18 @@ const CASES = [
     /web-characters: COPY content\/catalog content\/catalog is not allowed/,
   ],
   [
+    'web Dockerfile: the shop prices next to the catalog of /botarga',
+    {
+      [WD]: [
+        [
+          'content/catalog/styles.json content/catalog/\n',
+          'content/catalog/styles.json content/catalog/shop.json content/catalog/\n',
+        ],
+      ],
+    },
+    /web-characters: COPY content\/catalog\/abilities\.json .*shop\.json content\/catalog\/ is not allowed/,
+  ],
+  [
     'web Dockerfile: the characters in the final stage',
     {
       [WD]: [

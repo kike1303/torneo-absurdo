@@ -58,11 +58,11 @@ El precio de un accesorio va por tier, no por cuánto mueve sus stats: son de su
 - `kind` es `accessory`, `cosmetic` (un clip) o `skin`;
 - `id` es el del catálogo de accesorios, el código del clip o el slug del traje en `content/models/skins/`.
 
-`crates/content` lo carga y lo valida al arrancar:
+El server lo embebe al compilar (`apps/server/src/shop/`, como el catálogo de la botarga) y lo valida contra ese catálogo al arrancar:
 - cada `id` existe;
 - no hay repetidos;
 - `price` está entre 1 y 1 000 000;
-- un `skin` tiene su carpeta.
+- un `skin` tiene su carpeta (lo comprueba un test del server, que lee el mismo repo).
 
 Los nombres salen de `names.{es,en}.json`. Para los trajes se agrega una sección `skins`.
 
@@ -90,7 +90,7 @@ En el borde, antes de tocar la base, se rechaza con 422 `shop.invalid_request` (
 - un `client_key` no canónico.
 
 Después, en una transacción:
-1. `lock_user` (exige `banned_at IS NULL`) y después la botarga, con un `lock_timeout` de 1 s. Sin botarga, 404 `botarga.not_created`.
+1. `lock_user` (exige `banned_at IS NULL`), con un `lock_timeout` de 1 s. La botarga se bloquea con `FOR NO KEY UPDATE`: así espera al XP de una defensa (`grant_xp` la bloquea `FOR UPDATE`) y una subida de nivel nunca sortea ni regala lo que se está comprando, sin hacer esperar a las FK de las peleas que la nombran (`FOR KEY SHARE`). Sin botarga, 404 `botarga.not_created`.
 2. Si el `client_key` ya existe:
    - con el mismo `kind` e `item_id`, se devuelve esa compra con 200, aunque el precio haya cambiado;
    - con otro artículo, 409 `shop.key_reused`.
@@ -132,7 +132,7 @@ El motor no cambia: el traje es solo cosmético y no entra en el `CharacterSpec`
 
 ## Riesgos
 - **Doble cobro.** Lo evitan la idempotencia por `client_key`, la unicidad `(user, kind, item)` y el lock del usuario. La base además ata un cobro a una compra y el monto a su precio.
-- **Saldo negativo.** No hay ninguna barrera en la base: lo evita solo leer el saldo bajo `lock_user`, el mismo que toman las apuestas. Lo prueban compras concurrentes de artículos distintos que juntas superan el saldo, y una apuesta y una compra a la vez.
+- **Saldo negativo.** No hay ninguna barrera en la base: lo evita solo leer el saldo bajo `lock_user`, el mismo que toman las apuestas. Lo prueban compras concurrentes de artículos distintos que juntas superan el saldo, y un gasto que espera el mismo lock que las apuestas.
 - **Inflación.** La tienda absorbe monedas, pero cada artículo se compra una sola vez, así que el sumidero se agota para quien ya lo tiene todo. No reemplaza la revisión del rake (TA-59). Revisarlo en D30 con tres medidas: qué parte de lo emitido absorbe la tienda, el saldo mediano y cuántos se quedan sin saldo.
 - **Granjas.** Lo comprado no se transfiere, pero el daño no es solo cosmético: con monedas pasadas desde cuentas granja, una cuenta compra de una vez todos los accesorios de sus tiers. Así gana opciones de build para contraelegir en el PvP con ranking, aunque sin poder neto. La v1 no suma las compras a `farm-report`: el patrón de las granjas ya sale en sus señales de apuestas y de PvP. Se revisa en D30, con `shop_purchases` como fuente.
 - **Contenido.** Los disfraces del torneo son contenido propio (`LICENSE-CONTENT.md`). Cada traje nuevo pasa la lista de "¿demasiado parecido?" de `write-character` antes de publicarse.
@@ -152,9 +152,10 @@ El motor no cambia: el traje es solo cosmético y no entra en el `CharacterSpec`
   - [ ] un cuerpo inválido da 422 `shop.invalid_request`.
 - [ ] Concurrencia:
   - [ ] N compras de artículos distintos que juntas superan el saldo dejan un saldo ≥ 0 y solo los asientos que caben;
-  - [ ] una apuesta y una compra a la vez que juntas superan el saldo: una de las dos da `insufficient`;
+  - [ ] una compra que espera el lock del usuario (el de las apuestas) mientras otro gasto lo toma lee el saldo después y da `insufficient`;
+  - [ ] dos compras a la vez con la misma `client_key` dejan un solo cobro;
   - [ ] dos compras de lo mismo dejan un solo asiento.
-- [ ] La base rechaza un asiento `shop_purchase` con los signos invertidos, con un monto distinto del precio o sin su compra. También rechaza una compra sin asiento al commit, y el `UPDATE` o `DELETE` de un desbloqueo comprado.
+- [ ] La base rechaza un asiento `shop_purchase` con los signos invertidos, con un monto distinto del precio o sin su compra. También rechaza una compra sin asiento al commit, un desbloqueo de la tienda sin su compra, un segundo cobro de la misma compra, un cobro a nombre de otro usuario, un `grant` que pague al sumidero, y el `UPDATE`, `DELETE` o `TRUNCATE` de lo comprado.
 - [ ] `banned_writes.rs` y `fights_no_leaks.rs` cubren las rutas nuevas.
 - [ ] Un traje no desbloqueado no se puede equipar. Uno equipado viaja en el `look` de la pelea y en su repetición.
 - [ ] e2e: comprar una animación y un accesorio, ver el saldo bajar, equiparlos y verlos en la vista previa y en una pelea. Capturas a 375 px y en escritorio, claro y oscuro.

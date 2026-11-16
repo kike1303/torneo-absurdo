@@ -198,7 +198,8 @@ async fn every_kind_of_entry_is_accepted() {
             .fetch_all(&w.pool)
             .await
             .unwrap();
-    assert_eq!(kinds, ["issuance", "bet_escrow", "rake_sink"]);
+    // 024 adds the sink of the shop.
+    assert_eq!(kinds, ["issuance", "bet_escrow", "rake_sink", "shop_sink"]);
 }
 
 /// RF1: without these columns, the indexes of RF3 would not see the entry.

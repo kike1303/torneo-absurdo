@@ -11,6 +11,7 @@ import type { FriendsErrorCode } from './FriendsErrorCode.js';
 import type { ProfileErrorCode } from './ProfileErrorCode.js';
 import type { PvpErrorCode } from './PvpErrorCode.js';
 import type { SeasonErrorCode } from './SeasonErrorCode.js';
+import type { ShopErrorCode } from './ShopErrorCode.js';
 import type { WalletErrorCode } from './WalletErrorCode.js';
 import type { WsErrorCode } from './WsErrorCode.js';
 
@@ -27,4 +28,5 @@ export type ErrorCode =
   | SeasonErrorCode
   | BotargaErrorCode
   | PvpErrorCode
-  | FriendsErrorCode;
+  | FriendsErrorCode
+  | ShopErrorCode;

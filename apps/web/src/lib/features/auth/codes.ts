@@ -90,6 +90,16 @@ const ERROR_CODES: { readonly [K in ErrorCode]: true } = {
   'friends.not_found': true,
   'friends.busy': true,
   'friends.unavailable': true,
+  'shop.invalid_request': true,
+  'shop.not_found': true,
+  'shop.owned': true,
+  'shop.in_draw': true,
+  'shop.level': true,
+  'shop.price_changed': true,
+  'shop.insufficient': true,
+  'shop.key_reused': true,
+  'shop.busy': true,
+  'shop.unavailable': true,
 };
 
 const CALLBACK_ERROR_CODES: { readonly [K in CallbackErrorCode]: true } = {

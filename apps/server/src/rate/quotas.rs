@@ -59,6 +59,10 @@ pub const FRIENDS_IP: Quota = Quota::per_minute(nonzero(120));
 pub const FRIENDS_ACCEPT_USER: Quota = Quota::per_minute(nonzero(5));
 pub const FRIENDS_ACCEPT_IP: Quota = Quota::per_minute(nonzero(20));
 
+/// `POST /api/shop/buy` (024): a purchase is a ledger entry, so as tight as a bet.
+pub const SHOP_USER: Quota = Quota::per_minute(nonzero(10)).allow_burst(nonzero(3));
+pub const SHOP_IP: Quota = Quota::per_minute(nonzero(120));
+
 /// `quote` (012 RF37): 120/min per user and 600/min per IP.
 pub const QUOTE_USER: Quota = Quota::per_minute(nonzero(120));
 pub const QUOTE_IP: Quota = Quota::per_minute(nonzero(600));

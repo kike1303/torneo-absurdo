@@ -147,6 +147,15 @@ fn request_of(route: &RouteSpec, id: i32) -> (String, Vec<(&'static str, &'stati
         | Handler::FriendFightDetail
         | Handler::FriendTournaments
         | Handler::FriendTournamentDetail => (vec![], String::new()),
+        // 024: the shop of the identity, and a purchase of an item it cannot afford or has.
+        Handler::Shop => (vec![], String::new()),
+        Handler::ShopBuy => (
+            vec![json],
+            format!(
+                r#"{{"kind":"cosmetic","item_id":"win_3","expected_price":750,"client_key":"{}"}}"#,
+                uuid::Uuid::new_v4()
+            ),
+        ),
         Handler::FriendTournamentCreate => (
             vec![json],
             format!(
@@ -295,6 +304,8 @@ fn expected_status(handler: Handler, identity: &str) -> Option<u16> {
         | Handler::FriendTournamentCreate
         | Handler::FriendTournaments
         | Handler::FriendTournamentDetail
+        | Handler::Shop
+        | Handler::ShopBuy
             if identity == "anonymous" =>
         {
             Some(401)
@@ -316,7 +327,9 @@ fn expected_status(handler: Handler, identity: &str) -> Option<u16> {
         | Handler::FriendsChallenge
         | Handler::FriendTournamentCreate
         | Handler::FriendsInvitePreview
-        | Handler::FriendsAccept => None,
+        | Handler::FriendsAccept
+        | Handler::Shop
+        | Handler::ShopBuy => None,
         // 021: a search is a real fight once the identity created its botarga above, until the
         // quota of the attacks; the id of the case may or may not be a player fight too.
         Handler::PvpFightCreate | Handler::PvpFightDetail => None,

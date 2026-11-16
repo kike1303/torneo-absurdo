@@ -15,6 +15,8 @@ pub const ISSUANCE_ACCOUNT: Uuid = Uuid::from_u128(1);
 pub const ESCROW_ACCOUNT: Uuid = Uuid::from_u128(2);
 /// Where the rake and the residue go, and never come back from (012 RF1, RF10).
 pub const RAKE_SINK_ACCOUNT: Uuid = Uuid::from_u128(3);
+/// Where the coins of the purchases go, and never come back from (024).
+pub const SHOP_SINK_ACCOUNT: Uuid = Uuid::from_u128(4);
 
 /// The ledger account of a new user, in the transaction of its first login.
 pub async fn create_user_account(tx: &mut PgConnection, user_id: Uuid) -> Result<(), sqlx::Error> {
@@ -185,6 +187,44 @@ pub async fn pvp_reward(
     .bind(ISSUANCE_ACCOUNT)
     .bind(-amount.0)
     .bind(amount.0)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+    Ok(entry)
+}
+
+/// The charge of purchase `shop_purchase_id` (024): its owner pays `price`, the shop sink takes it.
+/// The database refuses any other amount, sign, account or owner (`TA008`), a second charge of the
+/// same purchase (`ledger_entries_shop_purchase_uq`) and a purchase left without one (`TA016`).
+///
+/// # Errors
+/// The database error.
+pub async fn shop_purchase(
+    tx: &mut PgConnection,
+    shop_purchase_id: i32,
+    user_id: Uuid,
+    price: Coins,
+) -> Result<Uuid, sqlx::Error> {
+    let entry = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO ledger_entries (id, kind, user_id, shop_purchase_id) \
+         VALUES ($1, 'shop_purchase', $2, $3)",
+    )
+    .bind(entry)
+    .bind(user_id)
+    .bind(shop_purchase_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO ledger_postings (entry_id, account_id, amount) \
+         SELECT $1, $2, $3 \
+         UNION ALL \
+         SELECT $1, id, $4 FROM ledger_accounts WHERE user_id = $5",
+    )
+    .bind(entry)
+    .bind(SHOP_SINK_ACCOUNT)
+    .bind(price.0)
+    .bind(-price.0)
     .bind(user_id)
     .execute(&mut *tx)
     .await?;

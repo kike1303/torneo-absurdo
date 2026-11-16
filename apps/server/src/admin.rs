@@ -1051,7 +1051,7 @@ mod source_rules {
     /// Only 009: the guard also had to refuse `admin_account_cutoff`, which took a new body and,
     /// as `UPDATE OF` can not be altered, a drop and a create in the same migration, which runs in
     /// one transaction. A later migration needs its own line here, and a review.
-    const GUARD_CHANGES_ALLOWED: [(i64, &str, &str); 9] = [
+    const GUARD_CHANGES_ALLOWED: [(i64, &str, &str); 11] = [
         (
             20261030000000,
             "or replace function",
@@ -1079,6 +1079,14 @@ mod source_rules {
         // in a closed month. Named twice: the trigger and the function share the name.
         (20261114000000, "or replace function", "pvp_fights_guard"),
         (20261114000000, "or replace function", "pvp_fights_guard"),
+        // 024 widens the kinds with `shop_purchase` in the same statement, and ties its postings to
+        // the price of its purchase: one more kind and one more branch, nothing taken away.
+        (20261118000000, "drop constraint", "ledger_entries_kind_ck"),
+        (
+            20261118000000,
+            "or replace function",
+            "ledger_posting_rules",
+        ),
     ];
 
     /// `(version, file name, text)` of every migration.
