@@ -68,7 +68,9 @@ Las peleas del torneo se ven sin iniciar sesión. Para apostar, cobrar las moned
 - Apuestas internas con monedas de torneo de amigos, o torneos sin monedas, solo por diversión.
 
 ## Monedas
-Dos monedas: la de **apuestas** (la del torneo público) y la de **torneos de amigos**. Las skins de la tienda se pueden comprar con cualquiera de las dos, a precios distintos. La de apuestas nunca se compra ni se vende. Lo demás sobre economía de pago está en `private/`.
+Dos monedas: la de **apuestas** (la del torneo público) y la de **torneos de amigos**. La de apuestas nunca se compra ni se vende. Lo demás sobre economía de pago está en `private/`.
+- La tienda v1 (feature 024, owner, 2026-11-16) usa solo la moneda de apuestas. La segunda moneda queda para después.
+- En la tienda nunca se vende poder neto: los accesorios se venden con sus stats porque son de suma cero.
 
 ## Preguntas abiertas
 - ¿Cuántas peleas por día con recompensa completa antes de que empiece el decrecimiento?
