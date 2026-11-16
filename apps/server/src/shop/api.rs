@@ -181,8 +181,14 @@ pub async fn buy(
         if !lock_user(&mut tx, user_id).await? {
             return Ok(Outcome::Gone);
         }
-        // Read, not locked: the user's lock already serializes its purchases and bets, and the
-        // botarga is never written here (an unlock is a row of its own).
+        // `FOR NO KEY UPDATE`: it waits for the XP a defense gives (`grant_xp` locks the botarga
+        // `FOR UPDATE`), so a level up never opens a draw nor gives a reward of what is being
+        // bought, while the foreign keys of the fights that name the botarga (`FOR KEY SHARE`)
+        // never wait on it.
+        sqlx::query("SELECT 1 FROM botargas WHERE user_id = $1 FOR NO KEY UPDATE")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
         let Some(view) = botarga::store::view(&mut tx, user_id).await? else {
             return refusal(StatusCode::NOT_FOUND, BotargaErrorCode::NotCreated);
         };

@@ -158,6 +158,29 @@ $$;
 CREATE TRIGGER botarga_unlocks_shop_guard BEFORE UPDATE OR DELETE ON botarga_unlocks
     FOR EACH ROW EXECUTE FUNCTION botarga_unlocks_shop_guard();
 
+CREATE FUNCTION botarga_unlocks_no_truncate() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION USING ERRCODE = 'TA015', MESSAGE = 'shop guard';
+END;
+$$;
+CREATE TRIGGER botarga_unlocks_no_truncate BEFORE TRUNCATE ON botarga_unlocks
+    FOR EACH STATEMENT EXECUTE FUNCTION botarga_unlocks_no_truncate();
+
+-- At commit, an unlock of the shop has its purchase: nothing comes from the shop unpaid (TA016).
+CREATE FUNCTION botarga_unlock_bought() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.source = 'shop' AND NOT EXISTS (
+        SELECT 1 FROM shop_purchases
+        WHERE user_id = NEW.user_id AND kind = NEW.kind AND item_id = NEW.item_id
+    ) THEN
+        RAISE EXCEPTION USING ERRCODE = 'TA016', MESSAGE = 'shop unlock without a purchase';
+    END IF;
+    RETURN NULL;
+END;
+$$;
+CREATE CONSTRAINT TRIGGER botarga_unlocks_bought AFTER INSERT ON botarga_unlocks
+    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION botarga_unlock_bought();
+
 -- One event per purchase, with its entry and the `ip_hash` of the request (retention of D8). The
 -- lasting record is `shop_purchases` and the ledger.
 ALTER TABLE auth_events

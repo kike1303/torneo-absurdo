@@ -505,3 +505,93 @@ async fn charge(
     .await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn retries_at_once_with_one_key_charge_once() {
+    let (app, _db) = start().await;
+    let pool = &app.pool;
+    let (user, token) = buyer(pool, 1000).await;
+    let k = key();
+    let (one, two) = tokio::join!(
+        app.buy(&token, "cosmetic", "idle_2", 400, &k),
+        app.buy(&token, "cosmetic", "idle_2", 400, &k),
+    );
+    let mut statuses = [status(&one), status(&two)];
+    statuses.sort_unstable();
+    assert!(
+        statuses == [200, 201] || statuses == [201, 503],
+        "{one} {two}"
+    );
+    assert_eq!(count(pool, "SELECT count(*) FROM shop_purchases").await, 1);
+    assert_eq!(balance(pool, user).await, 600);
+    assert_ledger_whole(pool).await;
+}
+
+#[tokio::test]
+async fn the_database_keeps_every_other_rule_of_a_purchase() {
+    let (app, _db) = start().await;
+    let pool = &app.pool;
+    let (user, token) = buyer(pool, 1000).await;
+    let (other, _) = buyer(pool, 1000).await;
+    let bought = app.buy(&token, "cosmetic", "idle_2", 400, &key()).await;
+    assert_eq!(status(&bought), 201);
+    let id: i32 = sqlx::query_scalar("SELECT id FROM shop_purchases")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+    // A second charge of the same purchase.
+    let mut tx = pool.begin().await.unwrap();
+    assert!(charge(&mut tx, user, id, -400, 400).await.is_err());
+    drop(tx);
+    // A charge of it in the name of another user.
+    let mut tx = pool.begin().await.unwrap();
+    assert!(charge(&mut tx, other, id, -400, 400).await.is_err());
+    drop(tx);
+    // A grant that pays the sink.
+    let mut tx = pool.begin().await.unwrap();
+    let entry = Uuid::new_v4();
+    sqlx::query("INSERT INTO ledger_entries (id, kind, user_id) VALUES ($1, 'bailout', $2)")
+        .bind(entry)
+        .bind(other)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let error = sqlx::query(
+        "INSERT INTO ledger_postings (entry_id, account_id, amount) VALUES \
+         ($1, '00000000-0000-0000-0000-000000000001', -5), \
+         ($1, '00000000-0000-0000-0000-000000000004', 5)",
+    )
+    .bind(entry)
+    .execute(&mut *tx)
+    .await
+    .unwrap_err();
+    assert_eq!(server::db::error_kind(&error), "ledger_posting_rule");
+    drop(tx);
+    // An unlock of the shop without its purchase fails at commit.
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query(
+        "INSERT INTO botarga_unlocks (user_id, kind, item_id, source) \
+         VALUES ($1, 'cosmetic', 'win_3', 'shop')",
+    )
+    .bind(other)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    let error = tx.commit().await.unwrap_err();
+    assert_eq!(server::db::error_kind(&error), "shop_uncharged");
+    // Nothing bought is truncated.
+    for sql in [
+        "TRUNCATE shop_purchases CASCADE",
+        "TRUNCATE botarga_unlocks",
+    ] {
+        let error = sqlx::query(sqlx::AssertSqlSafe(sql))
+            .execute(pool)
+            .await
+            .unwrap_err();
+        assert_eq!(server::db::error_kind(&error), "shop_guard", "{sql}");
+    }
+    assert_eq!(balance(pool, user).await, 600);
+    assert_eq!(balance(pool, other).await, 1000);
+    assert_ledger_whole(pool).await;
+}
