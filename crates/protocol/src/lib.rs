@@ -27,6 +27,7 @@ mod health;
 mod me;
 mod pvp;
 mod seasons;
+mod shop;
 mod ws;
 
 pub use bets::{
@@ -42,7 +43,7 @@ pub use coins::{CoinAmount, CoinAmountOutOfRange};
 pub use error::{
     ApiError, ApiErrorCode, AuthErrorCode, BailoutErrorCode, BetErrorCode, BonusErrorCode,
     BotargaErrorCode, CallbackErrorCode, ErrorCode, FightErrorCode, FriendsErrorCode,
-    ProfileErrorCode, PvpErrorCode, SeasonErrorCode, WalletErrorCode, WsErrorCode,
+    ProfileErrorCode, PvpErrorCode, SeasonErrorCode, ShopErrorCode, WalletErrorCode, WsErrorCode,
 };
 pub use fight::{AbilityKind, EndReason, FightEvent, FightLog, FighterInfo, MomentKind, Side};
 pub use fights::{
@@ -65,4 +66,5 @@ pub use pvp::{
     PvpLeaderboard, PvpLeaderboardEntry, PvpLook, PvpReward, PvpRole,
 };
 pub use seasons::{Leaderboard, LeaderboardEntry, SeasonView};
+pub use shop::{ShopBuyRequest, ShopItem, ShopItemKind, ShopPurchase, ShopView};
 pub use ws::{Channel, ClientMessage, FightId, SelfEvent, ServerMessage};

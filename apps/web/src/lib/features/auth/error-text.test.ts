@@ -86,8 +86,8 @@ describe('every code has a text in en and es (condition of plan-a, answer 5)', (
     // 4 + 11 + 12 + 3 + 2 (ApiErrorCode, WsErrorCode, AuthErrorCode, ProfileErrorCode, FightErrorCode)
     // + 10 + 1 + 3 + 1 (BetErrorCode, BonusErrorCode, BailoutErrorCode, WalletErrorCode; 012 RF38)
     // + 2 (SeasonErrorCode; 020) + 18 (BotargaErrorCode; 021) + 7 (PvpErrorCode; 021)
-    // + 11 (FriendsErrorCode; 023).
-    expect(Object.keys(ERROR_TEXT)).toHaveLength(85);
+    // + 11 (FriendsErrorCode; 023) + 10 (ShopErrorCode; 024).
+    expect(Object.keys(ERROR_TEXT)).toHaveLength(95);
     expect(Object.keys(CALLBACK_ERROR_TEXT)).toEqual([...CALLBACK]);
   });
 

@@ -23,6 +23,7 @@ pub mod pvp;
 pub mod rate;
 pub mod seasons;
 pub mod sessions;
+pub mod shop;
 pub mod shutdown;
 pub mod telemetry;
 pub mod version;

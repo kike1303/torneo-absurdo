@@ -161,6 +161,17 @@ impl BotargaCatalog {
             .map(|entry| &entry.accessory)
     }
 
+    /// The tier of accessory `id`, if the catalog has it.
+    #[must_use]
+    pub fn accessory_tier(&self, id: &str) -> Option<u8> {
+        let accessories = &self.catalog.accessories;
+        accessories
+            .binary_search_by(|entry| entry.accessory.id.as_str().cmp(id))
+            .ok()
+            .and_then(|at| accessories.get(at))
+            .map(|entry| entry.tier)
+    }
+
     /// The abilities a draw of `level` may offer: the ones of its tier or a lower one (016). The
     /// caller leaves out what the user owns.
     #[must_use]

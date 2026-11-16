@@ -100,6 +100,8 @@ pub struct AppState {
     pub pools: Arc<crate::bets::pool::PoolCache>,
     /// The catalog of the player botargas and their starter build (021).
     pub botarga: Arc<BotargaCatalog>,
+    /// The catalog of the shop, checked against [`Self::botarga`] (024).
+    pub shop: Arc<crate::shop::ShopCatalog>,
     /// `PVP_WIN_COINS` (021).
     pub pvp: crate::pvp::PvpConfig,
     /// The characters of the tournament as rivals of last resort, read from `CONTENT_DIR` (021).
@@ -125,6 +127,12 @@ impl AppState {
             tracing::error!(event = "botarga.catalog_invalid", error_kind = error.kind);
             StartupError::Catalog
         })?);
+        let shop = Arc::new(
+            crate::shop::ShopCatalog::embedded(&botarga).map_err(|error| {
+                tracing::error!(event = "shop.catalog_invalid", error_kind = error.code);
+                StartupError::Catalog
+            })?,
+        );
         Ok(Self {
             db: pool,
             health: Arc::new(HealthState::new(probe, settings.health)),
@@ -137,6 +145,7 @@ impl AppState {
             bets: config.bets,
             pools: Arc::new(crate::bets::pool::PoolCache::default()),
             botarga,
+            shop,
             pvp: config.pvp,
             pvp_rivals: Arc::new(crate::pvp::Rivals::new(config.fights.content_dir.clone())),
             pvp_board: Arc::new(crate::pvp::season::BoardCache::default()),

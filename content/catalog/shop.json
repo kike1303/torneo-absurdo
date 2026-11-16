@@ -1,0 +1,109 @@
+{
+  "items": [
+    {
+      "kind": "cosmetic",
+      "id": "idle",
+      "price": 400
+    },
+    {
+      "kind": "cosmetic",
+      "id": "idle_2",
+      "price": 400
+    },
+    {
+      "kind": "cosmetic",
+      "id": "idle_3",
+      "price": 400
+    },
+    {
+      "kind": "cosmetic",
+      "id": "idle_4",
+      "price": 400
+    },
+    {
+      "kind": "cosmetic",
+      "id": "idle_5",
+      "price": 400
+    },
+    {
+      "kind": "cosmetic",
+      "id": "win_1",
+      "price": 750
+    },
+    {
+      "kind": "cosmetic",
+      "id": "win_2",
+      "price": 750
+    },
+    {
+      "kind": "cosmetic",
+      "id": "win_3",
+      "price": 750
+    },
+    {
+      "kind": "accessory",
+      "id": "bunny_slippers",
+      "price": 750
+    },
+    {
+      "kind": "accessory",
+      "id": "oven_mitts",
+      "price": 750
+    },
+    {
+      "kind": "accessory",
+      "id": "pool_floatie_vest",
+      "price": 750
+    },
+    {
+      "kind": "accessory",
+      "id": "propeller_beanie",
+      "price": 750
+    },
+    {
+      "kind": "accessory",
+      "id": "sunday_sweatpants",
+      "price": 1000
+    },
+    {
+      "kind": "accessory",
+      "id": "tinfoil_crown",
+      "price": 1000
+    },
+    {
+      "kind": "accessory",
+      "id": "giant_foam_finger",
+      "price": 1500
+    },
+    {
+      "kind": "accessory",
+      "id": "grandma_roller_skates",
+      "price": 1500
+    },
+    {
+      "kind": "accessory",
+      "id": "sequin_waistcoat",
+      "price": 1500
+    },
+    {
+      "kind": "accessory",
+      "id": "spandex_bike_shorts",
+      "price": 2000
+    },
+    {
+      "kind": "accessory",
+      "id": "traffic_cone_helmet",
+      "price": 2000
+    },
+    {
+      "kind": "accessory",
+      "id": "cement_galoshes",
+      "price": 2500
+    },
+    {
+      "kind": "accessory",
+      "id": "mismatched_mitts",
+      "price": 2500
+    }
+  ]
+}

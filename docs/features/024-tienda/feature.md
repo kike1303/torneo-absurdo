@@ -90,7 +90,7 @@ En el borde, antes de tocar la base, se rechaza con 422 `shop.invalid_request` (
 - un `client_key` no canónico.
 
 Después, en una transacción:
-1. `lock_user` (exige `banned_at IS NULL`) y después la botarga, con un `lock_timeout` de 1 s. Sin botarga, 404 `botarga.not_created`.
+1. `lock_user` (exige `banned_at IS NULL`), con un `lock_timeout` de 1 s. La botarga se lee sin lock, como en amigos: el lock del usuario ya ordena sus compras y apuestas, y una botarga en `FOR UPDATE` haría esperar a las FK de las peleas que la nombran. Sin botarga, 404 `botarga.not_created`.
 2. Si el `client_key` ya existe:
    - con el mismo `kind` e `item_id`, se devuelve esa compra con 200, aunque el precio haya cambiado;
    - con otro artículo, 409 `shop.key_reused`.

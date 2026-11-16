@@ -68,6 +68,9 @@ pub fn error_kind(error: &sqlx::Error) -> &'static str {
             "TA013" => return "pvp_ranking_guard",
             // `friend_fights_guard` (023).
             "TA014" => return "friend_fight_guard",
+            // 024: a purchase or a bought unlock is never changed, and a purchase has its charge.
+            "TA015" => return "shop_guard",
+            "TA016" => return "shop_uncharged",
             // `SET LOCAL lock_timeout` of the fight transitions (010 RF8).
             "55P03" => return "lock_timeout",
             // A row that a foreign key needs was deleted meanwhile: a login whose identity an

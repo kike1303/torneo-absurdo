@@ -6,6 +6,7 @@ Lo que una botarga de jugador puede equipar ([feature 016](../../docs/features/0
 abilities.json     # ataques: kind, power, cooldown, element, tier (1-5) y un único starter
 accessories.json   # accesorios: slot (head, hands, torso, legs, feet), tier y deltas de stats de suma cero
 styles.json        # estilos de pelea: presets de personalidad
+shop.json          # tienda (024): kind (accessory, cosmetic, skin), id y precio en monedas
 names.es.json      # nombres en español de cada ataque, accesorio y estilo
 names.en.json      # lo mismo en inglés, con el humor adaptado
 ```

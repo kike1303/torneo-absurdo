@@ -522,3 +522,34 @@ async fn a_ban_during_a_rotation_stops_it() {
     assert_unauthenticated(&response);
     assert_eq!(invite_of(&pool, ana).await, before);
 }
+
+/// 024: a ban that commits while a purchase waits on the user's lock stops it: no purchase, no
+/// entry, no unlock and no event.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_ban_during_a_purchase_stops_it() {
+    let db = TestDb::create().await;
+    let (app, pool) = oauth::start_app(&db).await;
+    let (user, token) = support::app::user_with_session(&pool).await;
+    let catalog = server::botarga::BotargaCatalog::embedded().unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    server::botarga::store::create(&mut tx, user, catalog.starter())
+        .await
+        .unwrap();
+    server::ledger::grant(&mut tx, user, server::ledger::Coins(1000))
+        .await
+        .unwrap()
+        .unwrap();
+    tx.commit().await.unwrap();
+    let body = r#"{"kind":"cosmetic","item_id":"idle_2","expected_price":400,"client_key":"0b0e8e5e-8a43-4c3c-9b55-0e6e3e1b2a10"}"#;
+    let path = "/api/shop/buy";
+    let response = with_a_ban_in_between(&app, &pool, user, "POST", path, &token, body).await;
+    assert_unauthenticated(&response);
+    for sql in [
+        "SELECT count(*) FROM shop_purchases",
+        "SELECT count(*) FROM ledger_entries WHERE kind = 'shop_purchase'",
+        "SELECT count(*) FROM botarga_unlocks WHERE source = 'shop'",
+        "SELECT count(*) FROM auth_events WHERE kind = 'purchase'",
+    ] {
+        assert_eq!(count_of(&pool, sql).await, 0, "{sql}");
+    }
+}
