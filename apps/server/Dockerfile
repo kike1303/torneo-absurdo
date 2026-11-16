@@ -7,7 +7,7 @@
 # The rust: version must equal the channel of rust-toolchain.toml (scripts/check-compose.mjs).
 
 # rust:1.99.1-slim-bookworm, multi-arch index digest (linux/amd64 and linux/arm64).
-FROM --platform=$BUILDPLATFORM rust:1.99.1-slim-bookworm@sha256:86234e857a413004348b471d11a4ebe1aa92d2eae2b6b143cac68fd1ac3c48be AS chef
+FROM --platform=$BUILDPLATFORM rust:1.100.0-slim-bookworm@sha256:7c7d4eb4d05b7781187a327809466cfddf29753f6defdc3d19a0e291951b7a37 AS chef
 ARG BUILDARCH
 WORKDIR /app
 
@@ -68,7 +68,7 @@ COPY content/catalog content/catalog
 RUN cargo zigbuild --release --locked --target x86_64-unknown-linux-musl -p server
 
 # distroless/static-debian13:nonroot, index digest (uid 65532, no shell).
-FROM gcr.io/distroless/static-debian13:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:aafe993665bf6200db38a02c11a9351e782a84b6a45e7f33b6695638c88e3931
 COPY --from=build /app/target/x86_64-unknown-linux-musl/release/server /server
 # The characters of the new fights (010 RNF "Imagen"). Public in the repo; their license does not change.
 COPY content/characters /content/characters
