@@ -761,3 +761,188 @@ async fn crossed_tournaments_at_once_both_finish() {
     assert_eq!(status(&two), 201, "{two}");
     assert_eq!(count(&app.pool, "friend_fights").await, 6);
 }
+
+#[tokio::test]
+async fn preview_gives_the_one_404_for_an_own_an_invented_and_a_rotated_code() {
+    let (app, _db) = start().await;
+    let (_, ana) = player(&app.pool, "Ana").await;
+    let (_, beto) = player(&app.pool, "Beto").await;
+    let preview = |token: String, code: String| {
+        let app = &app;
+        async move {
+            let body = format!(r#"{{"code":"{code}"}}"#);
+            app.send("POST", "/api/friends/invite/preview", Some(&token), &body)
+                .await
+        }
+    };
+    let old = invite(&app.friends(&ana).await);
+    let shown = preview(beto.clone(), old.clone()).await;
+    assert_eq!(status(&shown), 200, "{shown}");
+    assert_eq!(shown["display_name"], "Ana");
+    // Its own, one nobody has, and one rotated away: the same 404 as `accept`.
+    assert_code(
+        &preview(ana.clone(), old.clone()).await,
+        404,
+        "friends.invite_not_found",
+    );
+    assert_code(
+        &preview(beto.clone(), "B".repeat(22)).await,
+        404,
+        "friends.invite_not_found",
+    );
+    let rotated = app
+        .send("POST", "/api/friends/invite/rotate", Some(&ana), "")
+        .await;
+    assert_eq!(status(&rotated), 200);
+    assert_code(
+        &preview(beto.clone(), old.clone()).await,
+        404,
+        "friends.invite_not_found",
+    );
+    assert_code(
+        &app.accept(&beto, &old).await,
+        404,
+        "friends.invite_not_found",
+    );
+    assert_eq!(
+        preview(beto.clone(), invite(&rotated)).await["display_name"],
+        "Ana"
+    );
+}
+
+#[tokio::test]
+async fn ten_challenges_keep_a_user_in_the_pvp_probation() {
+    let (app, _db) = start().await;
+    let pool = &app.pool;
+    let (ana_id, ana) = player(pool, "Ana").await;
+    let (_, beto) = player(pool, "Beto").await;
+    befriend(&app, &ana, &beto).await;
+    // Old enough: only the ten attacks are missing (021 "Carencia PvP").
+    sqlx::query("UPDATE users SET created_at = now() - interval '30 days' WHERE id = $1")
+        .bind(ana_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        server::pvp::matchmaking::probation(&mut conn, ana_id)
+            .await
+            .unwrap()
+    );
+    for _ in 0..10 {
+        let created = app
+            .challenge(&ana, "Beto", &Uuid::new_v4().to_string())
+            .await;
+        assert_eq!(status(&created), 201, "{created}");
+    }
+    assert_eq!(count(pool, "friend_fights").await, 10);
+    assert!(
+        server::pvp::matchmaking::probation(&mut conn, ana_id)
+            .await
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn two_accepts_at_once_keep_the_cap_of_200() {
+    let (app, _db) = start().await;
+    let pool = &app.pool;
+    let (host_id, host) = player(pool, "Host").await;
+    // 199 friends already: one more fits, two do not.
+    let catalog = server::botarga::BotargaCatalog::embedded().unwrap();
+    for _ in 0..199 {
+        let (user, _) = support::app::user_with_session(pool).await;
+        let mut tx = pool.begin().await.unwrap();
+        server::botarga::store::create(&mut tx, user, catalog.starter())
+            .await
+            .unwrap();
+        let (lo, hi) = (host_id.min(user), host_id.max(user));
+        sqlx::query("INSERT INTO friendships (user_lo, user_hi) VALUES ($1, $2)")
+            .bind(lo)
+            .bind(hi)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+    }
+    let (_, one) = player(pool, "Uno").await;
+    let (_, two) = player(pool, "Dos").await;
+    let code = invite(&app.friends(&host).await);
+    // Both accepts must meet at the lock of the host, not run one after the other: the host's row
+    // is held until both wait on it.
+    let mut hold = pool.begin().await.unwrap();
+    sqlx::query("SELECT 1 FROM users WHERE id = $1 FOR UPDATE")
+        .bind(host_id)
+        .execute(&mut *hold)
+        .await
+        .unwrap();
+    let release = async {
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(900);
+        loop {
+            let waiting: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM pg_stat_activity \
+                 WHERE datname = current_database() AND wait_event_type = 'Lock'",
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            if waiting == 2 {
+                break;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "{waiting} waiting");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        hold.commit().await.unwrap();
+    };
+    let (a, b, ()) = tokio::join!(app.accept(&one, &code), app.accept(&two, &code), release);
+    let mut statuses = [status(&a), status(&b)];
+    statuses.sort_unstable();
+    assert_eq!(statuses, [200, 422], "{a} {b}");
+    let refused = if status(&a) == 422 { &a } else { &b };
+    assert_code(refused, 422, "friends.limit");
+    let friends: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM friendships WHERE user_lo = $1 OR user_hi = $1")
+            .bind(host_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(friends, 200);
+    assert_eq!(
+        app.friends(&host).await["friends"]
+            .as_array()
+            .unwrap()
+            .len(),
+        200
+    );
+}
+
+#[tokio::test]
+async fn the_list_gives_each_friend_its_own_level_and_readiness() {
+    let (app, _db) = start().await;
+    let pool = &app.pool;
+    let (_, ana) = player(pool, "Ana").await;
+    let (beto_id, beto) = player(pool, "Beto").await;
+    let (carla_id, carla) = player(pool, "Carla").await;
+    befriend(&app, &ana, &beto).await;
+    befriend(&app, &ana, &carla).await;
+    sqlx::query("UPDATE botargas SET level = 4 WHERE user_id = $1")
+        .bind(carla_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    ban(pool, beto_id).await;
+    let view = app.friends(&ana).await;
+    let by_name = |name: &str| {
+        view["friends"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["display_name"] == name)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(by_name("Beto")["level"], 1);
+    assert_eq!(by_name("Beto")["ready"], false);
+    assert_eq!(by_name("Carla")["level"], 4);
+    assert_eq!(by_name("Carla")["ready"], true);
+}

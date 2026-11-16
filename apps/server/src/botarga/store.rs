@@ -73,10 +73,11 @@ macro_rules! unlocked_sql {
     };
 }
 
-/// One statement, so the build and the unlocks are of one snapshot. One list of columns for the two
-/// reads: [`decode`] reads them by position.
+/// One statement, so the build and the unlocks are of one snapshot. One list of columns for the three
+/// reads: [`decode`] reads columns 0 to 19 by position, and [`views_of`] reads `b.user_id`, column
+/// 20, so a new column goes after it.
 macro_rules! view_sql {
-    ($suffix:literal) => {
+    ($filter:literal) => {
         concat!(
             "SELECT b.level, b.xp, b.hp, b.attack, b.defense, b.speed, b.special, b.style_id, \
              b.abilities, b.accessories, b.cosmetic_idle, b.cosmetic_victory, b.body_type, \
@@ -87,16 +88,19 @@ macro_rules! view_sql {
             ", ",
             unlocked_sql!("cosmetic"),
             ", COALESCE((SELECT d.attacks FROM pvp_daily d WHERE d.user_id = b.user_id \
-             AND d.day = (now() AT TIME ZONE 'UTC')::date), 0)::smallint",
-            " FROM botargas b WHERE b.user_id = $1",
-            $suffix
+             AND d.day = (now() AT TIME ZONE 'UTC')::date), 0)::smallint, b.user_id",
+            " FROM botargas b WHERE ",
+            $filter
         )
     };
 }
 
-const VIEW_SQL: &str = view_sql!("");
+const VIEW_SQL: &str = view_sql!("b.user_id = $1");
 
-const VIEW_LOCKED_SQL: &str = view_sql!(" FOR UPDATE OF b");
+const VIEW_LOCKED_SQL: &str = view_sql!("b.user_id = $1 FOR UPDATE OF b");
+
+/// Many botargas at once, in the order of their users.
+const VIEWS_SQL: &str = view_sql!("b.user_id = ANY($1) ORDER BY b.user_id");
 
 fn bad() -> sqlx::Error {
     sqlx::Error::Decode(Box::new(BadBotargaRow))
@@ -183,6 +187,24 @@ pub async fn view(
         .fetch_optional(&mut *conn)
         .await?;
     with_draws(conn, user_id, row.as_ref().map(decode).transpose()?).await
+}
+
+/// The botargas of `users` in one statement, without their draws: for a list that needs only the
+/// level and the build of each. A user without a botarga is left out.
+///
+/// # Errors
+/// The database error, or [`BadBotargaRow`] as a decode error.
+pub async fn views_of(
+    conn: &mut PgConnection,
+    users: &[Uuid],
+) -> Result<Vec<(Uuid, BotargaView)>, sqlx::Error> {
+    let rows = sqlx::query(VIEWS_SQL)
+        .bind(users)
+        .fetch_all(&mut *conn)
+        .await?;
+    rows.iter()
+        .map(|row| Ok((row.try_get(20)?, decode(row)?)))
+        .collect()
 }
 
 /// Like [`view`], with the row of `botargas` locked `FOR UPDATE` until the transaction ends.
