@@ -2,7 +2,7 @@
 id: "024"
 title: Tienda de cosméticos
 type: feature
-status: draft
+status: approved
 risk: high
 author: claude
 linear: TA-68
@@ -70,7 +70,7 @@ Los nombres salen de `names.{es,en}.json`. Para los trajes se agrega una secció
 - **Ledger:** una cuenta `shop_sink`, creada por la migración (`SHOP_SINK_ACCOUNT`), y un asiento `shop_purchase` del usuario (−precio) al sumidero (+precio). La base lo garantiza como en `pvp_reward`:
   - `shop_sink` entra en `ledger_accounts_kind_ck` y `shop_purchase` en `ledger_entries_kind_ck`.
   - `ledger_posting_rules` gana una rama: `shop_sink` solo recibe montos positivos y solo de un `shop_purchase` (TA008). En un `shop_purchase`, el `user` es el dueño del asiento con −precio y el sumidero recibe +precio, el precio de su compra. Así unos signos invertidos o un monto distinto del precio fallan. `issuance` sigue sin poder pagar un `shop_purchase`.
-  - `ledger_entries.shop_purchase_id`, con `CHECK ((kind = 'shop_purchase') = (shop_purchase_id IS NOT NULL))`, una FK de dueño `(shop_purchase_id, user_id)` hacia `shop_purchases (id, user_id)` y un índice único parcial: un cobro por compra y una compra por cobro.
+  - `ledger_entries.shop_purchase_id`, con `CHECK ((kind = 'shop_purchase') = (shop_purchase_id IS NOT NULL))`, una FK de dueño `(shop_purchase_id, user_id)` hacia `shop_purchases (id, user_id)` y un índice único parcial: a lo sumo un cobro por compra. Un `CONSTRAINT TRIGGER … DEFERRABLE INITIALLY DEFERRED` sobre `shop_purchases`, con el patrón de `ledger_entries_balanced`, exige al commit que cada compra tenga su asiento: una compra sin cobro falla.
 - **Compras:** `shop_purchases (id, user_id, kind, item_id, price, client_key, created_at)`, inmutable (guard), con:
   - `UNIQUE (user_id, kind, item_id)`, porque nada se compra dos veces;
   - `UNIQUE (user_id, client_key)`;
@@ -79,7 +79,7 @@ Los nombres salen de `names.{es,en}.json`. Para los trajes se agrega una secció
   Esta tabla y el ledger son el registro duradero de las compras.
 - **Inventario:** `botarga_unlocks` acepta `kind = 'skin'` y `source = 'shop'`. Lo comprado entra al inventario como cualquier desbloqueo, y un sorteo nunca ofrece lo que ya se tiene. Un guard rechaza `UPDATE` y `DELETE` de las filas con `source = 'shop'`: lo pagado no se borra.
 - **Build:** `botargas.skin text NULL` es el traje equipado. `null` es la botarga base.
-- **Auditoría:** un `auth_events` de tipo `purchase` por compra, con su `ledger_entry_id` y el `ip_hash`, como `bet` y `grant`. Lleva `CHECK ((kind = 'purchase') = (ledger_entry_id IS NOT NULL))`, como en `auth_events_pvp_ck`. `auth_events` se borra a los 38 días: el registro duradero son `shop_purchases` y el ledger.
+- **Auditoría:** un `auth_events` de tipo `purchase` por compra, con su `ledger_entry_id` y el `ip_hash`, como `bet` y `grant`. Lleva `CHECK (kind <> 'purchase' OR ledger_entry_id IS NOT NULL)`: no puede ser una igualdad, porque `grant` y `bailout` también guardan su `ledger_entry_id`. `auth_events` se borra a los 38 días: el registro duradero son `shop_purchases` y el ledger.
 
 **Compra:** `POST /api/shop/buy { kind, item_id, expected_price, client_key }`, con sesión, `Effect::Mutate`, `Origin` y las cuotas `SHOP_USER` y `SHOP_IP`.
 
@@ -154,7 +154,7 @@ El motor no cambia: el traje es solo cosmético y no entra en el `CharacterSpec`
   - [ ] N compras de artículos distintos que juntas superan el saldo dejan un saldo ≥ 0 y solo los asientos que caben;
   - [ ] una apuesta y una compra a la vez que juntas superan el saldo: una de las dos da `insufficient`;
   - [ ] dos compras de lo mismo dejan un solo asiento.
-- [ ] La base rechaza un asiento `shop_purchase` con los signos invertidos, con un monto distinto del precio o sin su compra, y el `UPDATE` o `DELETE` de un desbloqueo comprado.
+- [ ] La base rechaza un asiento `shop_purchase` con los signos invertidos, con un monto distinto del precio o sin su compra. También rechaza una compra sin asiento al commit, y el `UPDATE` o `DELETE` de un desbloqueo comprado.
 - [ ] `banned_writes.rs` y `fights_no_leaks.rs` cubren las rutas nuevas.
 - [ ] Un traje no desbloqueado no se puede equipar. Uno equipado viaja en el `look` de la pelea y en su repetición.
 - [ ] e2e: comprar una animación y un accesorio, ver el saldo bajar, equiparlos y verlos en la vista previa y en una pelea. Capturas a 375 px y en escritorio, claro y oscuro.
