@@ -868,7 +868,33 @@ async fn two_accepts_at_once_keep_the_cap_of_200() {
     let (_, one) = player(pool, "Uno").await;
     let (_, two) = player(pool, "Dos").await;
     let code = invite(&app.friends(&host).await);
-    let (a, b) = tokio::join!(app.accept(&one, &code), app.accept(&two, &code));
+    // Both accepts must meet at the lock of the host, not run one after the other: the host's row
+    // is held until both wait on it.
+    let mut hold = pool.begin().await.unwrap();
+    sqlx::query("SELECT 1 FROM users WHERE id = $1 FOR UPDATE")
+        .bind(host_id)
+        .execute(&mut *hold)
+        .await
+        .unwrap();
+    let release = async {
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(900);
+        loop {
+            let waiting: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM pg_stat_activity \
+                 WHERE datname = current_database() AND wait_event_type = 'Lock'",
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            if waiting == 2 {
+                break;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "{waiting} waiting");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        hold.commit().await.unwrap();
+    };
+    let (a, b, ()) = tokio::join!(app.accept(&one, &code), app.accept(&two, &code), release);
     let mut statuses = [status(&a), status(&b)];
     statuses.sort_unstable();
     assert_eq!(statuses, [200, 422], "{a} {b}");
@@ -888,4 +914,35 @@ async fn two_accepts_at_once_keep_the_cap_of_200() {
             .len(),
         200
     );
+}
+
+#[tokio::test]
+async fn the_list_gives_each_friend_its_own_level_and_readiness() {
+    let (app, _db) = start().await;
+    let pool = &app.pool;
+    let (_, ana) = player(pool, "Ana").await;
+    let (beto_id, beto) = player(pool, "Beto").await;
+    let (carla_id, carla) = player(pool, "Carla").await;
+    befriend(&app, &ana, &beto).await;
+    befriend(&app, &ana, &carla).await;
+    sqlx::query("UPDATE botargas SET level = 4 WHERE user_id = $1")
+        .bind(carla_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    ban(pool, beto_id).await;
+    let view = app.friends(&ana).await;
+    let by_name = |name: &str| {
+        view["friends"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["display_name"] == name)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(by_name("Beto")["level"], 1);
+    assert_eq!(by_name("Beto")["ready"], false);
+    assert_eq!(by_name("Carla")["level"], 4);
+    assert_eq!(by_name("Carla")["ready"], true);
 }

@@ -73,8 +73,9 @@ macro_rules! unlocked_sql {
     };
 }
 
-/// One statement, so the build and the unlocks are of one snapshot. One list of columns for the two
-/// reads: [`decode`] reads them by position.
+/// One statement, so the build and the unlocks are of one snapshot. One list of columns for the three
+/// reads: [`decode`] reads columns 0 to 19 by position, and [`views_of`] reads `b.user_id`, column
+/// 20, so a new column goes after it.
 macro_rules! view_sql {
     ($filter:literal) => {
         concat!(
