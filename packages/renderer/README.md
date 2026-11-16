@@ -96,6 +96,12 @@ El bloqueo de cada `extend` (RNF "CPU" de 010) se mide de dos formas:
 - **iPhone:** Safari no reenvía puertos por USB. Solo con el OK previo del owner, anotado en el PR, y solo mientras dura la medición, a mano y fuera de `just`: `HOST=<ip-de-la-LAN> PORT=3000 PUBLIC_ORIGIN=http://<ip-de-la-LAN>:3000 ENABLE_DEV_CATALOG=1 node apps/web/build` (después de `just build`).
 - **Control en escritorio:** el mismo procedimiento en `localhost:3000`.
 
+### Vestuario (TA-66, 2026-11-15)
+
+Peso de descarga por prenda (`content/models/accessories/<id>/<id>.glb`, sin comprimir / gzip): de 23/16 KB (`oven_mitts`) a 142/104 KB (`sequin_waistcoat`). El peor caso, con la prenda más pesada en cada una de las cinco ranuras, suma unos 530/360 KB, la mitad de la botarga base (1,08 MB). Cada GLB se baja solo si alguien lo lleva.
+
+Fps con las cinco ranuras puestas en los dos lados (`?wear_a=propeller_beanie,mismatched_mitts,sequin_waistcoat,sunday_sweatpants,grandma_roller_skates&wear_b=tinfoil_crown,oven_mitts,pool_floatie_vest,spandex_bike_shorts,cement_galoshes`), con el build de producción, a 375 × 812 y DPR 3, en Chromium sin ventana sobre Metal (Apple M2 Pro). Tres corridas de 40 s después de una de calentamiento: FPS medio 60,0, p95 16,7 ms, p99 16,8 ms y ningún cuadro de más de 33 ms. Sin prendas da lo mismo, también con la CPU limitada a 4×: la escena va por la GPU. Es solo el control de escritorio: falta la medición en un celular medio real, con el procedimiento de arriba.
+
 ## Sin `Math.random` ni `Date`
 
 El tiempo lo da el reloj que inyecta el host y el azar cosmético sale de `src/fx/prng.ts` (`mulberry32`), sembrado con el índice del cue y un canal. Así todos los espectadores ven lo mismo, y la semilla de la pelea nunca llega al renderer (ADR-0002). ESLint prohíbe `Math.random`, `Date`, `performance` y `crypto` en todo el paquete, tests incluidos, y Pixi y el DOM en el núcleo puro (`src/{manifest,timeline,scene,fx,player,stats}`).

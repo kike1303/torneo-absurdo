@@ -4,7 +4,7 @@ type: backlog
 status: draft
 author: owner
 created: 2026-11-04
-updated: 2026-11-05
+updated: 2026-11-15
 ---
 
 # Backlog de ideas
@@ -33,6 +33,8 @@ Todas las botargas comparten **un esqueleto** y unas proporciones base. Los pers
 Cómo se ajustan prendas a cabezas y cuerpos de distinto tamaño (a validar en el piloto):
 - **Accesorios rígidos** (gorro, casco, guantes rígidos): se pegan a un hueso. Cada personaje declara un **punto de anclaje** (posición, rotación y escala) por ranura, por ejemplo `head_top`. El mismo gorro se escala y se coloca según la cabeza de cada uno.
 - **Prendas deformables** (chaleco, pantalón): se pesan sobre el esqueleto común. Las diferencias de volumen se cubren con pocos **tipos de cuerpo** (por ejemplo flaco, normal y panzón) hechos como shape keys del cuerpo base; cada prenda trae las mismas shape keys, y el personaje elige su tipo.
+- **Tipos de cuerpo, pendientes** (owner, 2026-11-15): no se hacen hasta que hagan falta. Mientras tanto, el encaje medido por traje del feature 022 cubre las prendas. Cuando entren, el jugador elige el de su botarga en `/botarga` y es solo cosmético: no cambia stats ni el motor. La columna `botargas.body_type` ya existe y vale `normal`.
+- Ranuras, anclajes, prendas rígidas y deformables, la piel oculta y 13 accesorios ya están hechos (022, TA-66 y TA-67).
 - Bajo una prenda se oculta la parte del cuerpo que tapa, para evitar cruces de mallas.
 - Si un personaje se sale del rango (cabeza enorme, cola), su ranura se marca incompatible en lugar de forzar el ajuste.
 
