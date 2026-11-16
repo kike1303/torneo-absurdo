@@ -350,8 +350,6 @@ async fn purchases_at_once_never_spend_more_than_the_balance() {
         match status(answer) {
             201 => created += 1,
             402 => assert_eq!(answer["error"], "shop.insufficient"),
-            503 => assert_eq!(answer["error"], "shop.busy"),
-            429 => assert_eq!(answer["error"], "http.rate_limited"),
             other => panic!("{other}: {answer}"),
         }
     }
@@ -593,5 +591,40 @@ async fn the_database_keeps_every_other_rule_of_a_purchase() {
     }
     assert_eq!(balance(pool, user).await, 600);
     assert_eq!(balance(pool, other).await, 1000);
+    assert_ledger_whole(pool).await;
+}
+
+#[tokio::test]
+async fn one_item_bought_twice_at_once_is_bought_once_and_a_won_one_is_owned() {
+    let (app, _db) = start().await;
+    let pool = &app.pool;
+    let (user, token) = buyer(pool, 1000).await;
+    let (k1, k2) = (key(), key());
+    let (one, two) = tokio::join!(
+        app.buy(&token, "cosmetic", "idle_2", 400, &k1),
+        app.buy(&token, "cosmetic", "idle_2", 400, &k2),
+    );
+    let mut statuses = [status(&one), status(&two)];
+    statuses.sort_unstable();
+    assert_eq!(statuses, [201, 409], "{one} {two}");
+    let refused = if status(&one) == 409 { &one } else { &two };
+    assert_code(refused, 409, "shop.owned");
+    assert_eq!(count(pool, "SELECT count(*) FROM shop_purchases").await, 1);
+    assert_eq!(balance(pool, user).await, 600);
+
+    // Won by level, not bought: owned all the same.
+    sqlx::query(
+        "INSERT INTO botarga_unlocks (user_id, kind, item_id, source) \
+         VALUES ($1, 'cosmetic', 'idle_4', 'level')",
+    )
+    .bind(user)
+    .execute(pool)
+    .await
+    .unwrap();
+    assert_code(
+        &app.buy(&token, "cosmetic", "idle_4", 400, &key()).await,
+        409,
+        "shop.owned",
+    );
     assert_ledger_whole(pool).await;
 }

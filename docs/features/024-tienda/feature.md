@@ -58,11 +58,11 @@ El precio de un accesorio va por tier, no por cuánto mueve sus stats: son de su
 - `kind` es `accessory`, `cosmetic` (un clip) o `skin`;
 - `id` es el del catálogo de accesorios, el código del clip o el slug del traje en `content/models/skins/`.
 
-`crates/content` lo carga y lo valida al arrancar:
+El server lo embebe al compilar (`apps/server/src/shop/`, como el catálogo de la botarga) y lo valida contra ese catálogo al arrancar:
 - cada `id` existe;
 - no hay repetidos;
 - `price` está entre 1 y 1 000 000;
-- un `skin` tiene su carpeta.
+- un `skin` tiene su carpeta (lo comprueba un test del server, que lee el mismo repo).
 
 Los nombres salen de `names.{es,en}.json`. Para los trajes se agrega una sección `skins`.
 
