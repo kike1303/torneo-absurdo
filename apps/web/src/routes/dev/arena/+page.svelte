@@ -4,7 +4,8 @@
   // `vite dev`) and `?pace=` (RF-B7, RF-B9); phase C, `?log=` to play an engine log (RF-C3). 006
   // clamps `?pace=` to the smallest valid factor of the timeline (RF16) and reports it (RF17). 010
   // adds `?live=1`: an engine log released by its `t`, with `?t=` as the time already elapsed. 022
-  // adds the wardrobe: `?wear_a=`, `?skin_a=` and `?colors_a=` (and `_b`); TA-76, its controls,
+  // adds the wardrobe: `?wear_a=`, `?skin_a=` and `?colors_a=` (and `_b`; the house uniform of
+  // TA-91 is `?wear_a=tournament_shirt,tournament_pants`); TA-76, its controls,
   // which rewrite those parameters and remount the stage (FightStage reads `looks` on mount).
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';

@@ -157,4 +157,8 @@ pnpm -s dlx gltfpack@1.3.0 -i <slug>.glb -o <id>.glb -cc -vp 16 -vt 16 -vn 16 -k
 - `skin.json` (opcional): `fit` (las `slots` de `accessory-fit.json`, que escalan y centran los accesorios sobre ese cuerpo), y `zones`, `islands` e `island_map` (lo que escribe `color_zones.py` en `color-zones.json`), que permiten recolorearlo por zonas.
 - `zone-map.png` (solo con islas): la imagen que numera las islas.
 
-El primer traje es `tournament_suit`, el traje del torneo sobre la botarga base (TA-79): camisa y pantalón cortados de una versión limpia del cuerpo (remesh por vóxeles, alisado y pesos copiados del original), con tres zonas de color. Publicar el arte de un personaje sigue siendo decisión del owner.
+Por ahora no hay ningún traje en `content/`: publicar el arte de un personaje sigue siendo decisión del owner.
+
+**El uniforme de la casa** va en `content/models/uniform/<id>/`, con el mismo formato que un accesorio (`<id>.glb` y `accessory.json`), pero fuera del catálogo: no se sortea, no se vende y ninguna botarga de jugador lo lleva. Lo visten los dos luchadores de las peleas de la casa (en vivo y en repetición; `HOUSE_LOOKS` en `apps/web/src/lib/components/fight/botarga-model.ts`). En `/dev/arena` se prueba con `?wear_a=tournament_shirt,tournament_pants`.
+
+Hoy son dos piezas, la camisa (`tournament_shirt`, cuelga de `Spine1`) y el pantalón (`tournament_pants`, de `Hips`), las dos con `hides` (TA-91). Antes eran el traje `tournament_suit` (TA-79), pegado a la botarga base. Salen de `~/Documents/Blender/tournament-suit/`: `build_tournament_suit.py` corta las prendas de una versión limpia del cuerpo (remesh por vóxeles, alisado y pesos copiados del original), y `split_accessories.py` las exporta por separado. Cada pieza lleva solo los huesos de relleno que usa y tiene su origen en el hueso del que cuelga. Se comprimen como cualquier accesorio. Sus colores (azul, blanco y amarillo) van en la textura y no se recolorean.

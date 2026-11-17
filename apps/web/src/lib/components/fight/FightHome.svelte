@@ -18,6 +18,7 @@
   import FightNotice from './FightNotice.svelte';
   import FightResultCard from './FightResultCard.svelte';
   import FightStage from './FightStage.svelte';
+  import { HOUSE_LOOKS } from './botarga-model.js';
   import RoundClock from './RoundClock.svelte';
 
   interface Props {
@@ -184,6 +185,7 @@
           {#key stageFight}
             <FightStage
               fighters={{ a: 'dummy_a', b: 'dummy_b' }}
+              looks={HOUSE_LOOKS}
               displayNames={stageNames}
               live={session}
               showResult={false}

@@ -14,6 +14,7 @@
   import FightNotice from '../fight/FightNotice.svelte';
   import FightResultCard from '../fight/FightResultCard.svelte';
   import FightStage, { type FightStageState } from '../fight/FightStage.svelte';
+  import { HOUSE_LOOKS } from '../fight/botarga-model.js';
   import RoundClock from '../fight/RoundClock.svelte';
   import ReplayControls from './ReplayControls.svelte';
   import ReplayFinalNotice from './ReplayFinalNotice.svelte';
@@ -117,6 +118,7 @@
         bind:this={stage}
         bind:phase
         fighters={{ a: 'dummy_a', b: 'dummy_b' }}
+        looks={HOUSE_LOOKS}
         displayNames={names}
         {source}
         showResult={false}

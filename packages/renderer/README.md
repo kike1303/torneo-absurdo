@@ -100,6 +100,8 @@ El bloqueo de cada `extend` (RNF "CPU" de 010) se mide de dos formas:
 
 Peso de descarga por prenda (`content/models/accessories/<id>/<id>.glb`, sin comprimir / gzip): de 23/16 KB (`oven_mitts`) a 142/104 KB (`sequin_waistcoat`). El peor caso, con la prenda más pesada en cada una de las cinco ranuras, suma unos 530/360 KB, la mitad de la botarga base (1,08 MB). Cada GLB se baja solo si alguien lo lleva.
 
+El uniforme de la casa (TA-91, `content/models/uniform/`) lo llevan los dos lados de toda pelea de la casa: la camisa pesa 131/116 KB y el pantalón 124/110 KB. El GLB se comparte, así que se baja una vez por pelea; son unos 250/225 KB, menos que el traje `tournament_suit` al que reemplaza (1,26 MB).
+
 Fps con las cinco ranuras puestas en los dos lados (`?wear_a=propeller_beanie,mismatched_mitts,sequin_waistcoat,sunday_sweatpants,grandma_roller_skates&wear_b=tinfoil_crown,oven_mitts,pool_floatie_vest,spandex_bike_shorts,cement_galoshes`), con el build de producción, a 375 × 812 y DPR 3, en Chromium sin ventana sobre Metal (Apple M2 Pro). Tres corridas de 40 s después de una de calentamiento: FPS medio 60,0, p95 16,7 ms, p99 16,8 ms y ningún cuadro de más de 33 ms. Sin prendas da lo mismo, también con la CPU limitada a 4×: la escena va por la GPU. Es solo el control de escritorio: falta la medición en un celular medio real, con el procedimiento de arriba.
 
 ## Sin `Math.random` ni `Date`

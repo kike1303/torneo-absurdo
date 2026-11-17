@@ -269,3 +269,42 @@ describe('content/models/accessories', () => {
     }
   });
 });
+
+describe('content/models/uniform', () => {
+  const dir = fileURLToPath(new URL('../../../content/models/uniform/', import.meta.url));
+  const catalog = JSON.parse(
+    readFileSync(
+      fileURLToPath(new URL('../../../content/catalog/accessories.json', import.meta.url)),
+      'utf8',
+    ),
+  ) as { accessories: { id: string }[] };
+
+  it('every piece of the house uniform is a skinned garment out of the catalog', () => {
+    const ids = readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+    expect(ids).toEqual(['tournament_pants', 'tournament_shirt']);
+    for (const id of ids) {
+      // Out of the catalog: never drawn, sold or worn by a player.
+      expect(
+        catalog.accessories.some((accessory) => accessory.id === id),
+        id,
+      ).toBe(false);
+      const manifest = parseAccessoryManifest(
+        JSON.parse(readFileSync(path.join(dir, id, 'accessory.json'), 'utf8')),
+      );
+      expect(manifest, id).not.toBeNull();
+      expect(manifest?.hides, id).toBe(true);
+      const bytes = readFileSync(path.join(dir, id, `${id}.glb`));
+      const json = JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString('utf8')) as {
+        skins?: { joints: number[] }[];
+        nodes?: { name?: string }[];
+      };
+      // Stand-in bones with the Mixamo names, bound again to the fighter's by name.
+      const joints = json.skins?.[0]?.joints ?? [];
+      expect(joints.length, id).toBeGreaterThan(0);
+      for (const joint of joints) expect(json.nodes?.[joint]?.name, id).toMatch(/^mixamorig:/);
+    }
+  });
+});

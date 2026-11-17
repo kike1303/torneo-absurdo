@@ -31,6 +31,16 @@ const accessoryGlbs = import.meta.glob<string>(
   '../../../../../../content/models/accessories/*/*.glb',
   { query: '?url', import: 'default' },
 );
+// The house uniform (TA-91): accessories in the same format, out of the catalog, that only the
+// fighters of the house fights wear. A player never gets them: the server checks the catalog.
+const uniformManifests = import.meta.glob<unknown>(
+  '../../../../../../content/models/uniform/*/accessory.json',
+  { import: 'default' },
+);
+const uniformGlbs = import.meta.glob<string>('../../../../../../content/models/uniform/*/*.glb', {
+  query: '?url',
+  import: 'default',
+});
 const skinManifests = import.meta.glob<unknown>(
   '../../../../../../content/models/skins/*/skin.json',
   { import: 'default' },
@@ -76,11 +86,17 @@ export function wardrobeCatalog(): WardrobeCatalog {
   };
 }
 
+/** The pieces of the house uniform, in content/models/uniform/. */
+export const HOUSE_UNIFORM: readonly string[] = ['tournament_shirt', 'tournament_pants'];
+
+/** What both fighters of a house fight wear (TA-91). */
+export const HOUSE_LOOKS: LookSpecs = { a: { wear: HOUSE_UNIFORM }, b: { wear: HOUSE_UNIFORM } };
+
 /** What one side wears, by id: the host's way to ask for a `FighterLook`. */
 export interface LookSpec {
   /** Folder of content/models/skins/; without it, the base botarga. */
   readonly skin?: string;
-  /** Ids of content/models/accessories/ (the ones of the catalog). */
+  /** Ids of content/models/accessories/ (the ones of the catalog) or of content/models/uniform/. */
   readonly wear?: readonly string[];
   /** `#RRGGBB` by color slot of the accessories (`primary`…) or by zone id of the skin (`z1`…). */
   readonly colors?: Readonly<Record<string, string>>;
@@ -119,8 +135,12 @@ async function loadLook(spec: LookSpec, parsers: () => Promise<Parsers>): Promis
   );
   const accessories = await Promise.all(
     [...new Set(spec.wear ?? [])].map(async (id): Promise<AccessoryModel | null> => {
-      const manifest = fileOf(accessoryManifests, `accessories/${id}`);
-      const glb = fileOf(accessoryGlbs, `accessories/${id}`, `${id}.glb`);
+      const manifest =
+        fileOf(accessoryManifests, `accessories/${id}`) ??
+        fileOf(uniformManifests, `uniform/${id}`);
+      const glb =
+        fileOf(accessoryGlbs, `accessories/${id}`, `${id}.glb`) ??
+        fileOf(uniformGlbs, `uniform/${id}`, `${id}.glb`);
       if (manifest === undefined || glb === undefined) return null;
       const parsed = parseAccessoryManifest(await manifest());
       return parsed === null ? null : { glb: await glb(), manifest: parsed, colors: slotColors };
