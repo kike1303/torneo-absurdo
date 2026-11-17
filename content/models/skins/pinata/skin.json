@@ -1,0 +1,115 @@
+{
+  "fit": {
+    "head": {
+      "scale": [
+        1.122,
+        0.917,
+        1.0
+      ],
+      "offset": [
+        0.0,
+        -0.1219,
+        0.0037
+      ]
+    },
+    "chest": {
+      "scale": [
+        1.165,
+        0.811,
+        1.353
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0159
+      ]
+    },
+    "hips": {
+      "scale": [
+        1.02,
+        0.671,
+        1.234
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0115
+      ]
+    },
+    "hands": {
+      "scale": [
+        1.103,
+        1.103,
+        1.103
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0
+      ]
+    },
+    "feet": {
+      "scale": [
+        1.092,
+        1.078,
+        1.167
+      ],
+      "offset": [
+        -0.0008,
+        0,
+        0.0037
+      ]
+    }
+  },
+  "zones": [
+    {
+      "id": "z1",
+      "color": "#CA723B",
+      "share": 0.448,
+      "pick": true,
+      "label": "Cuerpo"
+    },
+    {
+      "id": "z2",
+      "color": "#FFD02A",
+      "share": 0.263,
+      "pick": true,
+      "label": "Amarillo"
+    },
+    {
+      "id": "z3",
+      "color": "#EB2E84",
+      "share": 0.168,
+      "pick": true,
+      "label": "Fucsia"
+    },
+    {
+      "id": "z4",
+      "color": "#67B83A",
+      "share": 0.068,
+      "pick": true,
+      "label": "Verde"
+    },
+    {
+      "id": "z5",
+      "color": "#F6EDDC",
+      "share": 0.019,
+      "pick": false,
+      "label": "Detalle"
+    },
+    {
+      "id": "z6",
+      "color": "#27121B",
+      "share": 0.018,
+      "pick": false,
+      "label": "Detalle"
+    },
+    {
+      "id": "z7",
+      "color": "#252428",
+      "share": 0.016,
+      "pick": false,
+      "label": "Detalle"
+    }
+  ]
+}

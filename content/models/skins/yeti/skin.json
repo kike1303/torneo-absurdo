@@ -1,0 +1,101 @@
+{
+  "fit": {
+    "head": {
+      "scale": [
+        1.255,
+        1.033,
+        1.178
+      ],
+      "offset": [
+        0.0,
+        -0.0168,
+        0.0112
+      ]
+    },
+    "chest": {
+      "scale": [
+        1.476,
+        0.972,
+        1.667
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0325
+      ]
+    },
+    "hips": {
+      "scale": [
+        1.284,
+        0.85,
+        1.474
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0261
+      ]
+    },
+    "hands": {
+      "scale": [
+        1.478,
+        1.478,
+        1.478
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0
+      ]
+    },
+    "feet": {
+      "scale": [
+        1.219,
+        0.937,
+        1.155
+      ],
+      "offset": [
+        -0.0134,
+        0,
+        -0.0245
+      ]
+    }
+  },
+  "zones": [
+    {
+      "id": "z1",
+      "color": "#C5DAEE",
+      "share": 0.821,
+      "pick": true,
+      "label": "Pelaje"
+    },
+    {
+      "id": "z2",
+      "color": "#5B296D",
+      "share": 0.069,
+      "pick": true,
+      "label": "Short"
+    },
+    {
+      "id": "z3",
+      "color": "#1C1824",
+      "share": 0.059,
+      "pick": false,
+      "label": "Detalle"
+    },
+    {
+      "id": "z4",
+      "color": "#F5EBCB",
+      "share": 0.033,
+      "pick": false,
+      "label": "Pelaje"
+    },
+    {
+      "id": "z5",
+      "color": "#CD3B56",
+      "share": 0.018,
+      "pick": false,
+      "label": "Nariz"
+    }
+  ]
+}

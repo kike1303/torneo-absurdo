@@ -1,0 +1,94 @@
+{
+  "fit": {
+    "head": {
+      "scale": [
+        1.093,
+        1.139,
+        1.445
+      ],
+      "offset": [
+        0.0,
+        0.0081,
+        -0.0097
+      ]
+    },
+    "chest": {
+      "scale": [
+        1.064,
+        0.86,
+        1.093
+      ],
+      "offset": [
+        0.0,
+        0,
+        0.015
+      ]
+    },
+    "hips": {
+      "scale": [
+        0.915,
+        0.721,
+        1.036
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0097
+      ]
+    },
+    "hands": {
+      "scale": [
+        0.991,
+        0.991,
+        0.991
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0
+      ]
+    },
+    "feet": {
+      "scale": [
+        1.162,
+        1.149,
+        1.199
+      ],
+      "offset": [
+        0.005,
+        0,
+        0.0005
+      ]
+    }
+  },
+  "zones": [
+    {
+      "id": "z1",
+      "color": "#595462",
+      "share": 0.724,
+      "pick": true,
+      "label": "Cuerpo"
+    },
+    {
+      "id": "z2",
+      "color": "#B8CB2C",
+      "share": 0.191,
+      "pick": true,
+      "label": "Lima"
+    },
+    {
+      "id": "z3",
+      "color": "#EDC782",
+      "share": 0.06,
+      "pick": true,
+      "label": "Costuras"
+    },
+    {
+      "id": "z4",
+      "color": "#F5EEE0",
+      "share": 0.025,
+      "pick": false,
+      "label": "Detalle"
+    }
+  ]
+}

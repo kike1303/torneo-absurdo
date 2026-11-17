@@ -136,8 +136,17 @@ test('buy an animation and an accessory, equip them and wear them in a fight', a
       for (const [name, item] of [
         ['shop', undefined],
         ['shop-confirm', 'accessory:tinfoil_crown'],
+        // A suit (TA-94), tried on in the 3D preview.
+        ['shop-skin', 'skin:astronaut'],
       ] as const) {
         await openShop(page, item);
+        if (item !== undefined) {
+          await expect(page.getByTestId('botarga-preview')).toHaveAttribute(
+            'data-phase',
+            /ready|paused/,
+            { timeout: 30_000 },
+          );
+        }
         await noHorizontalScroll(page);
         await page.screenshot({ path: `${DIR}/${name}-${size.name}-${theme}.png`, fullPage: true });
       }

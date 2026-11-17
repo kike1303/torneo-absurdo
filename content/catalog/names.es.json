@@ -50,5 +50,17 @@
     "defensive": "Tortuga con Casco",
     "showman": "Divo de Pasarela"
   },
-  "skins": {}
+  "skins": {
+    "astronaut": "Astronauta de Pecera",
+    "clown": "Payaso de Conos",
+    "eggplant": "Berenjena",
+    "gnome": "Gnomo de Jardín",
+    "goo": "Gelatina",
+    "gorilla": "Gorila de Corbata",
+    "mop": "Fregona Melenuda",
+    "ninja": "Ninja a Rayas",
+    "pinata": "Piñata",
+    "washer": "Lavadora",
+    "yeti": "Yeti"
+  }
 }

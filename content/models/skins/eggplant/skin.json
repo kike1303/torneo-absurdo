@@ -1,0 +1,127 @@
+{
+  "fit": {
+    "head": {
+      "scale": [
+        0.673,
+        0.692,
+        0.538
+      ],
+      "offset": [
+        0.0,
+        -0.0819,
+        0.0131
+      ]
+    },
+    "chest": {
+      "scale": [
+        1.05,
+        0.694,
+        1.136
+      ],
+      "offset": [
+        0.0,
+        0,
+        0.0068
+      ]
+    },
+    "hips": {
+      "scale": [
+        0.927,
+        0.635,
+        1.047
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.007
+      ]
+    },
+    "hands": {
+      "scale": [
+        1.067,
+        1.067,
+        1.067
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0
+      ]
+    },
+    "feet": {
+      "scale": [
+        0.917,
+        0.866,
+        0.965
+      ],
+      "offset": [
+        -0.0039,
+        0,
+        -0.0062
+      ]
+    }
+  },
+  "zones": [
+    {
+      "id": "z1",
+      "label": "Cabeza y capa",
+      "color": "#4A1A66",
+      "share": 0.335,
+      "pick": true
+    },
+    {
+      "id": "z2",
+      "label": "Cuerpo",
+      "color": "#BE96CF",
+      "share": 0.32,
+      "pick": true
+    },
+    {
+      "id": "z3",
+      "label": "Short y forro",
+      "color": "#B7263C",
+      "share": 0.169,
+      "pick": true
+    },
+    {
+      "id": "z4",
+      "label": "Hojas",
+      "color": "#799736",
+      "share": 0.09,
+      "pick": true
+    },
+    {
+      "id": "z5",
+      "label": "Negro (cejas, boca)",
+      "color": "#1C101D",
+      "share": 0.046,
+      "pick": false
+    },
+    {
+      "id": "z6",
+      "label": "Blanco (ojos, dientes)",
+      "color": "#F1E6D5",
+      "share": 0.039,
+      "pick": false
+    }
+  ],
+  "islands": [
+    {
+      "id": "i1",
+      "label": "Lengua",
+      "zone": "z3",
+      "center": [
+        0.0,
+        -0.08,
+        0.544
+      ],
+      "radius": 0.08,
+      "pick": false
+    }
+  ],
+  "island_map": {
+    "file": "zone-map.png",
+    "material": "Berenjena · Cabeza",
+    "step": 40
+  }
+}

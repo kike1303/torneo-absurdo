@@ -104,6 +104,61 @@
       "kind": "accessory",
       "id": "mismatched_mitts",
       "price": 2500
+    },
+    {
+      "kind": "skin",
+      "id": "astronaut",
+      "price": 5000
+    },
+    {
+      "kind": "skin",
+      "id": "clown",
+      "price": 5000
+    },
+    {
+      "kind": "skin",
+      "id": "eggplant",
+      "price": 5000
+    },
+    {
+      "kind": "skin",
+      "id": "gnome",
+      "price": 5000
+    },
+    {
+      "kind": "skin",
+      "id": "goo",
+      "price": 5000
+    },
+    {
+      "kind": "skin",
+      "id": "gorilla",
+      "price": 5000
+    },
+    {
+      "kind": "skin",
+      "id": "mop",
+      "price": 5000
+    },
+    {
+      "kind": "skin",
+      "id": "ninja",
+      "price": 5000
+    },
+    {
+      "kind": "skin",
+      "id": "pinata",
+      "price": 5000
+    },
+    {
+      "kind": "skin",
+      "id": "washer",
+      "price": 5000
+    },
+    {
+      "kind": "skin",
+      "id": "yeti",
+      "price": 5000
     }
   ]
 }

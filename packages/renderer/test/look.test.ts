@@ -313,3 +313,34 @@ describe('content/models/uniform', () => {
     }
   });
 });
+
+describe('content/models/skins', () => {
+  const dir = fileURLToPath(new URL('../../../content/models/skins/', import.meta.url));
+
+  it('every suit has its GLB with the 22 clips, a valid manifest and where it comes from', () => {
+    const slugs = existsSync(dir)
+      ? readdirSync(dir, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => entry.name)
+      : [];
+    for (const slug of slugs) {
+      const manifest = parseSkinManifest(
+        JSON.parse(readFileSync(path.join(dir, slug, 'skin.json'), 'utf8')),
+      );
+      expect(manifest, slug).not.toBeNull();
+      if (manifest?.islandMap !== undefined)
+        expect(existsSync(path.join(dir, slug, manifest.islandMap.file)), slug).toBe(true);
+      const provenance = JSON.parse(
+        readFileSync(path.join(dir, slug, 'provenance.json'), 'utf8'),
+      ) as { source_sha256?: unknown };
+      expect(provenance.source_sha256, slug).toMatch(/^[0-9a-f]{64}$/);
+      const bytes = readFileSync(path.join(dir, slug, `${slug}.glb`));
+      const json = JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString('utf8')) as {
+        animations?: unknown[];
+        images?: { name?: string }[];
+      };
+      // The same clips as the base botarga (the guide, step 5).
+      expect(json.animations?.length, slug).toBe(22);
+    }
+  });
+});

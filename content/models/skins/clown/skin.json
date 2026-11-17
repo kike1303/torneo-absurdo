@@ -1,0 +1,115 @@
+{
+  "fit": {
+    "head": {
+      "scale": [
+        1.381,
+        0.942,
+        1.105
+      ],
+      "offset": [
+        0.0,
+        0,
+        0.0268
+      ]
+    },
+    "chest": {
+      "scale": [
+        1.067,
+        0.879,
+        0.989
+      ],
+      "offset": [
+        0.0,
+        0,
+        0.002
+      ]
+    },
+    "hips": {
+      "scale": [
+        0.991,
+        0.833,
+        1.034
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0062
+      ]
+    },
+    "hands": {
+      "scale": [
+        0.929,
+        0.929,
+        0.929
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0
+      ]
+    },
+    "feet": {
+      "scale": [
+        0.967,
+        0.902,
+        0.979
+      ],
+      "offset": [
+        -0.0073,
+        0,
+        -0.0056
+      ]
+    }
+  },
+  "zones": [
+    {
+      "id": "z1",
+      "label": "Piel",
+      "color": "#FDB785",
+      "share": 0.59,
+      "pick": true
+    },
+    {
+      "id": "z2",
+      "label": "Conos",
+      "color": "#F85D1B",
+      "share": 0.188,
+      "pick": true
+    },
+    {
+      "id": "z3",
+      "label": "Blanco (ojos, dientes, franjas)",
+      "color": "#F6EEE4",
+      "share": 0.085,
+      "pick": false
+    },
+    {
+      "id": "z4",
+      "label": "Short",
+      "color": "#5A1F6A",
+      "share": 0.066,
+      "pick": true
+    },
+    {
+      "id": "z5",
+      "label": "Boca",
+      "color": "#230C12",
+      "share": 0.035,
+      "pick": false
+    },
+    {
+      "id": "z6",
+      "label": "Nariz y lengua",
+      "color": "#E03344",
+      "share": 0.019,
+      "pick": false
+    },
+    {
+      "id": "z7",
+      "label": "Negro (cejas, pupilas)",
+      "color": "#221614",
+      "share": 0.016,
+      "pick": false
+    }
+  ]
+}

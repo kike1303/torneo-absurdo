@@ -1,0 +1,8 @@
+{
+  "source": "tripo",
+  "source_sha256": "0d6d579b96b43c5cfdc3eb812936ad7bb767f8970aa3c758c8618a1f133fd5f7",
+  "pipeline": "docs/guides/flujo-personajes-3d.md",
+  "made_from": "final-yeti.glb",
+  "made_from_sha256": "a58c82b6779000e658a9d1a4e16ec050e7b06e9176e0bee5c4b8af072bf4c7d4",
+  "chosen_by_owner": "2026-11-17"
+}

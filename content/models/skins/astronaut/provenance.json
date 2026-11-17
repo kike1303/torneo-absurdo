@@ -1,0 +1,8 @@
+{
+  "source": "tripo",
+  "source_sha256": "7748ffad9dcc35314126fb76cb7d3f3f6b3d9cf4d38a8edca4a2e1bfde84ef28",
+  "pipeline": "docs/guides/flujo-personajes-3d.md",
+  "made_from": "final-astronaut.glb",
+  "made_from_sha256": "8b3c78b2a9cc8c5825b5996bda5b850fa15e18f4d70039f10263e3c314dea508",
+  "chosen_by_owner": "2026-11-17"
+}

@@ -1,0 +1,8 @@
+{
+  "source": "tripo",
+  "source_sha256": "facbb8f193d895530da476ae5bf92f7aa1762f987d3f743c25903813d0f33b6c",
+  "pipeline": "docs/guides/flujo-personajes-3d.md",
+  "made_from": "final-gnome.glb",
+  "made_from_sha256": "78f7d47b4a6ff823ec90dd74cf12b05ceaffdf98d9c29c62107a25e31e513340",
+  "chosen_by_owner": "2026-11-17"
+}
