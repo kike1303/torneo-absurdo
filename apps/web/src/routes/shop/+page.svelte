@@ -61,7 +61,7 @@
     <div class="flex flex-col items-start gap-3" data-testid="shop-load-error">
       <p role="status">{m.shop_load_error()}</p>
       <Button variant="outline" href={`/${locale}/shop`} data-sveltekit-reload>
-        {m.leaderboard_retry()}
+        {m.shop_retry()}
       </Button>
     </div>
   {:else if data.state === 'none'}

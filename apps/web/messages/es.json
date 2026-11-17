@@ -616,5 +616,6 @@
   "shop_to_botarga": "Ir a mi botarga",
   "shop_none_text": "Primero crea tu botarga para comprarle cosas.",
   "shop_load_error": "No pudimos cargar la tienda.",
-  "shop_home_link": "Tienda"
+  "shop_home_link": "Tienda",
+  "shop_retry": "Reintentar"
 }

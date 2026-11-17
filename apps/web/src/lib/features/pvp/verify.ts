@@ -32,7 +32,9 @@ function isLook(value: unknown): boolean {
     clip(value.idle, IDLE_CLIPS) &&
     clip(value.victory, VICTORY_CLIPS) &&
     Array.isArray(value.accessories) &&
-    value.accessories.every(isText)
+    value.accessories.every(isText) &&
+    // A look of before the suits (024) has no `skin`.
+    (value.skin === undefined || value.skin === null || isText(value.skin))
   );
 }
 

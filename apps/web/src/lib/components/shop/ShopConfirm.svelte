@@ -3,6 +3,7 @@
   // Buying is a form action with the price shown here and the key of this load; the server checks
   // every rule again and answers with a code. Without the coins, the button is not there.
   import { enhance } from '$app/forms';
+  import { invalidateAll } from '$app/navigation';
   import { Button } from '#lib/components/ui/button/index.js';
   import * as Card from '#lib/components/ui/card/index.js';
   import type { ShopEntry } from '#lib/features/shop/shop.js';
@@ -61,8 +62,11 @@
         action="?/buy"
         use:enhance={() => {
           pending = true;
-          return async ({ update }) => {
+          return async ({ result, update }) => {
             await update({ reset: false });
+            // A refusal charged nothing: read the shop again, so a changed price, an item bought in
+            // another tab or a balance spent elsewhere show as they are now, with a new key.
+            if (result.type === 'failure') await invalidateAll();
             pending = false;
           };
         }}

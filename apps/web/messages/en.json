@@ -616,5 +616,6 @@
   "shop_to_botarga": "Go to my botarga",
   "shop_none_text": "Create your botarga first to buy things for it.",
   "shop_load_error": "We could not load the shop.",
-  "shop_home_link": "Shop"
+  "shop_home_link": "Shop",
+  "shop_retry": "Try again"
 }
