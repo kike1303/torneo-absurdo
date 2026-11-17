@@ -27,6 +27,7 @@ describe('parseBuildForm', () => {
         ['accessory', ''],
         ['idle', 'idle_2'],
         ['victory', ''],
+        ['skin', 'tournament_suit'],
       ]),
     );
     expect(body).toEqual({
@@ -35,7 +36,13 @@ describe('parseBuildForm', () => {
       abilities: ['foam_headbutt', 'spicy_slap'],
       accessories: ['party_hat'],
       cosmetics: { idle: 'idle_2', victory: null },
+      skin: 'tournament_suit',
     });
+    // "Base botarga", and a form without the field: no suit.
+    expect(
+      parseBuildForm(form([...STATS, ['style_id', 'balanced'], ['skin', '']]))?.skin,
+    ).toBeNull();
+    expect(parseBuildForm(form([...STATS, ['style_id', 'balanced']]))?.skin).toBeNull();
   });
 
   it('leaves the rules to the server, and refuses what is not a build', () => {
@@ -59,6 +66,9 @@ describe('parseBuildForm', () => {
         ...Array.from({ length: 5 }, (_, i): [string, string] => ['ability', `a${i}`]),
       ]),
       form([...STATS, ['style_id', 'balanced'], ['ability', '']]),
+      form([...STATS, ['style_id', 'balanced'], ['skin', 'Tournament_Suit']]),
+      form([...STATS, ['style_id', 'balanced'], ['skin', '../suit']]),
+      form([...STATS, ['style_id', 'balanced'], ['skin', 's'.repeat(65)]]),
     ]) {
       expect(parseBuildForm(bad)).toBeNull();
     }

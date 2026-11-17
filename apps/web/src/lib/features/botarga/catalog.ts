@@ -82,6 +82,11 @@ export function styleName(id: string, locale: Locale): string {
   return (NAMES[locale].styles as Record<string, string>)[id] ?? id;
 }
 
+/** A suit of the shop (024) by its slug; one without a name shows as its slug. */
+export function skinName(slug: string, locale: Locale): string {
+  return (NAMES[locale].skins as Record<string, string>)[slug] ?? slug;
+}
+
 /** Whether `code` is one of the clip codes a draw of cosmetics offers. */
 export function isClip(code: string): boolean {
   return (

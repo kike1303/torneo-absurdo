@@ -21,13 +21,14 @@ pub const RULESET_VERSION: u16 = 2;
 /// Longest id of a build, in bytes (021 "Build").
 pub const MAX_ID_BYTES: usize = 64;
 
-/// What a build wears in a fight (TA-67): its idle, its victory and its accessories.
+/// What a build wears in a fight (TA-67, 024): its idle, its victory, its accessories and its suit.
 #[must_use]
 pub fn look_of(build: &protocol::BotargaBuild) -> protocol::PvpLook {
     protocol::PvpLook {
         idle: build.cosmetics.idle,
         victory: build.cosmetics.victory,
         accessories: build.accessories.clone(),
+        skin: build.skin.clone(),
     }
 }
 

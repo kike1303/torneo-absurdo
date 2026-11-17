@@ -21,7 +21,7 @@ export function pvpFightRows(fights: readonly PvpFightSummary[], locale: Locale)
   return fights.map((fight) => ({ fight, opponent: pvpFighterName(fight.opponent, locale) }));
 }
 
-/** What the stage draws of a side: its idle and its victory, and the accessories it wears. */
+/** What the stage draws of a side: its idle and its victory, its accessories and its suit. */
 export interface StageLooks {
   readonly cosmetics: Partial<
     Record<
@@ -29,12 +29,13 @@ export interface StageLooks {
       { idle?: NonNullable<PvpLook['idle']>; victory?: NonNullable<PvpLook['victory']> }
     >
   >;
-  readonly looks: Partial<Record<'a' | 'b', { wear: readonly string[] }>>;
+  readonly looks: Partial<Record<'a' | 'b', { wear: readonly string[]; skin?: string }>>;
 }
 
 /**
- * The looks of a player fight as the stage reads them (TA-67, TA-84). A side without a look (a
- * character of the tournament, an old fight) keeps the tournament ones.
+ * The looks of a player fight as the stage reads them (TA-67, TA-84, 024). A side without a look (a
+ * character of the tournament, an old fight) keeps the tournament ones; a look without a suit, the
+ * base botarga.
  */
 export function stageLooks(detail: Pick<PvpFightDetail, 'look_a' | 'look_b'>): StageLooks {
   const cosmetics: StageLooks['cosmetics'] = {};
@@ -48,7 +49,9 @@ export function stageLooks(detail: Pick<PvpFightDetail, 'look_a' | 'look_b'>): S
       ...(look.idle === null ? {} : { idle: look.idle }),
       ...(look.victory === null ? {} : { victory: look.victory }),
     };
-    if (look.accessories.length > 0) looks[side] = { wear: look.accessories };
+    const skin = look.skin ?? null;
+    if (look.accessories.length > 0 || skin !== null)
+      looks[side] = { wear: look.accessories, ...(skin === null ? {} : { skin }) };
   }
   return { cosmetics, looks };
 }

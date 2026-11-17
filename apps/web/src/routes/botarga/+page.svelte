@@ -41,6 +41,15 @@
   const wear = $derived(
     previewWear ?? (data.state === 'ready' ? data.botarga.build.accessories : []),
   );
+  // `undefined` until the form says: then the saved suit.
+  let previewSkin = $state<string | null | undefined>(undefined);
+  const skin = $derived(
+    previewSkin !== undefined
+      ? previewSkin
+      : data.state === 'ready'
+        ? data.botarga.build.skin
+        : null,
+  );
   const resultSeen = $derived(attacked !== null && seen === attacked.id);
   function onResultSeen(id: number): void {
     if (seen === id) return;
@@ -129,11 +138,12 @@
       class="flex flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start"
     >
       <div class="flex min-w-0 flex-col gap-4">
-        {#key `${botarga.build.cosmetics.idle}/${botarga.build.cosmetics.victory}/${wear.join(',')}`}
+        {#key `${botarga.build.cosmetics.idle}/${botarga.build.cosmetics.victory}/${wear.join(',')}/${skin}`}
           <BotargaPreview
             name={m.botarga_title()}
             cosmetics={botarga.build.cosmetics}
             {wear}
+            {skin}
             source={() => Promise.resolve(SHOWCASE)}
           />
         {/key}
@@ -151,6 +161,9 @@
           <Button variant="outline" href={`/${locale}/friends`} data-testid="botarga-friends">
             {m.friends_title()}
           </Button>
+          <Button variant="outline" href={`/${locale}/shop`} data-testid="botarga-shop">
+            {m.shop_title()}
+          </Button>
         </div>
       </div>
     </div>
@@ -162,6 +175,7 @@
           choices={buildChoices(botarga, locale)}
           {locale}
           onwear={(ids) => (previewWear = ids)}
+          onskin={(slug) => (previewSkin = slug)}
         />
       {/key}
     {:else}

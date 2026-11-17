@@ -89,11 +89,14 @@ export type LookSpecs = Readonly<Partial<Record<Side, LookSpec>>>;
 
 const TINT_SLOT_NAMES: readonly TintSlot[] = ['primary', 'secondary', 'accent'];
 
+/** The file of `folder` (`<kind>/<id>`), by its exact two last directories: never by a substring. */
 function fileOf<T>(files: Record<string, () => Promise<T>>, folder: string, name?: string) {
-  const prefix = `/${folder}/`;
-  return Object.entries(files).find(
-    ([path]) => path.includes(prefix) && (name === undefined || path.endsWith(`/${name}`)),
-  )?.[1];
+  return Object.entries(files).find(([path]) => {
+    const parts = path.split('/');
+    return (
+      parts.slice(-3, -1).join('/') === folder && (name === undefined || parts.at(-1) === name)
+    );
+  })?.[1];
 }
 
 /**

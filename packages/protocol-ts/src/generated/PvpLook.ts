@@ -5,11 +5,13 @@ import type { VictoryClip } from './VictoryClip.js';
 
 /**
  * What a botarga wore in a fight (021, TA-67): the idle and the victory it picked (`null`: the
- * tournament ones) and its accessories, by catalog id. Outside what the fight hashes: it changes
- * nothing of the result, so the browser does not verify it, it only draws it.
+ * tournament ones), its accessories by catalog id and its suit (024, `null`: the base botarga).
+ * Outside what the fight hashes: it changes nothing of the result, so the browser does not verify
+ * it, it only draws it. A look stored before the suits reads with `skin: null`.
  */
 export type PvpLook = {
   idle: IdleClip | null;
   victory: VictoryClip | null;
   accessories: Array<string>;
+  skin: string | null;
 };

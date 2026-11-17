@@ -16,6 +16,8 @@ import type {
   Provider,
   PvpFightCreated,
   PvpFightRequest,
+  ShopBuyRequest,
+  ShopPurchase,
   Wallet,
 } from '@torneo/protocol';
 import { apiRequest, type Api, type ApiResult } from './client.js';
@@ -114,4 +116,9 @@ export function postFriendTournament(
     body,
     timeoutMs: 15_000,
   });
+}
+
+/** 201 for a purchase, 200 for a repeated `client_key` (024): both carry `ShopPurchase`. */
+export function postShopBuy(api: Api, body: ShopBuyRequest): Promise<ApiResult<ShopPurchase>> {
+  return apiRequest<ShopPurchase>(api, 'POST', '/api/shop/buy', { body });
 }

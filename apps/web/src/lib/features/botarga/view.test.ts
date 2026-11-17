@@ -9,6 +9,7 @@ const botarga = {
     abilities: ['foam_headbutt'],
     accessories: [],
     cosmetics: { idle: null, victory: null },
+    skin: null,
   },
   progress: {
     level: 5,
@@ -22,6 +23,7 @@ const botarga = {
     abilities: ['foam_headbutt', 'not_in_catalog'],
     accessories: ['oven_mitts', 'bunny_slippers', 'mismatched_mitts', 'ghost_hat'],
     cosmetics: ['idle_3', 'win_2', 'nonsense'],
+    skins: ['tournament_suit'],
   },
   draws: [],
   queued_draws: 0,
@@ -66,6 +68,8 @@ describe('buildChoices', () => {
     // An id the catalog does not have is in no slot.
     expect(es.wardrobe.flatMap((w) => w.options.map((o) => o.id))).not.toContain('ghost_hat');
     expect(buildChoices(botarga, 'en').abilities[0]?.name).not.toBe(es.abilities[0]?.name);
+    // A suit without a name yet shows as its slug.
+    expect(es.skins).toEqual([{ id: 'tournament_suit', name: 'tournament_suit' }]);
   });
 });
 

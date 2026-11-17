@@ -23,9 +23,11 @@
     locale: Locale;
     /** The accessories picked in the form, before saving: the page shows them in 3D. */
     onwear?: (ids: readonly string[]) => void;
+    /** The suit picked in the form (024), `null` for the base botarga: the page shows it in 3D. */
+    onskin?: (skin: string | null) => void;
   }
 
-  let { botarga, choices, locale, onwear }: Props = $props();
+  let { botarga, choices, locale, onwear, onskin }: Props = $props();
 
   const SLOT_LABEL: Record<WardrobeSlot['slot'], () => string> = {
     head: m.botarga_slot_head,
@@ -58,6 +60,8 @@
     ),
   );
   const wearing = $derived(Object.values(worn).filter((id) => id !== ''));
+  // svelte-ignore state_referenced_locally
+  let suit = $state(botarga.build.skin ?? '');
 
   function deltasText(option: WardrobeSlot['options'][number]): string {
     return formatList(
@@ -74,6 +78,7 @@
     hydrated = true;
     // A form that mounts again starts from the saved build: the preview follows it.
     onwear?.(wearing);
+    onskin?.(suit === '' ? null : suit);
   });
 
   const budget = $derived(
@@ -226,6 +231,25 @@
           {/each}
         </div>
       </fieldset>
+
+      {#if choices.skins.length > 0}
+        <div class="grid gap-2">
+          <Label for="skin">{m.botarga_skin()}</Label>
+          <select
+            id="skin"
+            name="skin"
+            class="h-11 rounded-md border border-input bg-background px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            bind:value={suit}
+            onchange={() => onskin?.(suit === '' ? null : suit)}
+            data-testid="botarga-skin"
+          >
+            <option value="">{m.botarga_skin_base()}</option>
+            {#each choices.skins as skin (skin.id)}
+              <option value={skin.id}>{skin.name}</option>
+            {/each}
+          </select>
+        </div>
+      {/if}
 
       <fieldset class="grid gap-3 sm:grid-cols-2">
         <legend class="mb-1 text-sm font-medium">{m.botarga_cosmetics()}</legend>

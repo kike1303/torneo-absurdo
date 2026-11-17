@@ -30,14 +30,17 @@ pub enum PvpFighter {
 }
 
 /// What a botarga wore in a fight (021, TA-67): the idle and the victory it picked (`null`: the
-/// tournament ones) and its accessories, by catalog id. Outside what the fight hashes: it changes
-/// nothing of the result, so the browser does not verify it, it only draws it.
+/// tournament ones), its accessories by catalog id and its suit (024, `null`: the base botarga).
+/// Outside what the fight hashes: it changes nothing of the result, so the browser does not verify
+/// it, it only draws it. A look stored before the suits reads with `skin: null`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PvpLook {
     pub idle: Option<IdleClip>,
     pub victory: Option<VictoryClip>,
     pub accessories: Vec<String>,
+    #[serde(default)]
+    pub skin: Option<String>,
 }
 
 /// `GET /api/pvp/fights/{id}` (public) and the fight of [`PvpFightCreated`]. The attacker is always
@@ -167,6 +170,7 @@ mod tests {
                 idle: None,
                 victory: Some(VictoryClip::Win2),
                 accessories: vec!["oven_mitts".to_owned()],
+                skin: Some("tournament_suit".to_owned()),
             }),
             look_b: None,
             created_at: TimestampMs::from_ms(1_700_000_000_000),
@@ -213,7 +217,12 @@ mod tests {
         assert_eq!(json["created_at"], "1700000000000");
         assert_eq!(
             json["look_a"],
-            serde_json::json!({"idle": null, "victory": "win_2", "accessories": ["oven_mitts"]})
+            serde_json::json!({
+                "idle": null,
+                "victory": "win_2",
+                "accessories": ["oven_mitts"],
+                "skin": "tournament_suit",
+            })
         );
         assert_eq!(json["look_b"], serde_json::Value::Null);
         let text = json.to_string();
@@ -301,5 +310,13 @@ mod tests {
         assert_eq!(json["winner"], serde_json::Value::Null);
         assert_eq!(json["end_reason"], "draw");
         assert_eq!(json["reward"]["factor_pct"], 75);
+    }
+
+    #[test]
+    fn a_look_stored_before_the_suits_reads_without_one() {
+        let look: PvpLook =
+            serde_json::from_str(r#"{"idle":null,"victory":"win_1","accessories":[]}"#).unwrap();
+        assert_eq!(look.skin, None);
+        assert_eq!(look.victory, Some(VictoryClip::Win1));
     }
 }

@@ -6,6 +6,8 @@ import type { FighterCosmetics } from './FighterCosmetics.js';
 /**
  * What a botarga has equipped, and the body of `PUT /api/botarga/build`: ids of the catalog the
  * user has unlocked. The server checks the sizes, the unlocks and the rules of the loadout.
+ * `skin` is the suit it wears (024), by its folder in `content/models/skins/`; `null` is the base
+ * botarga. Only a look: it never reaches the spec.
  */
 export type BotargaBuild = {
   stats: BotargaStats;
@@ -13,4 +15,5 @@ export type BotargaBuild = {
   abilities: Array<string>;
   accessories: Array<string>;
   cosmetics: FighterCosmetics;
+  skin: string | null;
 };

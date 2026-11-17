@@ -233,6 +233,10 @@
         <Button variant="outline" href={`/${locale}/botarga`} data-testid="fight-home-botarga">
           {m.botarga_home_link()}
         </Button>
+        <!-- 024: the shop of the botarga. -->
+        <Button variant="outline" href={`/${locale}/shop`} data-testid="fight-home-shop">
+          {m.shop_home_link()}
+        </Button>
         <Button
           variant="outline"
           href={`/${locale}/pvp/leaderboard`}

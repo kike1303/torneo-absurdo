@@ -78,6 +78,7 @@ fn starter_build() -> Value {
         "abilities": ["foam_headbutt"],
         "accessories": [],
         "cosmetics": {"idle": null, "victory": null},
+        "skin": null,
     })
 }
 
@@ -99,7 +100,12 @@ fn starter_view() -> Value {
             "slots_open": 1,
             "daily": {"attacks": 0, "factor_pct": 100},
         },
-        "unlocks": {"abilities": ["foam_headbutt"], "accessories": [], "cosmetics": []},
+        "unlocks": {
+            "abilities": ["foam_headbutt"],
+            "accessories": [],
+            "cosmetics": [],
+            "skins": [],
+        },
         "draws": [],
         "queued_draws": 0,
         "body_type": "normal",
@@ -373,6 +379,7 @@ async fn a_build_inside_the_rules_is_saved() {
     unlock(&pool, user, "ability", &["confetti_cannon", "spicy_slap"]).await;
     unlock(&pool, user, "accessory", &["oven_mitts"]).await;
     unlock(&pool, user, "cosmetic", &["idle_3", "win_2"]).await;
+    unlock(&pool, user, "skin", &["tournament_suit"]).await;
     set_level(&pool, user, 5).await;
 
     // Level 5 has 204 points and two slots; 4 points stay free.
@@ -382,6 +389,7 @@ async fn a_build_inside_the_rules_is_saved() {
         "abilities": ["spicy_slap", "confetti_cannon"],
         "accessories": ["oven_mitts"],
         "cosmetics": {"idle": "idle_3", "victory": "win_2"},
+        "skin": "tournament_suit",
     });
     let saved = put(app.addr, &token, &build).await;
     assert_eq!(saved.status, 200, "{}", saved.text());
@@ -397,13 +405,14 @@ async fn a_build_inside_the_rules_is_saved() {
             "abilities": ["confetti_cannon", "foam_headbutt", "spicy_slap"],
             "accessories": ["oven_mitts"],
             "cosmetics": ["idle_3", "win_2"],
+            "skins": ["tournament_suit"],
         })
     );
     // What was saved is what a later read gives, in the order the abilities were sent.
     assert_eq!(body(&get(app.addr, &token).await), view);
     let row = sqlx::query(
         "SELECT hp, attack, defense, speed, special, style_id, abilities, accessories, \
-         cosmetic_idle, cosmetic_victory, updated_at > created_at, level, rating \
+         cosmetic_idle, cosmetic_victory, updated_at > created_at, level, rating, skin \
          FROM botargas WHERE user_id = $1",
     )
     .bind(user)
@@ -424,8 +433,12 @@ async fn a_build_inside_the_rules_is_saved() {
     // A build never moves the level nor the rating.
     assert_eq!(row.get::<i16, _>(11), 5);
     assert_eq!(row.get::<i32, _>(12), 1000);
+    assert_eq!(
+        row.get::<Option<String>, _>(13).as_deref(),
+        Some("tournament_suit")
+    );
 
-    // Back to nothing picked: `null` clears a cosmetic.
+    // Back to nothing picked: `null` clears a cosmetic and the suit.
     let plain = build_with(|b| b["stats"]["hp"] = json!(44));
     let saved = put(app.addr, &token, &plain).await;
     assert_eq!(body(&saved)["build"], plain, "{}", saved.text());
@@ -466,6 +479,8 @@ async fn a_build_outside_the_rules_is_refused_with_its_code() {
             set("cosmetics", json!({"idle": null, "victory": "win_1"})),
             "not_unlocked",
         ),
+        // A suit it does not own, even one with its folder.
+        (set("skin", json!("tournament_suit")), "not_unlocked"),
         (set("style_id", json!("berserk")), "style_unknown"),
         // 201 points at level 1.
         (
@@ -570,6 +585,12 @@ async fn a_body_that_is_not_a_build_is_422_without_text() {
         build_with(|b| b["abilities"] = json!(["a", "b", "c", "d", "e"])).to_string(),
         build_with(|b| b["accessories"] = json!(["a", "b", "c", "d", "e", "f"])).to_string(),
         build_with(|b| b["accessories"] = json!([""])).to_string(),
+        // A suit that has not the form of a folder of the shop.
+        build_with(|b| b["skin"] = json!("")).to_string(),
+        build_with(|b| b["skin"] = json!("Tournament_Suit")).to_string(),
+        build_with(|b| b["skin"] = json!("../../etc")).to_string(),
+        build_with(|b| b["skin"] = json!(long)).to_string(),
+        build_with(|b| b["skin"] = json!(7)).to_string(),
         // Over the 4 KB of a form.
         build_with(|b| b["style_id"] = json!("s".repeat(5000))).to_string(),
     ];
@@ -596,9 +617,10 @@ async fn a_user_never_reads_nor_changes_the_botarga_of_another() {
     let (app, pool) = oauth::start_app(&db).await;
     let (ana, ana_token) = user_with_botarga(app.addr, &pool).await;
     let (beto, beto_token) = user_with_botarga(app.addr, &pool).await;
-    // Only Ana owns the fire slap and a cosmetic, and only she is level 5.
+    // Only Ana owns the fire slap, a cosmetic and a suit, and only she is level 5.
     unlock(&pool, ana, "ability", &["spicy_slap"]).await;
     unlock(&pool, ana, "cosmetic", &["win_3"]).await;
+    unlock(&pool, ana, "skin", &["tournament_suit"]).await;
     set_level(&pool, ana, 5).await;
     let beto_before = snapshot(&pool, beto).await;
 
@@ -608,6 +630,7 @@ async fn a_user_never_reads_nor_changes_the_botarga_of_another() {
         "abilities": ["foam_headbutt", "spicy_slap"],
         "accessories": [],
         "cosmetics": {"idle": null, "victory": "win_3"},
+        "skin": "tournament_suit",
     });
     let saved = put(app.addr, &ana_token, &hers).await;
     assert_eq!(saved.status, 200, "{}", saved.text());

@@ -410,7 +410,7 @@ async fn an_attack_between_two_users_is_resolved_paid_by_entry_and_public() {
     let detail = body(&detail);
     assert_public(&detail, &[a, b], &keys);
     // What each wore (TA-67): the build of a new botarga, with the tournament animations.
-    let plain = serde_json::json!({"idle": null, "victory": null, "accessories": []});
+    let plain = serde_json::json!({"idle": null, "victory": null, "accessories": [], "skin": null});
     assert_eq!(detail["look_a"], plain);
     assert_eq!(detail["look_b"], plain);
     assert_replays(&detail);
@@ -680,6 +680,20 @@ async fn without_other_users_the_rival_is_a_character_of_the_tournament() {
     let pool = &app.pool;
     let (a, token) = player(pool).await;
     veteran(pool, a).await;
+    // The suit it wears travels in its look (024).
+    sqlx::query(
+        "INSERT INTO botarga_unlocks (user_id, kind, item_id, source) \
+         VALUES ($1, 'skin', 'tournament_suit', 'level')",
+    )
+    .bind(a)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE botargas SET skin = 'tournament_suit' WHERE user_id = $1")
+        .bind(a)
+        .execute(pool)
+        .await
+        .unwrap();
     let roster: Vec<String> = std::fs::read_dir(content_dir())
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
@@ -696,7 +710,7 @@ async fn without_other_users_the_rival_is_a_character_of_the_tournament() {
         assert_eq!(created["reward"]["rating_delta"], 0);
         // The character of the tournament wears its own look: none is published for it (TA-67).
         assert_eq!(created["fight"]["look_b"], Value::Null);
-        assert!(created["fight"]["look_a"].is_object());
+        assert_eq!(created["fight"]["look_a"]["skin"], "tournament_suit");
         assert_replays(&created["fight"]);
         // Scaled to the level of the attacker: the budget and the slots of level 1.
         let spec: CharacterSpec =

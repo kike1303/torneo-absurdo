@@ -8,4 +8,8 @@ export type BotargaUnlocks = {
   abilities: Array<string>;
   accessories: Array<string>;
   cosmetics: Array<string>;
+  /**
+   * The suits it owns (024), by slug.
+   */
+  skins: Array<string>;
 };

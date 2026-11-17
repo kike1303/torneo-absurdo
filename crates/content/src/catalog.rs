@@ -132,6 +132,10 @@ struct NamesFile {
     abilities: BTreeMap<String, String>,
     accessories: BTreeMap<String, String>,
     styles: BTreeMap<String, String>,
+    /// The suits of the shop (024), by slug. Read by the web; the engine never sees a suit.
+    #[serde(default)]
+    #[allow(dead_code)]
+    skins: BTreeMap<String, String>,
 }
 
 const ABILITIES: &str = "abilities.json";
