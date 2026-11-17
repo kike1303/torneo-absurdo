@@ -1,0 +1,9 @@
+{
+  "slot": "chest",
+  "attach": [
+    {
+      "bone": "Spine1"
+    }
+  ],
+  "hides": true
+}

@@ -312,7 +312,7 @@
       // network the first frame would not arrive in time (010 plan-d decision 14).
       if (opening !== undefined) {
         if (view === '2d') preloadSheets(ids);
-        else preloadBotargaModel();
+        else preloadBotargaModel(looks);
       }
       const [rendererModule, cast, ...manifestModules] = await Promise.all([
         loadRenderer(),

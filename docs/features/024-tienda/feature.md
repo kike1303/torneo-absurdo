@@ -40,7 +40,7 @@ Hoy los accesorios y las animaciones de una botarga solo salen en los sorteos po
   - los tipos de cuerpo;
   - regalos e intercambios;
   - el arte de cada botarga. Publicar cada traje en `content/models/skins/` es trabajo de arte que revisa el owner (un issue por tanda), y la tienda lista solo los trajes que ya están en `content/`.
-  - `tournament_suit`, que hay que partir en dos accesorios (TA-91).
+  - `tournament_suit`: ya no es un traje, son las dos piezas del uniforme de la casa (TA-91, `content/models/uniform/`).
 
 ## Precios (aprobados, 2026-11-16)
 | Artículo | Precio |
