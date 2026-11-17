@@ -1,0 +1,108 @@
+{
+  "fit": {
+    "head": {
+      "scale": [
+        1.205,
+        1.222,
+        1.293
+      ],
+      "offset": [
+        0.0,
+        -0.0012,
+        -0.0047
+      ]
+    },
+    "chest": {
+      "scale": [
+        1.262,
+        0.848,
+        1.557
+      ],
+      "offset": [
+        0.0,
+        0,
+        0.0095
+      ]
+    },
+    "hips": {
+      "scale": [
+        1.133,
+        0.765,
+        1.304
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0123
+      ]
+    },
+    "hands": {
+      "scale": [
+        1.082,
+        1.082,
+        1.082
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0
+      ]
+    },
+    "feet": {
+      "scale": [
+        1.075,
+        1.008,
+        1.116
+      ],
+      "offset": [
+        -0.0079,
+        0,
+        -0.0034
+      ]
+    }
+  },
+  "zones": [
+    {
+      "id": "z1",
+      "color": "#E9AE83",
+      "share": 0.682,
+      "pick": true,
+      "label": "Piel"
+    },
+    {
+      "id": "z2",
+      "color": "#E6DAC2",
+      "share": 0.204,
+      "pick": true,
+      "label": "Barba"
+    },
+    {
+      "id": "z3",
+      "color": "#663F1E",
+      "share": 0.086,
+      "pick": true,
+      "label": "Short"
+    },
+    {
+      "id": "z4",
+      "color": "#200C10",
+      "share": 0.016,
+      "pick": false,
+      "label": "Detalle"
+    },
+    {
+      "id": "z5",
+      "color": "#201B17",
+      "share": 0.007,
+      "pick": false,
+      "label": "Detalle"
+    },
+    {
+      "id": "z6",
+      "color": "#D64649",
+      "share": 0.005,
+      "pick": false,
+      "label": "Lengua"
+    }
+  ]
+}

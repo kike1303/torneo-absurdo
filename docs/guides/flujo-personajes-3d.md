@@ -157,7 +157,21 @@ pnpm -s dlx gltfpack@1.3.0 -i <slug>.glb -o <id>.glb -cc -vp 16 -vt 16 -vn 16 -k
 - `skin.json` (opcional): `fit` (las `slots` de `accessory-fit.json`, que escalan y centran los accesorios sobre ese cuerpo), y `zones`, `islands` e `island_map` (lo que escribe `color_zones.py` en `color-zones.json`), que permiten recolorearlo por zonas.
 - `zone-map.png` (solo con islas): la imagen que numera las islas.
 
-Por ahora no hay ningún traje en `content/`: publicar el arte de un personaje sigue siendo decisión del owner.
+Publicar el arte de un personaje es decisión del owner. Un traje que aprobó se publica con `scripts/personajes/pack_skins.py` de `~/Documents/Blender`:
+
+```sh
+python3 -I scripts/personajes/pack_skins.py <repo> <carpeta-temporal> <slug>...
+```
+
+El script:
+- baja las texturas a 1024 como máximo (las de la botarga base son de 1024);
+- pasa a JPEG las que quedan claramente más chicas así;
+- comprime el GLB como en el paso 6;
+- escribe `skin.json` con el `fit` de `accessory-fit.json` y las zonas de `color-zones.json`;
+- copia `zone-map.png` si hay islas, también a 1024 como máximo y sin mezclar sus grises;
+- escribe `provenance.json` con su fuente: `tripo` y el hash de `source-tripo.json`, o `fbx` y el hash del FBX cuando no hay registro.
+
+La primera tanda es de once trajes (TA-94).
 
 **El uniforme de la casa** va en `content/models/uniform/<id>/`, con el mismo formato que un accesorio (`<id>.glb` y `accessory.json`), pero fuera del catálogo: no se sortea, no se vende y ninguna botarga de jugador lo lleva. Lo visten los dos luchadores de las peleas de la casa (en vivo y en repetición; `HOUSE_LOOKS` en `apps/web/src/lib/components/fight/botarga-model.ts`). En `/dev/arena` se prueba con `?wear_a=tournament_shirt,tournament_pants`.
 

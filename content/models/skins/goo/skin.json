@@ -1,0 +1,115 @@
+{
+  "fit": {
+    "head": {
+      "scale": [
+        1.142,
+        1.083,
+        1.141
+      ],
+      "offset": [
+        0.0,
+        0.0276,
+        -0.0031
+      ]
+    },
+    "chest": {
+      "scale": [
+        1.468,
+        0.813,
+        1.512
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0113
+      ]
+    },
+    "hips": {
+      "scale": [
+        1.178,
+        0.651,
+        1.323
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0179
+      ]
+    },
+    "hands": {
+      "scale": [
+        1.159,
+        1.159,
+        1.159
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0
+      ]
+    },
+    "feet": {
+      "scale": [
+        1.184,
+        1.114,
+        1.197
+      ],
+      "offset": [
+        -0.002,
+        0,
+        -0.0006
+      ]
+    }
+  },
+  "zones": [
+    {
+      "id": "z1",
+      "color": "#F33C8A",
+      "share": 0.698,
+      "pick": true,
+      "label": "Cuerpo"
+    },
+    {
+      "id": "z2",
+      "color": "#10AB9C",
+      "share": 0.081,
+      "pick": true,
+      "label": "Short"
+    },
+    {
+      "id": "z3",
+      "color": "#FB7EB3",
+      "share": 0.07,
+      "pick": true,
+      "label": "Gotas"
+    },
+    {
+      "id": "z4",
+      "color": "#25121A",
+      "share": 0.052,
+      "pick": false,
+      "label": "Detalle"
+    },
+    {
+      "id": "z5",
+      "color": "#F0C07E",
+      "share": 0.051,
+      "pick": true,
+      "label": "Parche"
+    },
+    {
+      "id": "z6",
+      "color": "#F5EEDF",
+      "share": 0.032,
+      "pick": false,
+      "label": "Detalle"
+    },
+    {
+      "id": "z7",
+      "color": "#26232A",
+      "share": 0.016,
+      "pick": false,
+      "label": "Detalle"
+    }
+  ]
+}

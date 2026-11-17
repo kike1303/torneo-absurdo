@@ -1,0 +1,135 @@
+{
+  "fit": {
+    "head": {
+      "scale": [
+        1.16,
+        1.078,
+        1.139
+      ],
+      "offset": [
+        0.0,
+        0.0136,
+        -0.0017
+      ]
+    },
+    "chest": {
+      "scale": [
+        1.201,
+        0.998,
+        1.477
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0056
+      ]
+    },
+    "hips": {
+      "scale": [
+        1.061,
+        0.749,
+        1.17
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0068
+      ]
+    },
+    "hands": {
+      "scale": [
+        1.176,
+        1.176,
+        1.176
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0
+      ]
+    },
+    "feet": {
+      "scale": [
+        1.006,
+        1.043,
+        0.991
+      ],
+      "offset": [
+        -0.0056,
+        0,
+        -0.0082
+      ]
+    }
+  },
+  "zones": [
+    {
+      "id": "z1",
+      "color": "#E6DAC8",
+      "share": 0.377,
+      "pick": true,
+      "label": "Traje"
+    },
+    {
+      "id": "z2",
+      "color": "#E76D43",
+      "share": 0.244,
+      "pick": true,
+      "label": "Aros y puños"
+    },
+    {
+      "id": "z3",
+      "color": "#389BB3",
+      "share": 0.187,
+      "pick": true,
+      "label": "Casco"
+    },
+    {
+      "id": "z4",
+      "color": "#2B344E",
+      "share": 0.067,
+      "pick": true,
+      "label": "Short"
+    },
+    {
+      "id": "z5",
+      "color": "#97CDE1",
+      "share": 0.051,
+      "pick": false,
+      "label": "Parte superior del casco",
+      "follows": "z3"
+    },
+    {
+      "id": "z6",
+      "color": "#EE8175",
+      "share": 0.042,
+      "pick": true,
+      "label": "Rosa"
+    },
+    {
+      "id": "z7",
+      "color": "#20101D",
+      "share": 0.032,
+      "pick": false,
+      "label": "Cejas y boca"
+    }
+  ],
+  "islands": [
+    {
+      "id": "i1",
+      "label": "Rostro",
+      "zone": "z1",
+      "center": [
+        0,
+        -0.17,
+        0.76
+      ],
+      "radius": 0.17,
+      "pick": false
+    }
+  ],
+  "island_map": {
+    "file": "zone-map.png",
+    "material": "Astronaut Eye",
+    "step": 40
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "source": "tripo",
+  "source_sha256": "db1c72acc24f85e33ee7a5a8319d7f0ac6c01321ec6342e3b6e480cf0945f3e5",
+  "pipeline": "docs/guides/flujo-personajes-3d.md",
+  "made_from": "final-ninja.glb",
+  "made_from_sha256": "977ea3e1bdde95338c97e2b8d4ede8cb1149873b67b32ca1393510db0c78abf0",
+  "chosen_by_owner": "2026-11-17"
+}

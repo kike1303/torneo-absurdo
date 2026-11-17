@@ -1,0 +1,8 @@
+{
+  "source": "tripo",
+  "source_sha256": "8485a4a6bfc2732d540368bb967cbd9e83590b97aaba22231cce4cdd7ac02704",
+  "pipeline": "docs/guides/flujo-personajes-3d.md",
+  "made_from": "final-gorilla.glb",
+  "made_from_sha256": "84850d3da29615d745ac0959de4567bf52b6f561c8754e9a112799a9badc1a52",
+  "chosen_by_owner": "2026-11-17"
+}

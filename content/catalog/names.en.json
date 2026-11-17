@@ -50,5 +50,17 @@
     "defensive": "Turtle in a Helmet",
     "showman": "Runway Diva"
   },
-  "skins": {}
+  "skins": {
+    "astronaut": "Fishbowl Astronaut",
+    "clown": "Traffic Cone Clown",
+    "eggplant": "Eggplant",
+    "gnome": "Garden Gnome",
+    "goo": "Jelly",
+    "gorilla": "Necktie Gorilla",
+    "mop": "Shaggy Mop",
+    "ninja": "Striped Ninja",
+    "pinata": "Piñata",
+    "washer": "Washing Machine",
+    "yeti": "Yeti"
+  }
 }

@@ -1,0 +1,115 @@
+{
+  "fit": {
+    "head": {
+      "scale": [
+        1.422,
+        1.183,
+        1.17
+      ],
+      "offset": [
+        0.0,
+        0.0145,
+        0.0021
+      ]
+    },
+    "chest": {
+      "scale": [
+        1.252,
+        0.919,
+        1.372
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0304
+      ]
+    },
+    "hips": {
+      "scale": [
+        1.134,
+        0.764,
+        1.343
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0185
+      ]
+    },
+    "hands": {
+      "scale": [
+        1.188,
+        1.188,
+        1.188
+      ],
+      "offset": [
+        0.0,
+        0,
+        -0.0
+      ]
+    },
+    "feet": {
+      "scale": [
+        1.038,
+        0.937,
+        0.952
+      ],
+      "offset": [
+        -0.0092,
+        0,
+        -0.0086
+      ]
+    }
+  },
+  "zones": [
+    {
+      "id": "z1",
+      "color": "#3B7996",
+      "share": 0.313,
+      "pick": true,
+      "label": "Cuerpo"
+    },
+    {
+      "id": "z2",
+      "color": "#E1D5C9",
+      "share": 0.3,
+      "pick": true,
+      "label": "Carcasa"
+    },
+    {
+      "id": "z3",
+      "color": "#949DA0",
+      "share": 0.24,
+      "pick": true,
+      "label": "Metal"
+    },
+    {
+      "id": "z4",
+      "color": "#25121A",
+      "share": 0.06,
+      "pick": false,
+      "label": "Detalle"
+    },
+    {
+      "id": "z5",
+      "color": "#484D52",
+      "share": 0.059,
+      "pick": true,
+      "label": "Short"
+    },
+    {
+      "id": "z6",
+      "color": "#F8AF37",
+      "share": 0.019,
+      "pick": false,
+      "label": "Parches"
+    },
+    {
+      "id": "z7",
+      "color": "#F46B81",
+      "share": 0.008,
+      "pick": false,
+      "label": "Detalle"
+    }
+  ]
+}

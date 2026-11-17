@@ -8,7 +8,7 @@ author: claude
 linear: TA-68
 depends_on: ["012", "021", "022"]
 created: 2026-11-16
-updated: 2026-11-16
+updated: 2026-11-17
 ---
 
 # Tienda de cosméticos
@@ -129,6 +129,8 @@ El motor no cambia: el traje es solo cosmético y no entra en el `CharacterSpec`
 1. Server A: migración, catálogo, `GET /api/shop`, `POST /api/shop/buy`, la conservación del ledger y la auditoría.
 2. Server B y web: `skin` en la build y en el `look`, `/shop` con la vista previa y el traje en `/botarga`, con su e2e.
 3. Contenido: los trajes de la primera tanda que apruebe el owner, cada uno con `skin.json` (fit y zonas) y `provenance`, en sus propios PR de contenido.
+
+   La primera tanda (TA-94, 2026-11-17) son los once diseños nuevos que eligió el owner: `astronaut`, `clown`, `eggplant`, `gnome`, `goo`, `gorilla`, `mop`, `ninja`, `pinata`, `washer` y `yeti`, a 5000. Los cuatro personajes del torneo (fontanero, erizo, ogro y rata) quedan fuera por ahora. Las texturas bajan a 1024, como las de la botarga base: a 4096, cada traje ocupaba 64 MB de memoria de video por luchador.
 
 ## Riesgos
 - **Doble cobro.** Lo evitan la idempotencia por `client_key`, la unicidad `(user, kind, item)` y el lock del usuario. La base además ata un cobro a una compra y el monto a su precio.
