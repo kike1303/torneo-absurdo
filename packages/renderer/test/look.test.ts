@@ -285,6 +285,11 @@ describe('content/models/uniform', () => {
       .map((entry) => entry.name)
       .sort();
     expect(ids).toEqual(['tournament_pants', 'tournament_shirt']);
+    // The loader looks in accessories/ first: a folder of the same name would take its place.
+    const accessories = fileURLToPath(
+      new URL('../../../content/models/accessories/', import.meta.url),
+    );
+    for (const id of ids) expect(existsSync(path.join(accessories, id)), id).toBe(false);
     for (const id of ids) {
       // Out of the catalog: never drawn, sold or worn by a player.
       expect(

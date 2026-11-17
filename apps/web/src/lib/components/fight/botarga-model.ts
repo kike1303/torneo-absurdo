@@ -124,6 +124,14 @@ export type Parsers = Pick<
   'parseAccessoryManifest' | 'parseSkinManifest'
 >;
 
+/** The GLB of an accessory, or of a piece of the house uniform, by its id. */
+function accessoryGlb(id: string): (() => Promise<string>) | undefined {
+  return (
+    fileOf(accessoryGlbs, `accessories/${id}`, `${id}.glb`) ??
+    fileOf(uniformGlbs, `uniform/${id}`, `${id}.glb`)
+  );
+}
+
 /** An id that is not in content/models/, or with a broken manifest, is skipped: nothing is worn. */
 async function loadLook(spec: LookSpec, parsers: () => Promise<Parsers>): Promise<FighterLook> {
   const { parseAccessoryManifest, parseSkinManifest } = await parsers();
@@ -138,9 +146,7 @@ async function loadLook(spec: LookSpec, parsers: () => Promise<Parsers>): Promis
       const manifest =
         fileOf(accessoryManifests, `accessories/${id}`) ??
         fileOf(uniformManifests, `uniform/${id}`);
-      const glb =
-        fileOf(accessoryGlbs, `accessories/${id}`, `${id}.glb`) ??
-        fileOf(uniformGlbs, `uniform/${id}`, `${id}.glb`);
+      const glb = accessoryGlb(id);
       if (manifest === undefined || glb === undefined) return null;
       const parsed = parseAccessoryManifest(await manifest());
       return parsed === null ? null : { glb: await glb(), manifest: parsed, colors: slotColors };
@@ -220,11 +226,11 @@ export async function loadBotargaModel(
 }
 
 /**
- * Puts the GLB and the faces in the HTTP cache while the events of a live fight come, as the
- * sheets do in 2D (010 plan-d decision 14). `<link rel="preload">`: the loaders then fetch them
- * from the cache. A failure here is not one: the load asks for them again and reports it.
+ * Puts the GLB, the faces and what the fighters wear in the HTTP cache while the events of a live
+ * fight come, as the sheets do in 2D (010 plan-d decision 14). `<link rel="preload">`: the loaders
+ * then fetch them from the cache. A failure here is not one: the load asks for them again and reports it.
  */
-export function preloadBotargaModel(): void {
+export function preloadBotargaModel(looks?: LookSpecs): void {
   const link = (href: string, as: 'fetch' | 'image'): void => {
     if (document.head.querySelector(`link[rel="preload"][href="${CSS.escape(href)}"]`)) return;
     const el = document.createElement('link');
@@ -241,4 +247,11 @@ export function preloadBotargaModel(): void {
       for (const url of Object.values(model.faces)) if (url !== undefined) link(url, 'image');
     })
     .catch(() => undefined);
+  // What they wear (the house uniform in every house fight), so it does not wait for the renderer.
+  const worn = new Set([...(looks?.a?.wear ?? []), ...(looks?.b?.wear ?? [])]);
+  for (const id of worn) {
+    void accessoryGlb(id)?.()
+      .then((url) => link(url, 'fetch'))
+      .catch(() => undefined);
+  }
 }
