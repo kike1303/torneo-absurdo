@@ -2,7 +2,7 @@
 id: "024"
 title: Tienda de cosméticos
 type: feature
-status: approved
+status: done
 risk: high
 author: claude
 linear: TA-68
