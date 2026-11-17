@@ -19,6 +19,7 @@ import type {
   PvpLeaderboard,
   ReauthStatus,
   SeasonView,
+  ShopView,
   VoidStats,
   Wallet,
 } from '@torneo/protocol';
@@ -165,4 +166,9 @@ export function getFriendTournaments(
 /** A tournament and its bracket (023); 404 for anybody who did not play it. */
 export function getFriendTournament(api: Api, id: number): Promise<ApiResult<FriendTournament>> {
   return apiRequest<FriendTournament>(api, 'GET', `/api/friends/tournaments/${id}`);
+}
+
+/** The shop from the side of the session's user (024): every item and the balance. */
+export function getShop(api: Api): Promise<ApiResult<ShopView>> {
+  return apiRequest<ShopView>(api, 'GET', '/api/shop');
 }

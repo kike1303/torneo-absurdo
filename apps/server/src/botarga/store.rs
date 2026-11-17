@@ -74,8 +74,8 @@ macro_rules! unlocked_sql {
 }
 
 /// One statement, so the build and the unlocks are of one snapshot. One list of columns for the three
-/// reads: [`decode`] reads columns 0 to 19 by position, and [`views_of`] reads `b.user_id`, column
-/// 20, so a new column goes after it.
+/// reads: [`decode`] reads columns 0 to 19 and 21 to 22 by position, and [`views_of`] reads
+/// `b.user_id`, column 20, so a new column goes after the last one.
 macro_rules! view_sql {
     ($filter:literal) => {
         concat!(
@@ -88,7 +88,8 @@ macro_rules! view_sql {
             ", ",
             unlocked_sql!("cosmetic"),
             ", COALESCE((SELECT d.attacks FROM pvp_daily d WHERE d.user_id = b.user_id \
-             AND d.day = (now() AT TIME ZONE 'UTC')::date), 0)::smallint, b.user_id",
+             AND d.day = (now() AT TIME ZONE 'UTC')::date), 0)::smallint, b.user_id, b.skin, ",
+            unlocked_sql!("skin"),
             " FROM botargas b WHERE ",
             $filter
         )
@@ -143,6 +144,7 @@ fn decode(row: &PgRow) -> Result<BotargaView, sqlx::Error> {
                 idle: idle.as_deref().and_then(IdleClip::parse),
                 victory: victory.as_deref().and_then(VictoryClip::parse),
             },
+            skin: row.try_get(21)?,
         },
         progress: BotargaProgress {
             level,
@@ -163,6 +165,7 @@ fn decode(row: &PgRow) -> Result<BotargaView, sqlx::Error> {
             abilities: row.try_get(16)?,
             accessories: row.try_get(17)?,
             cosmetics: row.try_get(18)?,
+            skins: row.try_get(22)?,
         },
         // Filled by [`with_draws`].
         draws: Vec::new(),
@@ -582,7 +585,7 @@ pub async fn save_build(
     let done = sqlx::query(
         "UPDATE botargas SET hp = $2, attack = $3, defense = $4, speed = $5, special = $6, \
          style_id = $7, abilities = $8, accessories = $9, cosmetic_idle = $10, \
-         cosmetic_victory = $11, updated_at = now() WHERE user_id = $1",
+         cosmetic_victory = $11, skin = $12, updated_at = now() WHERE user_id = $1",
     )
     .bind(user_id)
     .bind(i16::from(s.hp))
@@ -595,6 +598,7 @@ pub async fn save_build(
     .bind(&build.accessories)
     .bind(build.cosmetics.idle.map(IdleClip::as_str))
     .bind(build.cosmetics.victory.map(VictoryClip::as_str))
+    .bind(build.skin.as_deref())
     .execute(&mut *tx)
     .await?;
     Ok(done.rows_affected() == 1)

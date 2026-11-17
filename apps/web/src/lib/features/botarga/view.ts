@@ -10,6 +10,7 @@ import {
   accessory,
   accessoryName,
   clipNumber,
+  skinName,
   styleName,
   type AbilityKind,
   type AccessorySlot,
@@ -40,6 +41,8 @@ export interface BuildChoices {
   readonly victories: readonly ClipLabel[];
   /** The wardrobe: per slot, the accessories the user owns, with what each moves. */
   readonly wardrobe: readonly WardrobeSlot[];
+  /** The suits the user owns (024), named. */
+  readonly skins: readonly { readonly id: string; readonly name: string }[];
 }
 
 export interface WardrobeOption {
@@ -95,6 +98,7 @@ export function buildChoices(botarga: BotargaView, locale: Locale): BuildChoices
     idles: clips(botarga.unlocks.cosmetics, 'idle'),
     victories: clips(botarga.unlocks.cosmetics, 'win'),
     wardrobe: wardrobe(botarga.unlocks.accessories, locale),
+    skins: botarga.unlocks.skins.map((id) => ({ id, name: skinName(id, locale) })),
   };
 }
 

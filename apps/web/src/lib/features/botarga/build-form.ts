@@ -10,6 +10,8 @@ const MAX_ID_BYTES = 64;
 const MAX_ABILITIES = 4;
 const MAX_ACCESSORIES = 5;
 const INTEGER = /^(?:0|[1-9][0-9]{0,4})$/;
+/** A suit's slug, the form of an item of the shop (024). */
+const SKIN = /^[a-z0-9_-]{1,64}$/;
 
 const isId = (value: string): boolean =>
   value.length > 0 && new TextEncoder().encode(value).length <= MAX_ID_BYTES;
@@ -47,6 +49,9 @@ export function parseBuildForm(form: FormData): BotargaBuild | null {
   const victory = clip<VictoryClip>(text(form, 'victory'), VICTORY_CLIPS);
   if (idle === undefined || victory === undefined) return null;
   const cosmetics: FighterCosmetics = { idle, victory };
+  // "Base botarga" sends an empty value; a form without the field (no suit owned) keeps none.
+  const skinValue = text(form, 'skin') ?? '';
+  if (skinValue !== '' && !SKIN.test(skinValue)) return null;
   return {
     stats: {
       hp: stats.hp ?? 0,
@@ -59,6 +64,7 @@ export function parseBuildForm(form: FormData): BotargaBuild | null {
     abilities,
     accessories,
     cosmetics,
+    skin: skinValue === '' ? null : skinValue,
   };
 }
 

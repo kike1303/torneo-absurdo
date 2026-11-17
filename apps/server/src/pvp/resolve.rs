@@ -67,6 +67,7 @@ mod tests {
                 abilities: vec![starter.ability_id.clone()],
                 accessories: Vec::new(),
                 cosmetics: protocol::FighterCosmetics::default(),
+                skin: None,
             },
         )
         .unwrap();

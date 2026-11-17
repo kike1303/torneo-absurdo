@@ -8,11 +8,13 @@ use protocol::{BotargaBuild, BotargaErrorCode, BotargaUnlocks};
 use super::{BotargaCatalog, MAX_ACCESSORIES, MAX_ID_BYTES};
 
 /// Whether the body has the sizes of a build: ids of [`MAX_ID_BYTES`] at most, and no more
-/// abilities than the ruleset allows nor more accessories than slots. Checked before any query.
+/// abilities than the ruleset allows nor more accessories than slots. A suit has the form of an
+/// item of the shop (the `CHECK` of `botargas.skin`). Checked before any query.
 #[must_use]
 pub fn well_formed(catalog: &BotargaCatalog, build: &BotargaBuild) -> bool {
     let id_fits = |id: &String| !id.is_empty() && id.len() <= MAX_ID_BYTES;
-    id_fits(&build.style_id)
+    build.skin.as_deref().is_none_or(crate::shop::well_formed)
+        && id_fits(&build.style_id)
         && build.abilities.len() <= usize::from(catalog.ruleset().abilities_max())
         && build.accessories.len() <= MAX_ACCESSORIES
         && build.abilities.iter().all(id_fits)
@@ -66,6 +68,10 @@ pub fn check(
             .into_iter()
             .flatten()
             .all(|code| unlocks.cosmetics.iter().any(|owned| owned == code))
+        || !build
+            .skin
+            .as_ref()
+            .is_none_or(|skin| unlocks.skins.contains(skin))
     {
         return Err(BotargaErrorCode::NotUnlocked);
     }
@@ -134,6 +140,7 @@ mod tests {
             abilities: ids(&["foam_headbutt"]),
             accessories: Vec::new(),
             cosmetics: FighterCosmetics::default(),
+            skin: None,
         }
     }
 
@@ -156,6 +163,7 @@ mod tests {
                 "grandma_roller_skates",
             ]),
             cosmetics: ids(&["idle_2", "win_3"]),
+            skins: ids(&["tournament_suit"]),
         }
     }
 
@@ -255,6 +263,7 @@ mod tests {
             abilities: ids(&["foam_headbutt", "retired_move"]),
             accessories: ids(&["retired_hat"]),
             cosmetics: Vec::new(),
+            skins: Vec::new(),
         };
         assert_eq!(
             check_at(1, &ghost, |b| b.abilities = ids(&["retired_move"])),
@@ -264,7 +273,23 @@ mod tests {
             check_at(1, &ghost, |b| b.accessories = ids(&["retired_hat"])),
             Err(BotargaErrorCode::NotUnlocked)
         );
+        // A suit: only one it owns, and only of the form of an item of the shop.
+        assert_eq!(
+            check_at(1, &own, |b| b.skin = Some("tournament_suit".to_owned())),
+            Err(BotargaErrorCode::NotUnlocked)
+        );
         let all = everything();
+        assert_eq!(
+            check_at(1, &all, |b| b.skin = Some("tournament_suit".to_owned())),
+            Ok(())
+        );
+        let catalog = BotargaCatalog::embedded().unwrap();
+        for bad in ["", "Tournament_Suit", "suit with spaces", &"x".repeat(65)] {
+            let mut build = starter();
+            build.skin = Some(bad.to_owned());
+            assert!(!well_formed(&catalog, &build), "{bad:?}");
+        }
+        assert!(well_formed(&catalog, &starter()));
         assert_eq!(
             check_at(1, &all, |b| {
                 b.cosmetics = FighterCosmetics {

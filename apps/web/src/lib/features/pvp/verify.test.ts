@@ -102,6 +102,15 @@ describe('verifyPvpFight', () => {
   it('parses only the shape of the protocol', () => {
     expect(parsePvpDetail(detail())).not.toBeNull();
     expect(parsePvpDetail(detail({ winner: null, end_reason: 'draw' }))).not.toBeNull();
+    // A suit (024), and none in a look of before.
+    expect(
+      parsePvpDetail(
+        detail({ look_a: { idle: null, victory: null, accessories: [], skin: 'tournament_suit' } }),
+      ),
+    ).not.toBeNull();
+    expect(
+      parsePvpDetail(detail({ look_a: { idle: null, victory: null, accessories: [] } })),
+    ).not.toBeNull();
     for (const bad of [
       null,
       [],
@@ -115,6 +124,7 @@ describe('verifyPvpFight', () => {
       detail({ look_b: { idle: null, victory: null, accessories: [1] } }),
       detail({ look_a: undefined }),
       detail({ look_a: { idle: 'dance', victory: null, accessories: [] } }),
+      detail({ look_a: { idle: null, victory: null, accessories: [], skin: 7 } }),
     ]) {
       expect(parsePvpDetail(bad)).toBeNull();
     }

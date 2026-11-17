@@ -112,18 +112,18 @@ La respuesta trae la compra, el saldo nuevo y la `BotargaView`. Los errores de b
 - mi saldo.
 
 **Traje:**
-- `BotargaBuild.skin: Option<String>`; `PUT /api/botarga/build` exige que esté desbloqueado (`botarga.skin_locked`).
+- `BotargaBuild.skin: Option<String>` (columna `botargas.skin`, con la forma de un `item_id` de la tienda). `PUT /api/botarga/build` exige que esté desbloqueado y responde `botarga.not_unlocked`, el mismo código del resto de la build: un código aparte no le dice nada más al usuario.
 - `PvpLook.skin` lleva el traje a las peleas, a los retos de amigos y a sus repeticiones.
 
 El motor no cambia: el traje es solo cosmético y no entra en el `CharacterSpec`. El renderer ya sabe ponerlo (022): la web arma el `look` con el GLB de `content/models/skins/<slug>/`.
 
 **Web:**
-- `/shop`: los artículos agrupados por tipo, con el precio, "lo tienes" y "nivel N". Tiene una vista previa 3D sobre mi botarga con el artículo puesto, el saldo y una confirmación ("comprar X por N monedas") antes del `POST`, que va en una form action con su `client_key`.
+- `/shop`: los artículos agrupados por tipo, con el precio, "lo tienes", "en tu sorteo" y "nivel N". Elegir uno es un enlace a `?item=<tipo>:<id>`, así que funciona sin JavaScript: lo prueba en la vista previa 3D sobre mi botarga (un accesorio toma el lugar del de su ranura) y abre la confirmación, con el precio y el saldo que deja. "Comprar por N monedas" va en una form action con el precio mostrado y un `client_key` nuevo en cada carga. Sin saldo suficiente no hay botón, solo lo que falta.
 - `/botarga`: elegir el traje entre los que tengo.
 
 **Protocolo:**
 - tipos nuevos: `ShopView`, `ShopItem`, `ShopItemKind`, `ShopBuyRequest`, `ShopPurchase` y `ShopErrorCode` (`invalid_request`, `not_found`, `owned`, `in_draw`, `level`, `price_changed`, `insufficient`, `key_reused`, `busy` y `unavailable`);
-- campos nuevos: `skin` en `BotargaBuild`, en `BotargaUnlocks` y en `PvpLook`.
+- campos nuevos: `skin` en `BotargaBuild`, `skins` en `BotargaUnlocks` y `skin` en `PvpLook` (un `look` guardado antes se lee con `skin: null`).
 
 ## Fases
 1. Server A: migración, catálogo, `GET /api/shop`, `POST /api/shop/buy`, la conservación del ledger y la auditoría.

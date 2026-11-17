@@ -97,6 +97,8 @@ pub struct FighterCosmetics {
 
 /// What a botarga has equipped, and the body of `PUT /api/botarga/build`: ids of the catalog the
 /// user has unlocked. The server checks the sizes, the unlocks and the rules of the loadout.
+/// `skin` is the suit it wears (024), by its folder in `content/models/skins/`; `null` is the base
+/// botarga. Only a look: it never reaches the spec.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(deny_unknown_fields)]
@@ -106,6 +108,7 @@ pub struct BotargaBuild {
     pub abilities: Vec<String>,
     pub accessories: Vec<String>,
     pub cosmetics: FighterCosmetics,
+    pub skin: Option<String>,
 }
 
 /// The attacks of today and what the next one pays (021 "Escalones del día").
@@ -136,6 +139,8 @@ pub struct BotargaUnlocks {
     pub abilities: Vec<String>,
     pub accessories: Vec<String>,
     pub cosmetics: Vec<String>,
+    /// The suits it owns (024), by slug.
+    pub skins: Vec<String>,
 }
 
 /// What a draw offers: attacks of the catalog, or clip codes once no attack of the tiers of the
@@ -205,13 +210,14 @@ mod tests {
                 idle: Some(IdleClip::Idle2),
                 victory: None,
             },
+            skin: Some("tournament_suit".to_owned()),
         }
     }
 
     const BUILD_JSON: &str = concat!(
         r#"{"stats":{"hp":40,"attack":40,"defense":40,"speed":40,"special":40},"#,
         r#""style_id":"balanced","abilities":["foam_headbutt"],"accessories":[],"#,
-        r#""cosmetics":{"idle":"idle_2","victory":null}}"#,
+        r#""cosmetics":{"idle":"idle_2","victory":null},"skin":"tournament_suit"}"#,
     );
 
     #[test]
@@ -233,6 +239,7 @@ mod tests {
                 abilities: vec!["foam_headbutt".to_owned()],
                 accessories: Vec::new(),
                 cosmetics: Vec::new(),
+                skins: vec!["tournament_suit".to_owned()],
             },
             draws: vec![PendingDraw {
                 id: 7,
@@ -250,7 +257,8 @@ mod tests {
             concat!(
                 r#"{{"build":{},"progress":{{"level":1,"xp":0,"xp_to_next":120,"budget_free":0,"#,
                 r#""slots_open":1,"daily":{{"attacks":0,"factor_pct":100}}}},"#,
-                r#""unlocks":{{"abilities":["foam_headbutt"],"accessories":[],"cosmetics":[]}},"#,
+                r#""unlocks":{{"abilities":["foam_headbutt"],"accessories":[],"cosmetics":[],"#,
+                r#""skins":["tournament_suit"]}},"#,
                 r#""draws":[{{"id":7,"level":5,"kind":"ability","options":["a","b"]}}],"queued_draws":2,"#,
                 r#""body_type":"normal","face_id":"rookie","rating":1000,"rated_fights":0}}"#,
             ),

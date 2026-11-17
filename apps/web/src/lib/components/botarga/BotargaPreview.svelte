@@ -14,11 +14,13 @@
     cosmetics: FighterCosmetics;
     /** The accessories it wears, by catalog id (their 3D model in content/models/accessories). */
     wear: readonly string[];
+    /** The suit it wears (024), by its folder in content/models/skins; `null` is the base. */
+    skin?: string | null;
     /** The showcase timeline (`features/botarga/showcase.ts`). */
     source: () => Promise<AdaptedTimeline>;
   }
 
-  let { name, cosmetics, wear, source }: Props = $props();
+  let { name, cosmetics, wear, skin = null, source }: Props = $props();
 
   let stage = $state<FightStage | null>(null);
   let phase = $state<FightStageState>('loading');
@@ -45,7 +47,9 @@
       fighters={{ a: 'dummy_a', b: 'dummy_b' }}
       displayNames={{ a: name, b: m.botarga_sparring() }}
       cosmetics={picked}
-      looks={wear.length === 0 ? undefined : { a: { wear } }}
+      looks={wear.length === 0 && skin === null
+        ? undefined
+        : { a: { wear, ...(skin === null ? {} : { skin }) } }}
       {source}
       showResult={false}
       onfailure={(code) => (failed = code)}
