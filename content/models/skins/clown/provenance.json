@@ -1,5 +1,5 @@
 {
-  "source": null,
+  "source": "fbx",
   "source_sha256": "0ce13fcd1742ecc418fe3b2193c17d511d72ee1106cd60150cdb17bb0a2b1923",
   "pipeline": "docs/guides/flujo-personajes-3d.md",
   "made_from": "final-clown.glb",

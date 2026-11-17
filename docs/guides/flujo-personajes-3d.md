@@ -168,8 +168,8 @@ El script:
 - pasa a JPEG las que quedan claramente más chicas así;
 - comprime el GLB como en el paso 6;
 - escribe `skin.json` con el `fit` de `accessory-fit.json` y las zonas de `color-zones.json`;
-- copia `zone-map.png` si hay islas;
-- escribe `provenance.json` con el hash de la fuente (`source-tripo.json` o, sin él, el del FBX).
+- copia `zone-map.png` si hay islas, también a 1024 como máximo y sin mezclar sus grises;
+- escribe `provenance.json` con su fuente: `tripo` y el hash de `source-tripo.json`, o `fbx` y el hash del FBX cuando no hay registro.
 
 La primera tanda es de once trajes (TA-94).
 

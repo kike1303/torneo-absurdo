@@ -338,14 +338,19 @@ export function recolorZones(
   const ids = new Set([...zones.zones, ...(zones.islands ?? [])].map((entry) => entry.id));
   if (!Object.keys(colors).some((id) => ids.has(id) && parseHex(colors[id]) !== null)) return [];
 
-  const byMap = new Map<Texture, BotargaMaterial[]>();
+  // By image, not by texture: the loader clones a texture for each material with its own
+  // transform (gltfpack adds one to each), and the image is recolored once for all of them.
+  const bySource = new Map<Texture['source'], BotargaMaterial[]>();
   for (const material of materials) {
     if (material.map === null) continue;
-    byMap.set(material.map, [...(byMap.get(material.map) ?? []), material]);
+    const source = material.map.source;
+    bySource.set(source, [...(bySource.get(source) ?? []), material]);
   }
   const made: Texture[] = [];
-  for (const [map, users] of byMap) {
-    const image = map.image as HTMLImageElement;
+  for (const users of bySource.values()) {
+    const first = users[0]?.map;
+    if (first === null || first === undefined) continue;
+    const image = first.image as HTMLImageElement;
     const texels = texelsOf(image, image.width, image.height);
     if (texels === null) continue;
     const names = new Set(users.map((material) => material.name));
@@ -365,10 +370,23 @@ export function recolorZones(
     }
     const out = new ImageData(texels.width, texels.height);
     shiftPixels(texels.data, out.data, tables, islandOf);
-    const texture = textureWith(map, out);
-    if (texture === null) continue;
-    for (const material of users) material.map = texture;
-    made.push(texture);
+    const recolored = textureWith(first, out);
+    if (recolored === null) continue;
+    // Each texture keeps its own settings and shares the new image: one upload.
+    const copies = new Map<Texture, Texture>([[first, recolored]]);
+    for (const material of users) {
+      const map = material.map;
+      if (map === null) continue;
+      let copy = copies.get(map);
+      if (copy === undefined) {
+        copy = map.clone();
+        copy.source = recolored.source;
+        copy.needsUpdate = true;
+        copies.set(map, copy);
+      }
+      material.map = copy;
+    }
+    made.push(...copies.values());
   }
   return made;
 }
