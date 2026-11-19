@@ -108,17 +108,27 @@ test: _web-prepare
 # The Rust tests with Postgres (008 plan-b decision 15): the workspace without `dev-auth` (the
 # production cookie policy and routes), the server with it and `dev-fights`, the gate of `dev-fights`
 # with that feature alone (with both, the one of `dev-auth` comes first and hides it), then the A9
-# check of the Postgres log of the run.
+# check of the Postgres log of the run. The pass with the features runs the unit tests and only the
+# test files with a `feature = "dev-…"` gate (TA-95): the others do the same in both passes, and the
+# e2e covers the binary with the features.
 _test-rust:
     #!/usr/bin/env bash
     set -euo pipefail
+    featured=()
+    for file in $(grep -l 'feature = "dev-' apps/server/tests/*.rs); do
+        featured+=(--test "$(basename "$file" .rs)")
+    done
+    if [ "${#featured[@]}" -eq 0 ]; then
+        echo "test-rust: no test file of apps/server/tests has a dev feature gate" >&2
+        exit 1
+    fi
     # Stale canaries of earlier runs must not count: each run of tests/pg_log.rs writes its own.
     rm -f target/tmp/pglog-canary-*.txt
     # The clock of the Postgres container, not the host's: `logs --since` filters by the daemon's
     # clock, which drifts inside a VM (Colima, Docker Desktop).
     since="$(docker compose -f infra/compose.dev.yml exec -T postgres date -u +%Y-%m-%dT%H:%M:%SZ)"
     DATABASE_URL='{{test_db_url}}' cargo test --workspace --locked
-    DATABASE_URL='{{test_db_url}}' cargo test -p server --features dev-auth,dev-fights --locked
+    DATABASE_URL='{{test_db_url}}' cargo test -p server --features dev-auth,dev-fights --locked --lib --bins "${featured[@]}"
     DATABASE_URL='{{test_db_url}}' cargo test -p server --features dev-fights --locked --test startup dev_fights_needs_a_loopback_origin_and_bind_addr
     {{just_executable()}} _check-pg-log "$since"
 
