@@ -8,7 +8,7 @@
 # and the final base must be nodejs<major>- (scripts/check-compose.mjs).
 
 # node:22.23.4-bookworm-slim, multi-arch index digest (linux/amd64 and linux/arm64).
-FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS build
+FROM --platform=$BUILDPLATFORM node:22.23.5-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS build
 # corepack fetches the pnpm of `packageManager` and verifies it against its hash.
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
@@ -36,7 +36,7 @@ COPY content/catalog/abilities.json content/catalog/accessories.json content/cat
 RUN pnpm --filter web build
 
 # distroless/nodejs22-debian13:nonroot, index digest (Node v22.23.4, uid 65532, no shell).
-FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:8ad9cc935b7843c4024b7e1487b5ef472c354ea847b97c667023e2618552607e
+FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:39c66687298417dbf3ff2fb8b6012c20554494e16414ef7afd07b9abbb45b501
 WORKDIR /app
 COPY --from=build /app/apps/web/build build/
 # "type": "module" for build/index.js.
