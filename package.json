@@ -12,11 +12,11 @@
     "test:scripts": "vitest run --config scripts/vitest.config.mjs"
   },
   "devDependencies": {
-    "prettier": "3.9.10",
-    "prettier-plugin-svelte": "4.1.1",
+    "prettier": "3.10.1",
+    "prettier-plugin-svelte": "4.2.0",
     "prettier-plugin-tailwindcss": "0.8.1",
-    "svelte": "5.57.3",
-    "vitest": "5.1.0",
+    "svelte": "5.58.0",
+    "vitest": "5.1.1",
     "yaml": "2.9.1"
   }
 }
